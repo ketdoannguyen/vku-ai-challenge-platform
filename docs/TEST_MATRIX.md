@@ -24,15 +24,27 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Mongo không publish public | passing | `docker-compose.yml`: mongo chỉ `expose 27017`, không có `ports` |
 | Nginx không serve `/data` | passing | `frontend/nginx.conf`: `location /data/ { return 404; }` |
 
-## 3. Auth & accounts (Sprint 02) — planned
+## 3. Auth & accounts (Sprint 02)
 
-| Check | Status |
-|---|---|
-| Login đúng → cookie + `/auth/me` | planned |
-| Login sai → 401, không leak thông tin | planned |
-| Logout hủy session server-side | planned |
-| Argon2id hash password | planned |
-| Admin CRUD accounts + role check 403 | planned |
+| Check | Status | Cách verify |
+|---|---|---|
+| Login đúng → cookie + `/auth/me` safe fields | passing | `backend/tests/test_auth.py` (mongomock-motor) |
+| Login sai → 401 generic, sai email/sai password trả cùng response | passing | `backend/tests/test_auth.py` |
+| Disabled account: login 403 + session hiện có bị từ chối | passing | `backend/tests/test_auth.py` |
+| Logout hủy session server-side, idempotent | passing | `backend/tests/test_auth.py` |
+| Session hết hạn bị từ chối (kể cả khi doc còn trong DB) | passing | `backend/tests/test_auth.py` |
+| Argon2id hash password, không plaintext; verify đúng/sai; malformed hash không crash | passing | `backend/tests/test_passwords.py` |
+| DB lưu sha256(token), không lưu raw token | passing | `backend/tests/test_auth.py::test_db_stores_token_hash_not_raw_token` |
+| Admin API role guard: 401 chưa login, 403 participant | passing | `backend/tests/test_admin_accounts.py` |
+| Admin create/duplicate 409/weak password 422/invalid role 422 | passing | `backend/tests/test_admin_accounts.py` |
+| Admin reset password: mật khẩu cũ hết dùng, mới login được | passing | `backend/tests/test_admin_accounts.py` |
+| Admin disable: session chết ngay + login bị chặn; không tự disable chính mình | passing | `backend/tests/test_admin_accounts.py` |
+| Password policy (≥10 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
+| Login form: error message, loading state, không có link đăng ký | passing | `frontend/src/pages/LoginPage.test.tsx` (vitest) |
+| Protected routes: chưa login → /login; participant → không vào admin | passing | `frontend/src/auth/RequireAuth.test.tsx` |
+| Login end-to-end qua Nginx với Mongo thật + cookie | blocked | Docker permission máy dev (Sprint 01, mục 2); chạy lại sau `sudo usermod -aG docker nkd` |
+| Bootstrap scripts tạo admin/import thật với Mongo | blocked | Như trên — usage/error path đã verify, đường tạo thật cần Mongo chạy |
+| Login rate limiting | planned | Defer Sprint 07 (sprint file cho phép) |
 
 ## 4. Competition core & admin (Sprint 03) — planned
 

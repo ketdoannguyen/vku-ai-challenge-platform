@@ -20,6 +20,22 @@ class Settings(BaseSettings):
     max_upload_mb: int = 10
     data_dir: str = "./data"
 
+    session_secret: str = ""
+    session_lifetime_hours: int = 24
+    session_cookie_name: str = "aic_session"
+    session_cookie_secure: str = "auto"
+    session_cookie_samesite: str = "lax"
+
+    @property
+    def cookie_secure(self) -> bool:
+        if self.session_cookie_secure == "auto":
+            return self.is_production
+        return self.session_cookie_secure == "true"
+
+    @property
+    def cookie_samesite(self) -> str:
+        return "strict" if self.session_cookie_samesite == "strict" else "lax"
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"

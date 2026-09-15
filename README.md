@@ -8,7 +8,7 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Local stack shell** — Sprint 01 hoàn thành: Docker Compose chạy `web` (Nginx + React SPA), `api` (FastAPI), `mongo`. Có `GET /api/health`. Chưa có auth/nghiệp vụ. Xem `docs/PROJECT_STATE.md`.
+**Auth & accounts** — Sprint 02 hoàn thành: đăng nhập/mật khẩu (Argon2id)/session server-side, admin quản lý tài khoản (tạo/reset/vô hiệu hóa), bootstrap script tạo admin + import CSV. Sprint 01: Docker Compose chạy `web` (Nginx + React SPA), `api` (FastAPI), `mongo`, `GET /api/health`. Chưa có competitions/nghiệp vụ thi. Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 
@@ -22,6 +22,16 @@ docker compose down           # dừng (giữ volume)
 - `GET http://localhost:8080/api/health` → 200 khi Mongo reachable, 503 khi không.
 - Mongo KHÔNG publish ra host; api chỉ truy cập qua Nginx same-origin.
 
+## Bootstrap tài khoản (cần Mongo đang chạy)
+
+```bash
+cd backend
+.venv/bin/python scripts/create_admin.py <email> <name> <password>        # admin đầu tiên
+.venv/bin/python scripts/import_accounts.py <file.csv>                    # participant hàng loạt
+```
+
+CSV format: header `email,name,password` — mỗi dòng một account. Duplicate email được báo rõ và bỏ qua (không ghi đè).
+
 ## Dev không Docker
 
 ```bash
@@ -32,8 +42,9 @@ cd backend && uv venv .venv && uv pip install -e . --group dev
 
 # Frontend (cần Node 20+)
 cd frontend && npm install
-npm run build        # typecheck strict + production build
-npm run dev          # dev server (api gọi qua /api — cần proxy riêng khi không dùng Nginx)
+npm test            # vitest + testing-library
+npm run build       # typecheck strict + production build
+npm run dev         # dev server (api gọi qua /api — cần proxy riêng khi không dùng Nginx)
 ```
 
 ## Sprint plan & canonical docs

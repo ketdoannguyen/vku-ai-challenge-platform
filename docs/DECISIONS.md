@@ -57,3 +57,11 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Decision: Submission chỉ nhận `.csv`. Scoring engine hỗ trợ classification với config: `id_column`, `prediction_column`, `label_column`, `average` (binary/macro/weighted), `pos_label`, `primary_metric`, `higher_is_better=true`. Align theo ID, `zero_division=0`. Leaderboard lấy best valid submission mỗi account.
 - Consequences: Nếu kỳ thi thực tế cần schema/scoring khác, phải dừng và hỏi người dùng trước khi mở rộng engine.
 - Affected files/contracts: `plans/01_MASTER_CONTEXT.md` §10, `plans/02_ARCHITECTURE_CONTRACTS.md` §9-10
+
+## ADR-008 - Session representation & per-request resolution
+- Date: 2026-09-15
+- Status: accepted
+- Context: ADR-004 chốt server-side session, DB lưu hash token, nhưng chưa chốt chi tiết representation và luồng resolve.
+- Decision: Session `_id` = sha256 hex của raw token `secrets.token_urlsafe(32)`; `account_id` là ObjectId khớp `accounts._id`. Mọi request đi qua middleware resolve session → account (check `expires_at` + `active`) và gắn vào `request.state.account`; dependency `get_current_account`/`get_current_admin` chỉ đọc state đó. TTL index trên `expires_at` là cơ chế dọn dẹp, không phải cơ chế enforcement.
+- Consequences: Disable account có hiệu lực tức thì với mọi session hiện có. Login sai email và sai password trả cùng response 401 generic. Không log raw token/password. `SESSION_SECRET` hiện không dùng (token opaque, không cần ký).
+- Affected files/contracts: `docs/DATA_MODEL.md` §2, `docs/API_CONTRACT.md` §2, `backend/app/auth/`

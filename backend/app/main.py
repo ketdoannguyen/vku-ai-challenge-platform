@@ -3,8 +3,15 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.accounts import service as accounts_service
+from app.accounts.admin_router import router as admin_accounts_router
+from app.auth import sessions as sessions_module
+from app.auth.router import router as auth_router
+from app.auth.sessions import resolve_session
 from app.core.config import get_settings
 from app.core.database import MongoContext, mongo_lifespan
 
@@ -20,6 +27,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     async with mongo_lifespan(settings) as ctx:
         app.state.mongo = ctx
+        await accounts_service.ensure_indexes(ctx.db)
+        await sessions_module.ensure_indexes(ctx.db)
         yield
 
 
@@ -30,9 +39,31 @@ def error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
 
 
-@app.exception_handler(404)
-async def not_found_handler(request: Request, exc) -> JSONResponse:
-    return error_response(404, "NOT_FOUND", "Không tìm thấy tài nguyên.")
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return error_response(exc.status_code, exc.detail["code"], exc.detail.get("message", ""))
+    if exc.status_code == 404:
+        return error_response(404, "NOT_FOUND", "Không tìm thấy tài nguyên.")
+    return error_response(exc.status_code, "ERROR", str(exc.detail))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    return error_response(422, "VALIDATION_ERROR", "Dữ liệu gửi lên không hợp lệ.")
+
+
+@app.middleware("http")
+async def resolve_account_middleware(request: Request, call_next):
+    """Gắn account hiện tại (nếu có) vào request.state — dependency auth dùng lại."""
+    token = request.cookies.get(get_settings().session_cookie_name, "")
+    if token and request.url.path.startswith("/api"):
+        request.state.account = await resolve_session(request.app.state.mongo.db, token)
+    return await call_next(request)
+
+
+app.include_router(auth_router)
+app.include_router(admin_accounts_router)
 
 
 @app.get("/api/health")

@@ -27,9 +27,9 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| POST | `/api/auth/login` | planned | Body: identifier + password. Thành công: set session cookie, trả account info. |
-| POST | `/api/auth/logout` | planned | Hủy session hiện tại, clear cookie. |
-| GET | `/api/auth/me` | planned | Trả account hiện tại hoặc 401. |
+| POST | `/api/auth/login` | implemented | Body: `{identifier, password}` (identifier = email). Đúng: 200 + account safe fields (id, email, name, role, active) + set cookie `aic_session` (HttpOnly, SameSite=lax, Secure ở production). Sai: 401 `INVALID_CREDENTIALS` (generic, không tiết lộ email tồn tại). Account disabled: 403 `ACCOUNT_DISABLED`. |
+| POST | `/api/auth/logout` | implemented | Xóa session server-side + clear cookie. Idempotent: 200 kể cả khi không có session. Trả `{"ok":true}`. |
+| GET | `/api/auth/me` | implemented | Trả account safe fields hoặc 401 `UNAUTHORIZED`. Session hết hạn hoặc account bị disable cũng trả 401. |
 
 ## 3. Participant - competitions
 
@@ -51,20 +51,24 @@ Quy ước chung:
 
 ## 5. Admin (`/api/admin/...`)
 
-Namespace planned, chi tiết endpoint chốt ở Sprint 03+ khi code thật. Tối thiểu phải cover:
-- accounts CRUD cần thiết (tạo tài khoản, active/deactive, reset password)
-- competitions create/edit/clone/publish/close
-- memberships quản lý
-- contents upload/order/delete
-- ground truth + scoring config
-- submissions view
-- export `.xlsx`
+### 5.1 Accounts (implemented — Sprint 02)
 
-Tên endpoint cụ thể tinh chỉnh trong sprint nhưng phải cập nhật file này ngay; không để hai convention song song.
+| Method | Path | Status | Mô tả |
+|---|---|---|---|
+| GET | `/api/admin/accounts` | implemented | Query: `q` (search email/name, email exact match nếu dạng email), `limit` (≤200, default 50), `offset`. Trả `{accounts: [safe fields], total, limit, offset}`. |
+| POST | `/api/admin/accounts` | implemented | Body: `{email, name, password, role}` (role: admin\|participant, default participant). Password tối thiểu 10 ký tự, không space đầu/cuối. 201 + account safe fields; 409 `ACCOUNT_EXISTS`; 422 `VALIDATION_ERROR`. |
+| POST | `/api/admin/accounts/{id}/reset-password` | implemented | Body: `{password}` (cùng policy). 200 `{"ok":true}`; session hiện tại giữ nguyên; 404 `NOT_FOUND`. |
+| PATCH | `/api/admin/accounts/{id}` | implemented | Body: `{active: bool}`. Disable account hủy hiệu lực mọi session của account đó (login bị chặn 403). Không thể tự disable chính mình (422). 200 + account safe fields. |
+
+Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đăng nhập, 403 `FORBIDDEN` nếu participant.
+
+### 5.2 Competitions, memberships, contents, ground truth, submissions view, export
+
+Planned — chi tiết endpoint chốt ở Sprint 03+ khi code thật. Tên endpoint cụ thể tinh chỉnh trong sprint nhưng phải cập nhật file này ngay; không để hai convention song song.
 
 ## 6. Error codes
 
-Baseline planned (mở rộng dần theo sprint, giữ format ổn định):
-- `UNAUTHORIZED`, `FORBIDDEN`
-- `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_QUOTA_EXCEEDED`, `SUBMISSION_DEADLINE_PASSED`
-- `NOT_FOUND`, `VALIDATION_ERROR`
+- `UNAUTHORIZED` (401), `FORBIDDEN` (403) — implemented
+- `INVALID_CREDENTIALS` (401), `ACCOUNT_DISABLED` (403), `ACCOUNT_EXISTS` (409) — implemented
+- `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
+- `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_QUOTA_EXCEEDED`, `SUBMISSION_DEADLINE_PASSED` — planned (Sprint 05)

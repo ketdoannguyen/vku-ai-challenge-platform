@@ -40,4 +40,10 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: json === undefined ? undefined : JSON.stringify(json),
     }),
+  patch: <T>(path: string, json: unknown) =>
+    request<T>(path, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(json),
+    }),
 };

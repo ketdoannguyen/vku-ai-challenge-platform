@@ -8,31 +8,33 @@ Quy ước chung:
 - Mọi dữ liệu nghiệp vụ gắn `competition_id` (ADR-005).
 - Files không nằm trong Mongo — xem layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11.
 
-## 1. accounts — planned
+## 1. accounts — implemented (Sprint 02)
 
 Fields:
-- `_id`
-- `email` (login identifier)
+- `_id` (ObjectId)
+- `email` (login identifier, lưu lowercase, strip)
 - `name`
-- `password_hash` (Argon2id)
+- `password_hash` (Argon2id, argon2-cffi defaults)
 - `role`: `admin` | `participant`
-- `active`: bool — khóa toàn nền tảng
-- `created_at`, `updated_at`
+- `active`: bool — khóa toàn nền tảng (disable hủy hiệu lực mọi session)
+- `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
-- unique trên `email`
+- unique trên `email` — tạo idempotent ở app startup (`ensure_indexes`)
 
-## 2. sessions — planned
+## 2. sessions — implemented (Sprint 02)
 
 Fields:
-- `_id`: hash của raw session token
-- `account_id`
-- `created_at`
-- `expires_at`
+- `_id`: sha256 hex của raw session token (token gốc là `secrets.token_urlsafe(32)`, chỉ tồn tại trong cookie)
+- `account_id` (ObjectId → accounts._id)
+- `created_at` (UTC, timezone-aware)
+- `expires_at` (UTC, timezone-aware)
 
 Indexes:
-- TTL trên `expires_at`
+- TTL trên `expires_at` (`expireAfterSeconds=0`) — tạo idempotent ở app startup
 - `account_id`
+
+Lưu ý: Mongo TTL chỉ dọn định kỳ; `resolve_session` vẫn check `expires_at` từng request nên session hết hạn bị từ chối ngay.
 
 ## 3. competitions — planned
 

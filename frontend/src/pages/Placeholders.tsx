@@ -1,36 +1,22 @@
 import { Placeholder } from "../components/ui";
 
-export function LoginPage() {
-  return (
-    <div className="page">
-      <h1>Đăng nhập</h1>
-      <Placeholder>
-        Form đăng nhập (tài khoản do BTC cấp) sẽ có ở Sprint 02 — hiện chưa có auth.
-      </Placeholder>
-      <div className="card">
-        <form>
-          <p>
-            <label htmlFor="email">Tài khoản</label>
-            <input id="email" className="input" type="text" disabled placeholder="Chưa kích hoạt" />
-          </p>
-          <p>
-            <label htmlFor="password">Mật khẩu</label>
-            <input id="password" className="input" type="password" disabled placeholder="Chưa kích hoạt" />
-          </p>
-          <button className="btn" disabled>
-            Đăng nhập
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 export function DashboardPage() {
   return (
     <div className="page">
-      <h1>Danh sách cuộc thi</h1>
-      <Placeholder>Danh sách competition và trạng thái join sẽ có ở Sprint 03-04.</Placeholder>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Cuộc thi</h1>
+          <p className="page-subtitle">Các cuộc thi bạn có thể tham gia</p>
+        </div>
+      </div>
+      <div className="card empty-state">
+        <div className="empty-state-icon" aria-hidden>
+          🏆
+        </div>
+        <h2>Chưa có cuộc thi nào</h2>
+        <p>Các cuộc thi sẽ xuất hiện tại đây khi được mở (kế hoạch Sprint 03-04).</p>
+      </div>
+      <Placeholder>Placeholder này sẽ được thay bằng danh sách competition thật ở Sprint 03.</Placeholder>
     </div>
   );
 }
@@ -42,15 +28,6 @@ export function CompetitionPage() {
       <Placeholder>
         Trang competition (Overview / Đề bài / Rules / Nộp bài / Leaderboard) sẽ có từ Sprint 03.
       </Placeholder>
-    </div>
-  );
-}
-
-export function AdminPage() {
-  return (
-    <div className="page">
-      <h1>Admin</h1>
-      <Placeholder>Quản lý tài khoản và competition sẽ có từ Sprint 02-03 (chỉ admin).</Placeholder>
     </div>
   );
 }
