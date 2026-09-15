@@ -78,6 +78,14 @@ async def edit_competition(
 
 @router.post("/{competition_id}/publish")
 async def publish_competition(competition_id: str, request: Request, admin: AdminAccount) -> dict:
+    db = request.app.state.mongo.db
+    competition = await _get_competition_or_404(db, competition_id)
+    if competition["join_mode"] == "code" and not competition.get("join_code_hash"):
+        raise api_error(
+            422,
+            "JOIN_CODE_REQUIRED",
+            "Cần cấu hình mã tham gia trước khi publish cuộc thi.",
+        )
     return await _transition(request, admin, competition_id, "draft", "published", "publish")
 
 

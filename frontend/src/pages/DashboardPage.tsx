@@ -1,11 +1,11 @@
 /** Dashboard participant: danh sách competition đang mở/đã kết thúc (draft luôn ẩn ở backend). */
 
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition, CompetitionsResponse } from "../api/competitions";
+import type { Competition, CompetitionsResponse, Membership } from "../api/competitions";
 import { STATUS_LABEL, formatLocal, statusClass } from "../api/competitions";
 import { ErrorBox, Loading } from "../components/ui";
+import { JoinControl } from "../components/JoinControl";
 
 export function DashboardPage() {
   const [data, setData] = useState<CompetitionsResponse | null>(null);
@@ -27,6 +27,20 @@ export function DashboardPage() {
     void load();
   }, [load]);
 
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">Cuộc thi</h1>
+            <p className="page-subtitle">Các cuộc thi bạn có thể tham gia</p>
+          </div>
+        </div>
+        <Loading />
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-head">
@@ -37,12 +51,25 @@ export function DashboardPage() {
       </div>
 
       <ErrorBox error={error} />
-      {loading ? (
-        <Loading />
-      ) : data && data.competitions.length > 0 ? (
+      {data && data.competitions.length > 0 ? (
         <div className="comp-list">
           {data.competitions.map((c) => (
-            <CompetitionCard key={c.id} competition={c} />
+            <CompetitionCard
+              key={c.id}
+              competition={c}
+              onJoined={(slug, membership) =>
+                setData((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        competitions: prev.competitions.map((item) =>
+                          item.slug === slug ? { ...item, membership } : item,
+                        ),
+                      }
+                    : prev,
+                )
+              }
+            />
           ))}
         </div>
       ) : !error ? (
@@ -58,7 +85,13 @@ export function DashboardPage() {
   );
 }
 
-function CompetitionCard({ competition }: { competition: Competition }) {
+function CompetitionCard({
+  competition,
+  onJoined,
+}: {
+  competition: Competition;
+  onJoined: (slug: string, membership: Membership) => void;
+}) {
   const c = competition;
   return (
     <div className="card comp-card">
@@ -78,9 +111,10 @@ function CompetitionCard({ competition }: { competition: Competition }) {
         </div>
       </dl>
       <div className="comp-card-footer">
-        <Link className="btn" to={`/competitions/${c.slug}`}>
-          Vào cuộc thi
-        </Link>
+        <JoinControl
+          competition={c}
+          onJoined={(membership) => onJoined(c.slug, membership)}
+        />
       </div>
     </div>
   );

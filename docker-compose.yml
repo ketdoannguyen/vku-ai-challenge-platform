@@ -18,6 +18,8 @@ services:
       MONGO_USER: ${MONGO_USER:-changeme}
       MONGO_PASSWORD: ${MONGO_PASSWORD:-changeme}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MAX_CONTENT_MB: ${MAX_CONTENT_MB:-2}
+      MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
       DATA_DIR: /data
     expose:
       - "8000" # internal only — truy cập qua Nginx same-origin

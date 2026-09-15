@@ -1,5 +1,10 @@
 /** Types + helpers dùng chung cho competition API (Sprint 03). */
 
+export interface Membership {
+  active: boolean;
+  joined_at: string | null;
+}
+
 export interface Competition {
   id: string;
   slug: string;
@@ -13,6 +18,14 @@ export interface Competition {
   quota_per_day: number;
   leaderboard_visible: boolean;
   created_by: string;
+  join_code_configured: boolean;
+  membership: Membership;
+}
+
+export interface JoinResponse {
+  competition_id: string;
+  membership: Membership;
+  joined_now: boolean;
 }
 
 export interface CompetitionsResponse {

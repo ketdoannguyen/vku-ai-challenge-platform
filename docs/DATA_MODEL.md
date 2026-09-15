@@ -56,32 +56,40 @@ Fields:
 Indexes:
 - unique trên `slug` — tạo idempotent ở app startup (`ensure_indexes`)
 
-## 4. competition_memberships — planned
+## 4. competition_memberships — implemented (Sprint 04)
 
 Fields:
-- `competition_id`
-- `account_id`
-- `active`: bool — khóa trong riêng một competition
-- `joined_at`
+- `_id` (ObjectId)
+- `competition_id` (ObjectId → competitions._id)
+- `account_id` (ObjectId → accounts._id)
+- `active`: bool — khóa trong riêng một competition (participant không tự kích hoạt lại; admin reactivate giữ `joined_at`)
+- `joined_at` (UTC, timezone-aware)
+- `updated_at` (UTC, timezone-aware)
 
 Indexes:
-- unique compound `(competition_id, account_id)`
+- unique compound `(competition_id, account_id)` — enforce race-safe idempotent join
+- `account_id` — batch lookup membership cho dashboard
 
-## 5. competition_contents — planned
+## 5. competition_contents — implemented (Sprint 04)
 
 Fields:
-- `_id`
-- `competition_id`
+- `_id` (ObjectId — sinh trước insert, dùng làm tên file)
+- `competition_id` (ObjectId)
 - `title`
-- `slug`
-- `order`
-- `markdown_path`
-- `visibility`
-- `created_at`, `updated_at`
+- `slug` (format như competition slug, unique trong competition)
+- `order` (int 0-9999, default max+10)
+- `visibility`: `public` (mọi account đã đăng nhập) | `members` (membership active)
+- `markdown_path` (relative trong DATA_DIR: `competitions/<cid>/content/<content_id>.md` — backend sinh, không dùng input user)
+- `size_bytes` (int | null — null = chưa upload file)
+- `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
 - unique `(competition_id, slug)`
 - sort `(competition_id, order)`
+
+## 5b. Competition assets (filesystem, không có collection)
+
+`<DATA_DIR>/competitions/<competition_id>/assets/<uuid4>.<ext>` — PNG/JPEG/GIF/WebP ≤2 MiB (sniff magic bytes, không SVG). List bằng cách đọc directory (số lượng nhỏ); serve qua API có authz + `nosniff`.
 
 ## 6. submissions — planned
 

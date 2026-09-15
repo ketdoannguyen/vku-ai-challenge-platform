@@ -35,11 +35,12 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Trả `{competitions: [public fields]}` — không bao giờ trả `join_code_hash`. |
+| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Mỗi item có `membership: {active, joined_at}` của account hiện tại và `join_code_configured: bool` — không bao giờ trả `join_code_hash`. |
 | GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại). Không trả join_code. |
-| POST | `/api/competitions/{id}/join` | planned (Sprint 04) | Join theo mode: open/code/invite_only. Body chứa code nếu mode=code. |
-| GET | `/api/competitions/{id}/contents` | planned (Sprint 04) | List content page metadata theo `order`. |
-| GET | `/api/competitions/{id}/contents/{content_slug}` | planned (Sprint 04) | Metadata + Markdown content (đã kiểm tra visibility). |
+| POST | `/api/competitions/{slug}/join` | implemented (Sprint 04) | Body `{join_code?}`. Policy backend: draft/unknown slug → 404; closed → 422 `JOIN_CLOSED`; đã join → 200 idempotent `joined_now:false`; membership inactive → 403 `MEMBERSHIP_INACTIVE` (chỉ admin kích hoạt lại); invite_only → 403 `JOIN_INVITE_ONLY`; mode code thiếu/sai → 403 `JOIN_CODE_INVALID` (cùng message, không tạo oracle). Thành công → `{competition_id, membership, joined_now}`. |
+| GET | `/api/competitions/{slug}/contents` | implemented (Sprint 04) | List content metadata sort `order` asc. Chỉ `visibility=public` hoặc member active thấy `members`. Draft → 404. |
+| GET | `/api/competitions/{slug}/contents/{content_slug}` | implemented (Sprint 04) | Metadata + `markdown` (nội dung file). Không được xem (kể cả members-only non-member) → 404. File mất → 404 `CONTENT_FILE_MISSING`. |
+| GET | `/api/competitions/{slug}/assets/{name}` | implemented (Sprint 04) | Serve ảnh đã upload (PNG/JPEG/GIF/WebP). Headers: `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=300`. Traversal/symlink/extension lạ → 404. Yêu cầu đăng nhập; competition phải published/closed. |
 
 ## 4. Submissions & leaderboard
 
@@ -74,14 +75,39 @@ Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đ�
 | POST | `/api/admin/competitions/{id}/close` | implemented | published → closed (terminal, không reopen ở MVP). Sai trạng thái → 422 `INVALID_TRANSITION`. |
 | POST | `/api/admin/competitions/{id}/clone` | implemented | Clone config thành draft mới, slug tự sinh `<slug>-copy` (-copy2... nếu trùng), dates = now → +1 năm. KHÔNG copy status/submissions/memberships. 201 + clone. |
 
-### 5.3 Memberships, contents, ground truth, submissions view, export
+### 5.3 Memberships & join code (implemented — Sprint 04)
 
-Planned — chi tiết endpoint chốt ở Sprint 04+ khi code thật. Tên endpoint cụ thể tinh chỉnh trong sprint nhưng phải cập nhật file này ngay; không để hai convention song song.
+| Method | Path | Status | Mô tả |
+|---|---|---|---|
+| PUT | `/api/admin/competitions/{id}/join-code` | implemented | Body `{join_code}` (8-128 ký tự, không space đầu/cuối). Lưu Argon2id hash; raw code không bao giờ trả về. 200 `{"join_code_configured": true}`. Closed → 422 `INVALID_TRANSITION`. |
+| GET | `/api/admin/competitions/{id}/members` | implemented | Query `q`, `limit` (≤200), `offset`. Trả `{members: [{account_id, email, name, role, active, joined_at}], total, limit, offset}` sort `joined_at`. |
+| POST | `/api/admin/competitions/{id}/members` | implemented | Body `{email}`. Idempotent: tạo mới hoặc reactivate membership inactive (giữ `joined_at`), luôn 200 `{member, created, reactivated}`. 404 `ACCOUNT_NOT_FOUND`; 422 nếu account không phải participant active. |
+| PATCH | `/api/admin/competitions/{id}/members/{account_id}` | implemented | Body `{active: bool}`. 200 `{member}`; chưa có membership → 404. |
+
+### 5.4 Contents & assets (implemented — Sprint 04)
+
+| Method | Path | Status | Mô tả |
+|---|---|---|---|
+| GET | `/api/admin/competitions/{id}/contents` | implemented | List metadata sort `order` asc, gồm cả `members` visibility. |
+| POST | `/api/admin/competitions/{id}/contents` | implemented | Body `{title, slug, order?, visibility?}` (visibility: public\|members, default public; order mặc định max+10). 201; 409 `CONTENT_SLUG_EXISTS`; 422 validation. Chưa có file (`size_bytes: null`). |
+| GET | `/api/admin/competitions/{id}/contents/{content_id}` | implemented | Metadata + `markdown` (admin preview mọi visibility). |
+| PATCH | `/api/admin/competitions/{id}/contents/{content_id}` | implemented | Partial `{title?, slug?, order?, visibility?}`. 409 `CONTENT_SLUG_EXISTS`. |
+| PUT | `/api/admin/competitions/{id}/contents/{content_id}/file` | implemented | Multipart `file` — chỉ `.md`, UTF-8, không rỗng, ≤`MAX_CONTENT_MB` (2 MiB). Tên file gốc không dùng làm path (backend sinh `<content_id>.md`). 422 `INVALID_FILE_TYPE`/`VALIDATION_ERROR`; 413 `FILE_TOO_LARGE`. |
+| POST | `/api/admin/competitions/{id}/contents/reorder` | implemented | Body `{items: [{id, order}]}` — id phải thuộc competition, không trùng. 200 list mới. |
+| DELETE | `/api/admin/competitions/{id}/contents/{content_id}` | implemented | Xóa metadata + file best-effort. 200 `{"ok": true}`. |
+| GET | `/api/admin/competitions/{id}/assets` | implemented | List ảnh từ thư mục assets (tên backend sinh, không có DB collection). |
+| POST | `/api/admin/competitions/{id}/assets` | implemented | Multipart `file` — PNG/JPEG/GIF/WebP (sniff magic bytes, không tin MIME header), ≤`MAX_ASSET_MB` (2 MiB), không SVG. Tên sinh `uuid4.<ext>`. 201 `{name, size_bytes, content_type, url}`. |
+| DELETE | `/api/admin/competitions/{id}/assets/{name}` | implemented | 200 `{"ok": true}`; tên không hợp lệ/không tồn tại → 404. |
+
+### 5.5 Ground truth, submissions view, export
+
+Planned — Sprint 05+.
 
 ## 6. Error codes
 
 - `UNAUTHORIZED` (401), `FORBIDDEN` (403) — implemented
 - `INVALID_CREDENTIALS` (401), `ACCOUNT_DISABLED` (403), `ACCOUNT_EXISTS` (409) — implemented
 - `SLUG_EXISTS` (409), `INVALID_TRANSITION` (422) — implemented (Sprint 03)
+- `JOIN_CLOSED` (422), `JOIN_CODE_INVALID` (403), `JOIN_INVITE_ONLY` (403), `MEMBERSHIP_INACTIVE` (403), `JOIN_CODE_REQUIRED` (422), `ACCOUNT_NOT_FOUND` (404), `CONTENT_SLUG_EXISTS` (409), `CONTENT_FILE_MISSING` (404), `INVALID_FILE_TYPE` (422), `FILE_TOO_LARGE` (413) — implemented (Sprint 04)
 - `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
 - `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_QUOTA_EXCEEDED`, `SUBMISSION_DEADLINE_PASSED` — planned (Sprint 05)

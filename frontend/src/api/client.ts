@@ -46,4 +46,21 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(json),
     }),
+  del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
+  put: <T>(path: string, json?: unknown) =>
+    request<T>(path, {
+      method: "PUT",
+      headers: json === undefined ? undefined : { "Content-Type": "application/json" },
+      body: json === undefined ? undefined : JSON.stringify(json),
+    }),
+  upload: <T>(path: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<T>(path, { method: "PUT", body: form });
+  },
+  postFile: <T>(path: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<T>(path, { method: "POST", body: form });
+  },
 };

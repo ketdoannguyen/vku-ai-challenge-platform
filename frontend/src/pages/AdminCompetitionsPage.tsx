@@ -1,6 +1,7 @@
 /** Admin competitions: table + tạo/sửa modal + publish/close confirm + clone. */
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, CompetitionsResponse } from "../api/competitions";
 import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, isoToLocalInput, localInputToIso, statusClass } from "../api/competitions";
@@ -182,6 +183,9 @@ function CompetitionRow({
         <td>{METRIC_LABEL[c.primary_metric]}</td>
         <td className="col-actions">
           <span className="action-group">
+            <Link className="btn btn-secondary btn-sm" to={`/admin/competitions/${c.id}`}>
+              Quản lý
+            </Link>
             <button className="btn btn-secondary btn-sm" disabled={busy} onClick={onEdit}>
               Sửa
             </button>

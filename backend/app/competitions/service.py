@@ -4,11 +4,12 @@ Lifecycle (ADR-009): create -> draft; draft -> published; published -> closed.
 Closed là terminal — không reopen ở MVP.
 """
 
-import re
 from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
+
+from app.core.slugs import SLUG_MAX, is_valid_slug
 
 COMPETITIONS_COLLECTION = "competitions"
 
@@ -16,8 +17,7 @@ STATUSES = ("draft", "published", "closed")
 JOIN_MODES = ("open", "code", "invite_only")
 METRICS = ("f1", "precision", "recall")
 
-_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_SLUG_MAX = 64
+_SLUG_MAX = SLUG_MAX
 _QUOTA_MAX = 1000
 
 # Edit rule theo status (ADR-009): draft sửa mọi field config;
@@ -82,7 +82,7 @@ async def insert_competition(db: AsyncIOMotorDatabase, data: CompetitionCreate, 
 
 def validate_create(data: CompetitionCreate) -> None:
     """Raise ValueError với message tiếng Việt nếu dữ liệu tạo competition không hợp lệ."""
-    if not _SLUG_RE.fullmatch(data.slug) or len(data.slug) > _SLUG_MAX:
+    if not is_valid_slug(data.slug):
         raise ValueError(f"Slug chỉ gồm a-z, 0-9 và dấu gạch ngang (tối đa {_SLUG_MAX} ký tự).")
     if not data.name.strip():
         raise ValueError("Tên cuộc thi không được để trống.")
@@ -127,8 +127,10 @@ def validate_update(competition: dict, changes: dict) -> dict:
     return updates
 
 
-def public_competition(competition: dict) -> dict:
+def public_competition(competition: dict, membership: dict | None = None) -> dict:
     """Representation trả về API — không bao giờ lộ join_code_hash."""
+    from app.memberships.service import public_membership
+
     return {
         "id": str(competition["_id"]),
         "slug": competition["slug"],
@@ -142,6 +144,8 @@ def public_competition(competition: dict) -> dict:
         "quota_per_day": competition["quota_per_day"],
         "leaderboard_visible": competition["leaderboard_visible"],
         "created_by": competition["created_by"],
+        "join_code_configured": bool(competition.get("join_code_hash")),
+        "membership": public_membership(membership),
     }
 
 

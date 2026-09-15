@@ -4,7 +4,9 @@ import { RequireAdmin, RequireAuth } from "./auth/RequireAuth";
 import { HealthPage } from "./pages/HealthPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
+import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
 import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
+import { CompetitionContentPanel, CompetitionOverview } from "./pages/CompetitionContentPanel";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NotFoundPage } from "./pages/Placeholders";
@@ -78,18 +80,29 @@ export function App() {
         />
         <Route path="/login" element={<LoginPage />} />
         <Route
-          path="/competitions/:slug/*"
+          path="/competitions/:slug"
           element={
             <RequireAuth>
               <CompetitionDetailPage />
             </RequireAuth>
           }
-        />
+        >
+          <Route index element={<CompetitionOverview />} />
+          <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
+        </Route>
         <Route
           path="/admin/competitions"
           element={
             <RequireAdmin>
               <AdminCompetitionsPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/admin/competitions/:id"
+          element={
+            <RequireAdmin>
+              <AdminCompetitionDetailPage />
             </RequireAdmin>
           }
         />

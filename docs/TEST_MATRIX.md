@@ -65,14 +65,31 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin form: validate required, slug khóa khi edit, metric khóa khi published | passing | `frontend/src/pages/AdminCompetitionsPage.test.tsx` |
 | Admin UI end-to-end qua Nginx (tạo/publish/clone thật) | blocked | Docker permission máy dev (mục 2) — chạy `./scripts/dev_up.sh` từ terminal user để verify |
 
-## 5. Markdown content & membership (Sprint 04) — planned
+## 5. Markdown content & membership (Sprint 04)
 
-| Check | Status |
-|---|---|
-| Render GFM + sanitize (script/iframe/event handler bị chặn) | planned |
-| Path traversal bị chặn (asset/content) | planned |
-| Join mode open/code/invite_only đúng policy | planned |
-| Join code không trả về participant API | planned |
+| Check | Status | Cách verify |
+|---|---|---|
+| Render GFM (heading/table/code/link/image) + sanitize script/iframe/onerror/javascript: | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Ảnh chỉ từ approved assets; external/data image bị loại; link ngoài rel safety | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Path traversal/absolute/symlink escape bị chặn (content + asset) | passing | `backend/tests/test_content_storage.py`, `backend/tests/test_contents_public.py` |
+| Atomic write không để temp file; UTF-8 round-trip | passing | `backend/tests/test_content_storage.py` |
+| Join mode open/code/invite_only đúng policy; draft 404; closed 422 | passing | `backend/tests/test_memberships.py` |
+| Join code: sai/thiếu cùng 403 generic; đúng hash verify; không lộ raw/hash | passing | `backend/tests/test_memberships.py` |
+| Join idempotent; membership isolation giữa competitions | passing | `backend/tests/test_memberships.py` |
+| Membership inactive không tự join lại; admin reactivate giữ joined_at | passing | `backend/tests/test_memberships.py` |
+| Publish mode code chưa có code → 422 JOIN_CODE_REQUIRED | passing | `backend/tests/test_memberships.py` |
+| Admin member add/list/deactivate/reactivate; chỉ participant active | passing | `backend/tests/test_memberships.py` |
+| Content CRUD/reorder/upload/delete; slug collision 409; validation | passing | `backend/tests/test_contents_admin.py` |
+| Upload .md guards: extension/rỗng/UTF-8/size 413; filename không thành path | passing | `backend/tests/test_contents_admin.py` |
+| Asset upload sniff magic bytes; SVG/txt/fake → 422; size 413 | passing | `backend/tests/test_contents_admin.py` |
+| Content visibility public/members; closed readable; draft 404 | passing | `backend/tests/test_contents_public.py` |
+| Asset serve: nosniff + private cache; symlink/traversal 404 | passing | `backend/tests/test_contents_public.py` |
+| Missing markdown file → 404 CONTENT_FILE_MISSING ổn định | passing | `backend/tests/test_contents_public.py` |
+| Join UX states (open/code dialog/invite_only/joined/inactive/closed) | passing | `frontend/src/components/JoinControl.test.tsx` |
+| Sidebar content theo order; deep-link content/:contentSlug | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx` |
+| Dashboard membership states từ API | passing | `frontend/src/pages/DashboardPage.test.tsx` |
+| Admin content/member UI: table, actions, join code không hiện trong DOM | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
+| Upload/render E2E qua Nginx với file thật | passing | User verify thủ công: upload ảnh + `.md`, tham chiếu `assets/<name>` render thành ảnh trên participant UI |
 
 ## 6. Submission & scoring (Sprint 05) — planned
 

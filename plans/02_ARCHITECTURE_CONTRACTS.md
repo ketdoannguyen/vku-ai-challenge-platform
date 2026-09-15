@@ -78,9 +78,10 @@ Tất cả backend route dưới `/api`.
 ### Participant competitions
 - `GET /api/competitions`
 - `GET /api/competitions/{slug}`
-- `POST /api/competitions/{id}/join`
-- `GET /api/competitions/{id}/contents`
-- `GET /api/competitions/{id}/contents/{content_slug}`
+- `POST /api/competitions/{slug}/join` (ADR-010: participant route dùng slug nhất quán)
+- `GET /api/competitions/{slug}/contents`
+- `GET /api/competitions/{slug}/contents/{content_slug}`
+- `GET /api/competitions/{slug}/assets/{name}`
 
 ### Submissions
 - `POST /api/competitions/{id}/submissions`

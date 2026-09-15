@@ -637,6 +637,20 @@ code {
   margin-top: auto;
 }
 
+.join-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+
+.comp-header-join {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .status-badge.closed {
   background: var(--bg);
   color: var(--text-muted);
@@ -730,6 +744,173 @@ code {
 
 .comp-body h2 {
   margin-top: 0;
+}
+
+/* --- Content layout (sidebar + panel) --- */
+.content-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.content-sidebar {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  position: sticky;
+  top: 16px;
+}
+
+.content-sidebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  padding: 4px 10px 8px;
+}
+
+.content-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.content-nav-item {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text);
+  border-left: 2px solid transparent;
+}
+
+.content-nav-item:hover {
+  background: var(--accent-soft);
+  text-decoration: none;
+}
+
+.content-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+  border-left-color: var(--accent);
+}
+
+.content-nav-item .visibility-tag {
+  float: right;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* --- Markdown prose --- */
+.markdown-body {
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 1.4em 0 0.5em;
+}
+
+.markdown-body h1:first-child,
+.markdown-body h2:first-child {
+  margin-top: 0;
+}
+
+.markdown-body p {
+  margin: 0.6em 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.6em;
+  margin: 0.6em 0;
+}
+
+.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding: 4px 16px;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+
+.markdown-body pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.markdown-body th,
+.markdown-body td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.markdown-body th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+}
+
+/* --- Focus visible (a11y) --- */
+.btn:focus-visible,
+.input:focus-visible,
+.tab-link:focus-visible,
+.content-nav-item:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 720px) {
+  .content-layout {
+    grid-template-columns: 1fr;
+  }
+  .content-sidebar {
+    position: static;
+  }
+  .content-nav {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .content-nav-item {
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .content-nav-item.active {
+    border-bottom-color: var(--accent);
+  }
 }
 
 @media (max-width: 720px) {

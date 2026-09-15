@@ -77,3 +77,19 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Visibility participant: API public chỉ trả `published` + `closed`; `draft` trả 404 như không tồn tại (không tiết lộ sự tồn tại).
 - Consequences: Quota 0-1000, slug ≤64 ký tự enforced ở API layer. Publish/close sai trạng thái → 422 `INVALID_TRANSITION`. Không reopen — nếu BTC cần, phải hỏi user trước khi thêm transition mới.
 - Affected files/contracts: `backend/app/competitions/`, `docs/API_CONTRACT.md` §3+§5.2, `docs/DATA_MODEL.md` §3
+
+## ADR-010 - Sprint 04: membership policies, content storage & safe Markdown
+- Date: 2026-09-15
+- Status: accepted
+- Context: Sprint 04 cần chốt participant route convention, join policies, join code provisioning, content storage/visibility, asset allowlist và Markdown render stack. Các lựa chọn đã được user xác nhận.
+- Decision:
+  - Participant route dùng `{slug}` nhất quán (join/contents/assets); admin giữ `{id}`. Cập nhật `plans/02_ARCHITECTURE_CONTRACTS.md` §4 thay baseline `{id}`.
+  - Join policies: draft → 404; closed → 422 `JOIN_CLOSED` (không join mới); membership inactive → 403 `MEMBERSHIP_INACTIVE`, chỉ admin kích hoạt lại (reactivate giữ `joined_at`); join idempotent qua unique compound index + bắt DuplicateKeyError; thiếu và sai code trả cùng 403 `JOIN_CODE_INVALID` (không tạo oracle).
+  - Join code: admin tự đặt/đổi qua `PUT .../join-code` (8-128 ký tự); lưu Argon2id hash (tái dùng `auth/passwords.py`), raw không lưu/trả/log; publish competition mode `code` chưa có code → 422 `JOIN_CODE_REQUIRED`.
+  - Content visibility: `public` = mọi account đã đăng nhập (không anonymous API); `members` = membership active. Trang không được xem → 404 (không tiết lộ tồn tại). Closed vẫn đọc được.
+  - Storage: `<DATA_DIR>/competitions/<cid>/content/<content_id>.md` (ObjectId sinh trước insert); atomic write (temp + fsync + os.replace); read qua resolve + containment check + `O_NOFOLLOW`; mọi path do backend sinh.
+  - Assets: PNG/JPEG/GIF/WebP ≤2 MiB, sniff magic bytes (không tin MIME header), không SVG (vector XSS); tên `uuid4.<ext>`; serve qua API có authz + `nosniff` + `private, max-age=300`; không có DB collection.
+  - Markdown frontend: `react-markdown` + `remark-gfm` + `rehype-sanitize` (default schema), KHÔNG `rehype-raw`/`dangerouslySetInnerHTML`; ảnh chỉ chấp nhận relative `assets/...` transform sang `/api/competitions/{slug}/assets/...`; link ngoài `target="_blank" rel="noopener noreferrer"`.
+  - Clone vẫn KHÔNG copy content/assets/memberships (tiếp tục defer).
+- Consequences: Thêm deps `python-multipart` (backend) và `react-markdown`/`remark-gfm`/`rehype-sanitize` (frontend). Env mới `MAX_CONTENT_MB=2`, `MAX_ASSET_MB=2` (dùng chung `MAX_UPLOAD_MB` cho submission Sprint 05). Nginx `client_max_body_size 12m` đã lớn hơn các limit.
+- Affected files/contracts: `backend/app/memberships/`, `backend/app/content/`, `frontend/src/markdown/`, `docs/API_CONTRACT.md` §3+§5.3+§5.4, `docs/DATA_MODEL.md` §4-5b, `plans/02_ARCHITECTURE_CONTRACTS.md` §4

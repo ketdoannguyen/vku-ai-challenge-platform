@@ -10,6 +10,8 @@ export function Loading({ label = "Đang tải..." }: { label?: string }) {
 }
 
 export function ErrorBox({ error }: { error: unknown }) {
+  if (error == null) return null;
+
   const message =
     error instanceof ApiClientError || error instanceof Error
       ? error.message

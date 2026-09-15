@@ -1,85 +1,98 @@
 # AI Challenge Platform - Current Project State
 
 ## 1. Current checkpoint
-- Last completed sprint: SPRINT_03
+- Last completed sprint: SPRINT_04
 - Date: 2026-09-15
 - Branch: main
-- Commit/working tree status: sprint 03 (competition core & admin) chuẩn bị commit
-- Overall state: green — 48 backend tests + 16 frontend tests pass; end-to-end qua Docker vẫn chưa verify được (user nkd thiếu group docker, xem mục 11)
+- Commit/working tree status: Sprint 04 implementation complete; xem git history để biết commit SHA
+- Overall state: green — 77 backend tests + 33 frontend tests pass; user đã verify thủ công upload asset + Markdown render ảnh qua UI/Nginx; full E2E cả 3 join mode chưa chạy
 
 ## 2. Implemented capabilities
-- Sprint 01 (giữ nguyên): FastAPI skeleton, `GET /api/health`, React shell strict TS, Nginx, Docker Compose web/api/mongo
-- Sprint 02 (giữ nguyên): auth Argon2id + session server-side, admin accounts API + UI, bootstrap scripts
-- Competition model: collection `competitions`, unique slug (`[a-z0-9-]` ≤64, immutable), status `draft|published|closed`, join_mode, primary_metric f1/precision/recall, quota 0-1000, leaderboard_visible, created_by, timestamps UTC
-- Lifecycle (ADR-009): create → draft; draft → published; published → closed (terminal, không reopen). Sai transition → 422 `INVALID_TRANSITION`
-- Edit rules (ADR-009): draft sửa mọi config field; published khóa `primary_metric`; closed read-only; slug/status/created_by luôn immutable
-- Admin competitions API: list (gồm draft), create (409 SLUG_EXISTS, validate đầy đủ), detail by id, edit, publish, close, clone (copy config → draft mới, slug tự sinh `-copy`, KHÔNG copy status/dates/submissions/memberships)
-- Participant competitions API: list published+closed (sort name), detail by slug; draft → 404 như không tồn tại; yêu cầu đăng nhập
-- Frontend: Dashboard thật (comp card grid: tên, mô tả, status badge, ngày local, CTA "Vào cuộc thi"), CompetitionDetailPage shell theo slug (header meta + tab nav Tổng quan active; Đề bài/Rules/Nộp bài/Submissions/Leaderboard disabled với aria-disabled), AdminCompetitionsPage (table + create/edit modal chung, publish/close confirm modal, clone; slug khóa khi edit, metric khóa khi published)
-- Admin nav: "Quản trị" (/admin/competitions) + "Tài khoản" (/admin/accounts); /admin redirect competitions
-- Validation date: UI dùng datetime-local (giờ local ↔ ISO UTC qua helper); backend validate start < end
+- Sprint 01-03 (giữ nguyên): auth Argon2id + session server-side, admin accounts, competition CRUD/lifecycle/clone, dashboard/detail/admin UI
+- Membership/join (ADR-010): `competition_memberships` unique `(competition_id, account_id)`; join modes open (idempotent)/code (Argon2id verify)/invite_only; draft 404, closed 422 JOIN_CLOSED; membership inactive chỉ admin kích hoạt lại (giữ joined_at); thiếu/sai code cùng 403 generic
+- Join code: `PUT /api/admin/competitions/{id}/join-code` (8-128 ký tự, hash Argon2id, không trả raw); publish mode code chưa có code → 422 JOIN_CODE_REQUIRED
+- Competition API giờ trả `membership {active, joined_at}` (batch 1 query cho list) + `join_code_configured` bool
+- Admin members: list (search + pagination), add by email (idempotent, reactivate), set active
+- Content: `competition_contents` metadata (title/slug/order/visibility public|members); file `<DATA_DIR>/competitions/<cid>/content/<content_id>.md` atomic write (temp+fsync+replace); read qua resolve+containment+O_NOFOLLOW; upload .md chỉ UTF-8 ≤2 MiB
+- Assets: PNG/JPEG/GIF/WebP ≤2 MiB sniff magic bytes (không SVG), tên uuid4.<ext>, không DB collection; serve `/api/competitions/{slug}/assets/{name}` có authz + nosniff + private cache
+- Participant content API: list sort order (lọc theo visibility), detail trả markdown inline, assets serving; closed readable; mọi endpoint yêu cầu đăng nhập
+- Frontend Markdown: `react-markdown` + `remark-gfm` + `rehype-sanitize` (không rehype-raw); ảnh chỉ relative `assets/...` → `/api/...` endpoint; link ngoài noopener noreferrer
+- Frontend portal: CompetitionDetailPage thành layout (header + JoinControl + tab nav + content sidebar theo order + Outlet); route `/competitions/:slug` (index overview) + `content/:contentSlug`; Dashboard card dùng JoinControl (cập nhật local sau join, không reload)
+- Admin UI: `/admin/competitions/:id` 3 tab — Nội dung (table, thêm/sửa modal, upload/thay .md, ↑↓ reorder, xóa), Assets (upload, copy tham chiếu, xóa), Thành viên & mã tham gia (đặt/đổi code — chỉ hiện trạng thái, thêm member, toggle active); nút "Quản lý" từ list
+- ErrorBox bugfix (trước sprint 04, cùng tree): trả null khi error null — hết alert "Đã xảy ra lỗi không xác định." trên mọi trang
 
 ## 3. Not implemented yet
-- Membership/join (POST /join), Markdown content upload/render — Sprint 04
-- Submissions, scoring, leaderboard — Sprint 05-06
+- Submissions/scoring/leaderboard/export — Sprint 05-06
 - Login rate limiting — defer Sprint 07
 - Hardening, production deploy — Sprint 07-08
+- Clone competition không copy content/assets/memberships (tiếp tục defer, ghi trong ADR-010)
 
 ## 4. Repository structure that matters
-- `backend/app/competitions/`: `service.py` (model, validate_create/validate_update, public_competition, ISO helpers), `admin_router.py` (list/create/detail/edit/publish/close/clone), `router.py` (participant list/detail)
-- `backend/tests/`: mới `test_competitions_admin.py` (13), `test_competitions_public.py` (5)
-- `frontend/src/api/competitions.ts`: types Competition + labels (STATUS/JOIN_MODE/METRIC) + formatLocal/isoToLocalInput/localInputToIso/statusClass
-- `frontend/src/pages/`: mới `DashboardPage.tsx`, `CompetitionDetailPage.tsx`, `AdminCompetitionsPage.tsx` (+ 3 file test tương ứng); `Placeholders.tsx` chỉ còn NotFoundPage
-- CSS mới trong `index.css`: .comp-list/.comp-card*/.comp-meta*/.comp-header*/.tab-nav/.tab-link(.disabled)/.comp-body, .status-badge.closed, .btn-danger, .modal-lg, .checkbox-field/.checkbox-label, .form-field-wide, .slug-cell, .back-link, .text-muted
-- `frontend/src/components/ui.tsx`: bỏ Placeholder component (không còn dùng)
+- `backend/app/memberships/`: `service.py` (collection, ensure/get/batch/ensure_membership idempotent/set_active, public_membership, member_view), `router.py` (POST join), `admin_router.py` (join-code, members CRUD)
+- `backend/app/content/`: `storage.py` (paths, ensure_within, write_atomic, read_bytes, validate_asset magic bytes), `service.py` (metadata CRUD + validate + reorder body), `admin_router.py` (contents + assets endpoints), `router.py` (participant contents/assets)
+- `backend/app/core/slugs.py`: slug regex dùng chung competitions + content
+- `backend/tests/`: mới `test_memberships.py` (11), `test_content_storage.py` (6), `test_contents_admin.py` (6), `test_contents_public.py` (6)
+- `frontend/src/markdown/`: `MarkdownView.tsx` + test (4)
+- `frontend/src/api/contents.ts`: ContentSummary/Detail + fetch helpers
+- `frontend/src/api/client.ts`: thêm `del`, `put`, `upload` (PUT multipart), `postFile` (POST multipart)
+- `frontend/src/components/JoinControl.tsx` + test (6): 5 trạng thái + code dialog
+- `frontend/src/pages/`: `CompetitionContentPanel.tsx` (Overview + ContentPanel), `AdminCompetitionDetailPage.tsx` + test (4); CompetitionDetailPage/DashboardPage rewrite
+- CSS mới: `.content-layout/.content-sidebar/.content-nav-item/.markdown-body/...`, `.join-state`, `.comp-header-join`, `:focus-visible`
+- `.env.example`/`docker-compose.yml`: thêm `MAX_CONTENT_MB=2`, `MAX_ASSET_MB=2`
 
 ## 5. Runtime/services
-- web/api/mongo như Sprint 01-02; không đổi compose
+- web/api/mongo như cũ; volume `data:/data` đã có sẵn từ Sprint 01 (DATA_DIR=/data trong container api)
 
 ## 6. Current API contract summary
-- `GET /api/competitions`, `GET /api/competitions/{slug}`: implemented (Sprint 03)
-- `GET|POST /api/admin/competitions`, `GET|PATCH /api/admin/competitions/{id}`, `POST /api/admin/competitions/{id}/publish|close|clone`: implemented (Sprint 03)
-- Auth + admin accounts như Sprint 02. Chi tiết: `docs/API_CONTRACT.md`
+- Participant: `GET /api/competitions`, `GET /api/competitions/{slug}`, `POST /api/competitions/{slug}/join`, `GET .../contents`, `GET .../contents/{content_slug}`, `GET .../assets/{name}` — implemented
+- Admin: competitions (Sprint 03) + `PUT .../join-code`, `GET|POST .../members`, `PATCH .../members/{account_id}`, contents CRUD + `/file` + `/reorder`, assets `GET|POST|DELETE` — implemented
+- Chi tiết: `docs/API_CONTRACT.md`
 
 ## 7. Current data model and indexes
-- `competitions`: implemented — unique slug, status, join_mode, join_code_hash (None Sprint 03), primary_metric, quota_per_day, leaderboard_visible, created_by, timestamps. Chi tiết: `docs/DATA_MODEL.md` §3
-- accounts/sessions như Sprint 02
+- `competition_memberships`: implemented — unique compound `(competition_id, account_id)` + `account_id`
+- `competition_contents`: implemented — unique `(competition_id, slug)` + `(competition_id, order)`; `markdown_path` relative, `size_bytes` nullable
+- Assets: filesystem-only (không collection)
+- competitions thêm `join_code_updated_at`
+- Chi tiết: `docs/DATA_MODEL.md`
 
 ## 8. Environment variables in use
-- Không đổi so với Sprint 02 (APP_ENV, MONGO_*, MAX_UPLOAD_MB, DATA_DIR, SESSION_*)
+- Mới Sprint 04: `MAX_CONTENT_MB` (default 2), `MAX_ASSET_MB` (default 2) — `.env.example` + compose đã có
+- Còn lại như Sprint 02 (APP_ENV, MONGO_*, MAX_UPLOAD_MB, DATA_DIR, SESSION_*)
 
 ## 9. Commands verified
-- `cd backend && .venv/bin/pytest` — 48 passed
-- `cd frontend && npm test` — 16 passed; `npm run build` — pass (strict TS); `npm run lint` — pass (warnings cosmetic: fast-refresh, set-state-in-effect pattern fetch-on-mount)
+- `cd backend && .venv/bin/pytest` — 77 passed
+- `cd frontend && npm test` — 33 passed (9 files); `npm run build` — pass (strict TS); `npm run lint` — pass (warnings cosmetic set-state-in-effect/fast-refresh)
 - `docker compose config --quiet` — pass
 
 ## 10. Tests currently passing
-- backend: 48 (health 4, passwords 4, auth 10, admin accounts 12, competitions admin 13, competitions public 5)
-- frontend: 16 (login 3, protected routes 4, dashboard 3, competition detail 3, admin competitions 3)
-- integration qua Nginx: chưa chạy được (Docker permission)
+- backend: 77 (health 4, passwords 4, auth 10, admin accounts 12, competitions admin 13, competitions public 5, memberships 11, content storage 6, contents admin 6, contents public 6)
+- frontend: 33 (login 3, protected routes 4, dashboard 3, competition detail 4, admin competitions 3, markdown 4, JoinControl 6, ui/ErrorBox 2, admin competition detail 4)
+- integration qua Nginx: user đã verify upload ảnh + `.md` và render ảnh trên participant UI; full flow cả 3 join mode chưa verify
 
 ## 11. Known issues / technical debt
-- Docker permission máy dev: end-to-end qua Nginx (tạo competition thật, publish, participant thấy) chưa verify — chạy `./scripts/dev_up.sh` từ terminal user
-- Lint warnings set-state-in-effect: pattern fetch-on-mount tiêu chuẩn, chỉ là cảnh báo static analysis của oxlint
-- Admin list competitions chưa phân trang (số lượng kỳ thi nhỏ, ~vài chục — đủ cho MVP; thêm khi cần)
-- clone endpoint dùng `service._SLUG_MAX` (private) — chấp nhận trong cùng package
+- Full E2E open/code/invite_only qua Nginx chưa verify; riêng upload ảnh + `.md` và render ảnh đã được user kiểm tra thành công
+- Lint warnings set-state-in-effect: pattern fetch-on-mount, cosmetic
+- Asset list đọc directory mỗi request (số lượng nhỏ MVP — chấp nhận; thêm collection nếu phình)
+- Join code không có rate limit (defer Sprint 07 như login)
+- Reorder tuần tự update_one không transaction (single-writer admin, chấp nhận — ghi trong ADR-010)
 
 ## 12. Decisions made this sprint
-- ADR-009 (docs/DECISIONS.md): competition lifecycle draft→published→closed terminal; edit rules theo status; clone copy config only; participant không thấy draft (404)
+- ADR-010 (docs/DECISIONS.md): slug participant routes, join policies (closed/inactive/idempotent/generic 403), Argon2id join code, authenticated-only "public" visibility, atomic storage + path guards, raster-only assets ≤2 MiB, react-markdown+sanitize stack (không rehype-raw), clone vẫn không copy content
 
 ## 13. Preconditions for next sprint
-- Sprint 04 (content & membership) cần: competition core stable (đã có); tạo dữ liệu competition thật qua admin UI hoặc API khi stack lên
+- Sprint 05 (submissions/scoring) cần: competition có membership + content hoạt động (đã có); ground truth + scoring config là việc của Sprint 05
 
 ## 14. Exact next sprint
-- `plans/sprints/SPRINT_04_MARKDOWN_CONTENT_AND_JOIN.md`
+- `plans/sprints/SPRINT_05_SUBMISSION_VALIDATION_AND_SCORING.md`
 
 ## 15. Handoff notes for the next AI agent
-- Competition access pattern: participant qua `find_competition_by_slug` + check status; admin qua `_get_competition_or_404(db, id)` trong `admin_router.py`
-- Validation: dùng `service.validate_create`/`validate_update` (raise ValueError → router map 422 VALIDATION_ERROR với message tiếng Việt)
-- Representation API: mọi response competition qua `service.public_competition` — không bao giờ lộ join_code_hash
-- Frontend: datetime form dùng `isoToLocalInput`/`localInputToIso` từ `api/competitions.ts`; status badge qua `statusClass` (published=success, closed=muted, draft=warning)
-- Tab disabled ở CompetitionDetailPage là `<span role="tab" aria-disabled>` — khi Sprint 04/05 thêm nội dung, đổi thành NavLink + route con dưới `/competitions/:slug/*`
-- Test backend: fixture `client` seed sẵn admin@vku.vn + thi.sinh@vku.vn; pattern tạo competition trong test: POST /api/admin/competitions với `_body()`
+- Join policy hoàn toàn ở `memberships/router.py::join_competition` — mọi thay đổi policy sửa ở đó + test
+- Content path luôn qua `storage.ensure_within`; không bao giờ nối chuỗi path từ input user
+- `markdown_path` trong DB là relative; resolve tại thời điểm đọc với `get_settings().data_dir` (test dùng fixture `isolated_data_dir` monkeypatch DATA_DIR + `get_settings.cache_clear()`)
+- Multipart upload: `api.upload` (PUT .md file) và `api.postFile` (POST asset) trong client.ts
+- Tab disabled còn lại ở CompetitionDetailPage: Nộp bài/Submissions (Sprint 05), Leaderboard (Sprint 06) — đổi thành NavLink khi có route con
+- JoinControl dùng chung Dashboard card + CompetitionDetailPage header; trạng thái derive từ `competition.membership` + `join_mode` + `status`
+- ErrorBox đã có null guard — không render khi không có lỗi
 
 ---
 

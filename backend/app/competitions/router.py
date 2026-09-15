@@ -11,20 +11,32 @@ router = APIRouter(prefix="/api/competitions")
 
 @router.get("")
 async def list_visible_competitions(request: Request, account: CurrentAccount) -> dict:
+    from app.memberships.service import memberships_by_competition
+
     db = request.app.state.mongo.db
-    cursor = (
-        db[service.COMPETITIONS_COLLECTION]
+    competitions = [
+        competition
+        async for competition in db[service.COMPETITIONS_COLLECTION]
         .find({"status": {"$in": ["published", "closed"]}})
         .sort("name", 1)
+    ]
+    memberships = await memberships_by_competition(
+        db, [competition["_id"] for competition in competitions], account["_id"]
     )
-    competitions = [service.public_competition(c) async for c in cursor]
-    return {"competitions": competitions}
+    return {
+        "competitions": [
+            service.public_competition(c, memberships.get(c["_id"])) for c in competitions
+        ]
+    }
 
 
 @router.get("/{slug}")
 async def get_competition_by_slug(slug: str, request: Request, account: CurrentAccount) -> dict:
+    from app.memberships.service import get_membership
+
     db = request.app.state.mongo.db
     competition = await service.find_competition_by_slug(db, slug)
     if competition is None or competition["status"] == "draft":
         raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
-    return service.public_competition(competition)
+    membership = await get_membership(db, competition["_id"], account["_id"])
+    return service.public_competition(competition, membership)

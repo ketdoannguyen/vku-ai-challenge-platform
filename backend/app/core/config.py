@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     mongo_password: str = ""
 
     max_upload_mb: int = 10
+    max_content_mb: int = 2
+    max_asset_mb: int = 2
     data_dir: str = "./data"
 
     session_secret: str = ""

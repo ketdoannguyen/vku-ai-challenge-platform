@@ -1,37 +1,48 @@
-/** Competition detail shell theo slug: header + tab nav. Tab Sprint 04/05 disabled rõ ràng. */
+/** Competition layout: header + membership + content sidebar + nested routes. */
 
-import { useEffect, useState } from "react";
-import { Link, NavLink, useParams } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, NavLink, Outlet, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition } from "../api/competitions";
+import type { Competition, Membership } from "../api/competitions";
 import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, statusClass } from "../api/competitions";
+import { fetchContents, type ContentSummary } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
+import { JoinControl } from "../components/JoinControl";
+
+export interface CompetitionContext {
+  competition: Competition;
+  contents: ContentSummary[];
+}
 
 export function CompetitionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const [competition, setCompetition] = useState<Competition | null>(null);
+  const [contents, setContents] = useState<ContentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  const load = useCallback(async () => {
     setError(null);
-    api
-      .get<Competition>(`/competitions/${slug}`)
-      .then((c) => {
-        if (!cancelled) setCompetition(c);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const comp = await api.get<Competition>(`/competitions/${slug}`);
+      setCompetition(comp);
+      try {
+        const contentData = await fetchContents(slug!);
+        setContents(contentData.contents);
+      } catch {
+        setContents([]);
+      }
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
   }, [slug]);
+
+  useEffect(() => {
+    setLoading(true);
+    void load();
+  }, [load]);
 
   if (loading) {
     return (
@@ -40,7 +51,7 @@ export function CompetitionDetailPage() {
       </div>
     );
   }
-  if (error) {
+  if (error || !competition) {
     return (
       <div className="page">
         <ErrorBox error={error} />
@@ -50,7 +61,8 @@ export function CompetitionDetailPage() {
       </div>
     );
   }
-  const c = competition!;
+
+  const c = competition;
   return (
     <div className="page">
       <p>
@@ -84,17 +96,17 @@ export function CompetitionDetailPage() {
             <dd>{c.quota_per_day} lượt/ngày</dd>
           </div>
         </dl>
+        <div className="comp-header-join">
+          <JoinControl
+            competition={c}
+            onJoined={(membership: Membership) => setCompetition({ ...c, membership })}
+          />
+        </div>
       </div>
 
       <nav className="tab-nav" aria-label="Mục lục cuộc thi" role="tablist">
         <Tab to="." end>
           Tổng quan
-        </Tab>
-        <Tab to="problem" disabled title="Có từ Sprint 04">
-          Đề bài
-        </Tab>
-        <Tab to="rules" disabled title="Có từ Sprint 04">
-          Rules
         </Tab>
         <Tab to="submit" disabled title="Có từ Sprint 05">
           Nộp bài
@@ -107,12 +119,31 @@ export function CompetitionDetailPage() {
         </Tab>
       </nav>
 
-      <div className="card comp-body">
-        <h2>Tổng quan</h2>
-        <p className="text-muted">
-          Trang nội dung tổng quan của cuộc thi sẽ có từ Sprint 04. Hiện tại bạn có thể xem thông tin
-          thời gian, cách thức tham gia và giới hạn nộp bài ở trên.
-        </p>
+      <div className="content-layout">
+        <aside className="content-sidebar">
+          <div className="content-sidebar-title">Nội dung</div>
+          {contents.length > 0 ? (
+            <nav className="content-nav" aria-label="Nội dung cuộc thi">
+              {contents.map((item) => (
+                <NavLink
+                  key={item.id}
+                  to={`content/${item.slug}`}
+                  className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
+                >
+                  {item.title}
+                  {item.visibility === "members" && <span className="visibility-tag">members</span>}
+                </NavLink>
+              ))}
+            </nav>
+          ) : (
+            <p className="text-muted" style={{ padding: "4px 10px", margin: 0, fontSize: 13 }}>
+              Chưa có nội dung.
+            </p>
+          )}
+        </aside>
+        <div className="card comp-body">
+          <Outlet context={{ competition: c, contents } satisfies CompetitionContext} />
+        </div>
       </div>
     </div>
   );

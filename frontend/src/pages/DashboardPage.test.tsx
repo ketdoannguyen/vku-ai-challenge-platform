@@ -1,4 +1,4 @@
-/** Dashboard: render competitions từ API, empty state, không render draft (backend đã lọc). */
+/** Dashboard: render competitions từ API, join states, empty state, error state. */
 
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -18,9 +18,19 @@ const PUBLISHED = {
   quota_per_day: 5,
   leaderboard_visible: true,
   created_by: "admin@vku.vn",
+  join_code_configured: false,
+  membership: { active: false, joined_at: null },
 };
 
-const CLOSED = { ...PUBLISHED, id: "2", slug: "old-cup", name: "Old Cup", status: "closed" };
+const JOINED = {
+  ...PUBLISHED,
+  id: "2",
+  slug: "joined-cup",
+  name: "Joined Cup",
+  membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+};
+
+const CLOSED = { ...PUBLISHED, id: "3", slug: "old-cup", name: "Old Cup", status: "closed" };
 
 function mockFetchOnce(body: unknown, status = 200) {
   vi.stubGlobal(
@@ -33,19 +43,24 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("hiển thị competition từ API với status badge và CTA", async () => {
-  mockFetchOnce({ competitions: [PUBLISHED, CLOSED] });
+test("hiển thị competition với status badge; chưa join có nút Tham gia, đã join có link vào", async () => {
+  mockFetchOnce({ competitions: [PUBLISHED, JOINED, CLOSED] });
   render(
     <MemoryRouter>
       <DashboardPage />
     </MemoryRouter>,
   );
   expect(await screen.findByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Old Cup" })).toBeTruthy();
-  expect(screen.getByText("Đang mở")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Joined Cup" })).toBeTruthy();
+  expect(screen.getAllByText("Đang mở").length).toBe(2); // PUBLISHED + JOINED
   expect(screen.getByText("Đã kết thúc")).toBeTruthy();
-  const cta = screen.getAllByRole("link", { name: "Vào cuộc thi" });
-  expect(cta[0].getAttribute("href")).toBe("/competitions/ai-challenge-2026");
+  // PUBLISHED chưa join → nút Tham gia
+  expect(screen.getByRole("button", { name: "Tham gia" })).toBeTruthy();
+  // JOINED → link Vào cuộc thi đúng slug
+  const enter = screen.getByRole("link", { name: "Vào cuộc thi" });
+  expect(enter.getAttribute("href")).toBe("/competitions/joined-cup");
+  // CLOSED → không có nút join, chỉ thông báo kết thúc
+  expect(screen.getByText(/Cuộc thi đã kết thúc/)).toBeTruthy();
 });
 
 test("empty state khi không có competition", async () => {
