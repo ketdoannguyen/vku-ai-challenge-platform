@@ -8,7 +8,7 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Content & membership** — Sprint 04 hoàn thành: participant join theo mode open/code/invite-only, đọc đề bài Markdown render an toàn (GFM + sanitize), admin quản lý nội dung (.md + ảnh), thành viên và mã tham gia. Sprint 03: competition CRUD/lifecycle. Sprint 02: auth + admin tài khoản. Chưa có nộp bài/chấm điểm (Sprint 05). Xem `docs/PROJECT_STATE.md`.
+**Submission & scoring** — Sprint 05 hoàn thành: admin cấu hình schema CSV/upload ground truth private; participant hợp lệ nộp CSV và nhận F1/Precision/Recall với quota/deadline/backend validation. Sprint 04 có membership và Markdown content. Lịch sử submission, leaderboard và export thuộc Sprint 06. Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 

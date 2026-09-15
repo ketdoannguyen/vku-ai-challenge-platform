@@ -146,6 +146,22 @@ def public_competition(competition: dict, membership: dict | None = None) -> dic
         "created_by": competition["created_by"],
         "join_code_configured": bool(competition.get("join_code_hash")),
         "membership": public_membership(membership),
+        "submission_config": _public_submission_config(competition),
+    }
+
+
+def _public_submission_config(competition: dict) -> dict:
+    from app.core.config import get_settings
+    from app.scoring.storage import ground_truth_available
+
+    config = competition.get("scoring_config")
+    return {
+        "ready": bool(config and ground_truth_available(competition)),
+        "id_column": config["id_column"] if config else None,
+        "prediction_column": config["prediction_column"] if config else None,
+        "average": config["average"] if config else None,
+        "pos_label": config.get("pos_label") if config else None,
+        "max_upload_mb": get_settings().max_upload_mb,
     }
 
 

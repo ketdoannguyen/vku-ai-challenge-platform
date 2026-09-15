@@ -22,6 +22,14 @@ function makeCompetition(overrides: Partial<Competition> = {}): Competition {
     created_by: "admin@vku.vn",
     join_code_configured: false,
     membership: { active: false, joined_at: null },
+    submission_config: {
+      ready: false,
+      id_column: null,
+      prediction_column: null,
+      average: null,
+      pos_label: null,
+      max_upload_mb: 10,
+    },
     ...overrides,
   };
 }

@@ -19,8 +19,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | 404 API trả error format contract | passing | `backend/tests/test_health.py` |
 | Frontend build thành công (strict TS) | passing | `cd frontend && npm run build` |
 | `docker compose config` hợp lệ | passing | `docker compose config --quiet` |
-| `docker compose up` chạy web+api+mongo | blocked | User dev không có group docker (`docker.sock` permission denied) — cần `sudo usermod -aG docker nkd` rồi chạy lại để verify |
-| curl `/api/health` qua Nginx same-origin | blocked | Như trên — chưa verify end-to-end qua container web |
+| `docker compose up` chạy web+api+mongo | passing | `docker compose up -d --no-deps --force-recreate api web`; Mongo container healthy |
+| curl `/api/health` qua Nginx same-origin | passing | `curl --fail http://localhost:8080/api/health` → `status=ok`, Mongo reachable |
 | Mongo không publish public | passing | `docker-compose.yml`: mongo chỉ `expose 27017`, không có `ports` |
 | Nginx không serve `/data` | passing | `frontend/nginx.conf`: `location /data/ { return 404; }` |
 
@@ -42,8 +42,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Password policy (≥10 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
 | Login form: error message, loading state, không có link đăng ký | passing | `frontend/src/pages/LoginPage.test.tsx` (vitest) |
 | Protected routes: chưa login → /login; participant → không vào admin | passing | `frontend/src/auth/RequireAuth.test.tsx` |
-| Login end-to-end qua Nginx với Mongo thật + cookie | blocked | Docker permission máy dev (Sprint 01, mục 2); chạy lại sau `sudo usermod -aG docker nkd` |
-| Bootstrap scripts tạo admin/import thật với Mongo | blocked | Như trên — usage/error path đã verify, đường tạo thật cần Mongo chạy |
+| Login end-to-end qua Nginx với Mongo thật + cookie | passing | Sprint 05 isolated smoke đăng nhập admin + participant và gọi API authenticated qua Nginx |
+| Bootstrap scripts tạo admin/import thật với Mongo | planned | Docker hoạt động; script bootstrap không được chạy lại trong Sprint 05 |
 | Login rate limiting | planned | Defer Sprint 07 (sprint file cho phép) |
 
 ## 4. Competition core & admin (Sprint 03)
@@ -61,9 +61,9 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Draft detail → 404 như không tồn tại | passing | `backend/tests/test_competitions_public.py` |
 | Public API yêu cầu đăng nhập (401) | passing | `backend/tests/test_competitions_public.py` |
 | Dashboard render từ API, empty state, error state | passing | `frontend/src/pages/DashboardPage.test.tsx` |
-| Competition detail load theo slug động; tab Sprint 04/05 disabled aria-disabled | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx` |
+| Competition detail load theo slug động; content/submit enabled, các tab Sprint 06 disabled aria-disabled | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx` |
 | Admin form: validate required, slug khóa khi edit, metric khóa khi published | passing | `frontend/src/pages/AdminCompetitionsPage.test.tsx` |
-| Admin UI end-to-end qua Nginx (tạo/publish/clone thật) | blocked | Docker permission máy dev (mục 2) — chạy `./scripts/dev_up.sh` từ terminal user để verify |
+| Admin UI end-to-end qua Nginx (tạo/publish/clone thật) | planned | API create/publish đã smoke qua Nginx; thao tác browser và clone chưa chạy lại |
 
 ## 5. Markdown content & membership (Sprint 04)
 
@@ -91,16 +91,22 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin content/member UI: table, actions, join code không hiện trong DOM | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Upload/render E2E qua Nginx với file thật | passing | User verify thủ công: upload ảnh + `.md`, tham chiếu `assets/<name>` render thành ảnh trên participant UI |
 
-## 6. Submission & scoring (Sprint 05) — planned
+## 6. Submission & scoring (Sprint 05) — passing
 
-| Check | Status |
-|---|---|
-| Validate: extension, cột, duplicate ID, missing/extra ID, null prediction | planned |
-| F1/Precision/Recall tính đúng với average/pos_label config | planned |
-| Align theo ID không theo thứ tự dòng | planned |
-| Quota/day + deadline check backend | planned |
-| Upload size limit | planned |
-| Ground truth không public | planned |
+| Check | Status | Cách verify |
+|---|---|---|
+| Validate: empty/UTF-8, extension, cột, duplicate ID, missing/extra ID, null/invalid prediction | passing | `backend/tests/test_scoring.py`, `backend/tests/test_submissions.py` |
+| F1/Precision/Recall đúng: binary perfect=1; FP/FN=0.5; macro fixture=0.5; zero-division không warning | passing | `backend/tests/test_scoring.py` (23 pure tests, scikit-learn, zero_division=0) |
+| Align theo ID; reorder giữ nguyên score | passing | `backend/tests/test_scoring.py`, `backend/tests/test_submissions.py` |
+| Auth + active membership + published/start/deadline enforce backend | passing | `backend/tests/test_submissions.py` |
+| Quota completed/ngày UTC + quota_remaining | passing | `backend/tests/test_submissions.py` |
+| Upload size dùng global `MAX_UPLOAD_MB`; filename không thành path | passing | `backend/tests/test_submissions.py` |
+| Validation reject không lưu record/file | passing | `backend/tests/test_submissions.py` |
+| Ground truth/config admin validate, metadata safe, lock sau score/closed | passing | `backend/tests/test_scoring_admin.py` |
+| Ground truth không có public route; competition isolation | passing | `backend/tests/test_scoring_admin.py`, `backend/tests/test_submissions.py` |
+| Admin UI scoring readiness/config/upload/locked | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
+| Participant UI file/rules/loading/result/error/member/readiness | passing | `frontend/src/pages/SubmissionPage.test.tsx` |
+| Live API flow qua Nginx + Mongo + filesystem thật | passing | Isolated smoke: admin config/upload/publish; participant join; invalid không persist; valid reordered score 1.0; config lock; public ground truth 404; cleanup artifacts |
 
 ## 7. Leaderboard/history/export (Sprint 06) — planned
 

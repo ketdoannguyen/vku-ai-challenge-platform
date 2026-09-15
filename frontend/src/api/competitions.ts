@@ -5,6 +5,15 @@ export interface Membership {
   joined_at: string | null;
 }
 
+export interface SubmissionConfig {
+  ready: boolean;
+  id_column: string | null;
+  prediction_column: string | null;
+  average: "binary" | "macro" | "weighted" | null;
+  pos_label: string | null;
+  max_upload_mb: number;
+}
+
 export interface Competition {
   id: string;
   slug: string;
@@ -20,6 +29,7 @@ export interface Competition {
   created_by: string;
   join_code_configured: boolean;
   membership: Membership;
+  submission_config: SubmissionConfig;
 }
 
 export interface JoinResponse {

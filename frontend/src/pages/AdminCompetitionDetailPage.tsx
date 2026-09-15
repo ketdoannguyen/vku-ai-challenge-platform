@@ -1,4 +1,4 @@
-/** Admin quản lý 1 competition: Nội dung, Assets, Thành viên & mã tham gia. */
+/** Admin quản lý nội dung, assets, scoring và thành viên của một competition. */
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -8,7 +8,7 @@ import { STATUS_LABEL } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
 
-type Tab = "contents" | "assets" | "members";
+type Tab = "contents" | "assets" | "scoring" | "members";
 
 interface AdminContent extends ContentSummary {
   markdown?: string;
@@ -28,6 +28,29 @@ interface MemberItem {
   role: string;
   active: boolean;
   joined_at: string;
+}
+
+interface ScoringConfig {
+  id_column: string;
+  prediction_column: string;
+  label_column: string;
+  average: "binary" | "macro" | "weighted";
+  pos_label: string | null;
+  higher_is_better: true;
+}
+
+interface ScoringStatus {
+  ready: boolean;
+  locked: boolean;
+  config: ScoringConfig | null;
+  ground_truth: {
+    row_count: number;
+    columns: string[];
+    uploaded_at: string;
+  } | null;
+  primary_metric: "f1" | "precision" | "recall";
+  quota_per_day: number;
+  max_upload_mb: number;
 }
 
 export function AdminCompetitionDetailPage() {
@@ -92,6 +115,7 @@ export function AdminCompetitionDetailPage() {
           [
             ["contents", "Nội dung"],
             ["assets", "Assets"],
+            ["scoring", "Chấm điểm"],
             ["members", "Thành viên & mã tham gia"],
           ] as const
         ).map(([key, label]) => (
@@ -110,7 +134,222 @@ export function AdminCompetitionDetailPage() {
 
       {tab === "contents" && <ContentsPanel competitionId={competition.id} />}
       {tab === "assets" && <AssetsPanel competitionId={competition.id} />}
+      {tab === "scoring" && <ScoringPanel competition={competition} />}
       {tab === "members" && <MembersPanel competition={competition} />}
+    </div>
+  );
+}
+
+/** ---------- Chấm điểm ---------- */
+
+function ScoringPanel({ competition }: { competition: Competition }) {
+  const [status, setStatus] = useState<ScoringStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [message, setMessage] = useState("");
+  const [idColumn, setIdColumn] = useState("id");
+  const [predictionColumn, setPredictionColumn] = useState("prediction");
+  const [labelColumn, setLabelColumn] = useState("label");
+  const [average, setAverage] = useState<ScoringConfig["average"]>("binary");
+  const [posLabel, setPosLabel] = useState("1");
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const data = await api.get<ScoringStatus>(
+        `/admin/competitions/${competition.id}/scoring`,
+      );
+      setStatus(data);
+      if (data.config) {
+        setIdColumn(data.config.id_column);
+        setPredictionColumn(data.config.prediction_column);
+        setLabelColumn(data.config.label_column);
+        setAverage(data.config.average);
+        setPosLabel(data.config.pos_label ?? "");
+      }
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [competition.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function saveConfig(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    setMessage("");
+    try {
+      const data = await api.put<ScoringStatus>(
+        `/admin/competitions/${competition.id}/scoring`,
+        {
+          id_column: idColumn,
+          prediction_column: predictionColumn,
+          label_column: labelColumn,
+          average,
+          pos_label: average === "binary" ? posLabel : null,
+          higher_is_better: true,
+        },
+      );
+      setStatus(data);
+      setMessage("Đã lưu cấu hình chấm điểm.");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadGroundTruth(file: File) {
+    setBusy(true);
+    setError(null);
+    setMessage("");
+    try {
+      const data = await api.upload<ScoringStatus>(
+        `/admin/competitions/${competition.id}/ground-truth`,
+        file,
+      );
+      setStatus(data);
+      setMessage("Đã upload và kiểm tra ground truth.");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (loading) return <Loading />;
+
+  return (
+    <div className="scoring-admin-grid">
+      <div className="card scoring-panel">
+        <div className="scoring-panel-head">
+          <div>
+            <h2>Cấu hình CSV</h2>
+            <p className="text-muted">
+              Metric chính: {competition.primary_metric.toUpperCase()} · Quota: {competition.quota_per_day} lượt/ngày
+            </p>
+          </div>
+          {status && (
+            <span className={`status-badge ${status.ready ? "success" : "warning"}`}>
+              {status.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
+            </span>
+          )}
+        </div>
+
+        {status?.locked && (
+          <div className="status-banner warning">
+            Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
+          </div>
+        )}
+        {message && <div className="status-banner success" role="status">{message}</div>}
+        <ErrorBox error={error} />
+
+        <form onSubmit={saveConfig}>
+          <div className="form-grid">
+            <div className="form-field">
+              <label className="field-label" htmlFor="scoring-id-column">Cột ID</label>
+              <input
+                id="scoring-id-column"
+                className="input"
+                value={idColumn}
+                disabled={busy || status?.locked}
+                onChange={(event) => setIdColumn(event.target.value)}
+                required
+              />
+            </div>
+            <div className="form-field">
+              <label className="field-label" htmlFor="scoring-prediction-column">Cột prediction</label>
+              <input
+                id="scoring-prediction-column"
+                className="input"
+                value={predictionColumn}
+                disabled={busy || status?.locked}
+                onChange={(event) => setPredictionColumn(event.target.value)}
+                required
+              />
+            </div>
+            <div className="form-field">
+              <label className="field-label" htmlFor="scoring-label-column">Cột label trong ground truth</label>
+              <input
+                id="scoring-label-column"
+                className="input"
+                value={labelColumn}
+                disabled={busy || status?.locked}
+                onChange={(event) => setLabelColumn(event.target.value)}
+                required
+              />
+            </div>
+            <div className="form-field">
+              <label className="field-label" htmlFor="scoring-average">Average</label>
+              <select
+                id="scoring-average"
+                className="input"
+                value={average}
+                disabled={busy || status?.locked}
+                onChange={(event) => setAverage(event.target.value as ScoringConfig["average"])}
+              >
+                <option value="binary">Binary</option>
+                <option value="macro">Macro</option>
+                <option value="weighted">Weighted</option>
+              </select>
+            </div>
+            {average === "binary" && (
+              <div className="form-field">
+                <label className="field-label" htmlFor="scoring-pos-label">Positive label</label>
+                <input
+                  id="scoring-pos-label"
+                  className="input"
+                  value={posLabel}
+                  disabled={busy || status?.locked}
+                  onChange={(event) => setPosLabel(event.target.value)}
+                  required
+                />
+              </div>
+            )}
+          </div>
+          <button className="btn" type="submit" disabled={busy || status?.locked}>
+            {busy ? "Đang lưu..." : "Lưu cấu hình"}
+          </button>
+        </form>
+      </div>
+
+      <div className="card scoring-panel">
+        <h2>Ground truth private</h2>
+        <p className="text-muted">
+          CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có public download URL.
+        </p>
+        {status?.ground_truth ? (
+          <dl className="scoring-metadata">
+            <div><dt>Dữ liệu</dt><dd>{status.ground_truth.row_count} dòng</dd></div>
+            <div><dt>Các cột</dt><dd>{status.ground_truth.columns.join(", ")}</dd></div>
+            <div><dt>Upload lúc</dt><dd>{new Date(status.ground_truth.uploaded_at).toLocaleString()}</dd></div>
+          </dl>
+        ) : (
+          <p className="text-muted">Chưa có ground truth.</p>
+        )}
+        <label className="btn btn-secondary">
+          {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+          <input
+            aria-label="Upload ground truth CSV"
+            type="file"
+            accept=".csv,text/csv"
+            hidden
+            disabled={busy || status?.locked || !status?.config}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadGroundTruth(file);
+              event.target.value = "";
+            }}
+          />
+        </label>
+        {!status?.config && <p className="text-muted">Lưu cấu hình CSV trước khi upload.</p>}
+      </div>
     </div>
   );
 }

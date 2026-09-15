@@ -108,10 +108,10 @@ export function CompetitionDetailPage() {
         <Tab to="." end>
           Tổng quan
         </Tab>
-        <Tab to="submit" disabled title="Có từ Sprint 05">
+        <Tab to="submit">
           Nộp bài
         </Tab>
-        <Tab to="submissions" disabled title="Có từ Sprint 05">
+        <Tab to="submissions" disabled title="Có từ Sprint 06">
           Submissions
         </Tab>
         <Tab to="leaderboard" disabled title="Có từ Sprint 06">

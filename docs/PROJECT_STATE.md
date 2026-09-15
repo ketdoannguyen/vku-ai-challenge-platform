@@ -1,98 +1,102 @@
 # AI Challenge Platform - Current Project State
 
 ## 1. Current checkpoint
-- Last completed sprint: SPRINT_04
+- Last completed sprint: SPRINT_05
 - Date: 2026-09-15
 - Branch: main
-- Commit/working tree status: Sprint 04 implementation complete; xem git history để biết commit SHA
-- Overall state: green — 77 backend tests + 33 frontend tests pass; user đã verify thủ công upload asset + Markdown render ảnh qua UI/Nginx; full E2E cả 3 join mode chưa chạy
+- Commit/working tree status: Sprint 05 implemented trong working tree; chưa commit/push
+- Overall state: green — 120 backend tests + 41 frontend tests pass; frontend production build, Docker images/Compose config và submission API smoke qua Nginx + Mongo thật đều pass
 
 ## 2. Implemented capabilities
-- Sprint 01-03 (giữ nguyên): auth Argon2id + session server-side, admin accounts, competition CRUD/lifecycle/clone, dashboard/detail/admin UI
-- Membership/join (ADR-010): `competition_memberships` unique `(competition_id, account_id)`; join modes open (idempotent)/code (Argon2id verify)/invite_only; draft 404, closed 422 JOIN_CLOSED; membership inactive chỉ admin kích hoạt lại (giữ joined_at); thiếu/sai code cùng 403 generic
-- Join code: `PUT /api/admin/competitions/{id}/join-code` (8-128 ký tự, hash Argon2id, không trả raw); publish mode code chưa có code → 422 JOIN_CODE_REQUIRED
-- Competition API giờ trả `membership {active, joined_at}` (batch 1 query cho list) + `join_code_configured` bool
-- Admin members: list (search + pagination), add by email (idempotent, reactivate), set active
-- Content: `competition_contents` metadata (title/slug/order/visibility public|members); file `<DATA_DIR>/competitions/<cid>/content/<content_id>.md` atomic write (temp+fsync+replace); read qua resolve+containment+O_NOFOLLOW; upload .md chỉ UTF-8 ≤2 MiB
-- Assets: PNG/JPEG/GIF/WebP ≤2 MiB sniff magic bytes (không SVG), tên uuid4.<ext>, không DB collection; serve `/api/competitions/{slug}/assets/{name}` có authz + nosniff + private cache
-- Participant content API: list sort order (lọc theo visibility), detail trả markdown inline, assets serving; closed readable; mọi endpoint yêu cầu đăng nhập
-- Frontend Markdown: `react-markdown` + `remark-gfm` + `rehype-sanitize` (không rehype-raw); ảnh chỉ relative `assets/...` → `/api/...` endpoint; link ngoài noopener noreferrer
-- Frontend portal: CompetitionDetailPage thành layout (header + JoinControl + tab nav + content sidebar theo order + Outlet); route `/competitions/:slug` (index overview) + `content/:contentSlug`; Dashboard card dùng JoinControl (cập nhật local sau join, không reload)
-- Admin UI: `/admin/competitions/:id` 3 tab — Nội dung (table, thêm/sửa modal, upload/thay .md, ↑↓ reorder, xóa), Assets (upload, copy tham chiếu, xóa), Thành viên & mã tham gia (đặt/đổi code — chỉ hiện trạng thái, thêm member, toggle active); nút "Quản lý" từ list
-- ErrorBox bugfix (trước sprint 04, cùng tree): trả null khi error null — hết alert "Đã xảy ra lỗi không xác định." trên mọi trang
+- Sprint 01-04: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets và participant portal
+- Scoring config (ADR-011): `competitions.primary_metric` + `quota_per_day` giữ ở top-level; embedded `scoring_config` chỉ có id/prediction/label columns, binary|macro|weighted, pos_label và `higher_is_better=true`; không dùng config JSON
+- Ground truth admin: GET scoring readiness/metadata, PUT config, PUT/replace private CSV; validate ngay; metadata không chứa labels; không có public download route
+- Scoring lock: closed competition hoặc đã có submission completed thì không đổi config/ground truth; published chưa có điểm vẫn cấu hình được
+- CSV validation: UTF-8/UTF-8 BOM, non-empty, ≤1.000.000 dòng, required columns/values, unique IDs, exact ID set, prediction thuộc ground-truth labels; align bằng ID
+- Metrics: scikit-learn synchronous F1/Precision/Recall cùng average/pos_label, `zero_division=0`; DB lưu raw float, `primary_score` lấy metric top-level của competition
+- Submission policy: auth active → published → active membership → start/deadline → readiness → quota completed/ngày UTC → `.csv`/10 MiB → validation/scoring → atomic file write → Mongo completed record
+- Rejected validation chỉ trả error rõ cho participant; không lưu record/file và không trừ quota
+- File isolation: `<DATA_DIR>/submissions/<competition_id>/<account_id>/<submission_id>.csv`; original filename chỉ lưu basename, không dùng làm path
+- Frontend: admin tab Chấm điểm có readiness/config/ground-truth metadata/locked state; participant tab Nộp bài có rules, selected file, loading, metrics result, quota remaining và backend errors
 
 ## 3. Not implemented yet
-- Submissions/scoring/leaderboard/export — Sprint 05-06
-- Login rate limiting — defer Sprint 07
-- Hardening, production deploy — Sprint 07-08
-- Clone competition không copy content/assets/memberships (tiếp tục defer, ghi trong ADR-010)
+- My Submissions, leaderboard best-score/tie-break, admin submission view và Excel export — Sprint 06
+- Login/join rate limiting và release hardening — Sprint 07
+- Production deploy — Sprint 08; backup/restore/pilot — Sprint 09
 
 ## 4. Repository structure that matters
-- `backend/app/memberships/`: `service.py` (collection, ensure/get/batch/ensure_membership idempotent/set_active, public_membership, member_view), `router.py` (POST join), `admin_router.py` (join-code, members CRUD)
-- `backend/app/content/`: `storage.py` (paths, ensure_within, write_atomic, read_bytes, validate_asset magic bytes), `service.py` (metadata CRUD + validate + reorder body), `admin_router.py` (contents + assets endpoints), `router.py` (participant contents/assets)
-- `backend/app/core/slugs.py`: slug regex dùng chung competitions + content
-- `backend/tests/`: mới `test_memberships.py` (11), `test_content_storage.py` (6), `test_contents_admin.py` (6), `test_contents_public.py` (6)
-- `frontend/src/markdown/`: `MarkdownView.tsx` + test (4)
-- `frontend/src/api/contents.ts`: ContentSummary/Detail + fetch helpers
-- `frontend/src/api/client.ts`: thêm `del`, `put`, `upload` (PUT multipart), `postFile` (POST multipart)
-- `frontend/src/components/JoinControl.tsx` + test (6): 5 trạng thái + code dialog
-- `frontend/src/pages/`: `CompetitionContentPanel.tsx` (Overview + ContentPanel), `AdminCompetitionDetailPage.tsx` + test (4); CompetitionDetailPage/DashboardPage rewrite
-- CSS mới: `.content-layout/.content-sidebar/.content-nav-item/.markdown-body/...`, `.join-state`, `.comp-header-join`, `:focus-visible`
-- `.env.example`/`docker-compose.yml`: thêm `MAX_CONTENT_MB=2`, `MAX_ASSET_MB=2`
+- `backend/app/scoring/service.py`: config validation, CSV parser, ground-truth validation, ID alignment, scikit-learn metrics
+- `backend/app/scoring/storage.py`: path containment, symlink guard và private ground-truth read/readiness dùng chung
+- `backend/app/scoring/admin_router.py`: admin scoring status/config/ground-truth endpoints và lock policy
+- `backend/app/submissions/service.py`: indexes, quota UTC/day, public completed response
+- `backend/app/submissions/router.py`: participant guards, upload/score/persist flow
+- `backend/tests/test_scoring.py` (23), `test_scoring_admin.py` (11), `test_submissions.py` (9)
+- `frontend/src/pages/SubmissionPage.tsx` + test (4)
+- `frontend/src/pages/AdminCompetitionDetailPage.tsx`: tab Chấm điểm; test file hiện có 8 test
+- `.claude/plans/2026-09-15-sprint-05-submission-validation-scoring.md`: implementation plan
 
 ## 5. Runtime/services
-- web/api/mongo như cũ; volume `data:/data` đã có sẵn từ Sprint 01 (DATA_DIR=/data trong container api)
+- Kiến trúc web/api/mongo và volume `/data` giữ nguyên
+- Backend thêm runtime dependency `scikit-learn>=1.5,<2`; dev dependency `httpx2>=2.13` cho Starlette TestClient hiện tại
 
 ## 6. Current API contract summary
-- Participant: `GET /api/competitions`, `GET /api/competitions/{slug}`, `POST /api/competitions/{slug}/join`, `GET .../contents`, `GET .../contents/{content_slug}`, `GET .../assets/{name}` — implemented
-- Admin: competitions (Sprint 03) + `PUT .../join-code`, `GET|POST .../members`, `PATCH .../members/{account_id}`, contents CRUD + `/file` + `/reorder`, assets `GET|POST|DELETE` — implemented
+- Participant competition list/detail thêm safe `submission_config {ready,id_column,prediction_column,average,pos_label,max_upload_mb}`
+- `POST /api/competitions/{id}/submissions` — implemented; 201 completed metrics hoặc error ổn định, không persist validation reject
+- Admin: `GET|PUT /api/admin/competitions/{id}/scoring`, `PUT /api/admin/competitions/{id}/ground-truth` — implemented
+- Ground truth không có participant/public route
+- My Submissions/leaderboard/admin export vẫn planned Sprint 06
 - Chi tiết: `docs/API_CONTRACT.md`
 
 ## 7. Current data model and indexes
-- `competition_memberships`: implemented — unique compound `(competition_id, account_id)` + `account_id`
-- `competition_contents`: implemented — unique `(competition_id, slug)` + `(competition_id, order)`; `markdown_path` relative, `size_bytes` nullable
-- Assets: filesystem-only (không collection)
-- competitions thêm `join_code_updated_at`
+- `competitions` thêm optional `scoring_config` và `ground_truth` metadata; config/metadata chỉ xuất hiện sau khi admin cấu hình
+- `submissions`: implemented completed records với competition/account/path/original filename/metrics/primary score/created_at
+- Indexes: `(competition_id, account_id, created_at DESC)` và `(competition_id, primary_score DESC)`
+- Files: ground truth private theo competition; submissions private theo competition + account
 - Chi tiết: `docs/DATA_MODEL.md`
 
 ## 8. Environment variables in use
-- Mới Sprint 04: `MAX_CONTENT_MB` (default 2), `MAX_ASSET_MB` (default 2) — `.env.example` + compose đã có
-- Còn lại như Sprint 02 (APP_ENV, MONGO_*, MAX_UPLOAD_MB, DATA_DIR, SESSION_*)
+- Không có env mới; `MAX_UPLOAD_MB=10` là limit chung cho ground truth và submission CSV
+- `MAX_CONTENT_MB=2`, `MAX_ASSET_MB=2`, `DATA_DIR` và auth/Mongo env giữ nguyên
 
 ## 9. Commands verified
-- `cd backend && .venv/bin/pytest` — 77 passed
-- `cd frontend && npm test` — 33 passed (9 files); `npm run build` — pass (strict TS); `npm run lint` — pass (warnings cosmetic set-state-in-effect/fast-refresh)
+- `cd backend && .venv/bin/pytest` — 120 passed
+- `cd frontend && npm test` — 41 passed (10 files)
+- `cd frontend && npm run build` — pass (strict TS + Vite production build)
+- `cd frontend && npm run lint` — exit 0, chỉ warning fetch-on-mount/Fast Refresh đã biết
 - `docker compose config --quiet` — pass
+- `docker compose build api web` — pass
+- `docker compose up -d --no-deps --force-recreate api web` + `curl http://localhost:8080/api/health` — pass, Mongo reachable
+- One-off Sprint 05 smoke qua Nginx/Mongo/filesystem thật — pass: invalid không persist, reordered valid score 1.0, lock enforce, ground truth 404; artifacts tạm đã cleanup
 
 ## 10. Tests currently passing
-- backend: 77 (health 4, passwords 4, auth 10, admin accounts 12, competitions admin 13, competitions public 5, memberships 11, content storage 6, contents admin 6, contents public 6)
-- frontend: 33 (login 3, protected routes 4, dashboard 3, competition detail 4, admin competitions 3, markdown 4, JoinControl 6, ui/ErrorBox 2, admin competition detail 4)
-- integration qua Nginx: user đã verify upload ảnh + `.md` và render ảnh trên participant UI; full flow cả 3 join mode chưa verify
+- Backend cũ Sprint 01-04: 77
+- Backend Sprint 05: 43 (scoring pure 23, scoring admin 11, submissions 9)
+- Frontend: 41 (Sprint 05 thêm 4 Submit page + 4 admin scoring; các test cũ giữ pass)
 
 ## 11. Known issues / technical debt
-- Full E2E open/code/invite_only qua Nginx chưa verify; riêng upload ảnh + `.md` và render ảnh đã được user kiểm tra thành công
-- Lint warnings set-state-in-effect: pattern fetch-on-mount, cosmetic
-- Asset list đọc directory mỗi request (số lượng nhỏ MVP — chấp nhận; thêm collection nếu phình)
-- Join code không có rate limit (defer Sprint 07 như login)
-- Reorder tuần tự update_one không transaction (single-writer admin, chấp nhận — ghi trong ADR-010)
+- Chưa thao tác UI Sprint 05 thủ công trong browser; component tests và API smoke qua Nginx/Mongo/filesystem thật đã pass
+- Quota check là count rồi insert, không transaction; hai request thật sự đồng thời có thể cùng vượt qua slot cuối (MVP traffic thấp, cần harden nếu client gửi concurrent uploads)
+- Scoring synchronous đọc/parse ground truth lại mỗi submission; phù hợp limit 10 MiB/MVP, cần đo trước khi tăng limit
+- Lint warnings set-state-in-effect/Fast Refresh là pattern cũ và một instance mới trong admin scoring fetch-on-mount; không có lint error
+- Full E2E open/code/invite_only qua Nginx vẫn chưa chạy; upload/render Markdown đã được user verify ở Sprint 04
 
 ## 12. Decisions made this sprint
-- ADR-010 (docs/DECISIONS.md): slug participant routes, join policies (closed/inactive/idempotent/generic 403), Argon2id join code, authenticated-only "public" visibility, atomic storage + path guards, raster-only assets ≤2 MiB, react-markdown+sanitize stack (không rehype-raw), clone vẫn không copy content
+- ADR-011: Mongo/env/filesystem ownership không trùng, global upload 10 MiB, scoring lock sau điểm/closed, rejected không persistence, quota completed theo UTC, synchronous scikit-learn
 
 ## 13. Preconditions for next sprint
-- Sprint 05 (submissions/scoring) cần: competition có membership + content hoạt động (đã có); ground truth + scoring config là việc của Sprint 05
+- Sprint 06 có completed submission schema + indexes, metrics/primary score và stable participant upload API
+- Trước production nên kiểm tra UX Sprint 05 thủ công trên browser desktop/mobile; không chặn bắt đầu Sprint 06
 
 ## 14. Exact next sprint
-- `plans/sprints/SPRINT_05_SUBMISSION_VALIDATION_AND_SCORING.md`
+- `plans/sprints/SPRINT_06_LEADERBOARD_HISTORY_AND_EXPORT.md`
 
 ## 15. Handoff notes for the next AI agent
-- Join policy hoàn toàn ở `memberships/router.py::join_competition` — mọi thay đổi policy sửa ở đó + test
-- Content path luôn qua `storage.ensure_within`; không bao giờ nối chuỗi path từ input user
-- `markdown_path` trong DB là relative; resolve tại thời điểm đọc với `get_settings().data_dir` (test dùng fixture `isolated_data_dir` monkeypatch DATA_DIR + `get_settings.cache_clear()`)
-- Multipart upload: `api.upload` (PUT .md file) và `api.postFile` (POST asset) trong client.ts
-- Tab disabled còn lại ở CompetitionDetailPage: Nộp bài/Submissions (Sprint 05), Leaderboard (Sprint 06) — đổi thành NavLink khi có route con
-- JoinControl dùng chung Dashboard card + CompetitionDetailPage header; trạng thái derive từ `competition.membership` + `join_mode` + `status`
-- ErrorBox đã có null guard — không render khi không có lỗi
+- Leaderboard chỉ query `status=completed`; validation rejects không tồn tại trong DB
+- Best submission theo `primary_score` cao nhất; tie-break created_at sớm hơn theo contract v1
+- `primary_metric` top-level competition là nguồn ranking; `higher_is_better` hiện luôn true
+- My Submissions route planned `/api/competitions/{id}/submissions/me`; frontend tab hiện vẫn disabled
+- Không expose `file_path`, ground-truth path/data hoặc account secrets ở participant API
+- Nếu Sprint 06 thêm admin submission view/download, phải giữ competition scoping và path containment như Sprint 05
 
 ---
 

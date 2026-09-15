@@ -93,3 +93,17 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Clone vẫn KHÔNG copy content/assets/memberships (tiếp tục defer).
 - Consequences: Thêm deps `python-multipart` (backend) và `react-markdown`/`remark-gfm`/`rehype-sanitize` (frontend). Env mới `MAX_CONTENT_MB=2`, `MAX_ASSET_MB=2` (dùng chung `MAX_UPLOAD_MB` cho submission Sprint 05). Nginx `client_max_body_size 12m` đã lớn hơn các limit.
 - Affected files/contracts: `backend/app/memberships/`, `backend/app/content/`, `frontend/src/markdown/`, `docs/API_CONTRACT.md` §3+§5.3+§5.4, `docs/DATA_MODEL.md` §4-5b, `plans/02_ARCHITECTURE_CONTRACTS.md` §4
+
+## ADR-011 - Sprint 05: scoring ownership, locking and rejected uploads
+- Date: 2026-09-15
+- Status: accepted
+- Context: Sprint 05 cần tránh drift giữa competition fields, environment và `scoring_config.json`; đồng thời phải chốt khả năng thay ground truth sau khi đã có điểm và policy lưu bài validation-rejected. User đã xác nhận trực tiếp các lựa chọn này.
+- Decision:
+  - Không dùng `scoring_config.json`. Mongo competition là nguồn duy nhất cho config theo cuộc thi: `primary_metric` và `quota_per_day` tiếp tục ở top-level; `scoring_config` chỉ chứa `id_column`, `prediction_column`, `label_column`, `average`, `pos_label`, `higher_is_better=true`.
+  - `MAX_UPLOAD_MB=10` là giới hạn chung toàn platform từ environment; không có upload limit riêng từng competition và không copy giá trị này vào Mongo.
+  - Ground truth nằm ở `<DATA_DIR>/competitions/<id>/private/ground_truth.csv`; Mongo chỉ giữ path tương đối và metadata an toàn (row count, columns, uploaded time). Không có participant/public download endpoint.
+  - Admin được cấu hình hoặc thay ground truth khi competition draft/published và chưa có submission `completed`. Closed hoặc đã có điểm đầu tiên thì cả config và ground truth bị khóa; không rescore lịch sử trong MVP.
+  - Validation-rejected upload chỉ trả lỗi cho participant; không lưu record và không giữ file. Quota ngày chỉ đếm submission `completed`, reset theo ngày UTC.
+  - Scoring synchronous bằng scikit-learn, align theo ID, tính F1/Precision/Recall với cùng average/pos_label và `zero_division=0`. CSV UTF-8/UTF-8 BOM, tối đa 1.000.000 dòng bên cạnh byte limit.
+- Consequences: Config không có dữ liệu trùng để drift. Bài đã có điểm luôn so sánh trên cùng ground truth/config. Invalid upload không tạo audit trail và không tiêu quota; Sprint 06 chỉ cần query các record completed.
+- Affected files/contracts: `backend/app/scoring/`, `backend/app/submissions/`, `docs/API_CONTRACT.md` §3-5, `docs/DATA_MODEL.md` §3+§6-8

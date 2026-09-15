@@ -50,6 +50,8 @@ Fields:
 - `primary_metric`: `f1` | `precision` | `recall`
 - `quota_per_day` (0-1000)
 - `leaderboard_visible` (bool)
+- `scoring_config` (object | absent) — Sprint 05; chỉ chứa CSV/metric behavior, xem §7
+- `ground_truth` (object | absent) — Sprint 05; metadata/path private, xem §8
 - `created_by` (email của admin tạo)
 - `created_at`, `updated_at` (UTC, timezone-aware)
 
@@ -91,7 +93,7 @@ Indexes:
 
 `<DATA_DIR>/competitions/<competition_id>/assets/<uuid4>.<ext>` — PNG/JPEG/GIF/WebP ≤2 MiB (sniff magic bytes, không SVG). List bằng cách đọc directory (số lượng nhỏ); serve qua API có authz + `nosniff`.
 
-## 6. submissions — planned
+## 6. submissions — implemented (Sprint 05)
 
 Fields:
 - `_id`
@@ -99,21 +101,33 @@ Fields:
 - `account_id`
 - `file_path`
 - `original_filename`
-- `status`: `completed` | `rejected` | `failed`
-- `metrics`: `{f1, precision, recall}` khi completed
+- `status`: `completed` (Sprint 05 chỉ persist bài validation/scoring thành công)
+- `metrics`: `{f1, precision, recall}` raw float
 - `primary_score`
-- `error_code` / `error_message` khi rejected/failed
 - `created_at`
+
+Policy: validation-rejected không tạo record và file không được lưu (ADR-011). `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
 
 Indexes:
 - `(competition_id, account_id, created_at)`
 - `(competition_id, primary_score)`
 
-## 7. Scoring config (file, không phải collection)
+## 7. Scoring config (embedded trong competitions)
 
-`/data/competitions/<competition_id>/private/scoring_config.json`:
+`competitions.scoring_config`:
 - `id_column`, `prediction_column`, `label_column`
 - `average`: `binary` | `macro` | `weighted`
 - `pos_label` (nếu binary)
-- `primary_metric`: `f1` | `precision` | `recall`
 - `higher_is_better`: `true` (MVP)
+
+Không lưu `scoring_config.json`. `primary_metric` và `quota_per_day` dùng top-level competition fields hiện có. `MAX_UPLOAD_MB` chỉ đến từ environment, không lưu Mongo (ADR-011).
+
+## 8. Ground truth metadata (embedded trong competitions)
+
+`competitions.ground_truth`:
+- `path`: relative `competitions/<competition_id>/private/ground_truth.csv`
+- `row_count`
+- `columns`: danh sách header, không chứa row/label values
+- `uploaded_at` (UTC)
+
+File thật private trên persistent disk. Scoring ready khi có `scoring_config`, metadata path hợp lệ và file thường tồn tại (không chấp nhận symlink). Config/ground truth khóa khi competition closed hoặc có submission completed.

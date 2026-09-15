@@ -392,6 +392,11 @@ code {
   color: var(--success);
 }
 
+.status-banner.warning {
+  background: #fbf3e0;
+  color: var(--warning);
+}
+
 /* --- Toolbar --- */
 .toolbar {
   display: flex;
@@ -882,6 +887,144 @@ code {
   border-radius: var(--radius);
 }
 
+/* --- Scoring admin --- */
+.scoring-admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 20px;
+}
+
+.scoring-panel h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.scoring-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.scoring-panel-head p {
+  margin: 0;
+}
+
+.scoring-metadata {
+  margin: 16px 0;
+}
+
+.scoring-metadata div {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.scoring-metadata dt {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.scoring-metadata dd {
+  margin: 2px 0 0;
+}
+
+/* --- Participant submission --- */
+.submission-page h2,
+.submission-page h3 {
+  margin-top: 0;
+}
+
+.submission-head p {
+  margin-top: 4px;
+}
+
+.submission-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.submission-rules > span {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+}
+
+.submission-form {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.selected-file {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+}
+
+.selected-file strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.selected-file span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.score-result {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.metric-card.primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.metric-card span,
+.metric-card strong {
+  display: block;
+}
+
+.metric-card span {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 20px;
+}
+
 /* --- Focus visible (a11y) --- */
 .btn:focus-visible,
 .input:focus-visible,
@@ -893,8 +1036,16 @@ a:focus-visible {
 }
 
 @media (max-width: 720px) {
+  .scoring-admin-grid,
   .content-layout {
     grid-template-columns: 1fr;
+  }
+  .submission-form,
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+  .submission-form .btn {
+    width: 100%;
   }
   .content-sidebar {
     position: static;

@@ -35,8 +35,8 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Mỗi item có `membership: {active, joined_at}` của account hiện tại và `join_code_configured: bool` — không bao giờ trả `join_code_hash`. |
-| GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại). Không trả join_code. |
+| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Mỗi item có `membership`, `join_code_configured` và `submission_config` an toàn: `{ready,id_column,prediction_column,average,pos_label,max_upload_mb}`. Không trả join-code hash, label data hoặc ground-truth path. |
+| GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug với cùng safe fields. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại). |
 | POST | `/api/competitions/{slug}/join` | implemented (Sprint 04) | Body `{join_code?}`. Policy backend: draft/unknown slug → 404; closed → 422 `JOIN_CLOSED`; đã join → 200 idempotent `joined_now:false`; membership inactive → 403 `MEMBERSHIP_INACTIVE` (chỉ admin kích hoạt lại); invite_only → 403 `JOIN_INVITE_ONLY`; mode code thiếu/sai → 403 `JOIN_CODE_INVALID` (cùng message, không tạo oracle). Thành công → `{competition_id, membership, joined_now}`. |
 | GET | `/api/competitions/{slug}/contents` | implemented (Sprint 04) | List content metadata sort `order` asc. Chỉ `visibility=public` hoặc member active thấy `members`. Draft → 404. |
 | GET | `/api/competitions/{slug}/contents/{content_slug}` | implemented (Sprint 04) | Metadata + `markdown` (nội dung file). Không được xem (kể cả members-only non-member) → 404. File mất → 404 `CONTENT_FILE_MISSING`. |
@@ -46,8 +46,8 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| POST | `/api/competitions/{id}/submissions` | planned | Upload CSV. Backend check membership/deadline/quota/size/schema rồi scoring. |
-| GET | `/api/competitions/{id}/submissions/me` | planned | Lịch sử submission của account hiện tại. |
+| POST | `/api/competitions/{id}/submissions` | implemented (Sprint 05) | Multipart `file`. Chỉ `.csv` UTF-8/UTF-8 BOM ≤`MAX_UPLOAD_MB` (10 MiB), tối đa 1.000.000 dòng. Backend enforce published + active membership + `start_at <= now <= end_at` + scoring ready + quota completed/ngày UTC. Validate required columns, null, duplicate/missing/extra ID, prediction labels; align theo ID; trả 201 `{id,competition_id,status:"completed",metrics:{f1,precision,recall},primary_score,created_at,quota_remaining}`. Validation reject trả 422 và không lưu record/file. |
+| GET | `/api/competitions/{id}/submissions/me` | planned — Sprint 06 | Lịch sử submission của account hiện tại. |
 | GET | `/api/competitions/{id}/leaderboard` | planned | Best valid submission mỗi account, theo ranking contract. |
 
 ## 5. Admin (`/api/admin/...`)
@@ -101,7 +101,13 @@ Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đ�
 
 ### 5.5 Ground truth, submissions view, export
 
-Planned — Sprint 05+.
+| Method | Path | Status | Mô tả |
+|---|---|---|---|
+| GET | `/api/admin/competitions/{id}/scoring` | implemented (Sprint 05) | Trả `{ready,locked,config,ground_truth,primary_metric,quota_per_day,max_upload_mb}`. `ground_truth` chỉ có row count, column names, uploaded time; không có labels/path/download. |
+| PUT | `/api/admin/competitions/{id}/scoring` | implemented (Sprint 05) | Body `{id_column,prediction_column,label_column,average,pos_label,higher_is_better:true}`. Average chỉ binary\|macro\|weighted; binary bắt buộc pos_label, loại khác phải null. Nếu đã có ground truth thì config mới phải validate được file hiện tại trước khi lưu. |
+| PUT | `/api/admin/competitions/{id}/ground-truth` | implemented (Sprint 05) | Multipart CSV private. Bắt buộc lưu scoring config trước; validate UTF-8/schema/ID/labels ngay, sau đó atomic replace file. Closed hoặc đã có submission completed → 422 `SCORING_LOCKED`. |
+
+Admin submission list và export: planned — Sprint 06.
 
 ## 6. Error codes
 
@@ -110,4 +116,5 @@ Planned — Sprint 05+.
 - `SLUG_EXISTS` (409), `INVALID_TRANSITION` (422) — implemented (Sprint 03)
 - `JOIN_CLOSED` (422), `JOIN_CODE_INVALID` (403), `JOIN_INVITE_ONLY` (403), `MEMBERSHIP_INACTIVE` (403), `JOIN_CODE_REQUIRED` (422), `ACCOUNT_NOT_FOUND` (404), `CONTENT_SLUG_EXISTS` (409), `CONTENT_FILE_MISSING` (404), `INVALID_FILE_TYPE` (422), `FILE_TOO_LARGE` (413) — implemented (Sprint 04)
 - `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
-- `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_QUOTA_EXCEEDED`, `SUBMISSION_DEADLINE_PASSED` — planned (Sprint 05)
+- `SCORING_CONFIG_REQUIRED`, `SCORING_CONFIG_INVALID`, `SCORING_NOT_READY`, `SCORING_LOCKED`, `GROUND_TRUTH_INVALID` — implemented (Sprint 05)
+- `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_DUPLICATE_IDS`, `SUBMISSION_ID_MISMATCH`, `SUBMISSION_VALUE_INVALID`, `SUBMISSION_QUOTA_EXCEEDED` (429), `SUBMISSION_NOT_OPEN`, `SUBMISSION_DEADLINE_PASSED`, `SUBMISSION_CLOSED`, `MEMBERSHIP_REQUIRED` — implemented (Sprint 05)

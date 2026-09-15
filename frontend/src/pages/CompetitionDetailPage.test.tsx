@@ -1,4 +1,4 @@
-/** Competition layout: load theo slug, header + sidebar content theo order, tab disabled Sprint 05/06. */
+/** Competition layout: load theo slug, header + sidebar content, submit enabled, Sprint 06 tabs disabled. */
 
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -84,14 +84,17 @@ test("slug sai → 404 error box + link về danh sách", async () => {
   expect(screen.getByRole("link", { name: /Về danh sách cuộc thi/ })).toBeTruthy();
 });
 
-test("tab Sprint 05/06 disabled với aria-disabled, không còn Đề bài/Rules tĩnh", async () => {
+test("tab Nộp bài enabled, các tab Sprint 06 disabled", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
-  for (const label of ["Nộp bài", "Submissions", "Leaderboard"]) {
+  const submitTab = screen.getByRole("tab", { name: "Nộp bài" });
+  expect(submitTab.tagName).toBe("A");
+  expect(submitTab.getAttribute("aria-disabled")).toBeNull();
+  for (const label of ["Submissions", "Leaderboard"]) {
     const tab = screen.getByRole("tab", { name: label });
     expect(tab.getAttribute("aria-disabled")).toBe("true");
     expect(tab.tagName).not.toBe("A");

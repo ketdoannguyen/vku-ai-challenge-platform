@@ -43,6 +43,27 @@ const MEMBERS = {
   total: 1,
 };
 
+const SCORING = {
+  ready: true,
+  locked: false,
+  config: {
+    id_column: "id",
+    prediction_column: "prediction",
+    label_column: "label",
+    average: "binary",
+    pos_label: "1",
+    higher_is_better: true,
+  },
+  ground_truth: {
+    row_count: 4,
+    columns: ["id", "label"],
+    uploaded_at: "2026-09-15T00:00:00Z",
+  },
+  primary_metric: "f1",
+  quota_per_day: 5,
+  max_upload_mb: 10,
+};
+
 const calls: Array<{ url: string; init?: RequestInit }> = [];
 
 function mockApi(handler: (url: string, init?: RequestInit) => { body: unknown; status: number }) {
@@ -136,4 +157,78 @@ test("đổi trạng thái member gọi PATCH đúng", async () => {
     expect(patch).toBeTruthy();
     expect(JSON.parse(patch!.init!.body as string)).toEqual({ active: false });
   });
+});
+
+test("tab Chấm điểm hiển thị readiness và metadata ground truth an toàn", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  expect(await screen.findByText("Sẵn sàng chấm điểm")).toBeTruthy();
+  expect(screen.getByText("4 dòng")).toBeTruthy();
+  expect(screen.getByText("id, label")).toBeTruthy();
+  expect(screen.getByText("10 MiB")).toBeTruthy();
+  expect(screen.queryByText("ground truth labels")).toBeNull();
+});
+
+test("lưu scoring config chỉ gửi schema metric, không gửi quota/primary/upload limit", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring") && init?.method === "PUT") {
+      return { body: SCORING, status: 200 };
+    }
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, ready: false, ground_truth: null }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.change(await screen.findByLabelText("Cột prediction"), { target: { value: "answer" } });
+  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình" }).closest("form")!);
+  await waitFor(() => {
+    const put = calls.find((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT");
+    expect(put).toBeTruthy();
+    expect(JSON.parse(put!.init!.body as string)).toEqual({
+      id_column: "id",
+      prediction_column: "answer",
+      label_column: "label",
+      average: "binary",
+      pos_label: "1",
+      higher_is_better: true,
+    });
+  });
+});
+
+test("upload ground truth dùng endpoint private và form data", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/ground-truth") && init?.method === "PUT") {
+      return { body: SCORING, status: 200 };
+    }
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, ready: false, ground_truth: null }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  const input = await screen.findByLabelText("Upload ground truth CSV");
+  fireEvent.change(input, { target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] } });
+  await waitFor(() => {
+    const put = calls.find((call) => call.url.endsWith("/ground-truth") && call.init?.method === "PUT");
+    expect(put?.init?.body).toBeInstanceOf(FormData);
+  });
+});
+
+test("scoring controls bị khóa khi backend báo locked", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  expect(await screen.findByText(/đã bị khóa/i)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Lưu cấu hình" })).toBeDisabled();
+  expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
 });

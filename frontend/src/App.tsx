@@ -9,6 +9,7 @@ import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
 import { CompetitionContentPanel, CompetitionOverview } from "./pages/CompetitionContentPanel";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SubmissionPage } from "./pages/SubmissionPage";
 import { NotFoundPage } from "./pages/Placeholders";
 
 function Header() {
@@ -89,6 +90,7 @@ export function App() {
         >
           <Route index element={<CompetitionOverview />} />
           <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
+          <Route path="submit" element={<SubmissionPage />} />
         </Route>
         <Route
           path="/admin/competitions"

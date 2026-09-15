@@ -19,6 +19,9 @@ from app.competitions.router import router as competitions_router
 from app.memberships import service as memberships_service
 from app.memberships.admin_router import router as admin_memberships_router
 from app.memberships.router import router as memberships_router
+from app.scoring.admin_router import router as admin_scoring_router
+from app.submissions import service as submissions_service
+from app.submissions.router import router as submissions_router
 from app.auth.router import router as auth_router
 from app.auth.sessions import resolve_session
 from app.core.config import get_settings
@@ -41,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await competitions_service.ensure_indexes(ctx.db)
         await memberships_service.ensure_indexes(ctx.db)
         await content_service.ensure_indexes(ctx.db)
+        await submissions_service.ensure_indexes(ctx.db)
         yield
 
 
@@ -79,6 +83,8 @@ app.include_router(admin_accounts_router)
 app.include_router(admin_competitions_router)
 app.include_router(admin_memberships_router)
 app.include_router(admin_content_router)
+app.include_router(admin_scoring_router)
+app.include_router(submissions_router)
 app.include_router(memberships_router)
 app.include_router(content_router)
 app.include_router(competitions_router)
