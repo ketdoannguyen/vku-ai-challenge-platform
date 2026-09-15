@@ -12,6 +12,18 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Chạy local (Docker)
 
+Một lệnh duy nhất để test thủ công — tự tạo `.env`, up stack, chờ healthy, seed admin + 2 participant mẫu (idempotent), smoke test login qua Nginx, in tài khoản test:
+
+```bash
+./scripts/dev_up.sh           # up + seed + smoke test → http://localhost:8080
+./scripts/dev_up.sh --down    # dừng, giữ account
+./scripts/dev_up.sh --clean   # xóa sạch volume (mất hết account test)
+```
+
+User không có group docker thì script tự dùng `sudo docker` (hoặc fix một lần: `sudo usermod -aG docker nkd` + re-login).
+
+Làm thủ công nếu muốn:
+
 ```bash
 cp .env.example .env          # sửa MONGO_USER/MONGO_PASSWORD thành giá trị thật
 docker compose up --build -d  # web: http://localhost:8080
