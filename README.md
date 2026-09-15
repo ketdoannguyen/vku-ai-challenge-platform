@@ -8,7 +8,33 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Bootstrap only** — Sprint 00 hoàn thành. Chưa có code nghiệp vụ, chưa có runtime. Xem `docs/PROJECT_STATE.md` để biết chính xác cái gì đã có.
+**Local stack shell** — Sprint 01 hoàn thành: Docker Compose chạy `web` (Nginx + React SPA), `api` (FastAPI), `mongo`. Có `GET /api/health`. Chưa có auth/nghiệp vụ. Xem `docs/PROJECT_STATE.md`.
+
+## Chạy local (Docker)
+
+```bash
+cp .env.example .env          # sửa MONGO_USER/MONGO_PASSWORD thành giá trị thật
+docker compose up --build -d  # web: http://localhost:8080
+docker compose logs -f api    # xem log
+docker compose down           # dừng (giữ volume)
+```
+
+- `GET http://localhost:8080/api/health` → 200 khi Mongo reachable, 503 khi không.
+- Mongo KHÔNG publish ra host; api chỉ truy cập qua Nginx same-origin.
+
+## Dev không Docker
+
+```bash
+# Backend (cần Python 3.12+, khuyến nghị uv)
+cd backend && uv venv .venv && uv pip install -e . --group dev
+.venv/bin/pytest                       # backend tests
+.venv/bin/uvicorn app.main:app --port 8000
+
+# Frontend (cần Node 20+)
+cd frontend && npm install
+npm run build        # typecheck strict + production build
+npm run dev          # dev server (api gọi qua /api — cần proxy riêng khi không dùng Nginx)
+```
 
 ## Sprint plan & canonical docs
 

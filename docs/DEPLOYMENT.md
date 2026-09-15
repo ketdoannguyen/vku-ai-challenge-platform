@@ -1,6 +1,6 @@
 # Deployment - AI Challenge Platform
 
-Status: **planned** — chưa có runtime. Hoàn thiện dần theo sprint.
+Status: **local stack implemented, production planned** — Docker Compose chạy được local (web/api/mongo); production trên GCE hoàn thiện ở Sprint 08.
 
 ## Target architecture (locked)
 

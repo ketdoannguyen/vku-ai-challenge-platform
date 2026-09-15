@@ -1,88 +1,93 @@
 # AI Challenge Platform - Current Project State
 
 ## 1. Current checkpoint
-- Last completed sprint: SPRINT_00
+- Last completed sprint: SPRINT_01
 - Date: 2026-09-15
 - Branch: main
-- Commit/working tree status: initial commit after bootstrap
-- Overall state: green
+- Commit/working tree status: sprint 01 commit (backend/frontend/nginx/compose)
+- Overall state: green — code + tests pass; `docker compose up` chưa verify được trên máy dev (user nkd không có group docker), xem mục 11
 
 ## 2. Implemented capabilities
-- Repository skeleton: `plans/`, `docs/`, `.env.example`, `.gitignore`, `.editorconfig`, `README.md`
-- 6 canonical docs được tạo với baseline từ `plans/01_MASTER_CONTEXT.md` và `plans/02_ARCHITECTURE_CONTRACTS.md`
-- 7 quyết định kiến trúc ghi trong `docs/DECISIONS.md`
-- Environment contract trong `.env.example` (placeholder only)
+- Backend skeleton: FastAPI app `backend/app/main.py` với lifespan connect/close Mongo (motor), config từ env (`app/core/config.py`), error helper theo contract (`app/core/errors.py`), logging cơ bản
+- `GET /api/health`: 200 `{"status":"ok","mongo":"reachable"}` / 503 `{"status":"degraded","mongo":"unreachable"}`; 4 unit tests (TestClient, không cần Mongo thật)
+- 404 handler trả format `{"error":{"code","message"}}` cho mọi route `/api` không tồn tại
+- Frontend shell: React 19 + Vite + TypeScript strict (`frontend/`), react-router, app shell (header/nav/page container), design tokens CSS thuần (một accent, status colors), component Loading/ErrorBox/Placeholder
+- Placeholder routes: `/login`, `/` (dashboard), `/competitions/:slug/*`, `/admin/*`, `/health` (gọi thật `/api/health`), 404 — mọi placeholder ghi rõ "chưa có chức năng", không fake data
+- API client `frontend/src/api/client.ts`: fetch relative `/api`, parse error format thống nhất, throw `ApiClientError`
+- Nginx `frontend/nginx.conf`: serve SPA + fallback, proxy `/api/` → `api:8000`, security headers cơ bản, `client_max_body_size 12m`, `/data/` return 404
+- Docker: `backend/Dockerfile`, `frontend/Dockerfile` (multi-stage: npm build → nginx), `docker-compose.yml` với services `web`/`api`/`mongo`, volumes `mongo_data` + `data`
 
 ## 3. Not implemented yet
-- Mọi chức năng nghiệp vụ: login/session, competitions, memberships, content, submissions, scoring, leaderboard, export
-- Frontend app, backend app, Nginx config, Docker Compose (Sprint 01)
-- Production deployment (Sprint 08)
+- Auth/login/session (Sprint 02), accounts admin
+- Competitions, memberships, Markdown content (Sprint 03-04)
+- Submissions, scoring, leaderboard, export (Sprint 05-06)
+- Hardening, production deploy (Sprint 07-08)
 
 ## 4. Repository structure that matters
-- `plans/`: sprint plan pack (00-04 là docs định hướng, `sprints/` là chi tiết từng sprint)
-- `docs/`: canonical docs — nguồn sự thật về state/contracts
-- `.env.example`: environment contract với placeholder
-- `README.md`: mục đích, architecture, trạng thái hiện tại
-
-Chưa có `frontend/`, `backend/`, `nginx/`, `scripts/`, `docker-compose.yml` — sẽ tạo ở Sprint 01 khi có nội dung thật (không tạo folder rỗng).
+- `backend/app/`: `main.py` (app + health + 404), `core/config.py` (Settings), `core/database.py` (MongoContext), `core/errors.py`
+- `backend/tests/`: `test_health.py` (4 tests)
+- `frontend/src/`: `App.tsx` (router), `api/client.ts`, `components/ui.tsx`, `pages/` (HealthPage, Placeholders), `index.css` (design tokens)
+- `frontend/nginx.conf`: chạy trong container web
+- `docker-compose.yml`: web (port `${WEB_PORT:-8080}`), api (internal 8000), mongo (internal 27017, healthcheck mongosh)
 
 ## 5. Runtime/services
-- web: planned — Nginx serve React static + proxy `/api` (Sprint 01)
-- api: planned — FastAPI container (Sprint 01)
-- mongo: planned — MongoDB container (Sprint 01)
-- cloudflared: planned — Cloudflare Tunnel (Sprint 08)
+- web: implemented — Nginx 1.27 serve React static + proxy `/api` (chưa verify end-to-end qua container — xem mục 11)
+- api: implemented — FastAPI + uvicorn, port 8000 internal only
+- mongo: implemented trong compose — Mongo 7, auth root qua MONGO_INITDB_ROOT_*, volume `mongo_data`, không publish ra host
+- cloudflared: planned (Sprint 08)
 
 ## 6. Current API contract summary
-Chưa có endpoint nào implemented. Baseline planned: xem `docs/API_CONTRACT.md`.
+- `GET /api/health`: implemented — 200/503 như mục 2. Chi tiết: `docs/API_CONTRACT.md`
 
 ## 7. Current data model and indexes
-Chưa có collection nào implemented. Baseline planned: xem `docs/DATA_MODEL.md`.
+- Chưa có collection nào được code tạo/dùng. Health chỉ ping admin command. Baseline planned: `docs/DATA_MODEL.md`
 
 ## 8. Environment variables in use
-Định nghĩa trong `.env.example`; chưa có code nào đọc chúng (Sprint 01+).
-- APP_ENV, APP_NAME: môi trường/tên app — secret: no
-- MONGO_HOST/PORT/DATABASE/USER/PASSWORD: kết nối MongoDB — secret: USER, PASSWORD yes
-- SESSION_SECRET/LIFETIME_HOURS/COOKIE_NAME/COOKIE_SECURE/COOKIE_SAMESITE: session — secret: SESSION_SECRET yes
-- MAX_UPLOAD_MB: giới hạn upload CSV — secret: no
-- DATA_DIR: thư mục dữ liệu trên disk — secret: no
-- CLOUDFLARE_TUNNEL_TOKEN: production only — secret: yes
+- Code backend đọc: APP_ENV, APP_NAME, MONGO_HOST/PORT/DATABASE/USER/PASSWORD, MAX_UPLOAD_MB, DATA_DIR (Settings defaults hợp lệ cho local không env)
+- docker-compose.yml đọc thêm: WEB_PORT (mặc định 8080)
+- Chưa đọc (định nghĩa sẵn cho sprint sau): SESSION_*, CLOUDFLARE_TUNNEL_TOKEN
+- Secret: MONGO_USER/MONGO_PASSWORD, SESSION_SECRET, CLOUDFLARE_TUNNEL_TOKEN
+- Định nghĩa đầy đủ trong `.env.example` (đã thêm WEB_PORT)
 
 ## 9. Commands verified
 ### Local startup
-Chưa có runtime. Kế hoạch Sprint 01: `docker compose up --build`.
+- `docker compose config --quiet` — pass (cấu hình hợp lệ)
+- `docker compose up --build` — CHƯA chạy được trên máy dev này: user nkd không thuộc group `docker`, socket `/var/run/docker.sock` từ chối, sudo cần password. Cần `sudo usermod -aG docker nkd` + re-login rồi verify lại.
 ### Tests
-Chưa có test suite.
+- `cd backend && .venv/bin/pytest` — 4 passed (test health + error format + ping fail)
+- Cài môi trường: `uv venv .venv && uv pip install -e . --group dev` (máy không có python3-venv/pip, dùng uv)
 ### Build
-Chưa có build step.
+- `cd frontend && npm run build` — pass (tsc strict + vite build)
 
 ## 10. Tests currently passing
-- backend: chưa có
-- frontend: chưa có
-- integration/smoke: chưa có
+- backend: 4 passed (`backend/tests/test_health.py`)
+- frontend: typecheck strict + production build pass (chưa có test UI — chưa có logic đáng test)
+- integration/smoke qua Nginx: chưa chạy được vì Docker permission (xem mục 9)
 
 ## 11. Known issues / technical debt
-- Không có. Repo mới bootstrap.
+- Docker permission trên máy dev: user `nkd` không có group `docker` → chưa verify `docker compose up`, curl qua Nginx, health với Mongo thật. Đây là việc verify còn thiếu của Sprint 01, không phải bug code.
+- Mongo dùng chung root user làm app user (MONGO_USER/MONGO_PASSWORD set cho cả MONGO_INITDB_ROOT và api). Chấp nhận cho local dev; tách app user riêng + quyền tối thiểu khi hardening (Sprint 07/08).
+- `client_max_body_size 12m` là baseline cố định, chưa sync động với MAX_UPLOAD_MB — ghi debt, sẽ chốt khi Sprint 05 làm upload thật.
+- `AI_Challenge_Sprint_Plan_v1.zip` đã bị xóa khỏi working tree (nội dung đầy đủ đã có trong `plans/`); việc xóa được commit cùng sprint này.
 
 ## 12. Decisions made this sprint
-- ADR-001 đến ADR-007 trong `docs/DECISIONS.md`
+- Không có ADR mới. Chọn giữ `MONGO_USER/MONGO_PASSWORD` (đã chốt ở `.env.example` Sprint 00) thay vì `MONGO_APP_USER/MONGO_APP_PASSWORD` trong sprint file — truth hierarchy: `.env.example`/PROJECT_STATE > sprint file.
+- Mongo + api không publish port ra host; mọi truy cập đi qua Nginx (`WEB_PORT`, mặc định 8080; host không dùng 80 vì có thể cần quyền riêng).
 
 ## 13. Preconditions for next sprint
-- Repo structure và docs đã sẵn sàng (đạt)
-- Sprint 01 sẽ khởi tạo: Docker Compose stack (FastAPI + MongoDB + Nginx), React + Vite + TypeScript frontend shell với strict mode, `GET /api/health`
+- Sprint 02 (auth & accounts) cần: backend có Mongo reachable khi chạy (đã có compose), session collection + Argon2id. Nên verify `docker compose up` end-to-end trước khi vào Sprint 02 (xem mục 11).
 
 ## 14. Exact next sprint
-- `plans/sprints/SPRINT_01_LOCAL_STACK_AND_APP_SHELL.md`
+- `plans/sprints/SPRINT_02_AUTH_ACCOUNTS_SESSIONS.md`
 
 ## 15. Handoff notes for the next AI agent
-- Architecture đã khóa trong `plans/01_MASTER_CONTEXT.md` mục 3 — không đổi nếu chưa hỏi người dùng.
-- Nguồn sự thật khi mâu thuẫn: code trong repo > PROJECT_STATE.md > DECISIONS.md > API/DATA contracts > file sprint hiện tại.
-- Chưa có code frontend/backend — Sprint 01 tự do chọn cấu trúc bên trong miễn giữ stack đã khóa.
-- `.env.example` là environment contract; thêm biến mới phải cập nhật file này và mục 8 của doc này.
-- Không hard-code tên competition nào vào logic.
-- Cuối mỗi sprint cập nhật doc này + contracts liên quan; không tự chạy sprint kế tiếp.
+- Backend pattern: config qua `app/core/config.py` (pydantic-settings, lru_cache `get_settings()`), Mongo qua `app.state.mongo` (MongoContext), error dùng `api_error()` hoặc `error_response()` — endpoint mới theo pattern này.
+- Frontend pattern: gọi API qua `api.get/post` (`src/api/client.ts`), catch `ApiClientError`; trang mới đặt trong `src/pages/`, route trong `App.tsx`.
+- compose: api chỉ `expose 8000` — không thêm `ports` cho api/mongo; web là entry duy nhất.
+- Nginx nằm trong `frontend/nginx.conf` (được copy vào container web), không phải folder `nginx/` riêng.
+- Session/auth chưa có — cookie config (SESSION_*) định nghĩa trong `.env.example` nhưng chưa được code đọc.
 
 ---
-
 Rules:
 - Không ghi suy đoán.
 - Không ghi secret.

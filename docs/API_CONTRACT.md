@@ -21,7 +21,7 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| GET | `/api/health` | planned | Liveness check; trả trạng thái backend (và Mongo connection nếu hợp lý). Sprint 01. |
+| GET | `/api/health` | implemented | Trả `{"status":"ok","mongo":"reachable"}` + 200 khi Mongo reachable; `{"status":"degraded","mongo":"unreachable"}` + 503 khi không. Không expose thông tin nội bộ. |
 
 ## 2. Auth
 

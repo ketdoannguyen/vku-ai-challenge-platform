@@ -10,13 +10,19 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | `.env` bị gitignore, `.env.example` không chứa secret thật | passing | `git check-ignore .env` + review `.env.example` |
 | Docs links/paths hợp lệ | passing | Review thủ công các tham chiếu `plans/...`, `docs/...` |
 
-## 2. Health / local stack (Sprint 01) — planned
+## 2. Health / local stack (Sprint 01)
 
-| Check | Status |
-|---|---|
-| `GET /api/health` trả 200 | planned |
-| `docker compose up` chạy web+api+mongo | planned |
-| Frontend build thành công (strict TS) | planned |
+| Check | Status | Cách verify |
+|---|---|---|
+| `GET /api/health` trả 200 khi Mongo reachable | passing | `backend/tests/test_health.py` (TestClient, mock ping) |
+| Health degraded 503 khi Mongo unreachable | passing | `backend/tests/test_health.py` |
+| 404 API trả error format contract | passing | `backend/tests/test_health.py` |
+| Frontend build thành công (strict TS) | passing | `cd frontend && npm run build` |
+| `docker compose config` hợp lệ | passing | `docker compose config --quiet` |
+| `docker compose up` chạy web+api+mongo | blocked | User dev không có group docker (`docker.sock` permission denied) — cần `sudo usermod -aG docker nkd` rồi chạy lại để verify |
+| curl `/api/health` qua Nginx same-origin | blocked | Như trên — chưa verify end-to-end qua container web |
+| Mongo không publish public | passing | `docker-compose.yml`: mongo chỉ `expose 27017`, không có `ports` |
+| Nginx không serve `/data` | passing | `frontend/nginx.conf`: `location /data/ { return 404; }` |
 
 ## 3. Auth & accounts (Sprint 02) — planned
 
