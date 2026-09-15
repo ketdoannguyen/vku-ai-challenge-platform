@@ -36,22 +36,25 @@ Indexes:
 
 Lưu ý: Mongo TTL chỉ dọn định kỳ; `resolve_session` vẫn check `expires_at` từng request nên session hết hạn bị từ chối ngay.
 
-## 3. competitions — planned
+## 3. competitions — implemented (Sprint 03)
 
 Fields:
-- `_id`
-- `slug` (unique)
+- `_id` (ObjectId)
+- `slug` (unique) — format `[a-z0-9]+(-[a-z0-9]+)*`, tối đa 64 ký tự, immutable sau tạo
 - `name`
 - `short_description`
-- `status`: `draft` | `published` | `closed`
-- `start_at`, `end_at`
+- `status`: `draft` | `published` | `closed` — lifecycle: draft → published → closed (terminal), xem ADR-009
+- `start_at`, `end_at` (UTC, timezone-aware; API nhận ISO, trả ISO `...Z`)
 - `join_mode`: `open` | `code` | `invite_only`
-- `join_code_hash` (nullable; không trả về participant API)
+- `join_code_hash` (luôn None ở Sprint 03 — join là Sprint 04; không bao giờ trả về API)
 - `primary_metric`: `f1` | `precision` | `recall`
-- `quota_per_day`
-- `leaderboard_visible`
-- `created_by`
-- `created_at`, `updated_at`
+- `quota_per_day` (0-1000)
+- `leaderboard_visible` (bool)
+- `created_by` (email của admin tạo)
+- `created_at`, `updated_at` (UTC, timezone-aware)
+
+Indexes:
+- unique trên `slug` — tạo idempotent ở app startup (`ensure_indexes`)
 
 ## 4. competition_memberships — planned
 

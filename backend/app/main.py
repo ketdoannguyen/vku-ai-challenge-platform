@@ -10,6 +10,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.accounts import service as accounts_service
 from app.accounts.admin_router import router as admin_accounts_router
 from app.auth import sessions as sessions_module
+from app.competitions import service as competitions_service
+from app.competitions.admin_router import router as admin_competitions_router
+from app.competitions.router import router as competitions_router
 from app.auth.router import router as auth_router
 from app.auth.sessions import resolve_session
 from app.core.config import get_settings
@@ -29,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.mongo = ctx
         await accounts_service.ensure_indexes(ctx.db)
         await sessions_module.ensure_indexes(ctx.db)
+        await competitions_service.ensure_indexes(ctx.db)
         yield
 
 
@@ -64,6 +68,8 @@ async def resolve_account_middleware(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(admin_accounts_router)
+app.include_router(admin_competitions_router)
+app.include_router(competitions_router)
 
 
 @app.get("/api/health")

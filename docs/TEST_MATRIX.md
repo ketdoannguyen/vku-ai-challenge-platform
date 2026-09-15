@@ -46,13 +46,24 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Bootstrap scripts tạo admin/import thật với Mongo | blocked | Như trên — usage/error path đã verify, đường tạo thật cần Mongo chạy |
 | Login rate limiting | planned | Defer Sprint 07 (sprint file cho phép) |
 
-## 4. Competition core & admin (Sprint 03) — planned
+## 4. Competition core & admin (Sprint 03)
 
-| Check | Status |
-|---|---|
-| CRUD + clone + publish/close lifecycle | planned |
-| Slug unique | planned |
-| Draft không visible cho participant | planned |
+| Check | Status | Cách verify |
+|---|---|---|
+| Admin competition API role guard: 401 chưa login, 403 participant | passing | `backend/tests/test_competitions_admin.py` |
+| Create: defaults draft, created_by, validation slug/dates/metric/quota/join_mode/name | passing | `backend/tests/test_competitions_admin.py` |
+| Slug unique: 409 SLUG_EXISTS | passing | `backend/tests/test_competitions_admin.py` |
+| List admin gồm cả draft; detail by id; 404 unknown id | passing | `backend/tests/test_competitions_admin.py` |
+| Edit rules: draft sửa được, slug/status immutable; published khóa primary_metric; closed từ chối | passing | `backend/tests/test_competitions_admin.py` |
+| Publish/close transition đúng; sai trạng thái 422 INVALID_TRANSITION | passing | `backend/tests/test_competitions_admin.py` |
+| Clone: copy config, draft mới, slug -copy, không copy status/submissions | passing | `backend/tests/test_competitions_admin.py` |
+| Participant list chỉ thấy published/closed, không lộ join_code | passing | `backend/tests/test_competitions_public.py` |
+| Draft detail → 404 như không tồn tại | passing | `backend/tests/test_competitions_public.py` |
+| Public API yêu cầu đăng nhập (401) | passing | `backend/tests/test_competitions_public.py` |
+| Dashboard render từ API, empty state, error state | passing | `frontend/src/pages/DashboardPage.test.tsx` |
+| Competition detail load theo slug động; tab Sprint 04/05 disabled aria-disabled | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx` |
+| Admin form: validate required, slug khóa khi edit, metric khóa khi published | passing | `frontend/src/pages/AdminCompetitionsPage.test.tsx` |
+| Admin UI end-to-end qua Nginx (tạo/publish/clone thật) | blocked | Docker permission máy dev (mục 2) — chạy `./scripts/dev_up.sh` từ terminal user để verify |
 
 ## 5. Markdown content & membership (Sprint 04) — planned
 

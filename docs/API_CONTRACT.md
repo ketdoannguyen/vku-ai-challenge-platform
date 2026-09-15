@@ -35,11 +35,11 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| GET | `/api/competitions` | planned | List competition user được thấy (published + đã join tùy trạng thái). |
-| GET | `/api/competitions/{slug}` | planned | Chi tiết một competition. KHÔNG trả join_code sau khi publish. |
-| POST | `/api/competitions/{id}/join` | planned | Join theo mode: open/code/invite_only. Body chứa code nếu mode=code. |
-| GET | `/api/competitions/{id}/contents` | planned | List content page metadata theo `order`. |
-| GET | `/api/competitions/{id}/contents/{content_slug}` | planned | Metadata + Markdown content (đã kiểm tra visibility). |
+| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Trả `{competitions: [public fields]}` — không bao giờ trả `join_code_hash`. |
+| GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại). Không trả join_code. |
+| POST | `/api/competitions/{id}/join` | planned (Sprint 04) | Join theo mode: open/code/invite_only. Body chứa code nếu mode=code. |
+| GET | `/api/competitions/{id}/contents` | planned (Sprint 04) | List content page metadata theo `order`. |
+| GET | `/api/competitions/{id}/contents/{content_slug}` | planned (Sprint 04) | Metadata + Markdown content (đã kiểm tra visibility). |
 
 ## 4. Submissions & leaderboard
 
@@ -62,13 +62,26 @@ Quy ước chung:
 
 Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đăng nhập, 403 `FORBIDDEN` nếu participant.
 
-### 5.2 Competitions, memberships, contents, ground truth, submissions view, export
+### 5.2 Competitions (implemented — Sprint 03)
 
-Planned — chi tiết endpoint chốt ở Sprint 03+ khi code thật. Tên endpoint cụ thể tinh chỉnh trong sprint nhưng phải cập nhật file này ngay; không để hai convention song song.
+| Method | Path | Status | Mô tả |
+|---|---|---|---|
+| GET | `/api/admin/competitions` | implemented | List TẤT CẢ competition (kể cả draft), sort theo tên. Trả `{competitions: [...]}`. |
+| POST | `/api/admin/competitions` | implemented | Body: `{slug, name, short_description?, start_at, end_at, join_mode?, primary_metric?, quota_per_day?, leaderboard_visible?}`. Defaults: join_mode=open, primary_metric=f1, quota_per_day=5, leaderboard_visible=true. Validate: slug `[a-z0-9-]` ≤64 ký tự, start < end, metric f1\|precision\|recall, quota 0-1000, join_mode open\|code\|invite_only. 201 + public fields; 409 `SLUG_EXISTS`; 422 `VALIDATION_ERROR`. Tạo xong luôn `draft`. |
+| GET | `/api/admin/competitions/{id}` | implemented | Chi tiết theo id (admin xem được mọi status). 404 nếu không tồn tại/id sai. |
+| PATCH | `/api/admin/competitions/{id}` | implemented | Sửa config. Rule theo status (ADR-009): draft sửa mọi field trừ slug/status; published không đổi `primary_metric`; closed từ chối mọi sửa đổi (422). 200 + public fields. |
+| POST | `/api/admin/competitions/{id}/publish` | implemented | draft → published. Sai trạng thái → 422 `INVALID_TRANSITION`. |
+| POST | `/api/admin/competitions/{id}/close` | implemented | published → closed (terminal, không reopen ở MVP). Sai trạng thái → 422 `INVALID_TRANSITION`. |
+| POST | `/api/admin/competitions/{id}/clone` | implemented | Clone config thành draft mới, slug tự sinh `<slug>-copy` (-copy2... nếu trùng), dates = now → +1 năm. KHÔNG copy status/submissions/memberships. 201 + clone. |
+
+### 5.3 Memberships, contents, ground truth, submissions view, export
+
+Planned — chi tiết endpoint chốt ở Sprint 04+ khi code thật. Tên endpoint cụ thể tinh chỉnh trong sprint nhưng phải cập nhật file này ngay; không để hai convention song song.
 
 ## 6. Error codes
 
 - `UNAUTHORIZED` (401), `FORBIDDEN` (403) — implemented
 - `INVALID_CREDENTIALS` (401), `ACCOUNT_DISABLED` (403), `ACCOUNT_EXISTS` (409) — implemented
+- `SLUG_EXISTS` (409), `INVALID_TRANSITION` (422) — implemented (Sprint 03)
 - `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
 - `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_QUOTA_EXCEEDED`, `SUBMISSION_DEADLINE_PASSED` — planned (Sprint 05)

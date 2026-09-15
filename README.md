@@ -8,7 +8,7 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Auth & accounts** — Sprint 02 hoàn thành: đăng nhập/mật khẩu (Argon2id)/session server-side, admin quản lý tài khoản (tạo/reset/vô hiệu hóa), bootstrap script tạo admin + import CSV. Sprint 01: Docker Compose chạy `web` (Nginx + React SPA), `api` (FastAPI), `mongo`, `GET /api/health`. Chưa có competitions/nghiệp vụ thi. Xem `docs/PROJECT_STATE.md`.
+**Competition core & admin** — Sprint 03 hoàn thành: admin tạo/sửa/publish/close/clone cuộc thi, participant xem danh sách + chi tiết cuộc thi (draft luôn ẩn). Sprint 02: auth (Argon2id + session server-side), admin quản lý tài khoản. Sprint 01: Docker Compose web/api/mongo + health. Chưa có membership/nội dung Markdown/nộp bài (Sprint 04-05). Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 

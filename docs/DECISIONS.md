@@ -65,3 +65,15 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Decision: Session `_id` = sha256 hex của raw token `secrets.token_urlsafe(32)`; `account_id` là ObjectId khớp `accounts._id`. Mọi request đi qua middleware resolve session → account (check `expires_at` + `active`) và gắn vào `request.state.account`; dependency `get_current_account`/`get_current_admin` chỉ đọc state đó. TTL index trên `expires_at` là cơ chế dọn dẹp, không phải cơ chế enforcement.
 - Consequences: Disable account có hiệu lực tức thì với mọi session hiện có. Login sai email và sai password trả cùng response 401 generic. Không log raw token/password. `SESSION_SECRET` hiện không dùng (token opaque, không cần ký).
 - Affected files/contracts: `docs/DATA_MODEL.md` §2, `docs/API_CONTRACT.md` §2, `backend/app/auth/`
+
+## ADR-009 - Competition lifecycle, edit rules, clone & visibility
+- Date: 2026-09-15
+- Status: accepted
+- Context: Sprint 03 cần chốt status transition, quy tắc edit theo trạng thái, hành vi clone và participant visibility; sprint file yêu cầu "clear rules" nhưng không chỉ định chi tiết.
+- Decision:
+  - Lifecycle: create → `draft`; `draft` → `published` (publish); `published` → `closed` (close). `closed` là terminal — không reopen/archive ở MVP (sprint file: dừng và hỏi nếu cần).
+  - Edit theo status: `draft` sửa mọi config field; `published` mọi field trừ `primary_metric` (ảnh hưởng leaderboard đã có); `closed` read-only. `slug`, `status`, `created_by` luôn immutable — status chỉ đổi qua endpoint publish/close.
+  - Clone: copy config (name/mô tả/join_mode/metric/quota/leaderboard_visible) thành draft mới với slug tự sinh `<slug>-copy`; KHÔNG copy status, dates (now → +1 năm), submissions, memberships. Content/ground-truth clone defer Sprint 04.
+  - Visibility participant: API public chỉ trả `published` + `closed`; `draft` trả 404 như không tồn tại (không tiết lộ sự tồn tại).
+- Consequences: Quota 0-1000, slug ≤64 ký tự enforced ở API layer. Publish/close sai trạng thái → 422 `INVALID_TRANSITION`. Không reopen — nếu BTC cần, phải hỏi user trước khi thêm transition mới.
+- Affected files/contracts: `backend/app/competitions/`, `docs/API_CONTRACT.md` §3+§5.2, `docs/DATA_MODEL.md` §3

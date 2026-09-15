@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { ApiClientError } from "../api/client";
 
 export function Loading({ label = "Đang tải..." }: { label?: string }) {
@@ -19,13 +18,5 @@ export function ErrorBox({ error }: { error: unknown }) {
     <div className="error-box" role="alert">
       {message}
     </div>
-  );
-}
-
-export function Placeholder({ children }: { children: ReactNode }) {
-  return (
-    <p className="placeholder-note">
-      Chức năng đang được xây dựng — nội dung dưới đây chỉ là khung giao diện. {children}
-    </p>
   );
 }

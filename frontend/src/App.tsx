@@ -3,8 +3,11 @@ import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth";
 import { HealthPage } from "./pages/HealthPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
+import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
+import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
-import { CompetitionPage, DashboardPage, NotFoundPage } from "./pages/Placeholders";
+import { NotFoundPage } from "./pages/Placeholders";
 
 function Header() {
   const { account, loading, logout } = useAuth();
@@ -28,7 +31,14 @@ function Header() {
                 <NavLink to="/" end>
                   Cuộc thi
                 </NavLink>
-                {account.role === "admin" && <NavLink to="/admin/accounts">Quản trị</NavLink>}
+                {account.role === "admin" && (
+                <>
+                  <NavLink to="/admin/competitions">Quản trị</NavLink>
+                  <NavLink to="/admin/accounts" end>
+                    Tài khoản
+                  </NavLink>
+                </>
+              )}
                 <NavLink to="/health">Health</NavLink>
               </nav>
               <div className="user-chip">
@@ -71,8 +81,16 @@ export function App() {
           path="/competitions/:slug/*"
           element={
             <RequireAuth>
-              <CompetitionPage />
+              <CompetitionDetailPage />
             </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin/competitions"
+          element={
+            <RequireAdmin>
+              <AdminCompetitionsPage />
+            </RequireAdmin>
           }
         />
         <Route
@@ -83,7 +101,7 @@ export function App() {
             </RequireAdmin>
           }
         />
-        <Route path="/admin" element={<RequireAdmin><AdminAccountsPage /></RequireAdmin>} />
+        <Route path="/admin" element={<RequireAdmin><AdminCompetitionsPage /></RequireAdmin>} />
         <Route path="/health" element={<HealthPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
