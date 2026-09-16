@@ -1,7 +1,7 @@
 /** Overview (index) và content page (theo contentSlug) cho competition portal. */
 
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigationType, useOutletContext, useParams } from "react-router-dom";
 import type { Competition } from "../api/competitions";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
@@ -28,17 +28,32 @@ function submitBlockedReason(c: Competition): string {
 }
 
 export function CompetitionOverview() {
-  const { competition: c, contents } = useOutletContext<CompetitionContext>();
+  const { competition: c, contents, contentsLoading, contentsError } =
+    useOutletContext<CompetitionContext>();
+
+  if (contentsLoading) {
+    return <Loading label="Đang tải nội dung…" />;
+  }
+
+  if (contentsError) {
+    return (
+      <section className="ov">
+        <h2 className="ov-title">Tổng quan</h2>
+        <p className="text-danger">Không tải được danh sách nội dung cuộc thi.</p>
+      </section>
+    );
+  }
+
+  if (contents.length > 0) {
+    return <Navigate to={`content/${contents[0].slug}`} replace />;
+  }
+
   const canSubmit = c.membership.active && c.status !== "closed" && c.quota_per_day > 0;
 
   return (
     <section className="ov">
       <h2 className="ov-title">Tổng quan</h2>
-      <p className="text-muted">
-        {contents.length > 0
-          ? `Cuộc thi có ${contents.length} trang nội dung — chọn mục ở menu bên trái để đọc đề bài, thể lệ và hướng dẫn.`
-          : "Chưa có trang nội dung nào để hiển thị."}
-      </p>
+      <p className="text-muted">Chưa có trang nội dung nào để hiển thị.</p>
 
       <ul className="ov-facts">
         <li>
@@ -58,22 +73,6 @@ export function CompetitionOverview() {
             : "Không nhận bài nộp."}
         </li>
       </ul>
-
-      {contents.length > 0 && (
-        <div className="ov-block">
-          <h3 className="ov-block-title">Trang nội dung</h3>
-          <ul className="ov-docs">
-            {contents.map((item) => (
-              <li key={item.id}>
-                <Link className="ov-doc" to={`content/${item.slug}`}>
-                  <span className="ov-doc-title">{item.title}</span>
-                  <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
 
       <div className="ov-actions">
         {canSubmit ? (

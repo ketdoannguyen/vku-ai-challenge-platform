@@ -47,6 +47,9 @@ function renderAt(path: string) {
         <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
           <Route index element={<CompetitionOverview />} />
           <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
+          <Route path="submit" element={<div data-testid="workspace-submit">Trang nộp bài</div>} />
+          <Route path="submissions" element={<div data-testid="workspace-submissions">Trang bài đã nộp</div>} />
+          <Route path="leaderboard" element={<div data-testid="workspace-leaderboard">Trang bảng xếp hạng</div>} />
         </Route>
       </Routes>
     </MemoryRouter>,
@@ -57,8 +60,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("load competition + sidebar sắp theo order, tab active Tổng quan", async () => {
+test("load competition + sidebar sắp theo order, tự chuyển đến trang md đầu tiên và tab active Tổng quan", async () => {
   apiMock((url) => {
+    if (url.endsWith("/contents/problem")) {
+      return {
+        body: { ...CONTENTS.contents[0], markdown: "# Đề bài chi tiết\n\nNội dung mở đầu." },
+        status: 200,
+      };
+    }
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     if (url.endsWith("/api/competitions/ai-challenge-2026")) return { body: COMPETITION, status: 200 };
     return { body: { error: { code: "NOT_FOUND", message: "Không tìm thấy cuộc thi." } }, status: 404 };
@@ -73,7 +82,28 @@ test("load competition + sidebar sắp theo order, tab active Tổng quan", asyn
   // Frontend render theo thứ tự API trả về; backend đã sort theo order (Rules 10 trước Đề bài 20)
   expect(items[0].textContent).toContain("Đề bài");
   expect(items[1].textContent).toContain("Rules");
-  expect(screen.getByText(/2 trang nội dung/)).toBeTruthy();
+  expect(screen.getByText(/2\s*mục/)).toBeTruthy();
+  // Tự chuyển sang trang md đầu tiên ngay lập tức
+  expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 1 })).toBeTruthy();
+});
+
+test("ở các tab workspace (submit, submissions, leaderboard): không hiển thị sidebar Mục lục nội dung", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+
+  const { unmount } = renderAt("/competitions/ai-challenge-2026/submit");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+  expect(screen.getByTestId("workspace-submit")).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Nội dung cuộc thi" })).toBeNull();
+  expect(screen.queryByText("Mục lục nội dung")).toBeNull();
+  unmount();
+
+  renderAt("/competitions/ai-challenge-2026/submissions");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+  expect(screen.getByTestId("workspace-submissions")).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Nội dung cuộc thi" })).toBeNull();
 });
 
 test("slug sai → 404 error box + link về danh sách", async () => {

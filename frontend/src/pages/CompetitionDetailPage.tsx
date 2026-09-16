@@ -18,6 +18,8 @@ import { JoinControl } from "../components/JoinControl";
 export interface CompetitionContext {
   competition: Competition;
   contents: ContentSummary[];
+  contentsLoading?: boolean;
+  contentsError?: unknown;
 }
 
 export const VISIBILITY_LABEL: Record<ContentSummary["visibility"], string> = {
@@ -112,6 +114,7 @@ const TABS: { to: string; end: boolean; label: string; icon: React.ReactNode }[]
 
 export function CompetitionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
+  const { pathname } = useLocation();
   const [competition, setCompetition] = useState<Competition | null>(null);
   const [contents, setContents] = useState<ContentSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -202,6 +205,9 @@ export function CompetitionDetailPage() {
 
   const c = competition;
   const remaining = c.status === "published" ? countdown(c.end_at) : null;
+  const currentPath = pathname.replace(/\/+$/, "");
+  const basePath = `/competitions/${slug}`.replace(/\/+$/, "");
+  const isOverview = currentPath === basePath || currentPath.startsWith(`${basePath}/content`);
 
   return (
     <div className="page comp-page">
@@ -292,56 +298,67 @@ export function CompetitionDetailPage() {
         ))}
       </nav>
 
-      <div className="content-layout">
-        <aside className="content-sidebar">
-          <div className="content-sidebar-head">
-            <span className="content-sidebar-title">
-              <Icon>
-                <path d="M9 6h11" />
-                <path d="M9 12h11" />
-                <path d="M9 18h11" />
-                <path d="M4.5 6h.01" />
-                <path d="M4.5 12h.01" />
-                <path d="M4.5 18h.01" />
-              </Icon>
-              Mục lục nội dung
-            </span>
-            {!contentsLoading && !contentsError && contents.length > 0 && (
-              <span className="content-sidebar-count">{contents.length} mục</span>
-            )}
-          </div>
-
-          {contentsLoading ? (
-            <p className="content-nav-state" role="status">
-              Đang tải nội dung…
-            </p>
-          ) : contentsError ? (
-            <div className="content-nav-state" role="alert">
-              <p>Không tải được danh sách nội dung.</p>
-              <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
-                Thử lại
-              </button>
+      <div className={`content-layout${!isOverview ? " is-workspace" : ""}`}>
+        {isOverview && (
+          <aside className="content-sidebar">
+            <div className="content-sidebar-head">
+              <span className="content-sidebar-title">
+                <Icon>
+                  <path d="M9 6h11" />
+                  <path d="M9 12h11" />
+                  <path d="M9 18h11" />
+                  <path d="M4.5 6h.01" />
+                  <path d="M4.5 12h.01" />
+                  <path d="M4.5 18h.01" />
+                </Icon>
+                Mục lục nội dung
+              </span>
+              {!contentsLoading && !contentsError && contents.length > 0 && (
+                <span className="content-sidebar-count">{contents.length} mục</span>
+              )}
             </div>
-          ) : contents.length > 0 ? (
-            <nav className="content-nav" aria-label="Nội dung cuộc thi">
-              {contents.map((item) => (
-                <NavLink
-                  key={item.id}
-                  to={`content/${item.slug}`}
-                  className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
-                >
-                  <span className="content-nav-title">{item.title}</span>
-                  <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
-                </NavLink>
-              ))}
-            </nav>
-          ) : (
-            <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
-          )}
-        </aside>
 
-        <div className="card comp-body">
-          <Outlet context={{ competition: c, contents } satisfies CompetitionContext} />
+            {contentsLoading ? (
+              <p className="content-nav-state" role="status">
+                Đang tải nội dung…
+              </p>
+            ) : contentsError ? (
+              <div className="content-nav-state" role="alert">
+                <p>Không tải được danh sách nội dung.</p>
+                <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
+                  Thử lại
+                </button>
+              </div>
+            ) : contents.length > 0 ? (
+              <nav className="content-nav" aria-label="Nội dung cuộc thi">
+                {contents.map((item) => (
+                  <NavLink
+                    key={item.id}
+                    to={`content/${item.slug}`}
+                    className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
+                  >
+                    <span className="content-nav-title">{item.title}</span>
+                    <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
+                  </NavLink>
+                ))}
+              </nav>
+            ) : (
+              <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
+            )}
+          </aside>
+        )}
+
+        <div className={`card comp-body${!isOverview ? " comp-body-workspace" : ""}`}>
+          <Outlet
+            context={
+              {
+                competition: c,
+                contents,
+                contentsLoading,
+                contentsError,
+              } satisfies CompetitionContext
+            }
+          />
         </div>
       </div>
     </div>
@@ -362,8 +379,13 @@ function CompTab({
 }) {
   const path = useResolvedPath(to);
   const { pathname } = useLocation();
-  const isActive =
-    pathname === path.pathname || (!end && pathname.startsWith(`${path.pathname}/`));
+  const currentPath = pathname.replace(/\/+$/, "");
+  const targetPath = path.pathname.replace(/\/+$/, "");
+
+  const isOverviewTab = to === "." || to === "";
+  const isActive = isOverviewTab
+    ? currentPath === targetPath || currentPath.startsWith(`${targetPath}/content`)
+    : currentPath === targetPath || (!end && currentPath.startsWith(`${targetPath}/`));
 
   return (
     <Link
