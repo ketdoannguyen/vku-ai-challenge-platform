@@ -1,4 +1,6 @@
 # Environment / secrets
+.claude/
+stitch_vku_ai_challenge_platform_1/
 .env
 .env.*
 !.env.example

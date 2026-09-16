@@ -44,14 +44,14 @@ export interface CompetitionsResponse {
 
 export const STATUS_LABEL: Record<Competition["status"], string> = {
   draft: "Nháp",
-  published: "Đang mở",
+  published: "Đang diễn ra",
   closed: "Đã kết thúc",
 };
 
 export const JOIN_MODE_LABEL: Record<Competition["join_mode"], string> = {
   open: "Tự do tham gia",
   code: "Cần mã tham gia",
-  invite_only: "Chỉ được mời",
+  invite_only: "Chỉ theo lời mời",
 };
 
 export const METRIC_LABEL: Record<Competition["primary_metric"], string> = {

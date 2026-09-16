@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth";
-import { HealthPage } from "./pages/HealthPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
 import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
@@ -103,8 +102,8 @@ function IconLogout() {
   return (
     <svg
       viewBox="0 0 24 24"
-      width={16}
-      height={16}
+      width={18}
+      height={18}
       fill="none"
       stroke="currentColor"
       strokeWidth={1.75}
@@ -113,27 +112,21 @@ function IconLogout() {
       aria-hidden="true"
       focusable="false"
     >
-      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 8l-4 4 4 4M6 12h9" />
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
     </svg>
   );
 }
 
 type NavItem = { to: string; label: string; end?: boolean };
 
-function useNavItems() {
+function useNavItems(): NavItem[] {
   const { account } = useAuth();
-  if (!account) {
-    return [
-      { to: "/login", label: "Đăng nhập" },
-      { to: "/health", label: "Health" },
-    ] satisfies NavItem[];
-  }
+  if (!account) return [];
   const items: NavItem[] = [{ to: "/", label: "Cuộc thi", end: true }];
   if (account.role === "admin") {
     items.push({ to: "/admin/competitions", label: "Quản trị" });
     items.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
   }
-  items.push({ to: "/health", label: "Health" });
   return items;
 }
 
@@ -144,6 +137,7 @@ function roleLabel(role: string) {
 function Header() {
   const { account, loading, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const navItems = useNavItems();
@@ -166,6 +160,9 @@ function Header() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [menuOpen]);
 
+  // S01 (login) không có app shell: chỉ còn nút quay lại trong trang.
+  if (pathname === "/login") return null;
+
   return (
     <header className="app-header">
       <a className="skip-link" href="#main-content">
@@ -177,29 +174,27 @@ function Header() {
           <span className="app-brand-text">{BRAND}</span>
         </Link>
         <nav className="app-nav" aria-label="Điều hướng chính">
-          {navItems
-            .filter((item) => item.to !== "/login")
-            .map((item) => (
-              <NavLink key={item.to} to={item.to} end={item.end}>
-                {item.label}
-              </NavLink>
-            ))}
+          {navItems.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end}>
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
         <div className="app-header-right">
           {loading ? null : account ? (
             <>
-              <div className="user-chip">
-                <span className="user-name">{account.name}</span>
-                <span className={account.role === "admin" ? "role-badge" : "role-badge badge-muted"}>
-                  {roleLabel(account.role)}
+              {/* Ảnh mẫu chỉ để 2 control ở cột phải: capsule tài khoản + nút icon.
+                  Vai trò rời khỏi navbar nên giữ lại ở dạng sr-only — ở desktop
+                  drawer không mở được (.app-menu-toggle ẩn từ md). */}
+              <span className="user-pill">
+                <span className="app-avatar" aria-hidden="true">
+                  <IconPerson />
                 </span>
-              </div>
-              <span className="app-avatar" aria-hidden="true">
-                <IconPerson />
+                <span className="user-name">{account.name}</span>
+                <span className="sr-only">{roleLabel(account.role)}</span>
               </span>
-              <button className="app-logout" onClick={() => void onLogout()}>
+              <button className="app-logout" aria-label="Đăng xuất" onClick={() => void onLogout()}>
                 <IconLogout />
-                <span className="app-logout-label">Đăng xuất</span>
               </button>
             </>
           ) : (
@@ -285,10 +280,17 @@ function Header() {
 }
 
 export function App() {
+  const { pathname } = useLocation();
+  // Trang login không có header nên không giữ chỗ cho header.
+  const bare = pathname === "/login";
   return (
     <AuthProvider>
       <Header />
-      <main className="app-main" id="main-content" tabIndex={-1}>
+      <main
+        className={bare ? "app-main app-main-bare" : "app-main"}
+        id="main-content"
+        tabIndex={-1}
+      >
         <Routes>
           <Route
             path="/"
@@ -345,7 +347,6 @@ export function App() {
               </RequireAdmin>
             }
           />
-          <Route path="/health" element={<HealthPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

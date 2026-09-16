@@ -52,8 +52,9 @@ test("hiển thị competition với status badge; chưa join có nút Tham gia,
   );
   expect(await screen.findByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Joined Cup" })).toBeTruthy();
-  expect(screen.getAllByText("Đang mở").length).toBe(2); // PUBLISHED + JOINED
-  expect(screen.getByText("Đã kết thúc")).toBeTruthy();
+  // Nhãn trạng thái §2.2: chip trên thẻ (2 cuộc published) + tab lọc + ô thống kê
+  expect(screen.getAllByText("Đang diễn ra").length).toBe(4); // 2 chip + 1 tab + 1 thống kê
+  expect(screen.getAllByText("Đã kết thúc").length).toBe(3); // 1 chip + 1 tab + 1 thống kê
   // PUBLISHED chưa join → nút Tham gia
   expect(screen.getByRole("button", { name: "Tham gia" })).toBeTruthy();
   // JOINED → link Vào cuộc thi đúng slug
