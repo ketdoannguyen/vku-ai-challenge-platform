@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Query, Request, UploadFile
 
 from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
@@ -113,6 +113,26 @@ async def submit_csv(
         submission_id,
     )
     return service.public_submission(document, max(quota - completed_today - 1, 0))
+
+
+@router.get("/{competition_id}/submissions/me")
+async def my_submissions(
+    competition_id: str,
+    request: Request,
+    account: CurrentAccount,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> dict:
+    db = request.app.state.mongo.db
+    competition = await _competition_or_404(db, competition_id)
+    submissions, total = await service.list_account_submissions(
+        db,
+        competition["_id"],
+        account["_id"],
+        limit=limit,
+        offset=offset,
+    )
+    return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 
 
 async def _competition_or_404(db, competition_id: str) -> dict:

@@ -111,11 +111,11 @@ export function CompetitionDetailPage() {
         <Tab to="submit">
           Nộp bài
         </Tab>
-        <Tab to="submissions" disabled title="Có từ Sprint 06">
-          Submissions
+        <Tab to="submissions">
+          Bài đã nộp
         </Tab>
-        <Tab to="leaderboard" disabled title="Có từ Sprint 06">
-          Leaderboard
+        <Tab to="leaderboard">
+          Bảng xếp hạng
         </Tab>
       </nav>
 
@@ -152,23 +152,12 @@ export function CompetitionDetailPage() {
 function Tab({
   to,
   end = false,
-  disabled = false,
-  title,
   children,
 }: {
   to: string;
   end?: boolean;
-  disabled?: boolean;
-  title?: string;
   children: React.ReactNode;
 }) {
-  if (disabled) {
-    return (
-      <span className="tab-link disabled" role="tab" aria-disabled="true" title={title}>
-        {children}
-      </span>
-    );
-  }
   return (
     <NavLink to={to} end={end} role="tab" className={({ isActive }) => `tab-link${isActive ? " active" : ""}`}>
       {children}

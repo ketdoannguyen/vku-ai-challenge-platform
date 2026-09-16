@@ -232,3 +232,69 @@ test("scoring controls bị khóa khi backend báo locked", async () => {
   expect(screen.getByRole("button", { name: "Lưu cấu hình" })).toBeDisabled();
   expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
 });
+
+test("tab Kết quả hiển thị ranking, filter submission và link export", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/leaderboard")) {
+      return {
+        body: {
+          competition_id: COMPETITION.id,
+          primary_metric: "f1",
+          total: 1,
+          entries: [
+            {
+              rank: 1,
+              account_id: "u1",
+              display_name: "Thí Sinh",
+              primary_score: 0.9,
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              best_submission_id: "s1",
+              best_submission_at: "2026-09-15T09:00:00Z",
+              total_submissions: 2,
+            },
+          ],
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/submissions")) {
+      return {
+        body: {
+          submissions: [
+            {
+              id: "s1",
+              competition_id: COMPETITION.id,
+              filename: "result.csv",
+              status: "completed",
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              primary_score: 0.9,
+              created_at: "2026-09-15T09:00:00Z",
+              account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
+            },
+          ],
+          total: 51,
+          limit: 50,
+          offset: 0,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
+  expect(await screen.findByText("result.csv")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Bảng xếp hạng" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Xuất Excel" })).toHaveAttribute(
+    "href",
+    `/api/admin/competitions/${COMPETITION.id}/export.xlsx`,
+  );
+  expect(screen.getByLabelText("Lọc theo đội")).toBeTruthy();
+  expect(screen.getByLabelText("Lọc theo trạng thái")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await waitFor(() => {
+    expect(calls.some((call) => call.url.includes("/submissions?limit=50&offset=50"))).toBe(true);
+  });
+});

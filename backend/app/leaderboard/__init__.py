@@ -1,0 +1,1 @@
+"""Competition leaderboard queries."""

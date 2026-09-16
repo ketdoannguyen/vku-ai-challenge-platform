@@ -109,8 +109,13 @@ Fields:
 Policy: validation-rejected không tạo record và file không được lưu (ADR-011). `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
 
 Indexes:
-- `(competition_id, account_id, created_at)`
+- `(competition_id, account_id, created_at DESC, _id DESC)` — participant history exact sort
 - `(competition_id, primary_score)`
+- `(competition_id, status, primary_score DESC, created_at ASC, account_id ASC, _id ASC)` — leaderboard completed/best-score exact sort
+- `(competition_id, status, created_at DESC, _id DESC)` — admin history có status filter
+- `(competition_id, created_at DESC, _id DESC)` — admin history không filter status
+
+Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record `completed`, nhất quán với ADR-011.
 
 ## 7. Scoring config (embedded trong competitions)
 

@@ -107,3 +107,16 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Scoring synchronous bằng scikit-learn, align theo ID, tính F1/Precision/Recall với cùng average/pos_label và `zero_division=0`. CSV UTF-8/UTF-8 BOM, tối đa 1.000.000 dòng bên cạnh byte limit.
 - Consequences: Config không có dữ liệu trùng để drift. Bài đã có điểm luôn so sánh trên cùng ground truth/config. Invalid upload không tạo audit trail và không tiêu quota; Sprint 06 chỉ cần query các record completed.
 - Affected files/contracts: `backend/app/scoring/`, `backend/app/submissions/`, `docs/API_CONTRACT.md` §3-5, `docs/DATA_MODEL.md` §3+§6-8
+
+## ADR-012 - Sprint 06: derived ranking, visibility and safe XLSX export
+- Date: 2026-09-15
+- Status: accepted
+- Context: Sprint 06 cần biến completed submissions thành lịch sử, ranking và báo cáo Excel mà không thay đổi policy persistence/scoring của Sprint 05.
+- Decision:
+  - Mọi result đều query theo `competition_id`; leaderboard chỉ dùng `status=completed`, lấy submission tốt nhất mỗi account.
+  - Ranking ordinal `1..N`: `primary_score DESC`, sau đó `created_at ASC`; nếu cả hai bằng tuyệt đối thì `account_id` và submission `_id` làm tertiary key để kết quả deterministic. Không dense rank/freeze snapshot trong MVP.
+  - Participant leaderboard bị chặn ở backend bằng 403 `LEADERBOARD_HIDDEN` khi config ẩn; admin luôn xem được. Participant response không có email/account id; history không có account id/server path.
+  - Validation-rejected tiếp tục không persist theo ADR-011. History/admin serializers chỉ đọc optional safe error fields để tương thích nếu có record `failed|rejected` từ luồng tương lai.
+  - Export là một sheet `Results` chứa best result và completed submission count; không có full-history sheet/download participant CSV. Formula-like text được prefix apostrophe, ký tự control không hợp lệ bị loại.
+- Consequences: Không cần migration dữ liệu, chỉ thêm query indexes. Ranking được tính lúc đọc, phù hợp quy mô 40-80 đội; nếu cần snapshot/public-private split/dense rank phải có quyết định mới.
+- Affected files/contracts: `backend/app/leaderboard/`, `backend/app/submissions/`, `docs/API_CONTRACT.md` §4+§5.5, `docs/DATA_MODEL.md` §6

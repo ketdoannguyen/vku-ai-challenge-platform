@@ -1025,6 +1025,96 @@ code {
   font-size: 20px;
 }
 
+/* --- Results, submission history & leaderboard --- */
+.results-page h2,
+.results-section h2 {
+  margin: 0;
+}
+
+.results-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.results-head p {
+  margin: 4px 0 0;
+}
+
+.admin-results {
+  display: grid;
+  gap: 20px;
+}
+
+.results-section {
+  min-width: 0;
+}
+
+.results-filters .input {
+  max-width: 280px;
+}
+
+.results-filters select.input {
+  max-width: 190px;
+}
+
+.score-cell,
+.submission-id {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.primary-score,
+.rank-cell {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.filename-cell {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-secondary,
+.cell-error {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: normal;
+}
+
+.cell-error {
+  color: var(--danger);
+}
+
+.current-user-row,
+.current-user-row:hover {
+  background: var(--accent-soft);
+}
+
+.current-user-label {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 /* --- Focus visible (a11y) --- */
 .btn:focus-visible,
 .input:focus-visible,
@@ -1045,6 +1135,13 @@ a:focus-visible {
     grid-template-columns: 1fr;
   }
   .submission-form .btn {
+    width: 100%;
+  }
+  .results-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .results-head .btn {
     width: 100%;
   }
   .content-sidebar {

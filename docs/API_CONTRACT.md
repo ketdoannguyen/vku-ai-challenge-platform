@@ -47,8 +47,8 @@ Quy ước chung:
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
 | POST | `/api/competitions/{id}/submissions` | implemented (Sprint 05) | Multipart `file`. Chỉ `.csv` UTF-8/UTF-8 BOM ≤`MAX_UPLOAD_MB` (10 MiB), tối đa 1.000.000 dòng. Backend enforce published + active membership + `start_at <= now <= end_at` + scoring ready + quota completed/ngày UTC. Validate required columns, null, duplicate/missing/extra ID, prediction labels; align theo ID; trả 201 `{id,competition_id,status:"completed",metrics:{f1,precision,recall},primary_score,created_at,quota_remaining}`. Validation reject trả 422 và không lưu record/file. |
-| GET | `/api/competitions/{id}/submissions/me` | planned — Sprint 06 | Lịch sử submission của account hiện tại. |
-| GET | `/api/competitions/{id}/leaderboard` | planned | Best valid submission mỗi account, theo ranking contract. |
+| GET | `/api/competitions/{id}/submissions/me` | implemented (Sprint 06) | Query `limit` (1-200, default 50), `offset` (default 0). Chỉ trả lịch sử của account hiện tại trong đúng competition, newest first: `{submissions:[{id,competition_id,filename,status,metrics,primary_score,created_at,error?}],total,limit,offset}`. Không trả `account_id` hoặc `file_path`. `error` chỉ xuất hiện cho record lỗi tương thích; upload Sprint 05 vẫn không persist validation-rejected. |
+| GET | `/api/competitions/{id}/leaderboard` | implemented (Sprint 06) | Yêu cầu đăng nhập; draft/unknown → 404. Khi `leaderboard_visible=false` → 403 `LEADERBOARD_HIDDEN` và không trả data. Khi visible, trả `{competition_id,primary_metric,entries,total}`; mỗi entry gồm `rank,display_name,primary_score,metrics,best_submission_id,best_submission_at,total_submissions,is_current_user`, không có email/account_id. Chỉ `completed`, mỗi account lấy best; sort score DESC → thời điểm best ASC → account id/submission id để deterministic. |
 
 ## 5. Admin (`/api/admin/...`)
 
@@ -99,15 +99,16 @@ Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đ�
 | POST | `/api/admin/competitions/{id}/assets` | implemented | Multipart `file` — PNG/JPEG/GIF/WebP (sniff magic bytes, không tin MIME header), ≤`MAX_ASSET_MB` (2 MiB), không SVG. Tên sinh `uuid4.<ext>`. 201 `{name, size_bytes, content_type, url}`. |
 | DELETE | `/api/admin/competitions/{id}/assets/{name}` | implemented | 200 `{"ok": true}`; tên không hợp lệ/không tồn tại → 404. |
 
-### 5.5 Ground truth, submissions view, export
+### 5.5 Ground truth, submissions view, leaderboard, export
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
 | GET | `/api/admin/competitions/{id}/scoring` | implemented (Sprint 05) | Trả `{ready,locked,config,ground_truth,primary_metric,quota_per_day,max_upload_mb}`. `ground_truth` chỉ có row count, column names, uploaded time; không có labels/path/download. |
 | PUT | `/api/admin/competitions/{id}/scoring` | implemented (Sprint 05) | Body `{id_column,prediction_column,label_column,average,pos_label,higher_is_better:true}`. Average chỉ binary\|macro\|weighted; binary bắt buộc pos_label, loại khác phải null. Nếu đã có ground truth thì config mới phải validate được file hiện tại trước khi lưu. |
 | PUT | `/api/admin/competitions/{id}/ground-truth` | implemented (Sprint 05) | Multipart CSV private. Bắt buộc lưu scoring config trước; validate UTF-8/schema/ID/labels ngay, sau đó atomic replace file. Closed hoặc đã có submission completed → 422 `SCORING_LOCKED`. |
-
-Admin submission list và export: planned — Sprint 06.
+| GET | `/api/admin/competitions/{id}/submissions` | implemented (Sprint 06) | Query `q` (tên/email), `status` (`completed|rejected|failed`), `limit` (1-200, default 50), `offset`. Trả newest first `{submissions:[{id,competition_id,filename,status,metrics,primary_score,created_at,error?,account:{id,name,email}}],total,limit,offset}` trong đúng competition. Không trả `file_path`; không có endpoint download CSV submission. |
+| GET | `/api/admin/competitions/{id}/leaderboard` | implemented (Sprint 06) | Admin xem cùng ranking kể cả khi participant leaderboard ẩn. Entry thêm `account_id`, không trả email. |
+| GET | `/api/admin/competitions/{id}/export.xlsx` | implemented (Sprint 06) | Download workbook `.xlsx`, filename `<safe-slug>-results-<UTC timestamp>.xlsx`, một sheet `Results`: Rank, Account ID, Team name, Best score, F1, Precision, Recall, Best submission time, Total submissions. Chỉ completed/best result của đúng competition; không chứa email, server path, password/session hoặc ground truth. Text được neutralize formula và ký tự Excel không hợp lệ. |
 
 ## 6. Error codes
 
@@ -118,3 +119,4 @@ Admin submission list và export: planned — Sprint 06.
 - `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
 - `SCORING_CONFIG_REQUIRED`, `SCORING_CONFIG_INVALID`, `SCORING_NOT_READY`, `SCORING_LOCKED`, `GROUND_TRUTH_INVALID` — implemented (Sprint 05)
 - `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_DUPLICATE_IDS`, `SUBMISSION_ID_MISMATCH`, `SUBMISSION_VALUE_INVALID`, `SUBMISSION_QUOTA_EXCEEDED` (429), `SUBMISSION_NOT_OPEN`, `SUBMISSION_DEADLINE_PASSED`, `SUBMISSION_CLOSED`, `MEMBERSHIP_REQUIRED` — implemented (Sprint 05)
+- `LEADERBOARD_HIDDEN` (403) — implemented (Sprint 06)

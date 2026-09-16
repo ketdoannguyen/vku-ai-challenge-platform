@@ -84,7 +84,7 @@ test("slug sai → 404 error box + link về danh sách", async () => {
   expect(screen.getByRole("link", { name: /Về danh sách cuộc thi/ })).toBeTruthy();
 });
 
-test("tab Nộp bài enabled, các tab Sprint 06 disabled", async () => {
+test("các tab Nộp bài, Bài đã nộp và Bảng xếp hạng đều enabled", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
@@ -94,10 +94,10 @@ test("tab Nộp bài enabled, các tab Sprint 06 disabled", async () => {
   const submitTab = screen.getByRole("tab", { name: "Nộp bài" });
   expect(submitTab.tagName).toBe("A");
   expect(submitTab.getAttribute("aria-disabled")).toBeNull();
-  for (const label of ["Submissions", "Leaderboard"]) {
+  for (const label of ["Bài đã nộp", "Bảng xếp hạng"]) {
     const tab = screen.getByRole("tab", { name: label });
-    expect(tab.getAttribute("aria-disabled")).toBe("true");
-    expect(tab.tagName).not.toBe("A");
+    expect(tab.getAttribute("aria-disabled")).toBeNull();
+    expect(tab.tagName).toBe("A");
   }
 });
 

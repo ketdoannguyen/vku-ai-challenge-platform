@@ -4,11 +4,12 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition } from "../api/competitions";
-import { STATUS_LABEL } from "../api/competitions";
+import { formatLocal, STATUS_LABEL } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
+import { formatScore, type LeaderboardResponse, type SubmissionHistoryItem } from "../api/results";
 import { ErrorBox, Loading } from "../components/ui";
 
-type Tab = "contents" | "assets" | "scoring" | "members";
+type Tab = "contents" | "assets" | "scoring" | "members" | "results";
 
 interface AdminContent extends ContentSummary {
   markdown?: string;
@@ -52,6 +53,12 @@ interface ScoringStatus {
   quota_per_day: number;
   max_upload_mb: number;
 }
+
+interface AdminSubmission extends SubmissionHistoryItem {
+  account: { id: string; name: string; email: string };
+}
+
+const ADMIN_RESULTS_PAGE_SIZE = 50;
 
 export function AdminCompetitionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -116,6 +123,7 @@ export function AdminCompetitionDetailPage() {
             ["contents", "Nội dung"],
             ["assets", "Assets"],
             ["scoring", "Chấm điểm"],
+            ["results", "Kết quả"],
             ["members", "Thành viên & mã tham gia"],
           ] as const
         ).map(([key, label]) => (
@@ -135,7 +143,172 @@ export function AdminCompetitionDetailPage() {
       {tab === "contents" && <ContentsPanel competitionId={competition.id} />}
       {tab === "assets" && <AssetsPanel competitionId={competition.id} />}
       {tab === "scoring" && <ScoringPanel competition={competition} />}
+      {tab === "results" && <ResultsPanel competition={competition} />}
       {tab === "members" && <MembersPanel competition={competition} />}
+    </div>
+  );
+}
+
+/** ---------- Kết quả & submissions ---------- */
+
+function ResultsPanel({ competition }: { competition: Competition }) {
+  const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
+  const [submissions, setSubmissions] = useState<AdminSubmission[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<unknown>(null);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("");
+  const [filters, setFilters] = useState({ search: "", status: "" });
+  const [offset, setOffset] = useState(0);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const params = new URLSearchParams({
+      limit: String(ADMIN_RESULTS_PAGE_SIZE),
+      offset: String(offset),
+    });
+    if (filters.search) params.set("q", filters.search);
+    if (filters.status) params.set("status", filters.status);
+    try {
+      const [ranking, history] = await Promise.all([
+        api.get<LeaderboardResponse>(`/admin/competitions/${competition.id}/leaderboard`),
+        api.get<{ submissions: AdminSubmission[]; total: number }>(
+          `/admin/competitions/${competition.id}/submissions?${params.toString()}`,
+        ),
+      ]);
+      setLeaderboard(ranking);
+      setSubmissions(history.submissions);
+      setTotal(history.total);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [competition.id, filters, offset]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  return (
+    <div className="admin-results">
+      <section className="card results-section">
+        <div className="results-head">
+          <div>
+            <h2>Bảng xếp hạng</h2>
+            <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
+          </div>
+          <a
+            className="btn btn-secondary"
+            href={`/api/admin/competitions/${competition.id}/export.xlsx`}
+            download
+          >
+            Xuất Excel
+          </a>
+        </div>
+        {loading ? <Loading /> : leaderboard?.entries.length ? (
+          <div className="table-wrap">
+            <table className="table results-table">
+              <thead><tr><th>Hạng</th><th>Đội</th><th>Điểm chính</th><th>F1</th><th>Precision</th><th>Recall</th><th>Số bài</th></tr></thead>
+              <tbody>
+                {leaderboard.entries.map((entry) => (
+                  <tr key={entry.best_submission_id}>
+                    <td className="rank-cell">{entry.rank}</td>
+                    <td>{entry.display_name}</td>
+                    <td className="score-cell primary-score">{formatScore(entry.primary_score)}</td>
+                    <td className="score-cell">{formatScore(entry.metrics.f1)}</td>
+                    <td className="score-cell">{formatScore(entry.metrics.precision)}</td>
+                    <td className="score-cell">{formatScore(entry.metrics.recall)}</td>
+                    <td>{entry.total_submissions}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="text-muted">Chưa có kết quả xếp hạng.</p>}
+      </section>
+
+      <section className="card results-section">
+        <div className="results-head">
+          <div>
+            <h2>Danh sách submissions</h2>
+            <p className="text-muted">{total} submission trong bộ lọc hiện tại.</p>
+          </div>
+        </div>
+        <form
+          className="toolbar results-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setOffset(0);
+            setFilters({ search: search.trim(), status });
+          }}
+        >
+          <input
+            className="input"
+            aria-label="Lọc theo đội"
+            placeholder="Tên hoặc email đội"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select
+            className="input"
+            aria-label="Lọc theo trạng thái"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            <option value="">Mọi trạng thái</option>
+            <option value="completed">Đã chấm</option>
+            <option value="rejected">Bị từ chối</option>
+            <option value="failed">Lỗi</option>
+          </select>
+          <button className="btn btn-secondary" type="submit">Lọc</button>
+        </form>
+        <ErrorBox error={error} />
+        {!loading && (
+          <div className="table-wrap">
+            <table className="table results-table">
+              <thead><tr><th>Thời gian</th><th>Đội</th><th>File</th><th>Trạng thái</th><th>F1</th><th>Precision</th><th>Recall</th><th>Điểm chính</th></tr></thead>
+              <tbody>
+                {submissions.length ? submissions.map((submission) => (
+                  <tr key={submission.id}>
+                    <td>{formatLocal(submission.created_at)}</td>
+                    <td><strong>{submission.account.name}</strong><span className="cell-secondary">{submission.account.email}</span></td>
+                    <td className="filename-cell">{submission.filename}</td>
+                    <td>{submission.status}{submission.error && <span className="cell-error">{submission.error.message}</span>}</td>
+                    <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
+                    <td className="score-cell">{formatScore(submission.metrics?.precision)}</td>
+                    <td className="score-cell">{formatScore(submission.metrics?.recall)}</td>
+                    <td className="score-cell primary-score">{formatScore(submission.primary_score)}</td>
+                  </tr>
+                )) : <tr><td colSpan={8} className="table-state">Không có submission phù hợp.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {total > ADMIN_RESULTS_PAGE_SIZE && (
+          <div className="pagination pagination-controls">
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - ADMIN_RESULTS_PAGE_SIZE))}
+            >
+              Trang trước
+            </button>
+            <span>
+              {offset + 1}–{Math.min(offset + ADMIN_RESULTS_PAGE_SIZE, total)} / {total}
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={offset + ADMIN_RESULTS_PAGE_SIZE >= total}
+              onClick={() => setOffset(offset + ADMIN_RESULTS_PAGE_SIZE)}
+            >
+              Trang sau
+            </button>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
