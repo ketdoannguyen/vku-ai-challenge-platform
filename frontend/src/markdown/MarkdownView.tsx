@@ -45,6 +45,14 @@ export function MarkdownView({
             if (!src) return null;
             return <img src={src} alt={alt ?? ""} loading="lazy" {...props} />;
           },
+          // Bảng rộng cuộn trong wrapper để giữ nguyên ngữ nghĩa table (không đổi display).
+          table({ children, ...props }) {
+            return (
+              <div className="md-table-wrap">
+                <table {...props}>{children}</table>
+              </div>
+            );
+          },
         }}
       >
         {markdown}
