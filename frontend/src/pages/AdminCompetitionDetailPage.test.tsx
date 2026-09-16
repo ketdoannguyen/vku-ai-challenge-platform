@@ -100,24 +100,30 @@ test("tab Nội dung render table theo order + trạng thái file", async () => 
   });
   renderPage();
   expect(await screen.findByText("Đề bài")).toBeTruthy();
+  expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("01/10/2026");
+  expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("5 lượt/ngày");
   expect(screen.getByText("Chưa có file")).toBeTruthy();
   expect(screen.getByText("Đã upload")).toBeTruthy();
   expect(screen.getByText("Chỉ thành viên")).toBeTruthy();
 });
 
 test("thêm thành viên gửi email đúng endpoint", async () => {
-  mockApi((url) => {
+  mockApi((url, init) => {
+    if (url.endsWith("/members") && init?.method === "POST") {
+      return { body: { member: MEMBERS.members[0], created: false, reactivated: false }, status: 200 };
+    }
     if (url.includes("/members")) return { body: MEMBERS, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  await waitFor(() => expect(calls.some((call) => call.url.includes("/members?limit=200"))).toBe(true));
   const input = await screen.findByLabelText("Email thành viên");
   fireEvent.change(input, { target: { value: "thi.sinh@vku.vn" } });
   fireEvent.submit(input.closest("form")!);
   await waitFor(() => {
-    const addCall = calls.find((c) => c.url.endsWith("/members") && c.init?.method !== "GET" && !c.init?.method);
+    const addCall = calls.find((c) => c.url.endsWith("/members") && c.init?.method === "POST");
     expect(addCall).toBeTruthy();
   });
   await screen.findByText("thi.sinh@vku.vn");
@@ -135,11 +141,14 @@ test("đổi mã tham gia không bao giờ hiển thị mã trong DOM", async ()
   const input = await screen.findByLabelText("Mã tham gia mới");
   fireEvent.change(input, { target: { value: "new-secret-2026" } });
   fireEvent.submit(input.closest("form")!);
+  expect(screen.getByRole("dialog", { name: "Đổi mã tham gia" })).toBeTruthy();
+  expect(calls.some((call) => call.url.includes("/join-code") && call.init?.method === "PUT")).toBe(false);
+  fireEvent.click(screen.getAllByRole("button", { name: "Đổi mã" })[1]);
   await waitFor(() => screen.getByText("Đã cập nhật mã tham gia."));
-  expect(screen.queryByText("new-secret-2026")).toBeNull();
+  expect(screen.queryByDisplayValue("new-secret-2026")).toBeNull();
 });
 
-test("đổi trạng thái member gọi PATCH đúng", async () => {
+test("đổi trạng thái member yêu cầu xác nhận rồi mới PATCH", async () => {
   mockApi((url, init) => {
     if (url.includes("/members/") && init?.method === "PATCH") {
       return { body: { member: { ...MEMBERS.members[0], active: false } }, status: 200 };
@@ -152,6 +161,9 @@ test("đổi trạng thái member gọi PATCH đúng", async () => {
   fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
   const toggle = await screen.findByRole("button", { name: "Vô hiệu hóa" });
   fireEvent.click(toggle);
+  expect(screen.getByRole("dialog", { name: "Vô hiệu hóa thành viên" })).toBeTruthy();
+  expect(calls.some((c) => c.init?.method === "PATCH" && c.url.includes("/members/u1"))).toBe(false);
+  fireEvent.click(screen.getAllByRole("button", { name: "Vô hiệu hóa" })[1]);
   await waitFor(() => {
     const patch = calls.find((c) => c.init?.method === "PATCH" && c.url.includes("/members/u1"));
     expect(patch).toBeTruthy();

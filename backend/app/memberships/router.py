@@ -1,5 +1,7 @@
 """Participant join endpoint. Policy được enforce hoàn toàn ở backend."""
 
+import logging
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
@@ -9,6 +11,7 @@ from app.competitions.service import find_competition_by_slug
 from app.core.errors import api_error
 from app.memberships import service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/competitions")
 
 
@@ -35,6 +38,11 @@ async def join_competition(
                 "MEMBERSHIP_INACTIVE",
                 "Membership đã bị vô hiệu hóa. Vui lòng liên hệ Ban Tổ chức.",
             )
+        logger.info(
+            "Competition join reused competition=%s account=%s",
+            competition["_id"],
+            account["_id"],
+        )
         return {
             "competition_id": str(competition["_id"]),
             "membership": service.public_membership(membership),
@@ -54,6 +62,13 @@ async def join_competition(
 
     membership, joined_now = await service.ensure_membership(
         db, competition["_id"], account["_id"]
+    )
+    logger.info(
+        "Competition join completed competition=%s account=%s mode=%s joined_now=%s",
+        competition["_id"],
+        account["_id"],
+        competition["join_mode"],
+        joined_now,
     )
     return {
         "competition_id": str(competition["_id"]),

@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, CompetitionsResponse } from "../api/competitions";
 import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, isoToLocalInput, localInputToIso, statusClass } from "../api/competitions";
+import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
 
 export function AdminCompetitionsPage() {
@@ -186,7 +187,12 @@ function CompetitionRow({
             <Link className="btn btn-secondary btn-sm" to={`/admin/competitions/${c.id}`}>
               Quản lý
             </Link>
-            <button className="btn btn-secondary btn-sm" disabled={busy} onClick={onEdit}>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={busy || c.status === "closed"}
+              title={c.status === "closed" ? "Cuộc thi đã kết thúc và không thể chỉnh sửa." : undefined}
+              onClick={onEdit}
+            >
               Sửa
             </button>
             {c.status === "draft" && (
@@ -241,8 +247,14 @@ function CompetitionFormModal({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    setBusy(true);
     setError("");
+    const start = new Date(startAt);
+    const end = new Date(endAt);
+    if (end <= start) {
+      setError("Thời gian kết thúc phải sau thời gian bắt đầu.");
+      return;
+    }
+    setBusy(true);
     const payload = {
       name,
       slug: slug.trim().toLowerCase(),
@@ -395,76 +407,5 @@ function CompetitionFormModal({
         </div>
       </form>
     </Modal>
-  );
-}
-
-function ConfirmModal({
-  title,
-  body,
-  confirmLabel,
-  danger,
-  onConfirm,
-  onClose,
-}: {
-  title: string;
-  body: string;
-  confirmLabel: string;
-  danger: boolean;
-  onConfirm: () => Promise<void>;
-  onClose: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function confirm() {
-    setBusy(true);
-    setError("");
-    try {
-      await onConfirm();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Lỗi không xác định");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title={title} onClose={onClose}>
-      <p>{body}</p>
-      {error && (
-        <div className="error-box" role="alert">
-          {error}
-        </div>
-      )}
-      <div className="modal-actions">
-        <button type="button" className="btn btn-secondary" onClick={onClose}>
-          Hủy
-        </button>
-        <button type="button" className={`btn ${danger ? "btn-danger" : ""}`} onClick={() => void confirm()} disabled={busy}>
-          {busy ? "Đang xử lý..." : confirmLabel}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-head">
-          <h2 className="modal-title">{title}</h2>
-          <button className="modal-close" aria-label="Đóng" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }

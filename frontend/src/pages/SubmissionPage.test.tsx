@@ -119,6 +119,23 @@ test("validation error từ backend được hiển thị rõ", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Tập ID không khớp ground truth");
 });
 
+test("khóa form trước giờ mở và sau deadline với lý do rõ", () => {
+  const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const later = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+  const { unmount } = renderPage({ ...COMPETITION, start_at: future, end_at: later });
+  expect(screen.getByText("Cuộc thi chưa mở nhận bài.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
+  unmount();
+
+  const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  renderPage({
+    ...COMPETITION,
+    start_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    end_at: past,
+  });
+  expect(screen.getByText("Đã hết hạn nộp bài.")).toBeTruthy();
+});
+
 test("khóa form khi chưa là member hoặc scoring chưa ready", async () => {
   const { unmount } = renderPage({
     ...COMPETITION,

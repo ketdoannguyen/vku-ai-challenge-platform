@@ -64,6 +64,36 @@ test("tạo cuộc thi thiếu field bắt buộc → form không submit (HTML v
   });
 });
 
+test("closed competition không cho mở form sửa", async () => {
+  const closed = { ...DRAFT, status: "closed" as const };
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [closed] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  const edit = await screen.findByRole("button", { name: "Sửa" });
+  expect(edit).toBeDisabled();
+  expect(edit).toHaveAttribute("title", "Cuộc thi đã kết thúc và không thể chỉnh sửa.");
+});
+
+test("create validates end time after start time before API call", async () => {
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Tạo cuộc thi" }));
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Test Cup" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "test-cup" } });
+  fireEvent.change(screen.getByLabelText("Bắt đầu"), { target: { value: "2026-11-01T10:00" } });
+  fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-01T09:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Thời gian kết thúc phải sau thời gian bắt đầu.");
+  expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
+});
+
 test("edit form khóa slug và disable metric khi published", async () => {
   const published = { ...DRAFT, status: "published" as const };
   mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [published] }, status: 200 } : { body: {}, status: 500 }));

@@ -8,7 +8,7 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Submission & scoring** — Sprint 05 hoàn thành: admin cấu hình schema CSV/upload ground truth private; participant hợp lệ nộp CSV và nhận F1/Precision/Recall với quota/deadline/backend validation. Sprint 04 có membership và Markdown content. Lịch sử submission, leaderboard và export thuộc Sprint 06. Xem `docs/PROJECT_STATE.md`.
+**Release candidate** — Sprint 07 hoàn thành: toàn bộ MVP flow (login → competition → join → Markdown → submit → scoring → history → leaderboard → export) chạy được, kèm hardening: login rate limiting, error contract ổn định, audit log an toàn, security headers + CSP Report-Only, admin UX hoàn thiện. Production deploy thuộc Sprint 08. Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 
@@ -64,7 +64,8 @@ npm run dev         # dev server (api gọi qua /api — cần proxy riêng khi 
 - Sprint plans: `plans/` (bắt đầu từ `plans/sprints/SPRINT_01_LOCAL_STACK_AND_APP_SHELL.md`)
 - Trạng thái dự án: `docs/PROJECT_STATE.md`
 - Quyết định kiến trúc: `docs/DECISIONS.md`
-- Contracts: `docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`
+- Contracts: `docs/API_CONTRACT.md`, `docs/DATA_MODEL.md`, `docs/TEST_MATRIX.md`
+- Production deploy: `docs/DEPLOYMENT.md`
 
 ## Lưu ý
 

@@ -3,6 +3,8 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import logging
+
 import pytest
 from bson import ObjectId
 
@@ -147,6 +149,23 @@ def test_invalid_submissions_return_clear_errors_without_record_or_file(client, 
     assert _submission_documents(client) == []
     submission_root = isolated_data_dir / "submissions"
     assert not submission_root.exists() or list(submission_root.rglob("*.csv")) == []
+
+
+def test_rejected_submission_log_contains_code_but_not_uploaded_values(client, caplog):
+    competition = _ready_competition(client)
+    private_value = "do-not-log-this-prediction"
+    caplog.set_level(logging.INFO, logger="app.submissions.router")
+
+    response = _submit(
+        client,
+        competition["id"],
+        f"id,prediction\n1,1\n2,{private_value}\n3,0\n4,0\n".encode(),
+    )
+
+    assert response.status_code == 422
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "code=SUBMISSION_VALUE_INVALID" in messages
+    assert private_value not in messages
 
 
 def test_submission_requires_auth_and_active_membership(client):

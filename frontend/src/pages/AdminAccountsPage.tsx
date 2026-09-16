@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api } from "../api/client";
 import type { Account } from "../auth/AuthContext";
+import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
 
 interface AccountsResponse {
@@ -22,8 +23,10 @@ export function AdminAccountsPage() {
 
   const load = useCallback(async (q: string) => {
     setError(null);
+    const params = new URLSearchParams({ limit: "200" });
+    if (q) params.set("q", q);
     try {
-      setData(await api.get<AccountsResponse>(`/admin/accounts${q ? `?q=${encodeURIComponent(q)}` : ""}`));
+      setData(await api.get<AccountsResponse>(`/admin/accounts?${params.toString()}`));
     } catch (err) {
       setError(err);
     } finally {
@@ -122,6 +125,7 @@ export function AdminAccountsPage() {
 function AccountRow({ account, onChanged }: { account: Account; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [confirmingActiveChange, setConfirmingActiveChange] = useState(false);
   const [rowError, setRowError] = useState("");
 
   async function toggleActive() {
@@ -157,7 +161,7 @@ function AccountRow({ account, onChanged }: { account: Account; onChanged: () =>
             <button className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setResetting(true)}>
               Đặt lại MK
             </button>
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => void toggleActive()}>
+            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setConfirmingActiveChange(true)}>
               {account.active ? "Vô hiệu hóa" : "Kích hoạt"}
             </button>
           </span>
@@ -180,28 +184,24 @@ function AccountRow({ account, onChanged }: { account: Account; onChanged: () =>
           }}
         />
       )}
+      {confirmingActiveChange && (
+        <ConfirmModal
+          title={account.active ? "Vô hiệu hóa tài khoản" : "Kích hoạt tài khoản"}
+          body={
+            account.active
+              ? `Vô hiệu hóa ${account.email}? Người dùng sẽ mất quyền truy cập ngay lập tức.`
+              : `Kích hoạt lại ${account.email}? Người dùng sẽ có thể đăng nhập trở lại.`
+          }
+          confirmLabel={account.active ? "Vô hiệu hóa" : "Kích hoạt"}
+          danger={account.active}
+          onConfirm={async () => {
+            await toggleActive();
+            setConfirmingActiveChange(false);
+          }}
+          onClose={() => setConfirmingActiveChange(false)}
+        />
+      )}
     </>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-head">
-          <h2 className="modal-title">{title}</h2>
-          <button className="modal-close" aria-label="Đóng" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
   );
 }
 
@@ -267,9 +267,11 @@ function CreateAccountModal({ onClose, onCreated }: { onClose: () => void; onCre
             <input
               id="new-password"
               className="input"
-              type="text"
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              minLength={10}
+              autoComplete="new-password"
               required
             />
           </div>
@@ -284,7 +286,7 @@ function CreateAccountModal({ onClose, onCreated }: { onClose: () => void; onCre
             Hủy
           </button>
           <button className="btn" type="submit" disabled={busy}>
-            Tạo
+            {busy ? "Đang tạo..." : "Tạo"}
           </button>
         </div>
       </form>
@@ -321,9 +323,11 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
           <input
             id="reset-password"
             className="input"
-            type="text"
+            type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            minLength={10}
+            autoComplete="new-password"
             required
             autoFocus
           />
@@ -341,7 +345,7 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
             Hủy
           </button>
           <button className="btn" type="submit" disabled={busy}>
-            Đặt lại
+            {busy ? "Đang đặt lại..." : "Đặt lại"}
           </button>
         </div>
       </form>

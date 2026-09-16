@@ -150,6 +150,13 @@ async def upload_markdown(
         {"_id": content["_id"]},
         {"$set": {"size_bytes": len(data), "updated_at": datetime.now(timezone.utc)}},
     )
+    logger.info(
+        "Markdown uploaded admin=%s competition=%s content=%s bytes=%s",
+        admin["email"],
+        competition["_id"],
+        content["_id"],
+        len(data),
+    )
     return service.public_content(
         await _content_or_404(db, competition["_id"], content_id)
     )
@@ -170,6 +177,12 @@ async def delete_content(
         path.unlink(missing_ok=True)
     except OSError:
         logger.warning("Orphan Markdown file after delete content=%s", content["_id"])
+    logger.info(
+        "Content deleted admin=%s competition=%s content=%s",
+        admin["email"],
+        competition["_id"],
+        content["_id"],
+    )
     return {"ok": True}
 
 
@@ -203,6 +216,13 @@ async def upload_asset(
     except OSError:
         logger.exception("Cannot write competition asset competition=%s", competition["_id"])
         raise api_error(500, "FILE_WRITE_FAILED", "Không thể lưu ảnh.")
+    logger.info(
+        "Asset uploaded admin=%s competition=%s asset=%s bytes=%s",
+        admin["email"],
+        competition["_id"],
+        name,
+        len(data),
+    )
     return _asset_view(competition["slug"], path, content_type)
 
 
@@ -216,6 +236,12 @@ async def delete_asset(
     if not path.is_file() or path.is_symlink():
         raise api_error(404, "NOT_FOUND", "Không tìm thấy ảnh.")
     path.unlink()
+    logger.info(
+        "Asset deleted admin=%s competition=%s asset=%s",
+        admin["email"],
+        competition["_id"],
+        name,
+    )
     return {"ok": True}
 
 

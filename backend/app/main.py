@@ -53,22 +53,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="AI Challenge Platform API", lifespan=lifespan)
 
 
-def error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+def error_response(
+    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message}},
+        headers=headers,
+    )
 
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     if isinstance(exc.detail, dict) and "code" in exc.detail:
-        return error_response(exc.status_code, exc.detail["code"], exc.detail.get("message", ""))
+        return error_response(
+            exc.status_code,
+            exc.detail["code"],
+            exc.detail.get("message", ""),
+            exc.headers,
+        )
     if exc.status_code == 404:
         return error_response(404, "NOT_FOUND", "Không tìm thấy tài nguyên.")
-    return error_response(exc.status_code, "ERROR", str(exc.detail))
+    if exc.status_code == 405:
+        return error_response(405, "METHOD_NOT_ALLOWED", "Phương thức HTTP không được hỗ trợ.")
+    if exc.status_code >= 500:
+        logger.error("HTTP server error status=%s method=%s path=%s", exc.status_code, request.method, request.url.path)
+        return error_response(500, "INTERNAL_ERROR", "Máy chủ gặp lỗi. Vui lòng thử lại sau.")
+    return error_response(exc.status_code, "HTTP_ERROR", "Yêu cầu không thể được xử lý.")
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     return error_response(422, "VALIDATION_ERROR", "Dữ liệu gửi lên không hợp lệ.")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled API error method=%s path=%s", request.method, request.url.path)
+    return error_response(500, "INTERNAL_ERROR", "Máy chủ gặp lỗi. Vui lòng thử lại sau.")
 
 
 @app.middleware("http")
@@ -98,5 +120,7 @@ app.include_router(competitions_router)
 async def health(request: Request) -> JSONResponse:
     mongo: MongoContext = request.app.state.mongo
     reachable = await mongo.ping()
+    if not reachable:
+        logger.warning("Health check degraded: MongoDB unreachable")
     body = {"status": "ok" if reachable else "degraded", "mongo": "reachable" if reachable else "unreachable"}
     return JSONResponse(status_code=200 if reachable else 503, content=body)

@@ -1,5 +1,6 @@
 """Admin submission history, leaderboard and XLSX export."""
 
+import logging
 import re
 from datetime import datetime, timezone
 from io import BytesIO
@@ -17,6 +18,7 @@ from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
 from app.submissions import service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
 _STATUSES = {"completed", "rejected", "failed"}
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -80,6 +82,12 @@ async def export_results(
     content = _build_workbook(entries)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"{competition['slug']}-results-{timestamp}.xlsx"
+    logger.info(
+        "Results exported admin=%s competition=%s entries=%s",
+        admin["email"],
+        competition["_id"],
+        len(entries),
+    )
     return Response(
         content,
         media_type=_XLSX_MEDIA_TYPE,

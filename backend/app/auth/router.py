@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.accounts.service import find_account_by_email, public_account
 from app.auth.dependencies import set_session_cookie
 from app.auth.passwords import verify_password
+from app.auth.rate_limit import login_limiter
 from app.auth.sessions import create_session, delete_session, resolve_session
 from app.core.config import get_settings
 from app.core.errors import api_error
@@ -29,15 +30,23 @@ def _generic_login_error():
 async def login(body: LoginBody, request: Request, response: Response) -> dict:
     db = request.app.state.mongo.db
     email = body.identifier.strip().lower()
-    account = await find_account_by_email(db, email)
+    retry_after = login_limiter.retry_after(email)
+    if retry_after is not None:
+        logger.warning("Login rate limited for email=%s", email)
+        error = api_error(429, "RATE_LIMITED", "Đăng nhập thất bại quá nhiều lần. Vui lòng thử lại sau.")
+        error.headers = {"Retry-After": str(retry_after)}
+        raise error
 
+    account = await find_account_by_email(db, email)
     if account is None or not verify_password(account.get("password_hash", ""), body.password):
+        login_limiter.record_failure(email)
         logger.info("Login failed for email=%s", email)
         raise _generic_login_error()
     if not account.get("active", False):
         logger.info("Login blocked: disabled account email=%s", email)
         raise api_error(403, "ACCOUNT_DISABLED", "Tài khoản đã bị vô hiệu hóa.")
 
+    login_limiter.reset(email)
     settings = get_settings()
     token = await create_session(db, account["_id"], settings.session_lifetime_hours)
     set_session_cookie(

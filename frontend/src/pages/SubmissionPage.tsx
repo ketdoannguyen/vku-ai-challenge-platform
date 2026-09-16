@@ -129,6 +129,11 @@ function submissionUnavailableMessage(competition: CompetitionContext["competiti
       : "Bạn cần tham gia cuộc thi trước khi nộp bài.";
   }
   if (competition.status !== "published") return "Cuộc thi hiện không nhận bài nộp.";
+  const now = Date.now();
+  const startAt = new Date(competition.start_at).getTime();
+  const endAt = new Date(competition.end_at).getTime();
+  if (!Number.isNaN(startAt) && now < startAt) return "Cuộc thi chưa mở nhận bài.";
+  if (!Number.isNaN(endAt) && now > endAt) return "Đã hết hạn nộp bài.";
   if (!competition.submission_config.ready) return "Cuộc thi chưa sẵn sàng chấm điểm.";
   return null;
 }

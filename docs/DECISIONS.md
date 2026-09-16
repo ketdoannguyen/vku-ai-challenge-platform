@@ -120,3 +120,15 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Export là một sheet `Results` chứa best result và completed submission count; không có full-history sheet/download participant CSV. Formula-like text được prefix apostrophe, ký tự control không hợp lệ bị loại.
 - Consequences: Không cần migration dữ liệu, chỉ thêm query indexes. Ranking được tính lúc đọc, phù hợp quy mô 40-80 đội; nếu cần snapshot/public-private split/dense rank phải có quyết định mới.
 - Affected files/contracts: `backend/app/leaderboard/`, `backend/app/submissions/`, `docs/API_CONTRACT.md` §4+§5.5, `docs/DATA_MODEL.md` §6
+
+## ADR-013 - Sprint 07: login abuse control, API failure envelope and CSP rollout
+- Date: 2026-09-16
+- Status: accepted
+- Context: Release candidate cần chặn brute-force đăng nhập ở quy mô 40-80 users, giữ error response ổn định và thêm CSP mà chưa biết cấu hình Cloudflare/domain thật của Sprint 08. User xác nhận chỉ rate-limit login, không rate-limit join code trong sprint này.
+- Decision:
+  - Login dùng limiter in-process, không Redis/dependency mới: key là identifier email đã `strip().lower()`, tối đa 10 lần sai trong cửa sổ 15 phút; lần tiếp theo trả 429 `RATE_LIMITED` + `Retry-After`. Login đúng reset counter. State process-local, bounded 10.000 identifier và mất khi API restart.
+  - Không dựa vào client IP trước khi Sprint 08 chốt trusted proxy/Cloudflare headers; không áp limiter cho join code ở Sprint 07.
+  - Unhandled exception trả JSON 500 `INTERNAL_ERROR` với message generic; 405 có code `METHOD_NOT_ALLOWED`. Traceback chỉ ghi server log, không trả client.
+  - Nginx thêm `Permissions-Policy` và `Content-Security-Policy-Report-Only` theo same-origin; chưa enforce CSP và chưa thêm HSTS trước HTTPS/Cloudflare production.
+- Consequences: Một actor biết email có thể gây lockout tối đa 15 phút cho email đó; state không chia sẻ nếu sau này chạy nhiều API worker. Đây là trade-off MVP được chấp nhận và phải review lại khi thay topology ở Sprint 08. CSP violations chỉ quan sát, chưa block; enforce sau browser smoke trên domain thật.
+- Affected files/contracts: `backend/app/auth/rate_limit.py`, `backend/app/auth/router.py`, `backend/app/main.py`, `frontend/nginx.conf`, `docs/API_CONTRACT.md` §2+§6

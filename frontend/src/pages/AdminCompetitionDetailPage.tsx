@@ -7,6 +7,7 @@ import type { Competition } from "../api/competitions";
 import { formatLocal, STATUS_LABEL } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
 import { formatScore, type LeaderboardResponse, type SubmissionHistoryItem } from "../api/results";
+import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
 
 type Tab = "contents" | "assets" | "scoring" | "members" | "results";
@@ -117,6 +118,18 @@ export function AdminCompetitionDetailPage() {
         </div>
       </div>
 
+      <section className="card admin-competition-summary" aria-label="Thông tin chung cuộc thi">
+        {competition.short_description && <p>{competition.short_description}</p>}
+        <dl className="comp-meta">
+          <div className="comp-meta-item"><dt>Trạng thái</dt><dd>{STATUS_LABEL[competition.status]}</dd></div>
+          <div className="comp-meta-item"><dt>Bắt đầu</dt><dd>{formatLocal(competition.start_at)}</dd></div>
+          <div className="comp-meta-item"><dt>Kết thúc</dt><dd>{formatLocal(competition.end_at)}</dd></div>
+          <div className="comp-meta-item"><dt>Tham gia</dt><dd>{competition.join_mode}</dd></div>
+          <div className="comp-meta-item"><dt>Chỉ số chính</dt><dd>{competition.primary_metric.toUpperCase()}</dd></div>
+          <div className="comp-meta-item"><dt>Quota</dt><dd>{competition.quota_per_day} lượt/ngày</dd></div>
+        </dl>
+      </section>
+
       <nav className="tab-nav" aria-label="Quản lý cuộc thi" role="tablist">
         {(
           [
@@ -144,7 +157,7 @@ export function AdminCompetitionDetailPage() {
       {tab === "assets" && <AssetsPanel competitionId={competition.id} />}
       {tab === "scoring" && <ScoringPanel competition={competition} />}
       {tab === "results" && <ResultsPanel competition={competition} />}
-      {tab === "members" && <MembersPanel competition={competition} />}
+      {tab === "members" && <MembersPanel competition={competition} onCompetitionChanged={load} />}
     </div>
   );
 }
@@ -266,7 +279,9 @@ function ResultsPanel({ competition }: { competition: Competition }) {
           <button className="btn btn-secondary" type="submit">Lọc</button>
         </form>
         <ErrorBox error={error} />
-        {!loading && (
+        {loading ? (
+          <Loading />
+        ) : !error && (
           <div className="table-wrap">
             <table className="table results-table">
               <thead><tr><th>Thời gian</th><th>Đội</th><th>File</th><th>Trạng thái</th><th>F1</th><th>Precision</th><th>Recall</th><th>Điểm chính</th></tr></thead>
@@ -326,6 +341,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
   const [labelColumn, setLabelColumn] = useState("label");
   const [average, setAverage] = useState<ScoringConfig["average"]>("binary");
   const [posLabel, setPosLabel] = useState("1");
+  const [pendingGroundTruth, setPendingGroundTruth] = useState<File | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -516,13 +532,29 @@ function ScoringPanel({ competition }: { competition: Competition }) {
             disabled={busy || status?.locked || !status?.config}
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file) void uploadGroundTruth(file);
+              if (file) {
+                if (status?.ground_truth) setPendingGroundTruth(file);
+                else void uploadGroundTruth(file);
+              }
               event.target.value = "";
             }}
           />
         </label>
         {!status?.config && <p className="text-muted">Lưu cấu hình CSV trước khi upload.</p>}
       </div>
+      {pendingGroundTruth && (
+        <ConfirmModal
+          title="Thay ground truth"
+          body="File ground truth hiện tại sẽ bị thay thế. Hãy chắc chắn file mới đã được kiểm tra đúng schema."
+          confirmLabel="Thay ground truth"
+          danger
+          onConfirm={async () => {
+            await uploadGroundTruth(pendingGroundTruth);
+            setPendingGroundTruth(null);
+          }}
+          onClose={() => setPendingGroundTruth(null)}
+        />
+      )}
     </div>
   );
 }
@@ -536,6 +568,7 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
   const [message, setMessage] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AdminContent | null>(null);
+  const [deleting, setDeleting] = useState<AdminContent | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -615,6 +648,7 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
                   first={index === 0}
                   last={index === contents.length - 1}
                   onEdit={() => setEditing(content)}
+                  onDelete={() => setDeleting(content)}
                   onMove={(d) => void move(index, d)}
                   onChanged={notify}
                 />
@@ -650,6 +684,20 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
           }}
         />
       )}
+      {deleting && (
+        <ConfirmModal
+          title="Xóa trang nội dung"
+          body={`Xóa "${deleting.title}" và file Markdown liên quan? Thao tác này không thể hoàn tác.`}
+          confirmLabel="Xóa"
+          danger
+          onConfirm={async () => {
+            await api.del(`/admin/competitions/${competitionId}/contents/${deleting.id}`);
+            setDeleting(null);
+            notify(`Đã xóa "${deleting.title}".`);
+          }}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -660,6 +708,7 @@ function ContentRow({
   first,
   last,
   onEdit,
+  onDelete,
   onMove,
   onChanged,
 }: {
@@ -668,6 +717,7 @@ function ContentRow({
   first: boolean;
   last: boolean;
   onEdit: () => void;
+  onDelete: () => void;
   onMove: (direction: -1 | 1) => void;
   onChanged: (message: string) => void;
 }) {
@@ -747,12 +797,7 @@ function ContentRow({
             <button
               className="btn btn-ghost btn-sm"
               disabled={busy}
-              onClick={() =>
-                void run(
-                  () => api.del(`/admin/competitions/${competitionId}/contents/${content.id}`),
-                  `Đã xóa "${content.title}".`,
-                )
-              }
+              onClick={onDelete}
             >
               Xóa
             </button>
@@ -879,6 +924,7 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deletingAsset, setDeletingAsset] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -996,7 +1042,7 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
                       <button
                         className="btn btn-ghost btn-sm"
                         disabled={busy}
-                        onClick={() => void remove(asset.name)}
+                        onClick={() => setDeletingAsset(asset.name)}
                       >
                         Xóa
                       </button>
@@ -1015,28 +1061,49 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
           </tbody>
         </table>
       </div>
+      {deletingAsset && (
+        <ConfirmModal
+          title="Xóa asset"
+          body={`Xóa ${deletingAsset}? Các trang Markdown đang dùng ảnh này sẽ không còn hiển thị ảnh.`}
+          confirmLabel="Xóa"
+          danger
+          onConfirm={async () => {
+            await remove(deletingAsset);
+            setDeletingAsset(null);
+          }}
+          onClose={() => setDeletingAsset(null)}
+        />
+      )}
     </div>
   );
 }
 
 /** ---------- Thành viên & mã tham gia ---------- */
 
-function MembersPanel({ competition }: { competition: Competition }) {
+function MembersPanel({
+  competition,
+  onCompetitionChanged,
+}: {
+  competition: Competition;
+  onCompetitionChanged: () => Promise<void>;
+}) {
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
-  const [codeConfigured] = useState(competition.join_code_configured);
+  const [codeConfigured, setCodeConfigured] = useState(competition.join_code_configured);
   const [joinCode, setJoinCode] = useState("");
+  const [pendingJoinCode, setPendingJoinCode] = useState("");
+  const [pendingMember, setPendingMember] = useState<MemberItem | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
     try {
       const data = await api.get<{ members: MemberItem[]; total: number }>(
-        `/admin/competitions/${competition.id}/members`,
+        `/admin/competitions/${competition.id}/members?limit=200`,
       );
       setMembers(data.members);
       setTotal(data.total);
@@ -1058,8 +1125,10 @@ function MembersPanel({ competition }: { competition: Competition }) {
       await action();
       setMessage(successMessage);
       await load();
+      return true;
     } catch (err) {
       setError(err);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1080,19 +1149,28 @@ function MembersPanel({ competition }: { competition: Competition }) {
             style={{ marginBottom: 0 }}
             onSubmit={(e) => {
               e.preventDefault();
-              void run(
-                () =>
-                  api.put(`/admin/competitions/${competition.id}/join-code`, {
-                    join_code: joinCode,
-                  }),
-                "Đã cập nhật mã tham gia.",
-              );
-              setJoinCode("");
+              if (codeConfigured) setPendingJoinCode(joinCode);
+              else {
+                const code = joinCode;
+                void run(
+                  () =>
+                    api.put(`/admin/competitions/${competition.id}/join-code`, {
+                      join_code: code,
+                    }),
+                  "Đã đặt mã tham gia.",
+                ).then((saved) => {
+                  if (saved) {
+                    setCodeConfigured(true);
+                    setJoinCode("");
+                    void onCompetitionChanged();
+                  }
+                });
+              }
             }}
           >
             <input
               className="input"
-              type="text"
+              type="password"
               aria-label="Mã tham gia mới"
               placeholder={codeConfigured ? "Đã đặt mã — nhập mã mới để đổi" : "Chưa đặt mã"}
               value={joinCode}
@@ -1175,16 +1253,7 @@ function MembersPanel({ competition }: { competition: Competition }) {
                     <button
                       className="btn btn-ghost btn-sm"
                       disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            api.patch(
-                              `/admin/competitions/${competition.id}/members/${member.account_id}`,
-                              { active: !member.active },
-                            ),
-                          member.active ? "Đã vô hiệu hóa thành viên." : "Đã kích hoạt lại thành viên.",
-                        )
-                      }
+                      onClick={() => setPendingMember(member)}
                     >
                       {member.active ? "Vô hiệu hóa" : "Kích hoạt"}
                     </button>
@@ -1202,27 +1271,51 @@ function MembersPanel({ competition }: { competition: Competition }) {
         </table>
       </div>
       {total > 0 && <div className="pagination">Tổng số: {total}</div>}
-    </div>
-  );
-}
-
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  return (
-    <div
-      className="modal-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-head">
-          <h2 className="modal-title">{title}</h2>
-          <button className="modal-close" aria-label="Đóng" onClick={onClose}>
-            ×
-          </button>
-        </div>
-        {children}
-      </div>
+      {pendingJoinCode && (
+        <ConfirmModal
+          title="Đổi mã tham gia"
+          body="Mã cũ sẽ mất hiệu lực ngay. Các thí sinh chưa tham gia cần nhận mã mới."
+          confirmLabel="Đổi mã"
+          danger
+          onConfirm={async () => {
+            const code = pendingJoinCode;
+            const saved = await run(
+              () => api.put(`/admin/competitions/${competition.id}/join-code`, { join_code: code }),
+              "Đã cập nhật mã tham gia.",
+            );
+            if (saved) {
+              setPendingJoinCode("");
+              setJoinCode("");
+              await onCompetitionChanged();
+            }
+          }}
+          onClose={() => setPendingJoinCode("")}
+        />
+      )}
+      {pendingMember && (
+        <ConfirmModal
+          title={pendingMember.active ? "Vô hiệu hóa thành viên" : "Kích hoạt thành viên"}
+          body={
+            pendingMember.active
+              ? `Vô hiệu hóa ${pendingMember.email}? Thành viên sẽ không thể nộp bài cho cuộc thi này.`
+              : `Kích hoạt lại ${pendingMember.email}? Thành viên sẽ lấy lại quyền tham gia cuộc thi.`
+          }
+          confirmLabel={pendingMember.active ? "Vô hiệu hóa" : "Kích hoạt"}
+          danger={pendingMember.active}
+          onConfirm={async () => {
+            const member = pendingMember;
+            const saved = await run(
+              () => api.patch(
+                `/admin/competitions/${competition.id}/members/${member.account_id}`,
+                { active: !member.active },
+              ),
+              member.active ? "Đã vô hiệu hóa thành viên." : "Đã kích hoạt lại thành viên.",
+            );
+            if (saved) setPendingMember(null);
+          }}
+          onClose={() => setPendingMember(null)}
+        />
+      )}
     </div>
   );
 }

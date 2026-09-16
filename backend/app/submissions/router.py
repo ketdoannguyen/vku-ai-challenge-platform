@@ -66,6 +66,11 @@ async def submit_csv(
         raise api_error(422, "SCORING_NOT_READY", "Cuộc thi chưa sẵn sàng chấm điểm.")
 
     if Path(file.filename or "").suffix.lower() != ".csv":
+        logger.info(
+            "Submission rejected competition=%s account=%s code=INVALID_FILE_TYPE",
+            competition["_id"],
+            account["_id"],
+        )
         raise api_error(422, "INVALID_FILE_TYPE", "Chỉ chấp nhận file submission có đuôi .csv.")
     data = await _read_limited(file)
     try:
@@ -73,7 +78,20 @@ async def submit_csv(
             data, ground_truth, config, competition["primary_metric"]
         )
     except scoring_service.ScoringValidationError as exc:
+        logger.info(
+            "Submission rejected competition=%s account=%s code=%s",
+            competition["_id"],
+            account["_id"],
+            exc.code,
+        )
         raise api_error(422, exc.code, exc.message)
+    except Exception:
+        logger.exception(
+            "Submission scoring failed competition=%s account=%s",
+            competition["_id"],
+            account["_id"],
+        )
+        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
 
     submission_id = ObjectId()
     relative_path = Path(

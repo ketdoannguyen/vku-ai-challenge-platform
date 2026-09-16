@@ -27,7 +27,7 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| POST | `/api/auth/login` | implemented | Body: `{identifier, password}` (identifier = email). Đúng: 200 + account safe fields (id, email, name, role, active) + set cookie `aic_session` (HttpOnly, SameSite=lax, Secure ở production). Sai: 401 `INVALID_CREDENTIALS` (generic, không tiết lộ email tồn tại). Account disabled: 403 `ACCOUNT_DISABLED`. |
+| POST | `/api/auth/login` | implemented | Body: `{identifier, password}` (identifier = email). Đúng: 200 + account safe fields (id, email, name, role, active) + set cookie `aic_session` (HttpOnly, SameSite theo env, Secure ở production), đồng thời reset số lần sai của identifier. Sai: 401 `INVALID_CREDENTIALS` (generic, không tiết lộ email tồn tại). Account disabled: 403 `ACCOUNT_DISABLED`. Sau 10 lần sai trong cửa sổ 15 phút trên cùng identifier đã normalize: 429 `RATE_LIMITED` + header `Retry-After`; limiter process-local và reset khi API restart. |
 | POST | `/api/auth/logout` | implemented | Xóa session server-side + clear cookie. Idempotent: 200 kể cả khi không có session. Trả `{"ok":true}`. |
 | GET | `/api/auth/me` | implemented | Trả account safe fields hoặc 401 `UNAUTHORIZED`. Session hết hạn hoặc account bị disable cũng trả 401. |
 
@@ -113,10 +113,12 @@ Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đ�
 ## 6. Error codes
 
 - `UNAUTHORIZED` (401), `FORBIDDEN` (403) — implemented
-- `INVALID_CREDENTIALS` (401), `ACCOUNT_DISABLED` (403), `ACCOUNT_EXISTS` (409) — implemented
+- `INVALID_CREDENTIALS` (401), `ACCOUNT_DISABLED` (403), `ACCOUNT_EXISTS` (409), `RATE_LIMITED` (429) — implemented
 - `SLUG_EXISTS` (409), `INVALID_TRANSITION` (422) — implemented (Sprint 03)
 - `JOIN_CLOSED` (422), `JOIN_CODE_INVALID` (403), `JOIN_INVITE_ONLY` (403), `MEMBERSHIP_INACTIVE` (403), `JOIN_CODE_REQUIRED` (422), `ACCOUNT_NOT_FOUND` (404), `CONTENT_SLUG_EXISTS` (409), `CONTENT_FILE_MISSING` (404), `INVALID_FILE_TYPE` (422), `FILE_TOO_LARGE` (413) — implemented (Sprint 04)
 - `NOT_FOUND` (404), `VALIDATION_ERROR` (422) — implemented
 - `SCORING_CONFIG_REQUIRED`, `SCORING_CONFIG_INVALID`, `SCORING_NOT_READY`, `SCORING_LOCKED`, `GROUND_TRUTH_INVALID` — implemented (Sprint 05)
 - `SUBMISSION_SCHEMA_INVALID`, `SUBMISSION_DUPLICATE_IDS`, `SUBMISSION_ID_MISMATCH`, `SUBMISSION_VALUE_INVALID`, `SUBMISSION_QUOTA_EXCEEDED` (429), `SUBMISSION_NOT_OPEN`, `SUBMISSION_DEADLINE_PASSED`, `SUBMISSION_CLOSED`, `MEMBERSHIP_REQUIRED` — implemented (Sprint 05)
 - `LEADERBOARD_HIDDEN` (403) — implemented (Sprint 06)
+- `METHOD_NOT_ALLOWED` (405), `HTTP_ERROR` (generic non-contract 4xx), `INTERNAL_ERROR` (500) — implemented (Sprint 07); unhandled server errors luôn trả message generic, không trả traceback/detail nội bộ
+- `FILE_WRITE_FAILED`, `SUBMISSION_SAVE_FAILED`, `SCORING_FAILED` (500) — implemented cho failure mode lưu/chấm bài; message public generic, chi tiết chỉ ở server log

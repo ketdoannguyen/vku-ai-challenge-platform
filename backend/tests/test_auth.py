@@ -1,4 +1,8 @@
-"""Auth flows: login/me/logout, generic 401, disabled account, session vô hiệu sau logout."""
+"""Auth flows: login/me/logout, generic errors, cookie flags and abuse protection."""
+
+import logging
+
+from app.core.config import get_settings
 
 COOKIE = "aic_session"
 
@@ -26,6 +30,79 @@ def test_login_wrong_password_generic_401(client):
     resp2 = client.post("/api/auth/login", json={"identifier": "khong-ton-tai@vku.vn", "password": "sai-roi"})
     assert resp2.status_code == 401
     assert resp2.json() == resp.json()
+
+
+def test_login_rate_limit_normalizes_identifier_and_returns_retry_after(client):
+    for attempt in range(10):
+        identifier = "  ADMIN@VKU.VN " if attempt % 2 else "admin@vku.vn"
+        response = client.post(
+            "/api/auth/login",
+            json={"identifier": identifier, "password": "sai-roi"},
+        )
+        assert response.status_code == 401
+
+    limited = client.post(
+        "/api/auth/login",
+        json={"identifier": "Admin@vku.vn", "password": "sai-roi"},
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error"]["code"] == "RATE_LIMITED"
+    assert 1 <= int(limited.headers["Retry-After"]) <= 900
+
+
+def test_successful_login_clears_failed_attempts(client):
+    for _ in range(9):
+        assert client.post(
+            "/api/auth/login",
+            json={"identifier": "admin@vku.vn", "password": "sai-roi"},
+        ).status_code == 401
+
+    assert client.post(
+        "/api/auth/login",
+        json={"identifier": "admin@vku.vn", "password": "adminmatkhau1"},
+    ).status_code == 200
+    client.post("/api/auth/logout")
+    assert client.post(
+        "/api/auth/login",
+        json={"identifier": "admin@vku.vn", "password": "sai-roi"},
+    ).status_code == 401
+
+
+def test_production_login_cookie_has_required_flags(client, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "auto")
+    monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "strict")
+    get_settings.cache_clear()
+    try:
+        response = client.post(
+            "/api/auth/login",
+            json={"identifier": "admin@vku.vn", "password": "adminmatkhau1"},
+        )
+    finally:
+        get_settings.cache_clear()
+
+    cookie = response.headers["set-cookie"]
+    assert "aic_session=" in cookie
+    assert "HttpOnly" in cookie
+    assert "Secure" in cookie
+    assert "SameSite=strict" in cookie
+    assert "Path=/" in cookie
+    assert "Max-Age=86400" in cookie
+
+
+def test_login_logs_do_not_include_password_or_session_token(client, caplog):
+    caplog.set_level(logging.INFO)
+    password = "adminmatkhau1"
+    response = client.post(
+        "/api/auth/login",
+        json={"identifier": "admin@vku.vn", "password": password},
+    )
+    raw_token = response.cookies.get(COOKIE)
+    assert raw_token
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert password not in messages
+    assert raw_token not in messages
 
 
 def test_login_identifier_case_and_space_normalized(client):

@@ -11,11 +11,19 @@ from mongomock_motor import AsyncMongoMockClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.accounts.service import AccountCreate  # noqa: E402
+from app.auth.rate_limit import login_limiter  # noqa: E402
 from app.core.database import MongoContext  # noqa: E402
 
 
 def _mk(email, name, password, role):
     return AccountCreate(email=email, name=name, password=password, role=role)
+
+
+@pytest.fixture(autouse=True)
+def reset_login_limiter():
+    login_limiter.reset_all()
+    yield
+    login_limiter.reset_all()
 
 
 @pytest.fixture()
