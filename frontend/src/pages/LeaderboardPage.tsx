@@ -184,7 +184,7 @@ export function LeaderboardPage() {
           {lastUpdated && (
             <div className="lb-sync-bar">
               <div className="lb-sync-dot" />
-              <span>Cập nhật lúc: <strong className="text-primary font-normal">{lastUpdated}</strong></span>
+              <span>Cập nhật lúc: <strong>{lastUpdated}</strong></span>
             </div>
           )}
           <button
@@ -238,7 +238,7 @@ export function LeaderboardPage() {
                   </div>
                 </td>
                 <td className="name-cell">
-                  <span style={{ fontWeight: 600, color: "var(--palette-primary)" }}>
+                  <span className="lb-participant-name">
                     {entry.display_name}
                   </span>
                   {entry.is_current_user && (
@@ -257,7 +257,7 @@ export function LeaderboardPage() {
                 <td className="score-cell" style={{ textAlign: "right" }}>
                   {formatScore(entry.metrics.recall)}
                 </td>
-                <td style={{ textAlign: "right", color: "var(--palette-secondary)", fontSize: "var(--text-mono-xs)" }}>
+                <td className="lb-time-cell">
                   {formatLocal(entry.best_submission_at)}
                 </td>
               </tr>

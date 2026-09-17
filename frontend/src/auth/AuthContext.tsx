@@ -62,6 +62,10 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
+export function useOptionalAuth(): AuthState | null {
+  return useContext(AuthContext);
+}
+
 /** Lỗi login hiển thị cho user: message từ API (đã tiếng Việt, dễ hiểu). */
 export function loginErrorMessage(error: unknown): string {
   if (error instanceof ApiClientError) return error.message;

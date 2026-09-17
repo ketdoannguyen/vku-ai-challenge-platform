@@ -354,7 +354,7 @@ export function SubmissionPage() {
                     <line x1="12" y1="8" x2="12.01" y2="8" />
                   </svg>
                   <span>
-                    Hạn mức: <strong className="text-primary font-medium">{competition.quota_per_day} lượt/ngày</strong>
+                    Hạn mức: <strong>{competition.quota_per_day} lượt/ngày</strong>
                   </span>
                 </div>
 

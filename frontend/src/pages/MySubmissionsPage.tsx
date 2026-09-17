@@ -140,14 +140,14 @@ export function MySubmissionsPage() {
       <div className="subm-toolbar">
         <div className="subm-summary-pills">
           <span>
-            Tổng cộng <strong className="text-primary font-medium">{data.total}</strong> bài nộp
+            Tổng cộng <strong>{data.total}</strong> bài nộp
           </span>
           {bestScoreVal != null && (
             <>
               <span>•</span>
               <span className="flex items-center gap-1">
                 <span>Điểm cao nhất trong trang:</span>
-                <strong className="text-primary font-mono-sm font-semibold">
+                <strong className="subm-summary-score">
                   {formatScore(bestScoreVal)}
                 </strong>
               </span>
@@ -226,7 +226,7 @@ export function MySubmissionsPage() {
                     <span className="cell-secondary">{formatLocal(submission.created_at)}</span>
                   </td>
                   <td className="filename-cell">
-                    <div className="flex items-center gap-1.5 font-mono-sm">
+                    <div className="flex items-center gap-1.5">
                       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, color: "var(--palette-secondary)" }}>
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />

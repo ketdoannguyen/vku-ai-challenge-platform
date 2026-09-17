@@ -1,6 +1,6 @@
 /** Admin competition detail: content table, member actions, join code không hiện trong DOM. */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AdminCompetitionDetailPage } from "./AdminCompetitionDetailPage";
@@ -308,5 +308,172 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
   await waitFor(() => {
     expect(calls.some((call) => call.url.includes("/submissions?limit=50&offset=50"))).toBe(true);
+  });
+});
+
+test("header hiển thị action theo status: draft có Publish, published có Kết thúc, closed disable Sửa", async () => {
+  // 1. Published
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  const { unmount, container } = renderPage();
+  expect(await screen.findByRole("button", { name: "Kết thúc" })).toBeTruthy();
+  const headerActions = container.querySelector(".admin-detail-actions") as HTMLElement;
+  expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+  expect(within(headerActions).getByRole("button", { name: "Sửa" })).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Clone" })).toBeTruthy();
+  unmount();
+
+  // 2. Draft
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "draft" }, status: 200 };
+  });
+  const renderDraft = renderPage();
+  expect(await screen.findByRole("button", { name: "Publish" })).toBeTruthy();
+  const draftHeaderActions = renderDraft.container.querySelector(".admin-detail-actions") as HTMLElement;
+  expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
+  expect(within(draftHeaderActions).getByRole("button", { name: "Sửa" })).not.toBeDisabled();
+  renderDraft.unmount();
+
+  // 3. Closed
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "closed" }, status: 200 };
+  });
+  const renderClosed = renderPage();
+  expect(await screen.findByRole("button", { name: "Clone" })).toBeTruthy();
+  const closedHeaderActions = renderClosed.container.querySelector(".admin-detail-actions") as HTMLElement;
+  expect(within(closedHeaderActions).getByRole("button", { name: "Sửa" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
+  renderClosed.unmount();
+});
+
+test("header publish/close/clone gọi đúng endpoint modal xác nhận", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/publish") && init?.method === "POST") {
+      return { body: { ...COMPETITION, status: "published" }, status: 200 };
+    }
+    if (url.endsWith("/clone") && init?.method === "POST") {
+      return { body: { ...COMPETITION, id: "cloned-id", name: "Code Cup (Bản sao)" }, status: 201 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "draft" }, status: 200 };
+  });
+  renderPage();
+
+  // Publish
+  const publishBtn = await screen.findByRole("button", { name: "Publish" });
+  fireEvent.click(publishBtn);
+  const publishDialog = screen.getByRole("dialog", { name: "Publish cuộc thi" });
+  expect(publishDialog).toBeTruthy();
+  expect(calls.some((c) => c.url.endsWith("/publish"))).toBe(false);
+  fireEvent.click(within(publishDialog).getByRole("button", { name: "Publish" }));
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.endsWith("/publish") && c.init?.method === "POST")).toBe(true);
+  });
+
+  // Clone
+  const cloneBtn = screen.getByRole("button", { name: "Clone" });
+  fireEvent.click(cloneBtn);
+  const cloneDialog = screen.getByRole("dialog", { name: "Clone cuộc thi" });
+  expect(cloneDialog).toBeTruthy();
+  fireEvent.click(within(cloneDialog).getByRole("button", { name: "Clone" }));
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.endsWith("/clone") && c.init?.method === "POST")).toBe(true);
+  });
+});
+
+test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và upload/delete", async () => {
+  const ASSETS = {
+    assets: [
+      {
+        name: "banner.png",
+        content_type: "image/png",
+        size_bytes: 204800,
+        url: "/api/competitions/code-cup/assets/banner.png",
+      },
+      {
+        name: "architecture.jpg",
+        content_type: "image/jpeg",
+        size_bytes: 512000,
+        url: "/api/competitions/code-cup/assets/architecture.jpg",
+      },
+    ],
+  };
+
+  const clipboardWrite = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, {
+    clipboard: { writeText: clipboardWrite },
+  });
+
+  mockApi((url, init) => {
+    if (url.endsWith("/assets") && init?.method === "POST") {
+      return {
+        body: {
+          asset: {
+            name: "diagram.png",
+            content_type: "image/png",
+            size_bytes: 102400,
+            url: "/api/competitions/code-cup/assets/diagram.png",
+          },
+        },
+        status: 201,
+      };
+    }
+    if (url.includes("/assets/banner.png") && init?.method === "DELETE") {
+      return { body: { ok: true }, status: 200 };
+    }
+    if (url.includes("/assets")) return { body: ASSETS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Assets" }));
+
+  // Bento 8/4 items
+  expect(await screen.findByText("Kho lưu trữ hình ảnh (Assets)")).toBeTruthy();
+  expect(screen.getByText("2 tệp")).toBeTruthy();
+  expect(screen.getByText("Quy chuẩn nhúng Markdown")).toBeTruthy();
+  expect(screen.getByText("assets/ten-file.png")).toBeTruthy();
+
+  // Table items
+  expect(screen.getByText("banner.png")).toBeTruthy();
+  expect(screen.getByText("architecture.jpg")).toBeTruthy();
+  expect(screen.getByText("PNG")).toBeTruthy();
+  expect(screen.getByText("JPEG")).toBeTruthy();
+  expect(screen.getByText("200 KB")).toBeTruthy();
+  expect(screen.getByText("500 KB")).toBeTruthy();
+  expect(screen.getByText("assets/banner.png")).toBeTruthy();
+  expect(screen.getByText("assets/architecture.jpg")).toBeTruthy();
+
+  // Copy action
+  const copyBtns = screen.getAllByRole("button", { name: "Copy tham chiếu" });
+  fireEvent.click(copyBtns[0]); // first asset row copy
+  expect(clipboardWrite).toHaveBeenCalledWith("assets/banner.png");
+
+  // Delete action with confirm modal
+  const deleteBtns = screen.getAllByRole("button", { name: "Xóa" });
+  fireEvent.click(deleteBtns[0]);
+  const deleteDialog = screen.getByRole("dialog", { name: "Xóa asset" });
+  expect(deleteDialog).toBeTruthy();
+  expect(calls.some((c) => c.init?.method === "DELETE")).toBe(false);
+  fireEvent.click(within(deleteDialog).getByRole("button", { name: "Xóa" })); // modal confirm button
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.includes("/assets/banner.png") && c.init?.method === "DELETE")).toBe(true);
+  });
+
+  // Upload action
+  const uploadInput = screen.getByLabelText("Chọn tệp ảnh");
+  fireEvent.change(uploadInput, {
+    target: { files: [new File(["dummy"], "diagram.png", { type: "image/png" })] },
+  });
+  await waitFor(() => {
+    const uploadCall = calls.find((c) => c.url.endsWith("/assets") && c.init?.method === "POST");
+    expect(uploadCall).toBeTruthy();
+    expect(uploadCall?.init?.body).toBeInstanceOf(FormData);
   });
 });

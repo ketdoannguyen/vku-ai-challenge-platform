@@ -15,23 +15,26 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   large?: boolean;
-  variant?: "competition-form";
+  variant?: "competition-form" | "account-form";
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const previousFocusRef = useRef<HTMLElement | null>(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialogRef.current?.contains(document.activeElement)) {
       dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     }
 
     // Nền phía sau không cuộn khi hộp thoại đang mở.
     const previousOverflow = document.body.style.overflow;
+    const previousFocus = previousFocusRef.current;
     document.body.style.overflow = "hidden";
 
     function onKeyDown(event: KeyboardEvent) {
@@ -130,24 +133,37 @@ export function ConfirmModal({
 
   return (
     <Modal title={title} onClose={onClose} large={false}>
-      <p>{body}</p>
-      {error && (
-        <div className="error-box" role="alert">
-          {error}
+      <div className={`confirm-modal${danger ? " confirm-modal-danger" : ""}`}>
+        <div className="confirm-modal-body">
+          <span className="confirm-modal-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+              <path d="M12 8v5m0 3.5v.01M10.3 3.84 2.82 17a2 2 0 0 0 1.74 3h14.88a2 2 0 0 0 1.74-3L13.7 3.84a2 2 0 0 0-3.4 0Z" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <p>{body}</p>
         </div>
-      )}
-      <div className="modal-actions">
-        <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
-          Hủy
-        </button>
-        <button
-          type="button"
-          className={`btn ${danger ? "btn-danger" : ""}`}
-          onClick={() => void confirm()}
-          disabled={busy}
-        >
-          {busy ? "Đang xử lý..." : confirmLabel}
-        </button>
+        {error && (
+          <div className="confirm-modal-error" role="alert">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M12 7.5v5m0 4v.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )}
+        <div className="modal-actions confirm-modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            Hủy
+          </button>
+          <button
+            type="button"
+            className={`btn ${danger ? "btn-danger" : ""}`}
+            onClick={() => void confirm()}
+            disabled={busy}
+          >
+            {busy ? "Đang xử lý..." : confirmLabel}
+          </button>
+        </div>
       </div>
     </Modal>
   );
