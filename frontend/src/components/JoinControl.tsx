@@ -5,6 +5,7 @@ import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, JoinResponse, LeaveResponse, Membership } from "../api/competitions";
 import { useOptionalAuth } from "../auth/AuthContext";
+import { returnToFromLocation } from "../auth/returnTo";
 import { ConfirmModal, Modal } from "./Modal";
 
 function IconArrow() {
@@ -71,13 +72,16 @@ function IconError() {
 export function JoinControl({
   competition,
   onMembershipChange,
+  showLeave = true,
 }: {
   competition: Competition;
   onMembershipChange: (membership: Membership) => void;
+  /** Danh sách chỉ mời vào cuộc thi; rời cuộc thi là thao tác ở trang chi tiết. */
+  showLeave?: boolean;
 }) {
   const membership = competition.membership;
   const auth = useOptionalAuth();
-  const { pathname } = useLocation();
+  const location = useLocation();
   const [leaveOpen, setLeaveOpen] = useState(false);
   // Ngoài AuthProvider (test dựng component lẻ) không biết được trạng thái phiên nên
   // giữ nguyên hành vi cũ; trong app thì khách thấy lối đăng nhập thay vì POST ăn 401.
@@ -96,14 +100,16 @@ export function JoinControl({
           Vào cuộc thi
           <IconArrow />
         </Link>
-        <button
-          className="btn btn-ghost"
-          type="button"
-          onClick={() => setLeaveOpen(true)}
-        >
-          Rời cuộc thi
-        </button>
-        {leaveOpen && (
+        {showLeave && (
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={() => setLeaveOpen(true)}
+          >
+            Rời cuộc thi
+          </button>
+        )}
+        {showLeave && leaveOpen && (
           <ConfirmModal
             title="Rời cuộc thi"
             body={`Rời ${competition.name}? Kết quả và thứ hạng đã có vẫn được giữ, nhưng bạn cần Ban Tổ chức kích hoạt lại mới nộp bài tiếp được.`}
@@ -163,7 +169,11 @@ export function JoinControl({
   if (isGuest) {
     return (
       <span className="join-state">
-        <Link className="btn" to="/login" state={{ from: pathname }}>
+        <Link
+          className="btn"
+          to="/login"
+          state={{ from: returnToFromLocation(location) }}
+        >
           Đăng nhập để tham gia
           <IconArrow />
         </Link>

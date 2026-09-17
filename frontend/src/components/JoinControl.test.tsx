@@ -220,7 +220,7 @@ test("khách: CTA đăng nhập kèm đường dẫn quay lại, không gọi AP
   );
   vi.stubGlobal("fetch", fetchMock);
   render(
-    <MemoryRouter initialEntries={["/competitions/ai-cup"]}>
+    <MemoryRouter initialEntries={["/competitions/ai-cup?source=home#join"]}>
       <AuthProvider>
         <Routes>
           <Route
@@ -233,7 +233,7 @@ test("khách: CTA đăng nhập kèm đường dẫn quay lại, không gọi AP
     </MemoryRouter>,
   );
   fireEvent.click(await screen.findByRole("link", { name: "Đăng nhập để tham gia" }));
-  expect(await screen.findByText("FROM:/competitions/ai-cup")).toBeTruthy();
+  expect(await screen.findByText("FROM:/competitions/ai-cup?source=home#join")).toBeTruthy();
   // Chỉ lượt bootstrap /auth/me — khách không bắn POST join rồi ăn 401.
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
@@ -276,6 +276,20 @@ test("đã tham gia: rời cuộc thi phải xác nhận rồi mới gọi API",
       joined_at: "2026-09-15T00:00:00Z",
     }),
   );
+});
+
+test("showLeave=false: giữ lối vào cuộc thi nhưng không còn thao tác rời", () => {
+  render(
+    <MemoryRouter>
+      <JoinControl competition={MEMBER} onMembershipChange={vi.fn()} showLeave={false} />
+    </MemoryRouter>,
+  );
+
+  // Trạng thái "đã tham gia" và đường vào cuộc thi vẫn nguyên.
+  expect(screen.getByText("Đã tham gia")).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
+  // Danh sách chỉ để vào cuộc thi; rời cuộc thi là thao tác ở trang chi tiết.
+  expect(screen.queryByRole("button", { name: "Rời cuộc thi" })).toBeNull();
 });
 
 test("rời cuộc thi thất bại: modal hiện lỗi và không báo membership mới", async () => {

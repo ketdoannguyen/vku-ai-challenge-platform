@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, ApiClientError } from "../api/client";
+import { api } from "../api/client";
 import type { Competition, CompetitionsResponse, Membership } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
@@ -15,6 +15,7 @@ import { Loading } from "../components/ui";
 import { JoinControl } from "../components/JoinControl";
 import { useOptionalAuth } from "../auth/AuthContext";
 import { useDeadlineClock } from "../hooks/useCountdown";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCountdown } from "../lib/countdown";
 
 type StatusFilter = "all" | "published" | "closed";
@@ -24,6 +25,18 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "published", label: "Đang diễn ra" },
   { id: "closed", label: "Đã kết thúc" },
 ];
+
+/**
+ * Màu thẻ theo VỊ TRÍ trong lưới đang render, không theo trạng thái cuộc thi:
+ * cột 1 xanh, cột 2 đỏ, cột 3 vàng rồi lặp lại. Cuộc thi đã kết thúc nằm ở cột 2
+ * vẫn giữ thẻ đỏ, chỉ status badge chuyển xám.
+ */
+const CARD_THEMES = ["blue", "red", "yellow"] as const;
+type CardTheme = (typeof CARD_THEMES)[number];
+
+function getCardTheme(index: number): CardTheme {
+  return CARD_THEMES[index % CARD_THEMES.length];
+}
 
 function IconSearch() {
   return (
@@ -148,6 +161,96 @@ function IconError() {
   );
 }
 
+function IconPulse() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={14}
+      height={14}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M3 12h4l3-7 4 14 3-7h4" />
+    </svg>
+  );
+}
+
+function IconTrophy() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={14}
+      height={14}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M7 4h10v5a5 5 0 0 1-10 0V4z" />
+      <path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3M12 14v4M9 20h6" />
+    </svg>
+  );
+}
+
+function IconUsers() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={14}
+      height={14}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1" />
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M22 20v-1a4 4 0 0 0-3-3.87M16.5 5.2a3.2 3.2 0 0 1 0 5.6" />
+    </svg>
+  );
+}
+
+/** Icon lớn cho hai trạng thái rỗng — thay emoji để đồng bộ bộ icon SVG của app. */
+function IconEmptyState({ kind }: { kind: "search" | "trophy" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={28}
+      height={28}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.6}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {kind === "search" ? (
+        <>
+          <circle cx="11" cy="11" r="7" />
+          <path d="M20 20l-3.5-3.5" />
+        </>
+      ) : (
+        <>
+          <path d="M7 4h10v5a5 5 0 0 1-10 0V4z" />
+          <path d="M7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3M12 14v4M9 20h6" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function DashboardPage() {
   const auth = useOptionalAuth();
   const [data, setData] = useState<CompetitionsResponse | null>(null);
@@ -155,6 +258,7 @@ export function DashboardPage() {
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
+  useDocumentTitle("Cuộc thi");
 
   const load = useCallback(async () => {
     setError(null);
@@ -198,8 +302,8 @@ export function DashboardPage() {
   const closedCount = (competitions ?? []).filter((item) => item.status === "closed").length;
   const joinedCount = (competitions ?? []).filter((item) => item.membership.active).length;
 
+  const hasCompetitions = competitions !== undefined && competitions.length > 0;
   const errorMessage = error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
-  const errorCode = error instanceof ApiClientError ? error.code : null;
 
   return (
     <div className="page dash-page">
@@ -209,27 +313,32 @@ export function DashboardPage() {
             <h1 className="dash-title">Cuộc thi</h1>
             <p className="dash-subtitle">Các cuộc thi bạn có thể tham gia</p>
           </div>
-          <div className="dash-stats">
-            <div className="dash-stat">
-              <span className="dash-stat-label">Đang diễn ra</span>
-              <span className="dash-stat-value">{String(activeCount).padStart(2, "0")}</span>
-            </div>
-            <span className="dash-stat-divider" aria-hidden="true" />
-            <div className="dash-stat">
-              <span className="dash-stat-label">Đã kết thúc</span>
-              <span className="dash-stat-value">{String(closedCount).padStart(2, "0")}</span>
-            </div>
+          <section className="dash-stats" aria-label="Thống kê cuộc thi">
+            <dl className="dash-stat dash-stat-published">
+              <dt className="dash-stat-label">
+                <IconPulse />
+                Đang diễn ra
+              </dt>
+              <dd className="dash-stat-value">{String(activeCount).padStart(2, "0")}</dd>
+            </dl>
+            <dl className="dash-stat dash-stat-closed">
+              <dt className="dash-stat-label">
+                <IconTrophy />
+                Đã kết thúc
+              </dt>
+              <dd className="dash-stat-value">{String(closedCount).padStart(2, "0")}</dd>
+            </dl>
             {/* Khách chưa có membership nào nên ô này luôn 00 — chỉ tổ rối. */}
             {!isGuest && (
-              <>
-                <span className="dash-stat-divider" aria-hidden="true" />
-                <div className="dash-stat">
-                  <span className="dash-stat-label">Đã tham gia</span>
-                  <span className="dash-stat-value">{String(joinedCount).padStart(2, "0")}</span>
-                </div>
-              </>
+              <dl className="dash-stat dash-stat-joined">
+                <dt className="dash-stat-label">
+                  <IconUsers />
+                  Đã tham gia
+                </dt>
+                <dd className="dash-stat-value">{String(joinedCount).padStart(2, "0")}</dd>
+              </dl>
             )}
-          </div>
+          </section>
         </div>
 
         <div className="dash-toolbar">
@@ -261,7 +370,6 @@ export function DashboardPage() {
               ))}
             </div>
           </div>
-          <p className="dash-count">Hiển thị {filtered.length} cuộc thi</p>
         </div>
       </section>
 
@@ -270,40 +378,56 @@ export function DashboardPage() {
       ) : error ? (
         <div className="form-error dash-error" role="alert">
           <IconError />
+          {/* Mã lỗi thô của API là chi tiết kỹ thuật — người dùng cuối chỉ cần câu mô tả. */}
           <div>
             <p>{errorMessage}</p>
-            {errorCode && <p className="form-error-code">{errorCode}</p>}
           </div>
           <button type="button" className="btn btn-secondary" onClick={() => void load()}>
             Thử lại
           </button>
         </div>
-      ) : competitions && competitions.length > 0 ? (
-        <div className="comp-list">
-          {filtered.map((competition) => (
-            <CompetitionCard
-              key={competition.id}
-              competition={competition}
-              now={now}
-              onMembershipChange={(slug, membership) =>
-                setData((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        competitions: prev.competitions.map((item) =>
-                          item.slug === slug ? { ...item, membership } : item,
-                        ),
-                      }
-                    : prev,
-                )
-              }
-            />
-          ))}
+      ) : filtered.length > 0 ? (
+        <>
+          <div className="dash-list-head">
+            <h2 className="dash-list-title">Danh sách cuộc thi</h2>
+            <p className="dash-count">Hiển thị {filtered.length} cuộc thi</p>
+          </div>
+          <div className="comp-list">
+            {filtered.map((competition, index) => (
+              <CompetitionCard
+                key={competition.id}
+                competition={competition}
+                theme={getCardTheme(index)}
+                now={now}
+                onMembershipChange={(slug, membership) =>
+                  setData((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          competitions: prev.competitions.map((item) =>
+                            item.slug === slug ? { ...item, membership } : item,
+                          ),
+                        }
+                      : prev,
+                  )
+                }
+              />
+            ))}
+          </div>
+        </>
+      ) : hasCompetitions ? (
+        // Có cuộc thi nhưng bộ lọc không khớp — khác hẳn "hệ thống chưa có gì".
+        <div className="card empty-state">
+          <div className="empty-state-icon" aria-hidden="true">
+            <IconEmptyState kind="search" />
+          </div>
+          <h2>Không tìm thấy cuộc thi phù hợp</h2>
+          <p>Thử từ khóa khác hoặc bỏ bộ lọc trạng thái.</p>
         </div>
       ) : (
         <div className="card empty-state">
-          <div className="empty-state-icon" aria-hidden>
-            🏆
+          <div className="empty-state-icon" aria-hidden="true">
+            <IconEmptyState kind="trophy" />
           </div>
           <h2>Chưa có cuộc thi nào</h2>
           <p>Các cuộc thi sẽ xuất hiện tại đây khi được Ban Tổ chức mở.</p>
@@ -315,10 +439,13 @@ export function DashboardPage() {
 
 function CompetitionCard({
   competition,
+  theme,
   now,
   onMembershipChange,
 }: {
   competition: Competition;
+  /** Theme lấy theo vị trí trong lưới đang render — không lấy từ trạng thái cuộc thi. */
+  theme: CardTheme;
   /** Mốc giờ dùng chung của cả trang — mỗi thẻ không tự mở timer riêng. */
   now: number | null;
   onMembershipChange: (slug: string, membership: Membership) => void;
@@ -328,20 +455,21 @@ function CompetitionCard({
     c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
 
   return (
-    <article className={`card comp-card ${statusClass(c.status)}`}>
-      <div className="comp-card-main">
-        {/* Trạng thái là điểm nổi bật của thẻ nên đứng cạnh tiêu đề, không lẫn vào
-            hàng chip phụ. `statusClass` dùng chung cho cả thanh màu mép trái. */}
-        <div className="comp-card-head">
-          <h2 className="comp-card-title">
-            <Link to={`/competitions/${c.slug}`}>{c.name}</Link>
-          </h2>
-          <span className={`status-badge status-badge-lg ${statusClass(c.status)}`}>
-            <span className="chip-dot" aria-hidden="true" />
-            {STATUS_LABEL[c.status]}
-          </span>
-        </div>
+    // `data-theme` quyết định màu thẻ, `data-status` chỉ để tra cứu; `statusClass` chỉ
+    // còn dùng cho badge nên cuộc thi đã kết thúc ở cột 2 vẫn giữ nguyên thẻ đỏ.
+    <article className="card comp-card" data-theme={theme} data-status={c.status}>
+      <div className="comp-card-head">
+        {/* h3 vì cả danh sách đã nằm dưới h2 "Danh sách cuộc thi". */}
+        <h3 className="comp-card-title">
+          <Link to={`/competitions/${c.slug}`}>{c.name}</Link>
+        </h3>
+        <span className={`status-badge status-badge-lg ${statusClass(c.status)}`}>
+          <span className="chip-dot" aria-hidden="true" />
+          {STATUS_LABEL[c.status]}
+        </span>
+      </div>
 
+      <div className="comp-card-body">
         <div className="comp-card-chips">
           {remaining && (
             <span className="status-badge warning">
@@ -390,7 +518,12 @@ function CompetitionCard({
       </div>
 
       <div className="comp-card-footer">
-        <JoinControl competition={c} onMembershipChange={(membership) => onMembershipChange(c.slug, membership)} />
+        {/* Thẻ trong danh sách chỉ dẫn vào cuộc thi; rời cuộc thi nằm ở trang chi tiết. */}
+        <JoinControl
+          competition={c}
+          showLeave={false}
+          onMembershipChange={(membership) => onMembershipChange(c.slug, membership)}
+        />
       </div>
     </article>
   );

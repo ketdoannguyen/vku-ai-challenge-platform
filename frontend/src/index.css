@@ -95,6 +95,39 @@
   --palette-data-yellow: #e9b949;
   --palette-data-purple: #8b5cf6;
 
+  /* --- VKU brand ---
+     Namespace `--vku-*` vì các tên trần như `--text-secondary`/`--border` đã thuộc
+     bảng màu Stitch đơn sắc; dashboard cần bộ xanh–đỏ–vàng tách bạch khỏi scale cũ. */
+  --vku-blue-900: #082b73;
+  --vku-blue-800: #073b9a;
+  --vku-blue-700: #064fc4;
+  --vku-blue-600: #0969e8;
+  --vku-blue-500: #1677ff;
+  --vku-blue-100: #eaf3ff;
+  --vku-blue-50: #f5f9ff;
+
+  --vku-red-800: #b80619;
+  --vku-red-700: #d30b23;
+  --vku-red-600: #ec1631;
+  --vku-red-500: #f3263f;
+  --vku-red-100: #ffecef;
+  --vku-red-50: #fff6f7;
+
+  /* yellow-800 (amber-700) là tông chữ đạt 4.5:1 trên nền vàng nhạt; vàng 700/500 quá
+     sáng để làm màu chữ nên chỉ dùng cho nền và viền. */
+  --vku-yellow-800: #b45309;
+  --vku-yellow-700: #e9a900;
+  --vku-yellow-600: #f5b800;
+  --vku-yellow-500: #ffc51b;
+  --vku-yellow-400: #ffd43b;
+  --vku-yellow-100: #fff5cc;
+  --vku-yellow-50: #fffbeb;
+
+  --vku-ink: #0b1f44;
+  --vku-ink-muted: #526078;
+  --vku-border: #e5e7eb;
+  --vku-border-soft: #eef1f5;
+
   /* --- Semantic --- */
   --bg: var(--palette-background);
   --surface: var(--palette-surface);
@@ -193,14 +226,14 @@
 
   /* --- Layout --- */
   --container: 1280px;
+  /* Trần rộng của dashboard (3 cột + hero có stat card) — chỉ áp cho route "/" */
+  --container-wide: 1440px;
   --page-padding-inline: 1.125rem;
-  /* Navbar là đảo nổi căn giữa, rộng bằng trần nội dung dashboard (76rem = 1216px) */
-  --header-max-width: 1216px;
-  --header-height: 56px;
-  /* Khoảng cách từ đảo tới mép trên/dưới khung nhìn */
-  --header-gap: 8px;
-  /* Vùng header thực sự chiếm chỗ (đảo + 2 mép) */
-  --header-band: calc(var(--header-height) + 2 * var(--header-gap));
+  /* Navbar là thanh ngang full-bleed, nội dung bên trong căn giữa theo trần rộng */
+  --header-max-width: var(--container-wide);
+  --header-height: 64px;
+  /* Vùng header thực sự chiếm chỗ */
+  --header-band: var(--header-height);
   /* Khoảng hở chủ đích giữa navbar và nội dung */
   --header-content-gap: 20px;
   --header-offset: calc(var(--header-band) + var(--header-content-gap));
@@ -218,7 +251,6 @@
   /* --- Elevation --- */
   --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.02);
-  --shadow-header: 0 1px 8px rgba(0, 0, 0, 0.03);
   --shadow-modal: 0 20px 50px rgba(0, 0, 0, 0.12);
   --shadow: var(--shadow-card);
 
@@ -398,12 +430,17 @@ samp {
 /* =============================================================================
    App shell
    ============================================================================= */
-/* Đảo nổi căn giữa (DESIGN.md): đặc, viền mảnh, bo 14px, cách mép trên 8px */
+/* Thanh ngang full-bleed: nền trắng, vạch chân mảnh; nội dung bên trong mới bị chặn
+   bề rộng nên logo/nav luôn thẳng hàng với nội dung trang. */
 .app-header {
   position: fixed;
   inset: 0 0 auto;
   z-index: 50;
-  padding: var(--header-gap) var(--page-padding-inline);
+  padding: 0 var(--page-padding-inline);
+  /* Vạch chân vẽ bằng inset shadow để header cao đúng `--header-height`: `border-bottom`
+     cộng thêm 1px làm băng chừa chỗ cho header hụt mất 1px. */
+  box-shadow: inset 0 -1px 0 var(--vku-border-soft);
+  background: var(--surface);
   pointer-events: none;
 }
 
@@ -419,11 +456,6 @@ samp {
   height: var(--header-height);
   max-width: var(--header-max-width);
   margin: 0 auto;
-  padding: 0 var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-2xl);
-  background: var(--surface);
-  box-shadow: var(--shadow-header);
   pointer-events: auto;
 }
 
@@ -461,10 +493,10 @@ samp {
   border: 0;
 }
 
-/* Logo là dấu thương hiệu cạnh chữ, không phải nhân vật chính: giữ thấp hơn hẳn
-   cỡ chữ 16px của `.app-brand` để chữ không bị lấn. */
+/* Logo VKU là dấu nhận diện chính trên thanh 64px — đủ lớn để đọc nhưng vẫn thấp
+   hơn chiều cao thanh. `width: auto` giữ đúng tỉ lệ ảnh gốc. */
 .app-brand-logo {
-  height: 22px;
+  height: 30px;
   width: auto;
   object-fit: contain;
   flex: none;
@@ -479,9 +511,9 @@ samp {
 }
 
 .app-nav a {
-  padding: 6px 12px;
-  border-radius: var(--radius-md);
-  color: var(--text-muted);
+  padding: 8px 14px;
+  border-radius: 10px;
+  color: var(--vku-ink-muted);
   font-size: var(--text-body-md);
   font-weight: 500;
   line-height: 1.2;
@@ -492,13 +524,16 @@ samp {
     background-color var(--duration-fast) var(--ease-standard);
 }
 .app-nav a:hover {
-  color: var(--text);
-  background: var(--surface-subtle);
+  color: var(--vku-blue-700);
+  background: var(--vku-blue-50);
   text-decoration: none;
 }
+/* Mục đang mở: nền xanh nhạt + gạch chân 2px. Vạch vẽ bằng inset box-shadow để
+   không đổi chiều cao liên kết khi trạng thái đổi. */
 .app-nav a.active {
-  color: var(--text);
-  background: var(--surface-container);
+  color: var(--vku-blue-700);
+  background: var(--vku-blue-100);
+  box-shadow: inset 0 -2px 0 var(--vku-blue-600);
 }
 
 .app-header-right {
@@ -510,7 +545,7 @@ samp {
   min-width: 0;
 }
 
-/* Nút đăng nhập trên header (chưa đăng nhập): pill đen, ẩn dưới sm như Stitch S02 */
+/* Nút đăng nhập trên header (chưa đăng nhập): pill xanh VKU, ẩn dưới sm như Stitch S02 */
 .app-login-cta {
   display: none;
   align-items: center;
@@ -518,8 +553,8 @@ samp {
   height: 36px;
   padding: 0 14px;
   border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--vku-blue-700);
+  color: #fff;
   font-size: var(--text-label-md);
   font-weight: 500;
   line-height: 1.25;
@@ -528,7 +563,7 @@ samp {
   transition: background-color var(--duration-fast) var(--ease-standard);
 }
 .app-login-cta:hover {
-  background: var(--accent-strong);
+  background: var(--vku-blue-800);
   text-decoration: none;
 }
 
@@ -609,8 +644,8 @@ samp {
   height: 32px;
   flex: none;
   border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--vku-blue-700);
+  color: #fff;
 }
 
 /* Nút mở drawer: chỉ hiện dưới breakpoint md */
@@ -638,6 +673,8 @@ samp {
   inset: 0;
   z-index: 100;
   background: var(--overlay-bg);
+  /* Overlay/drawer là lớp fixed phủ toàn màn hình nên luôn tự nhận pointer. */
+  pointer-events: auto;
 }
 
 .app-drawer {
@@ -652,6 +689,7 @@ samp {
   background: var(--surface);
   box-shadow: var(--shadow-modal);
   overflow-y: auto;
+  pointer-events: auto;
 }
 
 .app-drawer-head {
@@ -694,8 +732,8 @@ samp {
   text-decoration: none;
 }
 .app-drawer-nav a.active {
-  background: var(--surface-container);
-  color: var(--text);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
 }
 
 .app-drawer-foot {
@@ -710,11 +748,18 @@ samp {
   max-width: var(--container);
   margin: 0 auto;
   padding: var(--header-offset) var(--page-padding-inline) var(--space-xl);
+  /* `main` nhận focus sau mỗi điều hướng; chừa chỗ để header fixed không che. */
+  scroll-margin-top: var(--header-offset);
 }
 
 /* Trang không có header (login) tự lo khoảng đệm của nó */
 .app-main-bare {
   padding: 0;
+}
+
+/* Dashboard lưới 3 cột cần trần rộng hơn; các màn khác giữ `--container` 1280px. */
+.app-main-dashboard {
+  max-width: var(--container-wide);
 }
 
 /* =============================================================================
@@ -1077,14 +1122,6 @@ select.input {
   margin-top: 1px;
 }
 
-.form-error-code {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-mono-xs);
-  font-weight: 400;
-  letter-spacing: 0;
-}
-
 .form-error .btn {
   flex: none;
   margin-left: auto;
@@ -1141,9 +1178,8 @@ select.input {
 }
 
 .empty-state-icon {
+  display: inline-flex;
   margin-bottom: 12px;
-  font-size: 30px;
-  line-height: 1;
   color: var(--text-muted);
 }
 
@@ -1176,6 +1212,13 @@ select.input {
 }
 
 /* --- Table --- */
+/* Cuộn ngang không được kéo theo trang khi đã tới biên. */
+.table-wrap,
+.md-table-wrap,
+.ac-table-scroll {
+  overscroll-behavior-x: contain;
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -1439,44 +1482,6 @@ select.input {
   border-radius: 2px;
 }
 
-/* --- Tab nav --- */
-.tab-nav {
-  display: flex;
-  gap: var(--space-xs);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-lg);
-  overflow-x: auto;
-}
-
-.tab-link {
-  padding: 10px var(--space-md);
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  font-size: var(--text-label-md);
-  font-weight: 500;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.tab-link:hover {
-  color: var(--text);
-  text-decoration: none;
-}
-
-.tab-link.active {
-  border-bottom-color: var(--accent);
-  color: var(--text);
-}
-
-.tab-link.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.tab-link.disabled:hover {
-  color: var(--text-muted);
-}
-
 /* --- Helpers --- */
 .text-muted {
   color: var(--text-muted);
@@ -1714,59 +1719,90 @@ select.input {
 .comp-list {
   display: grid;
   grid-template-columns: 1fr;
-  gap: var(--space-md);
-  padding-top: var(--space-xs);
+  gap: 20px;
 }
 
+/* Theme của thẻ lấy từ VỊ TRÍ trong lưới (`data-theme`), không lấy từ trạng thái cuộc
+   thi: cột 1 xanh, cột 2 đỏ, cột 3 vàng. Vài biến cục bộ điều khiển header, viền và
+   nút; `--accent*` được ghi đè tại đây nên nút và vòng focus trong thẻ ăn theo màu cột. */
 .comp-card {
-  position: relative;
+  --card-header-from: var(--vku-blue-700);
+  --card-header-to: var(--vku-blue-600);
+  --card-header-ink: #fff;
+  --card-tint: var(--vku-blue-50);
+  --card-border: #bfdbfe;
+  --card-outline-ink: var(--vku-blue-800);
+  --accent: var(--vku-blue-700);
+  --accent-strong: var(--vku-blue-800);
+  --on-accent: #fff;
+
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 300px;
+  padding: 0;
   overflow: hidden;
-  padding: var(--space-md);
-  box-shadow: none;
+  border-color: var(--card-border);
+  border-radius: var(--radius-2xl);
   transition:
-    border-color var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    border-color var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    transform var(--duration-base) var(--ease-standard);
 }
 
-/* Thanh màu trạng thái ở mép trái — cùng nguồn statusClass() với chip */
-.comp-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 4px;
-  background: var(--border);
+.comp-card[data-theme="red"] {
+  --card-header-from: var(--vku-red-700);
+  --card-header-to: var(--vku-red-600);
+  --card-tint: var(--vku-red-50);
+  --card-border: #fecdd3;
+  --card-outline-ink: var(--vku-red-800);
+  --accent: var(--vku-red-600);
+  --accent-strong: var(--vku-red-800);
 }
 
-.comp-card.success::before {
-  background: var(--success-bright);
-}
-
-.comp-card.closed::before {
-  background: var(--text-secondary);
-}
-
-.comp-card.warning::before {
-  background: var(--warning);
+/* Header vàng quá sáng để mang chữ trắng — dùng mực đậm của bảng màu VKU. */
+.comp-card[data-theme="yellow"] {
+  --card-header-from: var(--vku-yellow-400);
+  --card-header-to: var(--vku-yellow-500);
+  --card-header-ink: var(--vku-ink);
+  --card-tint: var(--vku-yellow-50);
+  --card-border: #fde68a;
+  --card-outline-ink: var(--vku-yellow-800);
+  --accent: var(--vku-yellow-500);
+  --accent-strong: var(--vku-yellow-600);
+  --on-accent: var(--vku-ink);
 }
 
 .comp-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
 }
 
-.comp-card-main {
-  min-width: 0;
+/* Nhấc thẻ khi trỏ vào chỉ bật khi người dùng không yêu cầu giảm chuyển động. */
+@media (prefers-reduced-motion: no-preference) {
+  .comp-card:hover {
+    transform: translateY(-2px);
+  }
 }
 
-/* Tiêu đề và chip trạng thái cùng một hàng: chip là điểm nhấn của thẻ */
+/* Vùng nội dung co giãn để footer luôn nằm sát đáy thẻ. */
+.comp-card-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  padding: var(--space-md);
+}
+
+/* Dải header màu đặc trưng của cột: chạy hết bề ngang thẻ, tiêu đề bên trái và
+   status badge bên phải. Đây là chỗ duy nhất mang màu theme ở cường độ cao. */
 .comp-card-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  min-height: 56px;
+  padding: 12px var(--space-md);
+  background: linear-gradient(100deg, var(--card-header-from), var(--card-header-to));
+  color: var(--card-header-ink);
 }
 
 .comp-card-chips {
@@ -1780,8 +1816,9 @@ select.input {
 .comp-card-title {
   margin: 0;
   min-width: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
+  color: var(--card-header-ink);
+  font-size: 1.125rem;
+  font-weight: 700;
   line-height: 1.35;
   letter-spacing: -0.015em;
 }
@@ -1793,7 +1830,6 @@ select.input {
 
 .comp-card:hover .comp-card-title a {
   text-decoration: underline;
-  text-decoration-color: var(--border-strong);
   text-underline-offset: 4px;
 }
 
@@ -1807,6 +1843,27 @@ select.input {
 .status-badge-lg .chip-dot {
   width: 6px;
   height: 6px;
+}
+
+/* Badge nằm trên dải header màu nên phải đục hoàn toàn mới đủ tương phản. Màu badge
+   vẫn theo trạng thái cuộc thi, tuyệt đối không theo theme của cột. */
+.comp-card-head .status-badge {
+  border-color: transparent;
+}
+
+.comp-card-head .status-badge.success {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.comp-card-head .status-badge.closed {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.comp-card-head .status-badge.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .comp-card-desc {
@@ -1846,16 +1903,16 @@ select.input {
   letter-spacing: -0.005em;
 }
 
-/* Hộp thông số (Stitch: bg-surface-subtle border rounded-lg p-2) */
+/* Hai ô thông số nằm sát đáy phần nội dung nên mọi thẻ trong hàng có cùng nhịp. */
 .comp-telemetry {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-xs);
-  margin-bottom: var(--space-md);
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
+  gap: var(--space-sm);
+  margin: auto 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e8edf3;
+  border-radius: var(--radius-lg);
+  background: #f8fafc;
 }
 
 .comp-telemetry-item {
@@ -1868,7 +1925,7 @@ select.input {
 .comp-telemetry-label {
   color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: 0.6875rem;
+  font-size: var(--text-label);
   line-height: 1.3;
 }
 
@@ -1881,6 +1938,7 @@ select.input {
   font-variant-numeric: tabular-nums;
 }
 
+/* Footer neo đáy thẻ: `margin-top: auto` giữ hàng nút thẳng nhau giữa các thẻ. */
 .comp-card-footer {
   display: flex;
   align-items: center;
@@ -1888,8 +1946,8 @@ select.input {
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-top: auto;
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border);
+  padding: var(--space-md);
+  border-top: 1px solid var(--vku-border-soft);
 }
 
 .comp-card-footer .join-state {
@@ -1901,17 +1959,22 @@ select.input {
   gap: var(--space-sm);
 }
 
-/* Stitch: px-4 rounded-md font-label-md, nút chính có shadow-sm — cao 34px gọn gàng */
 .comp-card-footer .btn {
-  height: 34px;
-  padding-inline: 12px;
-  border-radius: var(--radius-md);
+  height: 40px;
+  padding-inline: var(--space-md);
+  border-radius: var(--radius-lg);
   font-size: var(--text-label-md);
   gap: 6px;
 }
 
-.comp-card-footer .btn:not(.btn-outline) {
-  box-shadow: var(--shadow-sm);
+/* Nút viền lấy màu chữ của cột; nút đặc và vòng focus đã ăn theo `--accent`. */
+.comp-card .btn-outline {
+  color: var(--card-outline-ink);
+}
+
+.comp-card .btn-outline:hover {
+  background: var(--card-tint);
+  color: var(--card-outline-ink);
 }
 
 /* Chip trung tính cho join mode (Stitch: rounded-full border px-2 py-0.5 bg-surface-subtle) */
@@ -2058,93 +2121,144 @@ select.input {
 }
 
 /* --- Dashboard hero + toolbar --- */
-/* Dashboard rộng 76rem (1216px) cho layout 3 cột cân đối, tương thích trần đảo navbar */
+/* Trần rộng 1440px do `.app-main-dashboard` quyết định; ở đây chỉ căn giữa. */
 .dash-page {
-  max-width: 76rem;
   margin-inline: auto;
 }
 
+/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
 .dash-hero {
+  position: relative;
   width: 100%;
-  padding-bottom: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-lg);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. `pointer-events: none` để không chắn thao tác. */
+.dash-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.dash-hero > * {
+  position: relative;
 }
 
 .dash-hero-top {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: var(--space-lg);
   padding-bottom: var(--space-lg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--vku-border-soft);
 }
 
 .dash-hero-copy {
   min-width: 0;
-  max-width: 48rem;
 }
 
 .dash-title {
   margin: 0;
-  color: var(--text);
+  color: var(--vku-ink);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
 }
 
 .dash-subtitle {
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-sm) 0 0;
   max-width: 42rem;
-  color: var(--text-muted);
+  color: var(--vku-ink-muted);
   font-size: var(--text-body);
   line-height: var(--leading-body);
   letter-spacing: var(--tracking-body);
 }
 
-/* Capsule thống kê: chỉ hiện từ lg như Stitch (hidden lg:flex) */
+/* Ô thống kê: ba thẻ tint xanh–đỏ–vàng, hiển thị ở mọi bề rộng màn hình. */
 .dash-stats {
-  display: none;
-  align-items: center;
-  gap: var(--space-lg);
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--space-sm);
+  margin: 0;
 }
 
 .dash-stat {
+  --stat-bg: #eff6ff;
+  --stat-border: #bfdbfe;
+  --stat-ink: var(--vku-blue-700);
+
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-xs);
   min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--stat-border);
+  border-radius: var(--radius-xl);
+  background: var(--stat-bg);
+}
+
+.dash-stat-closed {
+  --stat-bg: #fff1f2;
+  --stat-border: #fecdd3;
+  --stat-ink: var(--vku-red-700);
+}
+
+/* Vàng 800 là tông vàng duy nhất đủ tương phản để làm màu chữ. */
+.dash-stat-joined {
+  --stat-bg: var(--vku-yellow-50);
+  --stat-border: #fde68a;
+  --stat-ink: var(--vku-yellow-800);
 }
 
 .dash-stat-label {
-  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--stat-ink);
   font-family: var(--font-sans);
   font-size: var(--text-label);
+  font-weight: 600;
   line-height: var(--leading-label);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .dash-stat-value {
-  color: var(--text);
-  font-size: var(--text-heading-sm);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
+  margin: 0;
+  color: var(--stat-ink);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
 
-.dash-stat-divider {
-  flex: none;
-  align-self: stretch;
-  width: 1px;
-  min-height: 32px;
-  background: var(--border);
-}
-
+/* Toolbar là phần cuối của panel hero nên không cần khoảng đệm dưới riêng. */
 .dash-toolbar {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
   padding-top: var(--space-md);
-  margin-bottom: var(--space-lg);
 }
 
 .dash-toolbar-left {
@@ -2172,29 +2286,29 @@ select.input {
 }
 
 .dash-search .input {
+  height: 44px;
   padding-right: 14px;
   padding-left: 36px;
-  border-radius: var(--radius-sm);
+  border-radius: 10px;
   background: var(--surface);
   font-size: var(--text-body-sm);
 }
 
+/* Filter là hàng pill rời, không còn là segmented control nền xám. */
 .dash-filters {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  padding: var(--space-xs);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-container);
+  gap: var(--space-sm);
 }
 
 .dash-filter {
-  padding: 6px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text-muted);
+  height: 44px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface-container-low);
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--text-control);
   font-weight: 500;
@@ -2204,20 +2318,24 @@ select.input {
   cursor: pointer;
   transition:
     background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);
 }
 
 .dash-filter:hover {
-  color: var(--text);
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
 .dash-filter[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-accent);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--vku-blue-700);
+  background: var(--vku-blue-700);
+  color: #fff;
 }
 
-.dash-count {
+.dash-count,
+.ac-table-head-count {
   margin: 0;
   color: var(--text-muted);
   font-family: var(--font-sans);
@@ -2301,6 +2419,8 @@ select.input {
   font-weight: 500;
   text-decoration: none;
   transition: color var(--duration-fast) var(--ease-standard);
+  /* Chữ chỉ cao ~23px; nâng vùng chạm lên ngưỡng 24×24 của WCAG 2.2. */
+  min-height: 24px;
 }
 
 .comp-crumb-back:hover {
@@ -4269,6 +4389,9 @@ select.input {
 
 .subm-id-copy-btn {
   padding: 2px;
+  /* Icon 12px nhưng vùng chạm phải đạt ngưỡng 24×24 của WCAG 2.2. */
+  min-width: 24px;
+  min-height: 24px;
   border: none;
   background: transparent;
   color: var(--palette-secondary);
@@ -4283,6 +4406,10 @@ select.input {
 .subm-id-copy-btn:hover {
   color: var(--palette-primary);
   background: var(--palette-surface-container);
+}
+
+.subm-id-copy-btn.copied {
+  color: var(--success);
 }
 
 .subm-badge-best {
@@ -5127,8 +5254,7 @@ select.input {
   white-space: nowrap;
 }
 
-.admin-members-total,
-.admin-accounts-total {
+.admin-members-total {
   padding: 12px 16px;
   border-top: 1px solid var(--border);
   background: var(--surface-subtle);
@@ -5475,25 +5601,28 @@ select.input {
   line-height: 1;
 }
 
+/* Một surface chung cho cả dải thống kê; các ô ngăn nhau bằng đường kẻ, không bằng
+   khung riêng — bốn chiếc card rời làm màn quản trị nặng hơn mức cần thiết. */
 .ac-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-md);
+  gap: 0;
   margin-bottom: 28px;
-}
-
-.ac-stat-card {
-  min-height: 126px;
-  padding: 20px;
+  padding: var(--space-md) 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-card);
-  transition: border-color var(--duration-fast) var(--ease-standard);
 }
 
-.ac-stat-card:hover {
-  border-color: var(--border-strong);
+.ac-stat-card {
+  min-width: 0;
+  padding: 0 20px;
+  border-left: 1px solid var(--border);
+}
+
+.ac-stat-card:first-child {
+  border-left: 0;
 }
 
 .ac-stat-head {
@@ -5773,6 +5902,10 @@ select.input {
 }
 
 .ac-table-scroll {
+  /* Neo containing block vào khung cuộn để .sr-only (position: absolute) trong ô hành động
+     không thoát ra ngoài và kéo cả trang cuộn ngang ở màn hẹp — cùng cách chữa với
+     .admin-accounts-table-wrap. Menu thao tác không bị ảnh hưởng vì nó là portal position: fixed. */
+  position: relative;
   overflow-x: auto;
 }
 
@@ -6688,6 +6821,16 @@ select.input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* Hai cột: ô ở cột 1 không mang vạch dọc, hàng thứ hai tự tách bằng khoảng đệm. */
+  .ac-stat-card:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .ac-stat-card:nth-child(n + 3) {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+  }
+
   .ac-table {
     min-width: 1270px;
   }
@@ -6831,6 +6974,17 @@ select.input {
     grid-template-columns: 1fr;
   }
 
+  /* Một cột: bỏ hết vạch dọc, mỗi hàng cách nhau bằng khoảng đệm dọc. */
+  .ac-stat-card,
+  .ac-stat-card:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .ac-stat-card:not(:first-child) {
+    margin-top: var(--space-md);
+    padding-top: var(--space-md);
+  }
+
   /* Giữ nút xóa cạnh URL, chỉ xếp tên tài nguyên xuống dòng riêng. */
   .ac-resource-row {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -6881,7 +7035,6 @@ select.input {
    ============================================================================= */
 .btn:focus-visible,
 .input:focus-visible,
-.tab-link:focus-visible,
 .content-nav-item:focus-visible,
 .app-nav a:focus-visible,
 .app-drawer-nav a:focus-visible,
@@ -6891,6 +7044,10 @@ select.input {
 .login-toggle:focus-visible,
 .dash-filter:focus-visible,
 .ac-leaderboard-field input:focus-visible,
+/* Vùng cuộn ngang của bảng: có tabIndex=0 nên phải thấy được focus. */
+.table-wrap:focus-visible,
+.md-table-wrap:focus-visible,
+.ac-table-scroll:focus-visible,
 a:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--accent);
@@ -6959,42 +7116,33 @@ button:focus-visible {
     padding: 56px;
   }
 
-  /* S02: hero xếp ngang, toolbar một hàng, grid 2 cột ở tablet */
-  .dash-hero-top {
-    flex-direction: row;
-    align-items: flex-end;
-    justify-content: space-between;
-  }
-
+  /* S02: toolbar một hàng, grid 2 cột ở tablet. Hàng chỉ có một con là
+     `.dash-toolbar-left` và con đó giãn hết bề ngang nên không cần `justify-content`. */
   .dash-toolbar {
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
   }
 
+  /* Ô search giãn hết phần trống nên hàng toolbar chạm đúng mép phải panel — trùng
+     mép phải của ô thống kê "Đã tham gia" ở khối trên. */
   .dash-toolbar-left {
+    flex: 1 1 auto;
     flex-wrap: nowrap;
   }
 
-  /* Rộng 18rem như Stitch nhưng co được, tránh tràn ngang ở dải 768–870px */
+  /* Bỏ bề rộng 18rem cố định: search tự co giãn, ba nút lọc giữ nguyên cỡ và dồn về
+     mép phải. `min-width: 0` sẵn có cho phép co xuống ở dải 768–870px. */
   .dash-search {
-    width: 18rem;
-    flex: 0 1 18rem;
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .comp-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-md);
   }
 }
 
 @media (min-width: 64rem) {
-  /* Dashboard hiển thị 3 cột cuộc thi ở màn hình desktop */
-  .comp-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-md);
-  }
-
   /* Từ lg mới đủ chỗ cho chữ thương hiệu cạnh mark */
   .app-brand-text {
     position: static;
@@ -7016,9 +7164,33 @@ button:focus-visible {
     display: block;
   }
 
-  /* Stitch chỉ hiện capsule thống kê từ lg */
+  /* Hero xếp ngang: tiêu đề bên trái, ô thống kê bên phải. */
+  .dash-hero-top {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-xl);
+  }
+
+  .dash-hero-copy {
+    max-width: 30rem;
+  }
+
   .dash-stats {
-    display: flex;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    flex: none;
+    width: 34rem;
+  }
+}
+
+/* 75rem = 1200px: mốc chuyển sang 3 cột cuộc thi theo DESIGN.md. */
+@media (min-width: 75rem) {
+  .comp-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dash-stats {
+    width: 38rem;
   }
 }
 
@@ -7028,14 +7200,8 @@ button:focus-visible {
   }
 }
 
-/* 47.99rem chứ không phải 48rem: hai mốc trùng nhau tại đúng 768px thì block này
-   thắng và hạ đảo xuống 60px trong khi nav đã hiện như desktop. */
+/* 47.99rem chứ không phải 48rem: tránh trùng mốc với block md ngay dưới. */
 @media (max-width: 47.99rem) {
-  :root {
-    /* Nút mở menu 44px + 2 mép 8px ⇒ đảo cao 60px; --header-band/--header-offset tự theo */
-    --header-height: 60px;
-  }
-
   /* Touch target ≥44px cho drawer điều hướng trên màn nhỏ */
   .app-drawer .btn,
   .app-drawer-nav a {
@@ -7126,7 +7292,40 @@ button:focus-visible {
   /* Touch target ≥44px cho toolbar + nút hành động trên màn nhỏ */
   .dash-filter,
   .dash-search .input,
-  .comp-card-footer .btn {
+  .comp-card-footer .btn,
+  .ov-actions .btn,
+  /* Rail quản trị và hàng nút ở đầu trang chi tiết cũng là điều hướng chính. */
+  .admin-detail-tab,
+  .admin-detail-action,
+  /* Bộ lọc, làm mới, menu hàng, phân trang và nút trong trạng thái rỗng của bảng. */
+  .ac-filter,
+  .ac-refresh,
+  .ac-create-button,
+  .ac-state-button,
+  .ac-menu-trigger,
+  .ac-pagination-controls button {
+    min-height: 44px;
+  }
+
+  .ac-pagination-controls button,
+  /* Nút mở menu thao tác của hàng: 32×32 là quá nhỏ để chạm chính xác. Menu neo
+     theo rect của nút nên nút to hơn không ảnh hưởng vị trí bung. */
+  .ac-menu-trigger {
+    min-width: 44px;
+  }
+
+  /* Hamburger và logo là điều hướng chính trên mobile. Header có chiều cao cố định
+     (--header-height 64px) nên nút to hơn không làm header cao thêm. */
+  .app-menu-toggle {
+    width: 44px;
+    height: 44px;
+  }
+  .app-brand,
+  .comp-crumb-back {
+    min-height: 44px;
+  }
+  /* Phân trang của thí sinh (bài đã nộp, bảng xếp hạng) là nút chạm thường xuyên. */
+  .pagination-controls button {
     min-height: 44px;
   }
   .dash-toolbar-left {
@@ -7330,106 +7529,42 @@ button:focus-visible {
   flex-shrink: 0;
 }
 
-/* Metadata summary strip */
-.admin-detail-summary {
-  margin-top: 0.875rem;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0.625rem 1rem;
-}
-
-.admin-detail-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1.5rem;
-  margin: 0;
-  padding: 0;
-}
-
-.admin-detail-meta-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4375rem;
-  font-size: 0.8125rem;
-}
-
-.admin-detail-meta-item dt {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0;
-}
-
-.admin-detail-meta-item dd {
-  margin: 0;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.admin-detail-meta-item dd.mono {
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  padding: 0.125rem 0.375rem;
-  border-radius: 3px;
-}
-
-/* Tabs */
-.admin-detail-tabs {
-  display: flex;
-  gap: 1.75rem;
-  border-bottom: 1px solid var(--border);
-  margin-top: 1.25rem;
-  margin-bottom: 1.5rem;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.admin-detail-tabs::-webkit-scrollbar {
-  display: none;
-}
-
+/* Tab của rail: pill cuộn ngang, mục đang mở là pill sáng nổi trên nền rail. */
+/* Tab của rail: pill cuộn ngang, mục đang mở là pill sáng nổi trên nền rail. */
 .admin-detail-tab {
   appearance: none;
   -webkit-appearance: none;
-  background: transparent;
-  border: 0;
-  padding: 0.6875rem 0;
-  font-family: inherit;
-  font-size: 0.84375rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  cursor: pointer;
-  position: relative;
-  white-space: nowrap;
   display: inline-flex;
   align-items: center;
-  transition: color 0.15s;
+  flex: none;
+  min-height: 40px;
+  padding: 0.5rem 0.875rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-control);
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .admin-detail-tab:hover {
   color: var(--text);
+  background: var(--surface);
 }
 
 .admin-detail-tab.active {
   color: var(--text);
   font-weight: 600;
-}
-
-.admin-detail-tab-indicator {
-  position: absolute;
-  bottom: -1px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background-color: var(--text);
-  border-radius: 2px 2px 0 0;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 
 .admin-detail-toast {
@@ -7631,6 +7766,8 @@ button:focus-visible {
   border: 1px solid var(--border);
   border-radius: 3px;
   padding: 0.1875rem 0.4375rem;
+  /* Nút copy trong pill chỉ cao ~22px; nâng lên ngưỡng chạm 24px tối thiểu. */
+  min-height: 24px;
   font-family: inherit;
   font-size: 0.6875rem;
   font-weight: 500;
@@ -7923,11 +8060,6 @@ button:focus-visible {
     width: 100%;
     justify-content: flex-start;
   }
-  .admin-detail-meta {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.375rem;
-  }
   .s14-bento-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
@@ -7955,5 +8087,165 @@ button:focus-visible {
   }
   .s14-search-input {
     width: 100%;
+  }
+}
+
+/* =============================================================================
+   S04 — Trải nghiệm cuộc thi: đầu khối danh sách, dải facts, rail quản trị
+   ============================================================================= */
+
+/* --- Đầu khối danh sách: một dòng, tên khối bên trái, số lượng bên phải.
+   Không bọc trong card riêng để mỗi màn chỉ còn một điểm neo thị giác. --- */
+.dash-list-head,
+.ac-table-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.dash-list-title,
+.ac-table-head-title {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--text-heading-sm);
+  font-weight: 600;
+  line-height: var(--leading-h3);
+  letter-spacing: var(--tracking-h3);
+}
+
+.dash-list-head {
+  margin-bottom: var(--space-md);
+}
+
+/* Đầu bảng nằm trong .ac-table-card nên tự chịu phần đệm ngang bằng với ô đầu tiên. */
+.ac-table-head {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* --- Dải facts của trang quản trị chi tiết: cùng ngôn ngữ với .comp-facts ở trang
+   công khai, chỉ khác số cột vì có sáu mục thay vì ba. --- */
+.admin-detail-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-sm);
+  margin: 0.875rem 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+
+.admin-detail-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+}
+
+.admin-detail-fact dt {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.admin-detail-fact dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+  line-height: var(--leading-secondary);
+  font-variant-numeric: tabular-nums;
+  /* Slug dài không được đẩy dải rộng ra ngoài khung. */
+  overflow-wrap: anywhere;
+}
+
+/* Slug là dữ liệu kỹ thuật nên giữ mono, nhưng bỏ hộp viền cho khỏi rối trong dải. */
+.admin-detail-fact dd.mono {
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+@media (min-width: 48rem) {
+  .admin-detail-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    /* Không có vạch ngang: một đường kẻ dọc duy nhất giữa hai cột, đủ để tách nhóm. */
+    gap: var(--space-sm) 0;
+  }
+
+  .admin-detail-fact {
+    border-left: 0;
+    padding-left: var(--space-sm);
+  }
+
+  .admin-detail-fact:nth-child(even) {
+    border-left: 1px solid var(--border);
+    padding-left: var(--space-md);
+  }
+}
+
+@media (min-width: 64rem) {
+  .admin-detail-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  /* Chỉ cột 2 và 3 mang vạch ngăn dọc. */
+  .admin-detail-fact {
+    border-left: 0;
+    padding-left: var(--space-sm);
+  }
+
+  .admin-detail-fact:nth-child(3n + 2),
+  .admin-detail-fact:nth-child(3n) {
+    border-left: 1px solid var(--border);
+    padding-left: var(--space-md);
+  }
+}
+
+/* --- Trang quản trị chi tiết: rail ngang cho các khu vực con, panel nằm dưới.
+   Dùng flex cột chứ không phải grid: grid nhốt rail trong hàng của chính nó nên
+   `position: sticky` không có chỗ để dính, còn flex thì lấy cả hộp làm containing block. --- */
+.admin-detail-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.admin-detail-rail {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-container-low);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.admin-detail-rail::-webkit-scrollbar {
+  display: none;
+}
+
+/* Panel là vùng nội dung được co: thiếu min-width: 0 thì bảng rộng bên trong
+   sẽ kéo cả trang rộng ra. */
+.admin-detail-panel {
+  min-width: 0;
+}
+
+/* Từ lg thanh tab dính ngay dưới header để bảng dài cuộn qua vẫn đổi được khu
+   vực. Ghim ở `--header-band` (đáy header) chứ không phải `--header-offset`:
+   khe 20px của offset nằm trong suốt nên dòng bảng sẽ lộ ra ở đó. */
+@media (min-width: 64rem) {
+  .admin-detail-rail {
+    position: sticky;
+    top: var(--header-band);
+    z-index: 3;
   }
 }

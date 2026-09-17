@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-const FOCUSABLE =
+/** Dùng chung cho Modal và drawer điều hướng để hai focus trap không lệch nhau. */
+export const FOCUSABLE =
   "[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 export function Modal({
@@ -10,22 +11,31 @@ export function Modal({
   children,
   large = true,
   variant,
+  returnFocusRef,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   large?: boolean;
   variant?: "competition-form" | "account-form";
+  /**
+   * Nơi cần trả focus khi đóng. Dùng khi modal được mở từ menu ba chấm: menu
+   * unmount trước khi modal kịp ghi nhận `document.activeElement`, nên focus
+   * "trước đó" sẽ là `<body>`. Row vẫn mounted nên ref của nút trigger còn hiệu lực.
+   */
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
+  const returnFocusRefRef = useRef(returnFocusRef);
   const previousFocusRef = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
 
   useEffect(() => {
     onCloseRef.current = onClose;
-  }, [onClose]);
+    returnFocusRefRef.current = returnFocusRef;
+  }, [onClose, returnFocusRef]);
 
   useEffect(() => {
     if (!dialogRef.current?.contains(document.activeElement)) {
@@ -70,7 +80,7 @@ export function Modal({
     return () => {
       document.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      previousFocus?.focus();
+      (returnFocusRefRef.current?.current ?? previousFocus)?.focus();
     };
   }, []);
 
@@ -108,6 +118,7 @@ export function ConfirmModal({
   danger = false,
   onConfirm,
   onClose,
+  returnFocusRef,
 }: {
   title: string;
   body: string;
@@ -115,6 +126,7 @@ export function ConfirmModal({
   danger?: boolean;
   onConfirm: () => Promise<void>;
   onClose: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -132,7 +144,7 @@ export function ConfirmModal({
   }
 
   return (
-    <Modal title={title} onClose={onClose} large={false}>
+    <Modal title={title} onClose={onClose} large={false} returnFocusRef={returnFocusRef}>
       <div className={`confirm-modal${danger ? " confirm-modal-danger" : ""}`}>
         <div className="confirm-modal-body">
           <span className="confirm-modal-icon" aria-hidden="true">

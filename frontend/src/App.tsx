@@ -1,7 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Link, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { AuthProvider, useAuth, type Account } from "./auth/AuthContext";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth";
+import { FOCUSABLE } from "./components/Modal";
+import { useRouteFocus } from "./hooks/useRouteFocus";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
 import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
@@ -119,6 +122,154 @@ function roleLabel(role: string) {
   return role === "admin" ? "Admin" : "Thí sinh";
 }
 
+/** Lý do đóng drawer quyết định focus trả về đâu (xem `closeDrawer`). */
+type DrawerCloseReason = "escape" | "overlay" | "close" | "navigation";
+
+/**
+ * Drawer điều hướng dưới 64rem. Portal ra `document.body` để `#root` có thể ở
+ * trạng thái `inert` mà không vô hiệu hoá chính drawer, và để không phụ thuộc
+ * vào cascade `pointer-events` của `.app-header`.
+ */
+function MobileDrawer({
+  account,
+  navItems,
+  returnFocusRef,
+  onClose,
+  onLogout,
+}: {
+  account: Account | null;
+  navItems: NavItem[];
+  returnFocusRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onLogout: () => void | Promise<void>;
+}) {
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  /**
+   * Focus phải trả về hamburger *sau* khi `#root` hết `inert`, nên việc restore
+   * nằm trong cleanup của effect bên dưới chứ không ở handler đóng drawer.
+   * Điều hướng thì không trả về: `useRouteFocus` đưa focus tới main của trang mới.
+   */
+  const restoreFocus = useRef(false);
+
+  /** Ghi nhớ lý do đóng trước khi unmount, vì cleanup không nhận được tham số. */
+  const requestClose = useCallback((reason: DrawerCloseReason) => {
+    restoreFocus.current = reason !== "navigation";
+    onCloseRef.current();
+  }, []);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const root = document.getElementById("root");
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    if (root) root.inert = true;
+    drawerRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        requestClose("escape");
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const drawer = drawerRef.current;
+      if (!drawer) return;
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      const outside = !(active instanceof HTMLElement) || !drawer.contains(active);
+
+      if (event.shiftKey && (outside || active === first)) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (outside || active === last)) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (root) root.inert = false;
+      // Focus chỉ vào được sau khi `inert` đã gỡ, nên phải đặt ở đây.
+      if (restoreFocus.current) returnFocusRef.current?.focus();
+    };
+  }, [requestClose, returnFocusRef]);
+
+  return createPortal(
+    <>
+      <div className="app-drawer-overlay" onClick={() => requestClose("overlay")} />
+      <div
+        ref={drawerRef}
+        className="app-drawer"
+        id="app-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Menu điều hướng"
+      >
+        <div className="app-drawer-head">
+          <div className="app-drawer-user">
+            {account ? (
+              <>
+                <span className="user-name">{account.name}</span>
+                <span
+                  className={account.role === "admin" ? "role-badge" : "role-badge badge-muted"}
+                >
+                  {roleLabel(account.role)}
+                </span>
+              </>
+            ) : (
+              <span className="user-name">{BRAND}</span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="modal-close"
+            aria-label="Đóng menu"
+            onClick={() => requestClose("close")}
+          >
+            <IconClose />
+          </button>
+        </div>
+        <nav className="app-drawer-nav" aria-label="Điều hướng chính (menu di động)">
+          {navItems.map((item) => (
+            <NavLink key={item.to} to={item.to} end={item.end} onClick={() => requestClose("navigation")}>
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+        {/* Dưới 40rem nút "Đăng nhập" trên header bị ẩn nên drawer là lối vào
+            duy nhất cho khách trên điện thoại. */}
+        <div className="app-drawer-foot">
+          {account ? (
+            <button className="btn btn-secondary" onClick={() => void onLogout()}>
+              <IconLogout />
+              Đăng xuất
+            </button>
+          ) : (
+            <Link className="btn" to="/login" onClick={() => requestClose("navigation")}>
+              Đăng nhập
+            </Link>
+          )}
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
 function Header() {
   const { account, loading, logout } = useAuth();
   const navigate = useNavigate();
@@ -133,17 +284,10 @@ function Header() {
     navigate("/login");
   }
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setMenuOpen(false);
-        toggleRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [menuOpen]);
+  /** Việc trả focus về hamburger do chính drawer làm khi unmount (xem `MobileDrawer`). */
+  function closeDrawer() {
+    setMenuOpen(false);
+  }
 
   // S01 (login) không có app shell: chỉ còn nút quay lại trong trang.
   if (pathname === "/login") return null;
@@ -196,10 +340,10 @@ function Header() {
             ref={toggleRef}
             type="button"
             className="app-menu-toggle"
-            aria-label="Mở menu điều hướng"
+            aria-label={menuOpen ? "Đóng menu điều hướng" : "Mở menu điều hướng"}
             aria-expanded={menuOpen}
             aria-controls="app-drawer"
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={() => (menuOpen ? closeDrawer() : setMenuOpen(true))}
           >
             {menuOpen ? <IconClose /> : <IconMenu />}
           </button>
@@ -207,64 +351,13 @@ function Header() {
       </div>
 
       {menuOpen && (
-        <>
-          <div className="app-drawer-overlay" onClick={() => setMenuOpen(false)} />
-          <div className="app-drawer" id="app-drawer">
-            <div className="app-drawer-head">
-              <div className="app-drawer-user">
-                {account ? (
-                  <>
-                    <span className="user-name">{account.name}</span>
-                    <span
-                      className={account.role === "admin" ? "role-badge" : "role-badge badge-muted"}
-                    >
-                      {roleLabel(account.role)}
-                    </span>
-                  </>
-                ) : (
-                  <span className="user-name">{BRAND}</span>
-                )}
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                aria-label="Đóng menu"
-                onClick={() => {
-                  setMenuOpen(false);
-                  toggleRef.current?.focus();
-                }}
-              >
-                <IconClose />
-              </button>
-            </div>
-            <nav className="app-drawer-nav" aria-label="Điều hướng chính">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.end}
-                  onClick={() => setMenuOpen(false)}
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-            {/* Dưới 40rem nút "Đăng nhập" trên header bị ẩn nên drawer là lối vào
-                duy nhất cho khách trên điện thoại. */}
-            <div className="app-drawer-foot">
-              {account ? (
-                <button className="btn btn-secondary" onClick={() => void onLogout()}>
-                  <IconLogout />
-                  Đăng xuất
-                </button>
-              ) : (
-                <Link className="btn" to="/login" onClick={() => setMenuOpen(false)}>
-                  Đăng nhập
-                </Link>
-              )}
-            </div>
-          </div>
-        </>
+        <MobileDrawer
+          account={account}
+          navItems={navItems}
+          returnFocusRef={toggleRef}
+          onClose={closeDrawer}
+          onLogout={onLogout}
+        />
       )}
     </header>
   );
@@ -274,11 +367,14 @@ export function App() {
   const { pathname } = useLocation();
   // Trang login không có header nên không giữ chỗ cho header.
   const bare = pathname === "/login";
+  // Dashboard là lưới 3 cột nên cần trần rộng hơn các màn còn lại.
+  const dashboard = pathname === "/";
+  useRouteFocus();
   return (
     <AuthProvider>
       <Header />
       <main
-        className={bare ? "app-main app-main-bare" : "app-main"}
+        className={`app-main${bare ? " app-main-bare" : ""}${dashboard ? " app-main-dashboard" : ""}`}
         id="main-content"
         tabIndex={-1}
       >
