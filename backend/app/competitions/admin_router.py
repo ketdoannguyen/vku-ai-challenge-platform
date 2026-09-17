@@ -30,8 +30,15 @@ async def _get_competition_or_404(db, competition_id: str) -> dict:
 async def list_competitions(request: Request, admin: AdminAccount) -> dict:
     db = request.app.state.mongo.db
     cursor = db[service.COMPETITIONS_COLLECTION].find().sort("name", 1)
-    competitions = [service.public_competition(c) async for c in cursor]
-    return {"competitions": competitions}
+    documents = [competition async for competition in cursor]
+    # Chỉ bảng admin cần số thành viên/bài nộp — endpoint public giữ nguyên payload.
+    counts = await service.activity_counts(db, [document["_id"] for document in documents])
+    return {
+        "competitions": [
+            {**service.public_competition(document), **counts[document["_id"]]}
+            for document in documents
+        ]
+    }
 
 
 @router.post("", status_code=201)

@@ -1,9 +1,10 @@
 /** Admin competitions: table + tạo/sửa modal + publish/close/clone confirm. */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition, CompetitionsResponse } from "../api/competitions";
+import type { AdminCompetition, AdminCompetitionsResponse, Competition } from "../api/competitions";
 import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, statusClass } from "../api/competitions";
 import {
   CompetitionActionConfirmModal,
@@ -77,12 +78,22 @@ function IconCheck({ className }: { className?: string }) {
   );
 }
 
+function IconDots({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none" />
+    </Icon>
+  );
+}
+
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Đã xảy ra lỗi không xác định.";
 }
 
 export function AdminCompetitionsPage() {
-  const [data, setData] = useState<CompetitionsResponse | null>(null);
+  const [data, setData] = useState<AdminCompetitionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -98,7 +109,7 @@ export function AdminCompetitionsPage() {
     setError(null);
     if (refresh) setRefreshing(true);
     try {
-      setData(await api.get<CompetitionsResponse>("/admin/competitions"));
+      setData(await api.get<AdminCompetitionsResponse>("/admin/competitions"));
     } catch (err) {
       setError(err);
     } finally {
@@ -246,6 +257,8 @@ export function AdminCompetitionsPage() {
               <col className="ac-col-status" />
               <col className="ac-col-time" />
               <col className="ac-col-metric" />
+              <col className="ac-col-members" />
+              <col className="ac-col-submissions" />
               <col className="ac-col-actions" />
             </colgroup>
             <thead>
@@ -255,19 +268,21 @@ export function AdminCompetitionsPage() {
                 <th scope="col">Trạng thái</th>
                 <th scope="col">Thời gian</th>
                 <th scope="col">Metric</th>
+                <th scope="col" className="ac-count-head">Thành viên</th>
+                <th scope="col" className="ac-count-head">Bài nộp</th>
                 <th scope="col">Thao tác</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="ac-table-state">
+                  <td colSpan={8} className="ac-table-state">
                     <Loading />
                   </td>
                 </tr>
               ) : error ? (
                 <tr>
-                  <td colSpan={6} className="ac-table-state">
+                  <td colSpan={8} className="ac-table-state">
                     <div className="ac-error-state" role="alert">
                       <strong>Không thể tải danh sách cuộc thi.</strong>
                       <span>{errorMessage(error)}</span>
@@ -279,7 +294,7 @@ export function AdminCompetitionsPage() {
                 </tr>
               ) : competitions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="ac-table-state">
+                  <td colSpan={8} className="ac-table-state">
                     <div className="ac-empty-state">
                       <strong>Chưa có cuộc thi nào. Tạo cuộc thi đầu tiên.</strong>
                       <button type="button" className="ac-state-button" onClick={() => setCreating(true)}>
@@ -290,7 +305,7 @@ export function AdminCompetitionsPage() {
                 </tr>
               ) : pageItems.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="ac-table-state">
+                  <td colSpan={8} className="ac-table-state">
                     <div className="ac-empty-state">
                       <strong>Không tìm thấy cuộc thi phù hợp.</strong>
                       <button type="button" className="ac-state-button" onClick={clearFilters}>
@@ -424,13 +439,11 @@ function CompetitionRow({
   onEdit,
   onConfirm,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   onEdit: () => void;
   onConfirm: (action: CompetitionAction) => void;
 }) {
   const c = competition;
-  const editDisabled = c.status === "closed";
-  const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
 
   return (
     <tr>
@@ -466,45 +479,176 @@ function CompetitionRow({
         <div className="ac-metric-cell">
           <strong>{METRIC_LABEL[c.primary_metric]}</strong>
           <span>{c.quota_per_day} lượt/ngày</span>
-          <small>{c.leaderboard_visible ? "Leaderboard hiển thị" : "Leaderboard đang ẩn"}</small>
         </div>
+      </td>
+      <td className="ac-count-cell">
+        <span className={`ac-count${c.member_count === 0 ? " is-empty" : ""}`}>{c.member_count}</span>
+      </td>
+      <td className="ac-count-cell">
+        <span className={`ac-count${c.submission_count === 0 ? " is-empty" : ""}`}>{c.submission_count}</span>
       </td>
       <td className="ac-actions-cell">
-        <div className="ac-actions">
-          <Link className="ac-row-action" to={`/admin/competitions/${c.id}`}>
-            Quản lý
-          </Link>
-          <button
-            className="ac-row-action"
-            type="button"
-            disabled={editDisabled}
-            title={editDisabled ? editReason : undefined}
-            aria-describedby={editDisabled ? `edit-reason-${c.id}` : undefined}
-            onClick={onEdit}
-          >
-            {editDisabled && <IconLock className="ac-action-lock" />}
-            Sửa
-          </button>
-          {c.status === "draft" && (
-            <button className="ac-row-action ac-row-action-primary" type="button" onClick={() => onConfirm("publish")}>
-              Publish
-            </button>
-          )}
-          {c.status === "published" && (
-            <button className="ac-row-action ac-row-action-danger" type="button" onClick={() => onConfirm("close")}>
-              Kết thúc
-            </button>
-          )}
-          <button className="ac-row-action ac-row-action-ghost" type="button" onClick={() => onConfirm("clone")}>
-            Clone
-          </button>
-        </div>
-        {editDisabled && (
-          <span className="ac-disabled-reason" id={`edit-reason-${c.id}`}>
-            {editReason}
-          </span>
-        )}
+        <RowActionMenu competition={c} onEdit={onEdit} onConfirm={onConfirm} />
       </td>
     </tr>
+  );
+}
+
+const EDIT_LOCKED_REASON = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
+
+/** Menu ba chấm: gom thao tác của row để cột Thao tác không chiếm chỗ của các cột khác.
+ *  Render qua portal + position:fixed vì `.ac-table-scroll` (overflow-x) sẽ cắt dropdown. */
+function RowActionMenu({
+  competition,
+  onEdit,
+  onConfirm,
+}: {
+  competition: AdminCompetition;
+  onEdit: () => void;
+  onConfirm: (action: CompetitionAction) => void;
+}) {
+  const c = competition;
+  const editDisabled = c.status === "closed";
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<CSSProperties | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const close = useCallback((refocus = false) => {
+    setOpen(false);
+    setPosition(null);
+    if (refocus) triggerRef.current?.focus();
+  }, []);
+
+  // Đặt menu cạnh nút nhưng lật lên trên nếu chạm đáy viewport (row cuối bảng).
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const menu = menuRef.current;
+    if (!open || !trigger || !menu) return;
+    const rect = trigger.getBoundingClientRect();
+    const openUp = rect.bottom + menu.offsetHeight + 8 > window.innerHeight;
+    setPosition({
+      top: openUp ? rect.top - menu.offsetHeight - 4 : rect.bottom + 4,
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
+
+  // Chỉ focus được sau khi `position` có giá trị: lúc chưa có toạ độ menu còn
+  // `visibility: hidden` và phần tử hidden không nhận được focus.
+  useEffect(() => {
+    if (open && position) menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+  }, [open, position]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      close();
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []);
+      if (event.key === "Escape") {
+        close(true);
+        return;
+      }
+      if (event.key === "Tab") {
+        close();
+        return;
+      }
+      if (items.length === 0) return;
+      const current = items.indexOf(document.activeElement as HTMLElement);
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+      if (step === 0 && event.key !== "Home" && event.key !== "End") return;
+      event.preventDefault();
+      if (event.key === "Home") items[0].focus();
+      else if (event.key === "End") items[items.length - 1].focus();
+      else items[(current + step + items.length) % items.length].focus();
+    }
+
+    // Menu neo theo toạ độ viewport nên phải đóng khi trang cuộn để không lệch.
+    function onViewportChange() {
+      close();
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, [open, close]);
+
+  function run(action: () => void) {
+    close();
+    action();
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        className="ac-menu-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`Thao tác cho ${c.name}`}
+        onClick={() => (open ? close(true) : setOpen(true))}
+      >
+        <IconDots />
+      </button>
+      {editDisabled && (
+        <span className="sr-only" id={`edit-reason-${c.id}`}>
+          {EDIT_LOCKED_REASON}
+        </span>
+      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="ac-menu"
+            role="menu"
+            aria-label={`Thao tác cho ${c.name}`}
+            style={{ ...position, visibility: position ? "visible" : "hidden" }}
+          >
+            <Link className="ac-menu-item" role="menuitem" to={`/admin/competitions/${c.id}`}>
+              Quản lý
+            </Link>
+            <button
+              className="ac-menu-item"
+              type="button"
+              role="menuitem"
+              disabled={editDisabled}
+              title={editDisabled ? EDIT_LOCKED_REASON : undefined}
+              aria-describedby={editDisabled ? `edit-reason-${c.id}` : undefined}
+              onClick={() => run(onEdit)}
+            >
+              {editDisabled && <IconLock className="ac-action-lock" />}
+              Sửa
+            </button>
+            {(c.status === "draft" || c.status === "published") && <div className="ac-menu-separator" />}
+            {c.status === "draft" && (
+              <button className="ac-menu-item ac-menu-item-strong" type="button" role="menuitem" onClick={() => run(() => onConfirm("publish"))}>
+                Publish
+              </button>
+            )}
+            {c.status === "published" && (
+              <button className="ac-menu-item ac-menu-item-danger" type="button" role="menuitem" onClick={() => run(() => onConfirm("close"))}>
+                Kết thúc
+              </button>
+            )}
+            <button className="ac-menu-item" type="button" role="menuitem" onClick={() => run(() => onConfirm("clone"))}>
+              Clone
+            </button>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

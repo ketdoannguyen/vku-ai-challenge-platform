@@ -165,6 +165,32 @@ def _public_submission_config(competition: dict) -> dict:
     }
 
 
+async def activity_counts(db, competition_ids: list) -> dict:
+    """member_count/submission_count cho cả trang, gộp bằng 2 aggregate thay vì N+1."""
+    from app.memberships.service import MEMBERSHIPS_COLLECTION
+    from app.submissions.service import SUBMISSIONS_COLLECTION
+
+    counts = {
+        competition_id: {"member_count": 0, "submission_count": 0}
+        for competition_id in competition_ids
+    }
+    if not counts:
+        return counts
+    for collection_name, field in (
+        (MEMBERSHIPS_COLLECTION, "member_count"),
+        (SUBMISSIONS_COLLECTION, "submission_count"),
+    ):
+        cursor = db[collection_name].aggregate(
+            [
+                {"$match": {"competition_id": {"$in": competition_ids}}},
+                {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+            ]
+        )
+        async for row in cursor:
+            counts[row["_id"]][field] = row["total"]
+    return counts
+
+
 def _iso(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)

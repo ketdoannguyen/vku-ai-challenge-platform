@@ -2,7 +2,10 @@
 
 import asyncio
 
+from bson import ObjectId
+
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.submissions.service import SUBMISSIONS_COLLECTION
 
 
 def _login(client, email="admin@vku.vn", password="adminmatkhau1"):
@@ -96,6 +99,28 @@ def test_admin_list_includes_drafts(client):
     assert resp.status_code == 200
     assert [c["slug"] for c in resp.json()["competitions"]] == ["ai-challenge-2026"]
     assert resp.json()["competitions"][0]["status"] == "draft"
+
+
+def test_admin_list_counts_members_and_submissions_per_competition(client):
+    """Bảng admin hiển thị số thành viên/bài nộp — phải tách đúng theo từng cuộc thi."""
+    _login(client)
+    tracked = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    other = client.post("/api/admin/competitions", json=_body(slug="other-cup", name="Other Cup")).json()["id"]
+    client.post(f"/api/admin/competitions/{tracked}/members", json={"email": "thi.sinh@vku.vn"})
+    account_id = ObjectId()
+    asyncio.run(
+        client.app.state.mongo.db[SUBMISSIONS_COLLECTION].insert_many(
+            [
+                {"competition_id": ObjectId(tracked), "account_id": account_id, "status": "completed"},
+                {"competition_id": ObjectId(tracked), "account_id": account_id, "status": "rejected"},
+                {"competition_id": ObjectId(other), "account_id": account_id, "status": "completed"},
+            ]
+        )
+    )
+
+    by_slug = {c["slug"]: c for c in client.get("/api/admin/competitions").json()["competitions"]}
+    assert (by_slug["ai-challenge-2026"]["member_count"], by_slug["ai-challenge-2026"]["submission_count"]) == (1, 2)
+    assert (by_slug["other-cup"]["member_count"], by_slug["other-cup"]["submission_count"]) == (0, 1)
 
 
 def test_admin_get_detail_by_id(client):

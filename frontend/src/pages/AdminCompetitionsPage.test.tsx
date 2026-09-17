@@ -18,7 +18,15 @@ const DRAFT = {
   quota_per_day: 5,
   leaderboard_visible: true,
   created_by: "admin@vku.vn",
+  member_count: 0,
+  submission_count: 0,
 };
+
+const MENU_LABEL = "Thao tác cho AI Challenge 2026";
+
+async function openRowMenu() {
+  fireEvent.click(await screen.findByRole("button", { name: MENU_LABEL }));
+}
 
 function mockFetch(handler: (url: string, init?: RequestInit) => { body: unknown; status: number }) {
   vi.stubGlobal(
@@ -43,8 +51,46 @@ test("hiển thị table competitions với status badge và hành động theo 
   );
   expect(await screen.findByText("AI Challenge 2026")).toBeTruthy();
   expect(screen.getByText("Nháp")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Publish" })).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull(); // draft chưa có nút close
+  await openRowMenu();
+  expect(await screen.findByRole("menuitem", { name: "Publish" })).toBeTruthy();
+  expect(screen.queryByRole("menuitem", { name: "Kết thúc" })).toBeNull(); // draft chưa có nút close
+});
+
+test("menu ba chấm đóng khi bấm ra ngoài hoặc nhấn Escape", async () => {
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  const trigger = await screen.findByRole("button", { name: MENU_LABEL });
+
+  fireEvent.click(trigger);
+  expect(await screen.findByRole("menuitem", { name: "Quản lý" })).toBeTruthy();
+  fireEvent.mouseDown(document.body);
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Quản lý" })).toBeNull());
+
+  fireEvent.click(trigger);
+  expect(await screen.findByRole("menuitem", { name: "Quản lý" })).toBeTruthy();
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Quản lý" })).toBeNull());
+  expect(document.activeElement).toBe(trigger);
+});
+
+test("cột Thành viên/Bài nộp hiển thị số và metric bỏ dòng leaderboard", async () => {
+  const row = { ...DRAFT, member_count: 12, submission_count: 34, leaderboard_visible: false };
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [row] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole("columnheader", { name: "Thành viên" })).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Bài nộp" })).toBeTruthy();
+  expect(screen.getByText("12")).toBeTruthy();
+  expect(screen.getByText("34")).toBeTruthy();
+  expect(screen.getByText("5 lượt/ngày")).toBeTruthy();
+  expect(screen.queryByText(/Leaderboard/)).toBeNull();
 });
 
 test("tạo cuộc thi thiếu field bắt buộc → form không submit (HTML validate)", async () => {
@@ -72,7 +118,8 @@ test("closed competition không cho mở form sửa", async () => {
       <AdminCompetitionsPage />
     </MemoryRouter>,
   );
-  const edit = await screen.findByRole("button", { name: "Sửa" });
+  await openRowMenu();
+  const edit = await screen.findByRole("menuitem", { name: "Sửa" });
   expect(edit).toBeDisabled();
   expect(edit).toHaveAttribute("title", "Cuộc thi đã kết thúc và không thể chỉnh sửa.");
 });
@@ -102,7 +149,8 @@ test("edit form khóa slug và disable metric khi published", async () => {
       <AdminCompetitionsPage />
     </MemoryRouter>,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Sửa" }));
+  await openRowMenu();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Sửa" }));
   const slugInput = await screen.findByLabelText(/Slug \(không đổi được\)/);
   expect((slugInput as HTMLInputElement).disabled).toBe(true);
   const metricSelect = screen.getByLabelText("Chỉ số chính") as HTMLSelectElement;

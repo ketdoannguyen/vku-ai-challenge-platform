@@ -5645,22 +5645,29 @@ select.input {
 
 .ac-table {
   width: 100%;
-  min-width: 1080px;
+  /* .app-main chặn ở 1280px -> bề rộng khả dụng thật của bảng là 1214px.
+     Để min-width cao hơn sẽ đẩy thanh cuộn ngang hiện thường trực. */
+  min-width: 1200px;
   border-collapse: collapse;
   table-layout: fixed;
   text-align: left;
 }
 
+/* Tỉ lệ dưới đây đo trực tiếp trên DOM (bảng rộng tối đa 1214px). Mỗi cột phải
+   chứa được header không xuống dòng, cộng nội dung dài nhất của nó:
+     Trạng thái 90px · Thời gian 160px · Metric 69px · Thành viên 81px
+     · Bài nộp 54px · Thao tác 68px (header, đã tính gutter 20px hai bên)
+   Tên/Slug là hai cột duy nhất được phép xuống dòng nên nhận phần dư. */
 .ac-col-name {
-  width: 28%;
+  width: 20%;
 }
 
 .ac-col-slug {
-  width: 15%;
+  width: 18%;
 }
 
 .ac-col-status {
-  width: 14%;
+  width: 10.5%;
 }
 
 .ac-col-time {
@@ -5668,11 +5675,19 @@ select.input {
 }
 
 .ac-col-metric {
-  width: 12%;
+  width: 9%;
+}
+
+.ac-col-members {
+  width: 8.5%;
+}
+
+.ac-col-submissions {
+  width: 6.5%;
 }
 
 .ac-col-actions {
-  width: 13%;
+  width: 9.5%;
 }
 
 .ac-table th {
@@ -5745,10 +5760,10 @@ select.input {
   font-weight: 500;
 }
 
+/* Slug hiển thị trọn vẹn: xuống dòng tại dấu gạch nối thay vì cắt bằng ellipsis. */
 .ac-slug-cell {
-  display: inline-flex;
+  display: inline-block;
   max-width: 100%;
-  overflow: hidden;
   padding: 4px var(--space-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -5758,8 +5773,7 @@ select.input {
   font-size: var(--text-code);
   font-weight: 400;
   line-height: var(--leading-code);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .ac-status-cell {
@@ -5841,8 +5855,7 @@ select.input {
   font-weight: 600;
 }
 
-.ac-metric-cell span,
-.ac-metric-cell small {
+.ac-metric-cell span {
   color: var(--ac-outline);
   font-family: var(--font-sans);
   font-size: var(--text-label);
@@ -5850,98 +5863,125 @@ select.input {
   line-height: var(--leading-label);
 }
 
-.ac-metric-cell small {
-  font-family: var(--font-sans);
+/* Cột số chỉ chứa vài ký tự — gutter 16px chỉ làm header "THÀNH VIÊN" tràn ra.
+   Phải ghép `.ac-table th/td` mới thắng được rule padding chung ở trên. */
+.ac-table th.ac-count-head,
+.ac-table td.ac-count-cell {
+  padding-right: var(--space-sm);
+  padding-left: var(--space-sm);
+  text-align: center;
+}
+
+.ac-count {
+  color: var(--ac-ink);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-count.is-empty {
+  color: var(--ac-outline);
+  font-weight: 500;
 }
 
 .ac-actions-cell {
   text-align: right;
 }
 
-.ac-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.ac-row-action {
+.ac-menu-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-height: 26px;
-  padding: 4px var(--space-sm);
+  width: 32px;
+  height: 32px;
   border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--ac-bg);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--ac-secondary);
+  cursor: pointer;
+}
+
+.ac-menu-trigger svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ac-menu-trigger:hover,
+.ac-menu-trigger[aria-expanded="true"] {
+  border-color: var(--ac-outline);
+  background: var(--ac-chip);
+  color: var(--ac-ink);
+}
+
+/* Neo theo viewport (position: fixed) để không bị `.ac-table-scroll` cắt. */
+.ac-menu {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  min-width: 172px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.ac-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--ac-ink);
   font-family: var(--font-sans);
-  font-size: var(--text-label);
+  font-size: 13px;
   font-weight: 500;
   line-height: 1.25;
+  text-align: left;
   white-space: nowrap;
   cursor: pointer;
 }
 
-.ac-row-action:hover:not(:disabled) {
+.ac-menu-item:hover:not(:disabled),
+.ac-menu-item:focus-visible {
   background: var(--ac-chip);
   color: var(--ac-ink);
   text-decoration: none;
+  outline: none;
 }
 
-.ac-row-action-primary {
-  padding-right: 10px;
-  padding-left: 10px;
-  border-color: var(--ac-ink);
-  background: var(--ac-ink);
-  color: var(--surface);
+.ac-menu-item:disabled {
+  color: #a3a3a3;
+  cursor: not-allowed;
 }
 
-.ac-row-action-primary:hover:not(:disabled) {
-  background: #000000;
-  color: var(--surface);
+.ac-menu-item-strong {
+  font-weight: 600;
 }
 
-.ac-row-action-danger {
-  border-color: #fee2e2;
+.ac-menu-item-danger {
+  color: #dc2626;
+}
+
+.ac-menu-item-danger:hover:not(:disabled),
+.ac-menu-item-danger:focus-visible {
   background: #fef2f2;
   color: #dc2626;
 }
 
-.ac-row-action-danger:hover:not(:disabled) {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.ac-row-action-ghost {
-  padding-right: 6px;
-  padding-left: 6px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ac-secondary);
-}
-
-.ac-row-action:disabled {
-  background: var(--ac-chip);
-  color: #a3a3a3;
-  cursor: not-allowed;
-  opacity: 0.75;
+.ac-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
 }
 
 .ac-action-lock {
   width: 13px;
   height: 13px;
-}
-
-.ac-disabled-reason {
-  display: block;
-  margin-top: 5px;
-  color: var(--ac-outline);
-  font-size: 10px;
-  line-height: 1.25;
-  white-space: normal;
 }
 
 .ac-table-state {
@@ -6458,7 +6498,7 @@ select.input {
   }
 
   .ac-table {
-    min-width: 1160px;
+    min-width: 1270px;
   }
 }
 

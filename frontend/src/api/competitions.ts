@@ -42,6 +42,16 @@ export interface CompetitionsResponse {
   competitions: Competition[];
 }
 
+/** Bảng admin kèm số liệu tổng hợp — endpoint public không trả về hai field này. */
+export interface AdminCompetition extends Competition {
+  member_count: number;
+  submission_count: number;
+}
+
+export interface AdminCompetitionsResponse {
+  competitions: AdminCompetition[];
+}
+
 export const STATUS_LABEL: Record<Competition["status"], string> = {
   draft: "Nháp",
   published: "Đang diễn ra",
