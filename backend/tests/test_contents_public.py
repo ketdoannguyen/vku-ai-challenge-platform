@@ -50,15 +50,30 @@ def _setup(client, slug="docs-cup", status="published"):
             files={"file": (f"{content_slug}.md", f"# {title}".encode())},
         )
         contents.append(content)
-    client.post(f"/api/admin/competitions/{competition['id']}/publish")
+    if status != "draft":
+        client.post(f"/api/admin/competitions/{competition['id']}/publish")
     if status == "closed":
         client.post(f"/api/admin/competitions/{competition['id']}/close")
     _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")
     return competition, contents
 
 
-def test_content_api_requires_login(client):
-    assert client.get("/api/competitions/docs-cup/contents").status_code == 401
+def test_guest_sees_only_public_content(client):
+    """Khách đọc nội dung công khai, nội dung members vẫn 404 vì không có membership (ADR-014)."""
+    _setup(client)
+    client.post("/api/auth/logout")
+    response = client.get("/api/competitions/docs-cup/contents")
+    assert response.status_code == 200
+    assert [item["slug"] for item in response.json()["contents"]] == ["problem"]
+    assert client.get("/api/competitions/docs-cup/contents/problem").status_code == 200
+    assert client.get("/api/competitions/docs-cup/contents/rules").status_code == 404
+
+
+def test_guest_cannot_read_draft_competition_content(client):
+    """Competition draft ẩn hoàn toàn với khách, kể cả nội dung public."""
+    _setup(client, slug="draft-cup", status="draft")
+    client.post("/api/auth/logout")
+    assert client.get("/api/competitions/draft-cup/contents").status_code == 404
 
 
 def test_non_member_sees_only_public_content_sorted(client):

@@ -106,9 +106,9 @@ type NavItem = { to: string; label: string; end?: boolean };
 
 function useNavItems(): NavItem[] {
   const { account } = useAuth();
-  if (!account) return [];
+  // "Cuộc thi" đọc công khai (ADR-014) nên khách cũng thấy; mục quản trị thì không.
   const items: NavItem[] = [{ to: "/", label: "Cuộc thi", end: true }];
-  if (account.role === "admin") {
+  if (account?.role === "admin") {
     items.push({ to: "/admin/competitions", label: "Quản trị" });
     items.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
   }
@@ -249,14 +249,20 @@ function Header() {
                 </NavLink>
               ))}
             </nav>
-            {account && (
-              <div className="app-drawer-foot">
+            {/* Dưới 40rem nút "Đăng nhập" trên header bị ẩn nên drawer là lối vào
+                duy nhất cho khách trên điện thoại. */}
+            <div className="app-drawer-foot">
+              {account ? (
                 <button className="btn btn-secondary" onClick={() => void onLogout()}>
                   <IconLogout />
                   Đăng xuất
                 </button>
-              </div>
-            )}
+              ) : (
+                <Link className="btn" to="/login" onClick={() => setMenuOpen(false)}>
+                  Đăng nhập
+                </Link>
+              )}
+            </div>
           </div>
         </>
       )}
@@ -277,28 +283,37 @@ export function App() {
         tabIndex={-1}
       >
         <Routes>
-          <Route
-            path="/"
-            element={
-              <RequireAuth>
-                <DashboardPage />
-              </RequireAuth>
-            }
-          />
+          {/* Danh sách và chi tiết cuộc thi đọc công khai (ADR-014); chỉ các trang
+              gắn với danh tính mới chặn. */}
+          <Route path="/" element={<DashboardPage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/competitions/:slug"
-            element={
-              <RequireAuth>
-                <CompetitionDetailPage />
-              </RequireAuth>
-            }
-          >
+          <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
             <Route index element={<CompetitionOverview />} />
             <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
-            <Route path="submit" element={<SubmissionPage />} />
-            <Route path="submissions" element={<MySubmissionsPage />} />
-            <Route path="leaderboard" element={<LeaderboardPage />} />
+            <Route
+              path="submit"
+              element={
+                <RequireAuth>
+                  <SubmissionPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="submissions"
+              element={
+                <RequireAuth>
+                  <MySubmissionsPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="leaderboard"
+              element={
+                <RequireAuth>
+                  <LeaderboardPage />
+                </RequireAuth>
+              }
+            />
           </Route>
           <Route
             path="/admin/competitions"

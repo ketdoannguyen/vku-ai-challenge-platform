@@ -1,9 +1,10 @@
 /** JoinControl: các trạng thái membership + join mode. */
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
+import { AuthProvider } from "../auth/AuthContext";
 import { JoinControl } from "./JoinControl";
 
 function makeCompetition(overrides: Partial<Competition> = {}): Competition {
@@ -129,4 +130,38 @@ test("closed: không cho join", () => {
   );
   expect(screen.getByText(/Cuộc thi đã kết thúc/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Tham gia/ })).toBeNull();
+});
+
+/** In ra `from` trong location.state để test kiểm tra được đường dẫn quay lại. */
+function LoginProbe() {
+  const state = useLocation().state as { from?: string } | null;
+  return <div>FROM:{state?.from ?? "-"}</div>;
+}
+
+test("khách: CTA đăng nhập kèm đường dẫn quay lại, không gọi API join", async () => {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  render(
+    <MemoryRouter initialEntries={["/competitions/ai-cup"]}>
+      <AuthProvider>
+        <Routes>
+          <Route
+            path="/competitions/:slug"
+            element={<JoinControl competition={makeCompetition()} onJoined={vi.fn()} />}
+          />
+          <Route path="/login" element={<LoginProbe />} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByRole("link", { name: "Đăng nhập để tham gia" }));
+  expect(await screen.findByText("FROM:/competitions/ai-cup")).toBeTruthy();
+  // Chỉ lượt bootstrap /auth/me — khách không bắn POST join rồi ăn 401.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });

@@ -1,11 +1,15 @@
-"""Participant competition content and approved image assets."""
+"""Participant competition content and approved image assets.
+
+Đọc công khai (ADR-014): khách chưa đăng nhập chỉ thấy nội dung `visibility=public`;
+nội dung `members` vẫn 404 vì không có membership nào.
+"""
 
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
-from app.auth.dependencies import CurrentAccount
+from app.auth.dependencies import OptionalAccount
 from app.competitions.service import find_competition_by_slug
 from app.content import service, storage
 from app.core.config import get_settings
@@ -15,14 +19,21 @@ from app.memberships.service import get_membership
 router = APIRouter(prefix="/api/competitions")
 
 
+async def _active_membership(db, competition_id, account: dict | None) -> dict | None:
+    """Membership đang hoạt động của account (None khi là khách hoặc chưa tham gia)."""
+    if account is None:
+        return None
+    membership = await get_membership(db, competition_id, account["_id"])
+    return membership if membership and membership.get("active", True) else None
+
+
 @router.get("/{slug}/contents")
 async def list_visible_contents(
-    slug: str, request: Request, account: CurrentAccount
+    slug: str, request: Request, account: OptionalAccount
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
-    membership = await get_membership(db, competition["_id"], account["_id"])
-    is_member = bool(membership and membership.get("active", True))
+    is_member = await _active_membership(db, competition["_id"], account) is not None
     contents = await service.list_contents(db, competition["_id"])
     visible = [
         item
@@ -34,7 +45,7 @@ async def list_visible_contents(
 
 @router.get("/{slug}/contents/{content_slug}")
 async def get_visible_content(
-    slug: str, content_slug: str, request: Request, account: CurrentAccount
+    slug: str, content_slug: str, request: Request, account: OptionalAccount
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
@@ -43,19 +54,17 @@ async def get_visible_content(
     )
     if content is None:
         raise api_error(404, "NOT_FOUND", "Không tìm thấy nội dung.")
-    membership = await get_membership(db, competition["_id"], account["_id"])
-    if content["visibility"] == "members" and not (
-        membership and membership.get("active", True)
-    ):
+    if content["visibility"] == "members" and await _active_membership(
+        db, competition["_id"], account
+    ) is None:
         raise api_error(404, "NOT_FOUND", "Không tìm thấy nội dung.")
     markdown = _read_markdown(content)
     return service.public_content(content, markdown)
 
 
 @router.get("/{slug}/assets/{name}")
-async def get_asset(
-    slug: str, name: str, request: Request, account: CurrentAccount
-) -> Response:
+async def get_asset(slug: str, name: str, request: Request) -> Response:
+    """Ảnh công khai trong nội dung — không cần phiên, nhưng vẫn chặn traversal/symlink."""
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
     extension = Path(name).suffix.lower()

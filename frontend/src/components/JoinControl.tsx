@@ -1,9 +1,10 @@
 /** Join CTA theo join_mode + membership state. Dùng chung dashboard card và competition header. */
 
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, JoinResponse, Membership } from "../api/competitions";
+import { useOptionalAuth } from "../auth/AuthContext";
 import { Modal } from "./Modal";
 
 function IconArrow() {
@@ -75,6 +76,11 @@ export function JoinControl({
   onJoined: (membership: Membership) => void;
 }) {
   const membership = competition.membership;
+  const auth = useOptionalAuth();
+  const { pathname } = useLocation();
+  // Ngoài AuthProvider (test dựng component lẻ) không biết được trạng thái phiên nên
+  // giữ nguyên hành vi cũ; trong app thì khách thấy lối đăng nhập thay vì POST ăn 401.
+  const isGuest = auth !== null && !auth.loading && auth.account === null;
 
   if (membership.active) {
     return (
@@ -115,6 +121,19 @@ export function JoinControl({
     return (
       <span className="join-state">
         <span className="join-state-note">Chỉ dành cho tài khoản được mời.</span>
+      </span>
+    );
+  }
+
+  // Đặt sau các nhánh "đã kết thúc"/"chỉ theo lời mời": đăng nhập không mở được khoá
+  // ở hai trường hợp đó, nên chỉ thay đúng hai nhánh thực sự gọi API tham gia.
+  if (isGuest) {
+    return (
+      <span className="join-state">
+        <Link className="btn" to="/login" state={{ from: pathname }}>
+          Đăng nhập để tham gia
+          <IconArrow />
+        </Link>
       </span>
     );
   }

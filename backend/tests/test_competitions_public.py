@@ -26,10 +26,25 @@ def seeded(client):
     return client
 
 
-def test_public_list_requires_login(client):
-    resp = client.get("/api/competitions")
-    assert resp.status_code == 401
-    assert resp.json()["error"]["code"] == "UNAUTHORIZED"
+def test_guest_list_hides_draft_and_membership(seeded):
+    """Khách chưa đăng nhập đọc được danh sách (ADR-014) nhưng không thấy draft."""
+    seeded.post("/api/auth/logout")
+    resp = seeded.get("/api/competitions")
+    assert resp.status_code == 200
+    assert [c["slug"] for c in resp.json()["competitions"]] == ["closed-cup", "open-cup"]
+    for competition in resp.json()["competitions"]:
+        assert competition["membership"] == {"active": False, "joined_at": None}
+        assert "join_code" not in competition
+        assert "join_code_hash" not in competition
+
+
+def test_guest_detail_by_slug_and_draft_404(seeded):
+    seeded.post("/api/auth/logout")
+    assert seeded.get("/api/competitions/open-cup").json()["membership"] == {
+        "active": False,
+        "joined_at": None,
+    }
+    assert seeded.get("/api/competitions/draft-cup").status_code == 404
 
 
 def test_public_list_hides_draft(seeded):

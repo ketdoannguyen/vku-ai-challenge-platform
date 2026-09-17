@@ -35,12 +35,12 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Yêu cầu đăng nhập (401 nếu không). Mỗi item có `membership`, `join_code_configured` và `submission_config` an toàn: `{ready,id_column,prediction_column,average,pos_label,max_upload_mb}`. Không trả join-code hash, label data hoặc ground-truth path. |
-| GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug với cùng safe fields. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại). |
+| GET | `/api/competitions` | implemented | List competition `published` + `closed`, sort theo tên. Đọc công khai (ADR-014): không cần đăng nhập; khách không có phiên nhận `membership = {active:false, joined_at:null}` và không tốn truy vấn membership. Mỗi item có `membership`, `join_code_configured` và `submission_config` an toàn: `{ready,id_column,prediction_column,average,pos_label,max_upload_mb}`. Không trả join-code hash, label data hoặc ground-truth path. |
+| GET | `/api/competitions/{slug}` | implemented | Chi tiết competition theo slug với cùng safe fields. Đọc công khai (ADR-014) như danh sách. Draft → 404 `NOT_FOUND` (kể cả khi tồn tại, với mọi đối tượng). |
 | POST | `/api/competitions/{slug}/join` | implemented (Sprint 04) | Body `{join_code?}`. Policy backend: draft/unknown slug → 404; closed → 422 `JOIN_CLOSED`; đã join → 200 idempotent `joined_now:false`; membership inactive → 403 `MEMBERSHIP_INACTIVE` (chỉ admin kích hoạt lại); invite_only → 403 `JOIN_INVITE_ONLY`; mode code thiếu/sai → 403 `JOIN_CODE_INVALID` (cùng message, không tạo oracle). Thành công → `{competition_id, membership, joined_now}`. |
-| GET | `/api/competitions/{slug}/contents` | implemented (Sprint 04) | List content metadata sort `order` asc. Chỉ `visibility=public` hoặc member active thấy `members`. Draft → 404. |
-| GET | `/api/competitions/{slug}/contents/{content_slug}` | implemented (Sprint 04) | Metadata + `markdown` (nội dung file). Không được xem (kể cả members-only non-member) → 404. File mất → 404 `CONTENT_FILE_MISSING`. |
-| GET | `/api/competitions/{slug}/assets/{name}` | implemented (Sprint 04) | Serve ảnh đã upload (PNG/JPEG/GIF/WebP). Headers: `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=300`. Traversal/symlink/extension lạ → 404. Yêu cầu đăng nhập; competition phải published/closed. |
+| GET | `/api/competitions/{slug}/contents` | implemented (Sprint 04) | List content metadata sort `order` asc. Đọc công khai (ADR-014): khách chỉ thấy `visibility=public` vì không có membership nào. Draft → 404. |
+| GET | `/api/competitions/{slug}/contents/{content_slug}` | implemented (Sprint 04) | Metadata + `markdown` (nội dung file). Không được xem (kể cả members-only với khách hoặc non-member) → 404. File mất → 404 `CONTENT_FILE_MISSING`. |
+| GET | `/api/competitions/{slug}/assets/{name}` | implemented (Sprint 04) | Serve ảnh đã upload (PNG/JPEG/GIF/WebP). Headers: `X-Content-Type-Options: nosniff`, `Cache-Control: private, max-age=300`. Traversal/symlink/extension lạ → 404. Đọc công khai (ADR-014) để ảnh trong nội dung public hiển thị với khách; competition phải published/closed. |
 
 ## 4. Submissions & leaderboard
 

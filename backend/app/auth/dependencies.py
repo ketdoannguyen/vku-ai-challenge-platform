@@ -17,6 +17,14 @@ def get_current_account(request: Request) -> dict:
 CurrentAccount = Annotated[dict, Depends(get_current_account)]
 
 
+def get_optional_account(request: Request) -> dict | None:
+    """Cho endpoint đọc công khai: có phiên thì cá nhân hoá, không có phiên vẫn trả 200."""
+    return getattr(request.state, "account", None)
+
+
+OptionalAccount = Annotated[dict | None, Depends(get_optional_account)]
+
+
 def get_current_admin(account: CurrentAccount) -> dict:
     if account.get("role") != "admin":
         raise api_error(403, "FORBIDDEN", "Chỉ admin mới được thực hiện thao tác này.")

@@ -132,3 +132,17 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Nginx thêm `Permissions-Policy` và `Content-Security-Policy-Report-Only` theo same-origin; chưa enforce CSP và chưa thêm HSTS trước HTTPS/Cloudflare production.
 - Consequences: Một actor biết email có thể gây lockout tối đa 15 phút cho email đó; state không chia sẻ nếu sau này chạy nhiều API worker. Đây là trade-off MVP được chấp nhận và phải review lại khi thay topology ở Sprint 08. CSP violations chỉ quan sát, chưa block; enforce sau browser smoke trên domain thật.
 - Affected files/contracts: `backend/app/auth/rate_limit.py`, `backend/app/auth/router.py`, `backend/app/main.py`, `frontend/nginx.conf`, `docs/API_CONTRACT.md` §2+§6
+
+## ADR-014 - Sprint 08: đọc công khai cho khách (danh sách, chi tiết, nội dung public)
+- Date: 2026-09-17
+- Status: accepted
+- Context: Nút "quay lại" ở `/login` bấm được và `navigate("/")` chạy, nhưng `RequireAuth` đẩy ngược về `/login` vì `/` đòi phiên, và backend cũng trả 401 cho `GET /api/competitions` khi ẩn danh — người dùng không có lối về dashboard. User chọn hướng mở dashboard cho khách thay vì sửa nút quay lại.
+- Decision:
+  - Thêm `get_optional_account`/`OptionalAccount` (`backend/app/auth/dependencies.py`): trả `request.state.account` hoặc `None` thay vì 401. Middleware sẵn có chỉ set `request.state.account` khi có cookie phiên nên không cần đổi gì thêm.
+  - Chuyển sang auth tuỳ chọn: `GET /api/competitions`, `GET /api/competitions/{slug}`, `GET /api/competitions/{slug}/contents`, `.../contents/{content_slug}`, `.../assets/{name}`.
+  - Khách không có membership nào nên `membership = {active:false, joined_at:null}` và chỉ thấy content `visibility=public`; content `members` vẫn 404 (không tiết lộ tồn tại). Draft vẫn 404 với mọi đối tượng, ở cả list lẫn detail.
+  - **Thay đổi so với ADR-010**, vốn ghi "public = mọi account đã đăng nhập (không anonymous API)". Từ ADR-014, `public` nghĩa là "mọi người, kể cả khách"; `members` không đổi.
+  - Vẫn yêu cầu đăng nhập (401, dùng `CurrentAccount`): join, submissions, submissions/me, leaderboard. Frontend giữ ranh giới tương ứng: bỏ `RequireAuth` ở `/` và route cha `/competitions/:slug`, bọc lại cho 3 route con `submit`/`submissions`/`leaderboard`.
+  - Điều hướng khách: navbar hiện mục "Cuộc thi"; drawer mobile (dưới 40rem nút "Đăng nhập" trên header bị ẩn) có thêm lối "Đăng nhập"; thẻ cuộc thi hiện CTA "Đăng nhập để tham gia" kèm `state.from` để quay lại đúng trang, thay vì bắn POST join rồi ăn 401. Ô thống kê "Đã tham gia" bị ẩn với khách vì luôn bằng 0.
+- Consequences: `assets/{name}` trước đây chỉ đòi đăng nhập chứ không kiểm tra visibility của content; mở cho khách giữ nguyên mức phơi nhiễm với participant và mở rộng thêm cho khách — chấp nhận để ảnh trong nội dung public hiển thị. `Cache-Control: private, max-age=300` giữ nguyên. Leaderboard vẫn chặn đăng nhập vì nằm ngoài phạm vi user xác nhận.
+- Affected files/contracts: `backend/app/auth/dependencies.py`, `backend/app/competitions/router.py`, `backend/app/content/router.py`, `frontend/src/App.tsx`, `frontend/src/components/JoinControl.tsx`, `frontend/src/pages/DashboardPage.tsx`, `docs/API_CONTRACT.md` §3, `docs/TEST_MATRIX.md` §4-5

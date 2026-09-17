@@ -13,6 +13,7 @@ import {
 } from "../api/competitions";
 import { Loading } from "../components/ui";
 import { JoinControl } from "../components/JoinControl";
+import { useOptionalAuth } from "../auth/AuthContext";
 
 type StatusFilter = "all" | "published" | "closed";
 
@@ -160,6 +161,7 @@ function IconError() {
 }
 
 export function DashboardPage() {
+  const auth = useOptionalAuth();
   const [data, setData] = useState<CompetitionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -192,6 +194,8 @@ export function DashboardPage() {
     });
   }, [competitions, filter, query]);
 
+  // Ngoài AuthProvider (test dựng component lẻ) coi như không phải khách để giữ hành vi cũ.
+  const isGuest = auth !== null && !auth.loading && auth.account === null;
   const activeCount = (competitions ?? []).filter((item) => item.status === "published").length;
   const closedCount = (competitions ?? []).filter((item) => item.status === "closed").length;
   const joinedCount = (competitions ?? []).filter((item) => item.membership.active).length;
@@ -217,11 +221,16 @@ export function DashboardPage() {
               <span className="dash-stat-label">Đã kết thúc</span>
               <span className="dash-stat-value">{String(closedCount).padStart(2, "0")}</span>
             </div>
-            <span className="dash-stat-divider" aria-hidden="true" />
-            <div className="dash-stat">
-              <span className="dash-stat-label">Đã tham gia</span>
-              <span className="dash-stat-value">{String(joinedCount).padStart(2, "0")}</span>
-            </div>
+            {/* Khách chưa có membership nào nên ô này luôn 00 — chỉ tổ rối. */}
+            {!isGuest && (
+              <>
+                <span className="dash-stat-divider" aria-hidden="true" />
+                <div className="dash-stat">
+                  <span className="dash-stat-label">Đã tham gia</span>
+                  <span className="dash-stat-value">{String(joinedCount).padStart(2, "0")}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
