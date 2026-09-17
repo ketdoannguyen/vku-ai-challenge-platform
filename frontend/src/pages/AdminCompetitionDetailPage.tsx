@@ -554,7 +554,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : leaderboard?.entries.length ? (
           <div className="table-wrap admin-results-table-wrap">
             <table className="table results-table">
-              <thead><tr><th>Hạng</th><th>Đội</th><th>Điểm chính</th><th>F1</th><th>Precision</th><th>Recall</th><th>Số bài</th></tr></thead>
+              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th><th scope="col" className="score-cell">Điểm chính</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
@@ -564,7 +564,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
                     <td className="score-cell">{formatScore(entry.metrics.f1)}</td>
                     <td className="score-cell">{formatScore(entry.metrics.precision)}</td>
                     <td className="score-cell">{formatScore(entry.metrics.recall)}</td>
-                    <td>{entry.total_submissions}</td>
+                    <td className="results-count-cell">{entry.total_submissions}</td>
                   </tr>
                 ))}
               </tbody>
@@ -608,7 +608,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : submissions.length ? (
           <div className="table-wrap admin-results-table-wrap">
             <table className="table results-table admin-submissions-table">
-              <thead><tr><th>Thời gian</th><th>Đội</th><th>File</th><th>Trạng thái</th><th>F1</th><th>Precision</th><th>Recall</th><th>Điểm chính</th></tr></thead>
+              <thead><tr><th scope="col">Thời gian</th><th scope="col">Đội</th><th scope="col">File</th><th scope="col">Trạng thái</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="score-cell">Điểm chính</th></tr></thead>
               <tbody>
                 {submissions.map((submission) => (
                   <tr key={submission.id}>
@@ -1603,6 +1603,24 @@ function MembersPanel({
   const [pendingJoinCode, setPendingJoinCode] = useState("");
   const [pendingMember, setPendingMember] = useState<MemberItem | null>(null);
   const [busy, setBusy] = useState(false);
+  const messageTimer = useRef<number | null>(null);
+
+  const notify = useCallback((text: string) => {
+    if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    setMessage(text);
+    messageTimer.current = window.setTimeout(() => {
+      setMessage("");
+      messageTimer.current = null;
+    }, 4500);
+  }, []);
+
+  const dismissMessage = useCallback(() => {
+    if (messageTimer.current !== null) {
+      window.clearTimeout(messageTimer.current);
+      messageTimer.current = null;
+    }
+    setMessage("");
+  }, []);
 
   const load = useCallback(async () => {
     setError(null);
@@ -1623,12 +1641,19 @@ function MembersPanel({
     void load();
   }, [load]);
 
+  useEffect(
+    () => () => {
+      if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    },
+    [],
+  );
+
   async function run(action: () => Promise<unknown>, successMessage: string) {
     setBusy(true);
     setError(null);
     try {
       await action();
-      setMessage(successMessage);
+      notify(successMessage);
       await load();
       return true;
     } catch (err) {
@@ -1644,7 +1669,7 @@ function MembersPanel({
     setError(null);
     try {
       await action();
-      setMessage(successMessage);
+      notify(successMessage);
       await load();
     } finally {
       setBusy(false);
@@ -1731,7 +1756,12 @@ function MembersPanel({
             <button className="btn" type="submit" disabled={busy}>Thêm thành viên</button>
           </form>
         </div>
-        {message && <div className="status-banner success" role="status">{message}</div>}
+        {message && (
+          <div className="status-banner success admin-members-message" role="status">
+            <span>{message}</span>
+            <button className="banner-dismiss" type="button" aria-label="Đóng thông báo" onClick={dismissMessage}>×</button>
+          </div>
+        )}
         {Boolean(error) && (
           <div className="admin-section-error">
             <ErrorBox error={error} />
@@ -1741,7 +1771,7 @@ function MembersPanel({
         <div className="table-wrap admin-members-table-wrap" aria-busy={loading}>
           <table className="table admin-members-table">
             <thead>
-              <tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Trạng thái</th><th>Tham gia lúc</th><th>Thao tác</th></tr>
+              <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Tham gia lúc</th><th scope="col">Thao tác</th></tr>
             </thead>
             <tbody>
               {loading ? (
@@ -1766,7 +1796,13 @@ function MembersPanel({
               )}
             </tbody>
           </table>
-          {total > 0 && <div className="admin-members-total">Tổng số: {total}</div>}
+          {total > 0 && (
+            <div className="admin-members-total">
+              {members.length < total
+                ? <>Đang hiển thị {members.length} / {total}</>
+                : <>Tổng số: {total}</>}
+            </div>
+          )}
         </div>
       </section>
       {pendingJoinCode && (

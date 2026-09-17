@@ -4772,7 +4772,7 @@ select.input {
   margin-bottom: 16px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 4px;
   background: var(--surface-subtle);
 }
 
@@ -4815,6 +4815,14 @@ select.input {
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.results-table .score-cell {
+  text-align: right;
+}
+
+.results-count-cell {
+  text-align: center;
 }
 
 .primary-score {
@@ -5058,6 +5066,9 @@ select.input {
 }
 
 .admin-accounts-table-wrap {
+  /* Bảng rộng hơn khung ở mobile: neo containing block vào wrapper để phần tử
+     .sr-only (position: absolute) trong ô không thoát khỏi vùng cuộn ngang. */
+  position: relative;
   border-radius: 2px;
   box-shadow: none;
 }
@@ -5096,14 +5107,16 @@ select.input {
   border-radius: 2px;
 }
 
-.admin-accounts-message {
+.admin-accounts-message,
+.admin-members-message {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.admin-accounts-message button {
+.admin-accounts-message button,
+.admin-members-message button {
   width: 28px;
   height: 28px;
   border: 0;
@@ -5228,6 +5241,7 @@ select.input {
 }
 
 .account-form-actions {
+  gap: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
 }

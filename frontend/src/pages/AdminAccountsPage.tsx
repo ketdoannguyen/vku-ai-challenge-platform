@@ -117,7 +117,7 @@ export function AdminAccountsPage() {
       <div className="table-wrap admin-accounts-table-wrap" aria-busy={loading || refreshing}>
         <table className="table admin-accounts-table">
           <thead>
-            <tr><th>Email</th><th>Tên</th><th>Vai trò</th><th>Trạng thái</th><th>Thao tác</th></tr>
+            <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr>
           </thead>
           <tbody>
             {loading && !data ? (
@@ -153,7 +153,13 @@ export function AdminAccountsPage() {
             )}
           </tbody>
         </table>
-        {data && <div className="admin-accounts-total">Tổng số: <strong>{data.total}</strong></div>}
+        {data && (
+          <div className="admin-accounts-total">
+            {data.accounts.length < data.total
+              ? <>Đang hiển thị <strong>{data.accounts.length}</strong> / {data.total}</>
+              : <>Tổng số: <strong>{data.total}</strong></>}
+          </div>
+        )}
       </div>
 
       {creating && (
@@ -214,11 +220,16 @@ function AccountRow({
               className="btn btn-ghost btn-sm"
               type="button"
               disabled={busy || cannotDisableSelf}
-              title={cannotDisableSelf ? "Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập." : undefined}
+              aria-describedby={cannotDisableSelf ? `self-disable-reason-${account.id}` : undefined}
               onClick={() => setConfirmingActiveChange(true)}
             >
               {account.active ? "Vô hiệu hóa" : "Kích hoạt"}
             </button>
+            {cannotDisableSelf && (
+              <span className="sr-only" id={`self-disable-reason-${account.id}`}>
+                Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập.
+              </span>
+            )}
           </span>
         </td>
       </tr>
@@ -373,7 +384,7 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
             <PasswordToggle visible={passwordVisible} onToggle={() => setPasswordVisible((value) => !value)} />
           </div>
         </div>
-        <p className="account-security-note">Hệ thống không tự gửi mật khẩu. Hãy chuyển mật khẩu mới cho người dùng qua một kênh riêng an toàn.</p>
+        <p className="account-security-note">Mật khẩu mới cần được chuyển cho người dùng qua kênh riêng (email/chat) — hệ thống không gửi tự động.</p>
         {error && <div className="error-box" role="alert">{error}</div>}
         <div className="modal-actions account-form-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>Hủy</button>
