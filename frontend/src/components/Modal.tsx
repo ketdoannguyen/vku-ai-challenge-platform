@@ -9,11 +9,13 @@ export function Modal({
   onClose,
   children,
   large = true,
+  variant,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
   large?: boolean;
+  variant?: "competition-form";
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -71,21 +73,21 @@ export function Modal({
 
   return createPortal(
     <div
-      className="modal-overlay"
+      className={`modal-overlay${variant ? ` modal-overlay-${variant}` : ""}`}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
         ref={dialogRef}
-        className={`modal${large ? " modal-lg" : ""}`}
+        className={`modal${large ? " modal-lg" : ""}${variant ? ` modal-${variant}` : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
       >
         <div className="modal-head">
           <h2 className="modal-title">{title}</h2>
-          <button className="modal-close" aria-label="Đóng" onClick={onClose}>
+          <button className="modal-close" aria-label="Đóng" onClick={onClose} type="button">
             ×
           </button>
         </div>
