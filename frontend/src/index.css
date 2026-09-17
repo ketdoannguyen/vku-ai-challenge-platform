@@ -4229,58 +4229,6 @@ select.input {
   }
 }
 
-.subm-notice-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-@media (min-width: 48rem) {
-  .subm-notice-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-.subm-notice-card {
-  padding: 16px;
-  border-radius: var(--radius-xl);
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.subm-notice-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--palette-primary);
-  margin-top: 2px;
-}
-
-.subm-notice-title {
-  font-size: var(--text-label-md);
-  font-weight: 600;
-  color: var(--palette-primary);
-  margin: 0 0 4px;
-}
-
-.subm-notice-text {
-  font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
-  margin: 0;
-  line-height: 1.5;
-}
-
 /* =============================================================================
    S08: Bảng xếp hạng (Leaderboard)
    ============================================================================= */

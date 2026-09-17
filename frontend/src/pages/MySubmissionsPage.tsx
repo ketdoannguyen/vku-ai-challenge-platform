@@ -290,38 +290,6 @@ export function MySubmissionsPage() {
           </div>
         </div>
       )}
-
-      {/* Notice cards quy chế và tính điểm (§6) */}
-      <div className="subm-notice-grid">
-        <div className="subm-notice-card">
-          <div className="subm-notice-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="subm-notice-title">Quy chế lưu trữ &amp; Toàn vẹn dữ liệu (§6)</h3>
-            <p className="subm-notice-text">
-              Bài nộp được lưu trữ vĩnh viễn trên Sandbox của Ban Tổ chức và không thể tải lại hoặc xóa theo quy chế thi.
-            </p>
-          </div>
-        </div>
-
-        <div className="subm-notice-card">
-          <div className="subm-notice-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
-          </div>
-          <div>
-            <h3 className="subm-notice-title">Cơ chế tính điểm tự động</h3>
-            <p className="subm-notice-text">
-              Điểm số hiển thị được tính toán ngay khi nộp đối chiếu với tập Public Test. Bài nộp có điểm chính cao nhất được dùng để xếp hạng.
-            </p>
-          </div>
-        </div>
-      </div>
     </section>
   );
 }

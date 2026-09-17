@@ -454,21 +454,6 @@ export function SubmissionPage() {
             </div>
           </div>
         </div>
-
-        {/* Panel 3: Cơ chế chấm điểm */}
-        <div className="sub-guide-card">
-          <div className="sub-guide-head">
-            <h3 className="sub-guide-title">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-              </svg>
-              Chấm điểm tự động
-            </h3>
-          </div>
-          <p className="sub-guide-desc">
-            Chỉ số chính <strong>{METRIC_LABEL[competition.primary_metric]}</strong> được tính toán tức thì ngay khi tải file lên máy chủ.
-          </p>
-        </div>
       </div>
     </div>
   );

@@ -338,7 +338,9 @@ export function CompetitionDetailPage() {
                     className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
                   >
                     <span className="content-nav-title">{item.title}</span>
-                    <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
+                    {item.visibility === "public" && (
+                      <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
+                    )}
                   </NavLink>
                 ))}
               </nav>

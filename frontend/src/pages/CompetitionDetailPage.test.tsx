@@ -26,7 +26,7 @@ const COMPETITION = {
 const CONTENTS = {
   contents: [
     { id: "a", slug: "problem", title: "Đề bài", order: 20, visibility: "public", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
-    { id: "b", slug: "rules", title: "Rules", order: 10, visibility: "public", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "b", slug: "rules", title: "Rules", order: 10, visibility: "members", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -81,7 +81,9 @@ test("load competition + sidebar sắp theo order, tự chuyển đến trang md
   const items = nav.querySelectorAll(".content-nav-item");
   // Frontend render theo thứ tự API trả về; backend đã sort theo order (Rules 10 trước Đề bài 20)
   expect(items[0].textContent).toContain("Đề bài");
-  expect(items[1].textContent).toContain("Rules");
+  expect(items[0].textContent).toContain("Mọi thí sinh");
+  expect(items[1].textContent).toBe("Rules");
+  expect(screen.queryByText("Chỉ thành viên cuộc thi")).toBeNull();
   expect(screen.getByText(/2\s*mục/)).toBeTruthy();
   // Tự chuyển sang trang md đầu tiên ngay lập tức
   expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 1 })).toBeTruthy();
