@@ -14,31 +14,16 @@ import { MySubmissionsPage } from "./pages/MySubmissionsPage";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
 import { NotFoundPage } from "./pages/Placeholders";
 
-const BRAND = "AI Challenge Platform";
+// Chữ "VKU" đã nằm trong logo cạnh bên nên phần chữ chỉ còn tên cuộc thi.
+const BRAND = "AI Challenge";
 
 function BrandMark() {
   return (
-    <svg
-      className="app-brand-mark"
-      viewBox="0 0 32 32"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <circle cx="16" cy="16" r="3.5" fill="currentColor" />
-      <ellipse cx="16" cy="7.5" rx="3.5" ry="5.5" />
-      <ellipse cx="16" cy="24.5" rx="3.5" ry="5.5" />
-      <ellipse cx="7.5" cy="16" rx="5.5" ry="3.5" />
-      <ellipse cx="24.5" cy="16" rx="5.5" ry="3.5" />
-      <ellipse cx="10" cy="10" rx="3.5" ry="5.5" transform="rotate(-45 10 10)" />
-      <ellipse cx="22" cy="22" rx="3.5" ry="5.5" transform="rotate(-45 22 22)" />
-      <ellipse cx="22" cy="10" rx="3.5" ry="5.5" transform="rotate(45 22 10)" />
-      <ellipse cx="10" cy="22" rx="3.5" ry="5.5" transform="rotate(45 10 22)" />
-    </svg>
+    <img
+      src="/vku-logo.png"
+      alt="VKU"
+      className="app-brand-logo"
+    />
   );
 }
 

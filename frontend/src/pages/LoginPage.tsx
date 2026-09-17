@@ -2,30 +2,13 @@ import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, loginErrorMessage } from "../auth/AuthContext";
 
-/** Emblem hoa 8 cánh — cùng ngôn ngữ hình với logo ở app shell. */
 function Emblem() {
   return (
-    <svg
+    <img
+      src="/vku-logo.png"
+      alt="VKU"
       className="login-emblem"
-      viewBox="0 0 32 32"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <circle cx="16" cy="16" r="3.5" fill="currentColor" />
-      <ellipse cx="16" cy="7.5" rx="3.5" ry="5.5" />
-      <ellipse cx="16" cy="24.5" rx="3.5" ry="5.5" />
-      <ellipse cx="7.5" cy="16" rx="5.5" ry="3.5" />
-      <ellipse cx="24.5" cy="16" rx="5.5" ry="3.5" />
-      <ellipse cx="10" cy="10" rx="3.5" ry="5.5" transform="rotate(-45 10 10)" />
-      <ellipse cx="22" cy="22" rx="3.5" ry="5.5" transform="rotate(-45 22 22)" />
-      <ellipse cx="22" cy="10" rx="3.5" ry="5.5" transform="rotate(45 22 10)" />
-      <ellipse cx="10" cy="22" rx="3.5" ry="5.5" transform="rotate(45 10 22)" />
-    </svg>
+    />
   );
 }
 
@@ -128,11 +111,8 @@ export function LoginPage() {
       <button
         type="button"
         className="login-back"
-        aria-label="Quay lại"
-        onClick={() => {
-          if (location.key === "default") navigate("/");
-          else navigate(-1);
-        }}
+        aria-label="Về trang chủ"
+        onClick={() => navigate("/")}
       >
         <IconBack />
       </button>
@@ -154,7 +134,7 @@ export function LoginPage() {
 
           <div className="login-head">
             <Emblem />
-            <h1 className="login-title">AI Challenge Platform</h1>
+            <h1 className="login-title">VKU AI Challenge Platform</h1>
             <p className="login-subtitle">Đăng nhập bằng tài khoản được cấp</p>
           </div>
 
