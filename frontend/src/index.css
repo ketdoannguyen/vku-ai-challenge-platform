@@ -872,6 +872,17 @@ samp {
   border-color: transparent;
   color: var(--text);
 }
+/* Nút xóa cấp hàng trong bảng admin (S13: text-error). */
+.btn-danger-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--danger);
+}
+.btn-danger-ghost:hover {
+  background: var(--danger-soft-30);
+  border-color: transparent;
+  color: var(--danger);
+}
 
 .btn-sm {
   height: 32px;
@@ -983,6 +994,19 @@ select.input {
   background: var(--surface-container);
   color: var(--text-muted);
 }
+/* Chip "Hiển thị" (S13): pill trung tính, dot 6px ăn theo tone của chip. */
+.status-badge.neutral {
+  border-color: var(--border);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
 
 /* --- Feedback --- */
 .loading {
@@ -1074,9 +1098,27 @@ select.input {
   font-size: var(--text-body-sm);
 }
 .status-banner.success {
+  display: flex;
+  align-items: center;
   border-color: var(--success-border);
   background: var(--success-soft);
   color: var(--success);
+}
+/* Nút đóng banner: cùng recipe với .admin-accounts-message button, tự canh phải. */
+.banner-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 .status-banner.warning {
   border-color: var(--warning-border);
@@ -1205,6 +1247,11 @@ select.input {
 .table-state .loading {
   justify-content: center;
   padding: 0;
+}
+
+/* Lỗi cấp hàng (S13): giữ nguyên hàng, chữ theo tone lỗi. */
+.table-state.error-cell {
+  color: var(--danger);
 }
 
 .pagination {
@@ -2459,9 +2506,16 @@ select.input {
   min-width: 0; /* Rất quan trọng: ngăn grid blowout khi bảng rộng */
 }
 
+/* Sidebar chỉ là cột dính; từng khối bên trong là một card ngang hàng (Mục lục, Tài nguyên). */
 .content-sidebar {
   position: sticky;
   top: calc(var(--header-band) + var(--space-md));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.content-card {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -2472,7 +2526,11 @@ select.input {
   box-shadow: var(--shadow-sm);
 }
 
-.content-sidebar-head {
+.content-card-resources {
+  background: var(--surface-subtle);
+}
+
+.content-card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2482,7 +2540,11 @@ select.input {
   background: var(--surface-subtle);
 }
 
-.content-sidebar-title {
+.content-card-resources .content-card-head {
+  background: var(--surface);
+}
+
+.content-card-title {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2493,15 +2555,60 @@ select.input {
   padding: 0;
 }
 
-.content-sidebar-title svg {
+.content-card-title svg {
   flex: none;
   color: var(--text-secondary);
 }
 
-.content-sidebar-count {
+.content-card-count {
   color: var(--text-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
+}
+
+.resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resource-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-label-md);
+  font-weight: 500;
+  text-decoration: none;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+              background-color var(--duration-fast) var(--ease-standard);
+}
+
+.resource-link:hover {
+  border-color: var(--accent);
+  background: var(--surface-subtle);
+  text-decoration: none;
+}
+
+.resource-link svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.resource-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .content-nav {
@@ -4413,6 +4520,82 @@ select.input {
   margin-left: 8px;
 }
 
+/* Hạng toàn cục của người xem — hiện cả khi hạng đó nằm ngoài trang đang xem. */
+.lb-me-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: 1rem;
+  padding: 12px 18px;
+  border: 1px solid var(--palette-border);
+  border-radius: var(--radius-xl);
+  background: var(--palette-surface-container-low);
+}
+
+.lb-me-rank-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: var(--space-md);
+  border-right: 1px solid var(--palette-border);
+}
+
+.lb-me-label {
+  font-size: var(--text-mono-xs);
+  color: var(--palette-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lb-me-rank {
+  font-family: var(--font-sans);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--palette-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-me-total {
+  margin-left: 2px;
+  font-size: var(--text-body-md);
+  font-weight: 500;
+  color: var(--palette-secondary);
+}
+
+.lb-me-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-lg);
+  margin: 0;
+}
+
+.lb-me-facts dt {
+  font-size: var(--text-mono-xs);
+  color: var(--palette-secondary);
+}
+
+.lb-me-facts dd {
+  margin: 2px 0 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-body-md);
+  font-weight: 600;
+  color: var(--palette-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-me-offpage {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: var(--text-label);
+  color: var(--palette-secondary);
+}
+
+.lb-pagination {
+  margin-top: 16px;
+}
+
 /* S08b Chưa công bố Locked Card */
 .lb-locked-card {
   position: relative;
@@ -5095,8 +5278,10 @@ select.input {
 
 .modal-account-form {
   max-width: 660px;
+  max-height: 100%;
   padding: 0;
-  overflow: hidden;
+  /* Canh ngang để bo góc header, nhưng vẫn cuộn dọc khi form cao hơn viewport. */
+  overflow-x: hidden;
   border-radius: 8px;
 }
 
@@ -6376,6 +6561,64 @@ select.input {
   line-height: 1.4;
 }
 
+/* Danh sách link tài nguyên: mỗi dòng là một cặp tên + URL Drive. */
+.ac-resource-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ac-resource-fieldset > legend {
+  margin-bottom: var(--space-xs);
+}
+
+.ac-resource-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ac-resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.ac-resource-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard);
+}
+
+.ac-resource-remove:hover {
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.ac-resource-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
 .ac-form-error {
   margin: 0;
 }
@@ -6586,6 +6829,15 @@ select.input {
   .ac-form-grid,
   .ac-join-options {
     grid-template-columns: 1fr;
+  }
+
+  /* Giữ nút xóa cạnh URL, chỉ xếp tên tài nguyên xuống dòng riêng. */
+  .ac-resource-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ac-resource-row > input:first-child {
+    grid-column: 1 / -1;
   }
 
   .ac-toolbar-actions {
@@ -6816,9 +7068,11 @@ button:focus-visible {
   }
   .content-sidebar {
     position: static;
+  }
+  .content-card {
     padding: 12px;
   }
-  .content-sidebar-head {
+  .content-card-toc .content-card-head {
     display: none;
   }
   .content-nav {
@@ -7182,6 +7436,18 @@ button:focus-visible {
   margin-bottom: 1.25rem;
 }
 
+/* Banner chặn publish: một dòng lý do cạnh nút nhảy sang tab Chấm điểm. */
+.admin-detail-publish-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-bottom: 1.25rem;
+}
+.admin-detail-publish-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
 /* S14 Assets Layout */
 .s14-assets-container {
   display: flex;
@@ -7526,6 +7792,13 @@ button:focus-visible {
   gap: 0.5rem;
 }
 
+/* Icon thường trong card S14 (S14.3: nút Upload icon 18). */
+.s14-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+}
+
 .s14-file-icon {
   width: 1rem;
   height: 1rem;
@@ -7614,11 +7887,11 @@ button:focus-visible {
   gap: 0.25rem;
   font-size: 0.75rem;
   padding: 0.25rem 0.5rem;
-  color: #b91c1c;
+  color: var(--danger);
 }
 
 .s14-action-btn-danger:hover {
-  background: #fef2f2;
+  background: var(--danger-soft-30);
 }
 
 .s14-icon-xs {
@@ -7628,7 +7901,7 @@ button:focus-visible {
 }
 
 /* Responsive adjustments */
-@media (max-width: 64rem) {
+@media (max-width: 63.99rem) {
   .s14-upload-card {
     grid-column: span 12;
   }

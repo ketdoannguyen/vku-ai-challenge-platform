@@ -3,7 +3,8 @@
 from collections import Counter
 
 from app.accounts.service import ACCOUNTS_COLLECTION
-from app.submissions.service import SUBMISSIONS_COLLECTION, iso_datetime
+from app.core.datetimes import iso_z
+from app.submissions.service import SUBMISSIONS_COLLECTION
 
 
 async def ranked_entries(db, competition_id) -> list[dict]:
@@ -38,11 +39,18 @@ async def ranked_entries(db, competition_id) -> list[dict]:
                 "primary_score": submission["primary_score"],
                 "metrics": submission["metrics"],
                 "best_submission_id": str(submission["_id"]),
-                "best_submission_at": iso_datetime(submission["created_at"]),
+                "best_submission_at": iso_z(submission["created_at"]),
                 "total_submissions": counts[account_id],
             }
         )
     return entries
+
+
+def _participant_entry(entry: dict, current_account_id) -> dict:
+    """Bỏ account_id và gắn cờ người xem — `me` dùng chung serializer này để không lộ định danh."""
+    item = {key: value for key, value in entry.items() if key != "account_id"}
+    item["is_current_user"] = entry["account_id"] == str(current_account_id)
+    return item
 
 
 def leaderboard_response(
@@ -50,19 +58,31 @@ def leaderboard_response(
     entries: list[dict],
     *,
     current_account_id=None,
-    include_account_id: bool = False,
+    limit: int = 50,
+    offset: int = 0,
 ) -> dict:
-    response_entries = []
-    for entry in entries:
-        item = {key: value for key, value in entry.items() if key != "account_id"}
-        if include_account_id:
-            item["account_id"] = entry["account_id"]
-        else:
-            item["is_current_user"] = entry["account_id"] == str(current_account_id)
-        response_entries.append(item)
+    """Trang participant: `rank` giữ nguyên thứ hạng toàn cục; `me` tìm trên full list rồi mới cắt trang."""
+    page = entries[offset : offset + limit]
+    me = next(
+        (entry for entry in entries if entry["account_id"] == str(current_account_id)), None
+    )
     return {
         "competition_id": str(competition["_id"]),
         "primary_metric": competition["primary_metric"],
-        "entries": response_entries,
-        "total": len(response_entries),
+        "entries": [_participant_entry(entry, current_account_id) for entry in page],
+        "total": len(entries),
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < len(entries),
+        "me": _participant_entry(me, current_account_id) if me else None,
+    }
+
+
+def admin_leaderboard_response(competition: dict, entries: list[dict]) -> dict:
+    """Admin/export luôn nhận toàn bộ danh sách kèm account_id, không phân trang."""
+    return {
+        "competition_id": str(competition["_id"]),
+        "primary_metric": competition["primary_metric"],
+        "entries": entries,
+        "total": len(entries),
     }

@@ -262,21 +262,11 @@ def test_submission_rejects_extension_and_global_size_limit(client, monkeypatch)
     assert _submission_documents(client) == []
 
 
-def test_submission_reports_scoring_not_ready(client):
-    now = datetime.now(timezone.utc)
-    _login(client)
-    competition = client.post(
-        "/api/admin/competitions",
-        json={
-            "slug": "not-ready",
-            "name": "not-ready",
-            "start_at": (now - timedelta(days=1)).isoformat(),
-            "end_at": (now + timedelta(days=1)).isoformat(),
-        },
-    ).json()
-    assert client.post(f"/api/admin/competitions/{competition['id']}/publish").status_code == 200
+def test_submission_reports_scoring_not_ready_when_ground_truth_disappears(client, isolated_data_dir):
+    """Publish đã gate readiness, nên 422 chỉ còn xảy ra khi ground truth hỏng sau khi publish."""
+    competition = _ready_competition(client, slug="not-ready")
+    (isolated_data_dir / "competitions" / competition["id"] / "private" / "ground_truth.csv").unlink()
     _login_participant(client)
-    assert client.post("/api/competitions/not-ready/join", json={}).status_code == 200
     response = _submit(client, competition["id"], b"id,prediction\n1,1\n")
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "SCORING_NOT_READY"

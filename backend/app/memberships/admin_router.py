@@ -2,6 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -12,8 +13,11 @@ from app.accounts.service import ACCOUNTS_COLLECTION, find_account_by_email
 from app.auth.dependencies import AdminAccount
 from app.auth.passwords import hash_password
 from app.competitions.admin_router import _get_competition_or_404
+from app.content import storage
+from app.core.config import get_settings
 from app.core.errors import api_error
 from app.memberships import service
+from app.submissions import service as submissions_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
@@ -92,6 +96,8 @@ async def list_members(
     return {
         "members": [service.member_view(m, accounts[m["account_id"]]) for m in page],
         "total": len(filtered),
+        # total gồm cả người đã rời/bị vô hiệu hóa nên UI cần con số đang hoạt động riêng.
+        "active_total": sum(1 for m in filtered if m.get("active", True)),
         "limit": limit,
         "offset": offset,
     }
@@ -143,3 +149,68 @@ async def set_member_active(
         raise api_error(404, "NOT_FOUND", "Không tìm thấy membership.")
     membership = await service.set_membership_active(db, membership, body.active)
     return {"member": service.member_view(membership, account)}
+
+
+@router.delete("/{competition_id}/members/{account_id}")
+async def delete_member(
+    competition_id: str, account_id: str, request: Request, admin: AdminAccount
+) -> dict:
+    """Xoá cứng membership, chỉ khi người này chưa từng có bài được chấm điểm."""
+    db = request.app.state.mongo.db
+    competition = await _get_competition_or_404(db, competition_id)
+    try:
+        oid = ObjectId(account_id)
+    except InvalidId:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy membership.")
+    membership = await service.get_membership(db, competition["_id"], oid)
+    if membership is None:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy membership.")
+
+    # Có điểm nghĩa là có lịch sử thi đấu: chỉ được vô hiệu hóa, không được xoá.
+    if await submissions_service.has_completed_submission(db, competition["_id"], account_id=oid):
+        raise api_error(
+            409,
+            "MEMBER_HAS_SUBMISSIONS",
+            "Thành viên đã có bài nộp được chấm điểm. Hãy dùng Vô hiệu hóa thay vì xoá.",
+        )
+
+    removed = await _delete_incomplete_submissions(db, competition["_id"], oid)
+    # Membership xoá sau cùng: nếu bước trên lỗi thì lần gọi lại vẫn còn bản ghi để chạy tiếp.
+    await db[service.MEMBERSHIPS_COLLECTION].delete_one({"_id": membership["_id"]})
+    logger.info(
+        "Admin %s deleted member competition=%s account=%s incomplete_submissions=%s",
+        admin["email"],
+        competition["_id"],
+        oid,
+        removed,
+    )
+    return {"deleted": True, "account_id": str(oid)}
+
+
+async def _delete_incomplete_submissions(db, competition_id, account_id) -> int:
+    """Dọn bài nộp chưa hoàn thành của một account; bài đã chấm điểm không bao giờ bị đụng tới."""
+    records = [
+        record
+        async for record in db[submissions_service.SUBMISSIONS_COLLECTION].find(
+            {
+                "competition_id": competition_id,
+                "account_id": account_id,
+                "status": {"$ne": "completed"},
+            }
+        )
+    ]
+    for record in records:
+        relative = record.get("file_path")
+        if not relative:
+            continue
+        try:
+            storage.ensure_within(Path(get_settings().data_dir), Path(relative)).unlink(
+                missing_ok=True
+            )
+        except (OSError, ValueError):
+            logger.warning("Cannot remove submission file %s", relative)
+    if records:
+        await db[submissions_service.SUBMISSIONS_COLLECTION].delete_many(
+            {"_id": {"$in": [record["_id"] for record in records]}}
+        )
+    return len(records)

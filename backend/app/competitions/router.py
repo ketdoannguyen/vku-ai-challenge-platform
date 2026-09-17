@@ -4,11 +4,14 @@
 nên `membership.active` luôn false. Draft vẫn ẩn với mọi đối tượng.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Request
 
 from app.auth.dependencies import OptionalAccount
 from app.competitions import service
 from app.core.errors import api_error
+from app.submissions import service as submissions_service
 
 router = APIRouter(prefix="/api/competitions")
 
@@ -46,4 +49,20 @@ async def get_competition_by_slug(slug: str, request: Request, account: Optional
     if competition is None or competition["status"] == "draft":
         raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
     membership = await get_membership(db, competition["_id"], account["_id"]) if account else None
-    return service.public_competition(competition, membership)
+    payload = service.public_competition(competition, membership)
+    # Quota chỉ tốn một count_documents nên chỉ tính khi thật sự dùng được: thành viên đang
+    # hoạt động của cuộc thi đang mở. List cố ý không tính để tránh N+1.
+    if (
+        account
+        and membership is not None
+        and membership.get("active", True)
+        and competition["status"] == "published"
+    ):
+        payload["quota"] = await submissions_service.quota_status(
+            db,
+            competition["_id"],
+            account["_id"],
+            competition["quota_per_day"],
+            datetime.now(timezone.utc),
+        )
+    return payload

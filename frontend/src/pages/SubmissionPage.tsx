@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
-import { METRIC_LABEL } from "../api/competitions";
+import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { ErrorBox } from "../components/ui";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
@@ -22,7 +22,7 @@ interface SubmissionResult {
 const METRICS = ["f1", "precision", "recall"] as const;
 
 export function SubmissionPage() {
-  const { competition } = useOutletContext<CompetitionContext>();
+  const { competition, refreshCompetition } = useOutletContext<CompetitionContext>();
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<SubmissionResult | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -31,6 +31,10 @@ export function SubmissionPage() {
 
   const unavailableMessage = submissionUnavailableMessage(competition);
   const config = competition.submission_config;
+  // Chỉ có khi backend trả quota (thành viên đang hoạt động, cuộc thi đang mở).
+  const quotaLabel = competition.quota
+    ? `Còn ${competition.quota.remaining}/${competition.quota.per_day} lượt hôm nay`
+    : `${competition.quota_per_day} lượt/ngày`;
 
   function validateAndSelectFile(selectedFile: File | null) {
     if (!selectedFile) {
@@ -74,6 +78,8 @@ export function SubmissionPage() {
       );
       setResult(response);
       setFile(null);
+      // POST đã trả quota_remaining tức thời; refetch để header và chỗ nộp bài khớp lại.
+      void refreshCompetition();
     } catch (err) {
       setError(err);
     } finally {
@@ -128,7 +134,7 @@ export function SubmissionPage() {
           </div>
           <div className="sub-spec-item">
             <span className="sub-spec-label">Hạn mức</span>
-            <span className="sub-spec-val">{competition.quota_per_day} lượt/ngày</span>
+            <span className="sub-spec-val">{quotaLabel}</span>
           </div>
         </div>
 
@@ -354,7 +360,7 @@ export function SubmissionPage() {
                     <line x1="12" y1="8" x2="12.01" y2="8" />
                   </svg>
                   <span>
-                    Hạn mức: <strong>{competition.quota_per_day} lượt/ngày</strong>
+                    Hạn mức: <strong>{quotaLabel}</strong>
                   </span>
                 </div>
 
@@ -474,6 +480,13 @@ function submissionUnavailableMessage(
   if (!Number.isNaN(startAt) && now < startAt) return "Cuộc thi chưa mở nhận bài.";
   if (!Number.isNaN(endAt) && now > endAt) return "Đã hết hạn nộp bài.";
   if (!competition.submission_config.ready) return "Cuộc thi chưa sẵn sàng chấm điểm.";
+  // Chỉ khóa theo quota khi backend thực sự trả quota; 429 vẫn là chốt cuối khi tab bị cũ.
+  const quota = competition.quota;
+  if (quota && quota.remaining === 0) {
+    return `Bạn đã dùng hết ${quota.per_day} lượt nộp hôm nay. Hạn mức làm mới lúc ${formatLocal(
+      quota.resets_at,
+    )}.`;
+  }
   return null;
 }
 

@@ -25,6 +25,7 @@ export interface SubmissionsResponse {
 }
 
 export interface LeaderboardEntry {
+  /** Thứ hạng toàn cục, không đánh lại số theo trang. */
   rank: number;
   display_name: string;
   primary_score: number;
@@ -33,14 +34,24 @@ export interface LeaderboardEntry {
   best_submission_at: string;
   total_submissions: number;
   is_current_user?: boolean;
+  /** Chỉ endpoint admin trả về; endpoint participant đã bỏ định danh. */
   account_id?: string;
 }
 
+/** Admin và export luôn nhận toàn bộ danh sách, không phân trang. */
 export interface LeaderboardResponse {
   competition_id: string;
   primary_metric: "f1" | "precision" | "recall";
   entries: LeaderboardEntry[];
   total: number;
+}
+
+export interface ParticipantLeaderboardResponse extends LeaderboardResponse {
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  /** Hạng toàn cục của người xem, kể cả khi ngoài trang; null nếu chưa có bài hoàn thành. */
+  me: LeaderboardEntry | null;
 }
 
 export function fetchMySubmissions(
@@ -51,8 +62,12 @@ export function fetchMySubmissions(
   return api.get(`/competitions/${competitionId}/submissions/me?limit=${limit}&offset=${offset}`);
 }
 
-export function fetchLeaderboard(competitionId: string): Promise<LeaderboardResponse> {
-  return api.get(`/competitions/${competitionId}/leaderboard`);
+export function fetchLeaderboard(
+  competitionId: string,
+  limit: number,
+  offset: number,
+): Promise<ParticipantLeaderboardResponse> {
+  return api.get(`/competitions/${competitionId}/leaderboard?limit=${limit}&offset=${offset}`);
 }
 
 export function formatScore(value: number | null | undefined): string {

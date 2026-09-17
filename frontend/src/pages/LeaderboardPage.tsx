@@ -4,14 +4,18 @@ import { formatLocal, METRIC_LABEL } from "../api/competitions";
 import {
   fetchLeaderboard,
   formatScore,
-  type LeaderboardResponse,
+  type ParticipantLeaderboardResponse,
 } from "../api/results";
 import { ErrorBox, Loading } from "../components/ui";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
+/** Số dòng mỗi trang; backend chặn 1–200 nên đây chỉ là lựa chọn hiển thị. */
+const PAGE_SIZE = 25;
+
 export function LeaderboardPage() {
   const { competition } = useOutletContext<CompetitionContext>();
-  const [data, setData] = useState<LeaderboardResponse | null>(null);
+  const [data, setData] = useState<ParticipantLeaderboardResponse | null>(null);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(competition.leaderboard_visible);
   const [error, setError] = useState<unknown>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -21,7 +25,7 @@ export function LeaderboardPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchLeaderboard(competition.id);
+      const result = await fetchLeaderboard(competition.id, PAGE_SIZE, offset);
       setData(result);
       setLastUpdated(new Date().toLocaleTimeString("vi-VN"));
     } catch (reason) {
@@ -29,7 +33,7 @@ export function LeaderboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [competition.id, competition.leaderboard_visible]);
+  }, [competition.id, competition.leaderboard_visible, offset]);
 
   useEffect(() => {
     void loadData();
@@ -135,7 +139,8 @@ export function LeaderboardPage() {
       </section>
     );
   }
-  if (!data?.entries.length) {
+  // Chỉ total = 0 mới thật sự là "chưa có kết quả"; trang rỗng vì offset quá xa là chuyện khác.
+  if (!data || data.total === 0) {
     return (
       <section className="results-page lb-page">
         <div className="lb-head results-head">
@@ -202,6 +207,50 @@ export function LeaderboardPage() {
         </div>
       </div>
 
+      {/* Hạng toàn cục của người xem: backend tìm trên toàn bộ danh sách nên vẫn đúng khi ngoài trang. */}
+      {data.me && (
+        <div className="lb-me-strip" role="status">
+          <div className="lb-me-rank-block">
+            <span className="lb-me-label">Hạng của bạn</span>
+            <span className="lb-me-rank">
+              #{data.me.rank}
+              <span className="lb-me-total">/{data.total}</span>
+            </span>
+          </div>
+          <dl className="lb-me-facts">
+            <div>
+              <dt>Điểm chính</dt>
+              <dd>{formatScore(data.me.primary_score)}</dd>
+            </div>
+            <div>
+              <dt>Số bài đã nộp</dt>
+              <dd>{data.me.total_submissions}</dd>
+            </div>
+            <div>
+              <dt>Đạt lúc</dt>
+              <dd>{formatLocal(data.me.best_submission_at)}</dd>
+            </div>
+          </dl>
+          {!data.entries.some((entry) => entry.is_current_user) && (
+            <p className="lb-me-offpage">Hạng của bạn nằm ngoài trang này.</p>
+          )}
+        </div>
+      )}
+
+      {data.entries.length === 0 ? (
+        <div className="empty-state">
+          <p>Trang này không có dữ liệu.</p>
+          <p className="text-muted">Kết quả vẫn còn ở các trang trước.</p>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          >
+            Về trang trước
+          </button>
+        </div>
+      ) : (
+      <>
       {/* Bảng xếp hạng 7 cột */}
       <div className="lb-table-wrap table-wrap">
         <table className="lb-table table results-table">
@@ -265,6 +314,36 @@ export function LeaderboardPage() {
           </tbody>
         </table>
       </div>
+
+      <div className="pagination pagination-controls lb-pagination">
+        <div>
+          Hiển thị <strong>{offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)}</strong> trong số{" "}
+          <strong>{data.total}</strong> thí sinh có điểm
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+          >
+            Trang trước
+          </button>
+          <span>
+            {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} / {data.total}
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={!data.has_more}
+            onClick={() => setOffset(offset + PAGE_SIZE)}
+          >
+            Trang sau
+          </button>
+        </div>
+      </div>
+      </>
+      )}
     </section>
   );
 }

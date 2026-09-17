@@ -1,8 +1,8 @@
 /** Overview (index) và content page (theo contentSlug) cho competition portal. */
 
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useNavigationType, useOutletContext, useParams } from "react-router-dom";
-import type { Competition } from "../api/competitions";
+import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
+import type { Competition, SubmissionConfig } from "../api/competitions";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
@@ -16,6 +16,21 @@ const JOIN_MODE_DETAIL: Record<Competition["join_mode"], string> = {
   invite_only: "Chỉ dành cho thí sinh được mời",
 };
 
+/** Nhãn `average` của sklearn — API trả khoá thô, UI cần chữ đọc được. */
+const AVERAGE_LABEL: Record<NonNullable<SubmissionConfig["average"]>, string> = {
+  binary: "Binary",
+  macro: "Macro",
+  weighted: "Weighted",
+};
+
+/** Giá trị cấu hình chưa được BTC thiết lập — hiển thị chữ thay vì `null`. */
+const NOT_CONFIGURED = "Chưa cấu hình";
+
+/** `pos_label` chỉ có với admin/thành viên đang hoạt động; undefined nghĩa là không được phép biết. */
+function configValue(value: string | null): string {
+  return value === null || value === "" ? NOT_CONFIGURED : value;
+}
+
 /** Vì sao chưa nộp được bài — chỉ gọi khi canSubmit sai, tức chưa tham gia và cuộc thi còn nhận bài. */
 function submitBlockedReason(c: Competition): string {
   if (c.status === "closed") return "Cuộc thi đã kết thúc nên không nhận thêm bài nộp.";
@@ -27,52 +42,103 @@ function submitBlockedReason(c: Competition): string {
   return "Bấm “Tham gia cuộc thi” ở khối phía trên để bắt đầu nộp bài.";
 }
 
+/**
+ * Tổng quan là một trang thật: thể lệ, quy cách bài nộp và danh sách tài liệu.
+ * Danh sách tài liệu tải độc lập nên lỗi ở đây chỉ ảnh hưởng đúng khối tài liệu.
+ */
 export function CompetitionOverview() {
-  const { competition: c, contents, contentsLoading, contentsError } =
+  const { competition: c, contents, contentsLoading, contentsError, reloadContents } =
     useOutletContext<CompetitionContext>();
 
-  if (contentsLoading) {
-    return <Loading label="Đang tải nội dung…" />;
-  }
-
-  if (contentsError) {
-    return (
-      <section className="ov">
-        <h2 className="ov-title">Tổng quan</h2>
-        <p className="text-danger">Không tải được danh sách nội dung cuộc thi.</p>
-      </section>
-    );
-  }
-
-  if (contents.length > 0) {
-    return <Navigate to={`content/${contents[0].slug}`} replace />;
-  }
-
   const canSubmit = c.membership.active && c.status !== "closed" && c.quota_per_day > 0;
+  const config = c.submission_config;
 
   return (
     <section className="ov">
       <h2 className="ov-title">Tổng quan</h2>
-      <p className="text-muted">Chưa có trang nội dung nào để hiển thị.</p>
 
-      <ul className="ov-facts">
-        <li>
-          <strong>Thời gian.</strong> Diễn ra từ {formatLocal(c.start_at)} đến{" "}
-          {formatLocal(c.end_at)}.
-        </li>
-        <li>
-          <strong>Tham gia.</strong> {JOIN_MODE_DETAIL[c.join_mode]}.
-        </li>
-        <li>
-          <strong>Chỉ số chính.</strong> {METRIC_LABEL[c.primary_metric]}.
-        </li>
-        <li>
-          <strong>Hạn mức nộp.</strong>{" "}
-          {c.quota_per_day > 0
-            ? `Tối đa ${c.quota_per_day} lượt mỗi ngày.`
-            : "Không nhận bài nộp."}
-        </li>
-      </ul>
+      <section className="ov-block">
+        <h3 className="ov-block-title">Thể lệ &amp; cách tham gia</h3>
+        <ul className="ov-facts">
+          <li>
+            <strong>Thời gian.</strong> Diễn ra từ {formatLocal(c.start_at)} đến{" "}
+            {formatLocal(c.end_at)}.
+          </li>
+          <li>
+            <strong>Tham gia.</strong> {JOIN_MODE_DETAIL[c.join_mode]}.
+          </li>
+          <li>
+            <strong>Hạn mức nộp.</strong>{" "}
+            {c.quota_per_day > 0
+              ? `Tối đa ${c.quota_per_day} lượt mỗi ngày.`
+              : "Không nhận bài nộp."}
+          </li>
+        </ul>
+      </section>
+
+      <section className="ov-block">
+        <h3 className="ov-block-title">Quy cách bài nộp</h3>
+        <ul className="ov-facts">
+          <li>
+            <strong>Chỉ số chính.</strong> <span>{METRIC_LABEL[c.primary_metric]}</span>
+          </li>
+          <li>
+            <strong>Cột ID.</strong> <span>{configValue(config.id_column)}</span>
+          </li>
+          <li>
+            <strong>Cột dự đoán.</strong> <span>{configValue(config.prediction_column)}</span>
+          </li>
+          <li>
+            <strong>Cách tính điểm.</strong>{" "}
+            <span>{config.average ? AVERAGE_LABEL[config.average] : NOT_CONFIGURED}</span>
+          </li>
+          {/* Backend bỏ hẳn khoá này với người không phải thành viên: nhãn dương là dữ liệu ground truth. */}
+          {config.pos_label !== undefined && (
+            <li>
+              <strong>Nhãn dương.</strong> <span>{configValue(config.pos_label)}</span>
+            </li>
+          )}
+          <li>
+            <strong>Dung lượng tối đa.</strong> <span>{config.max_upload_mb} MiB mỗi file.</span>
+          </li>
+        </ul>
+      </section>
+
+      <section className="ov-block">
+        <h3 className="ov-block-title">Tài liệu cuộc thi</h3>
+        {contentsLoading ? (
+          <p className="content-nav-state" role="status">
+            Đang tải tài liệu…
+          </p>
+        ) : contentsError ? (
+          <div className="content-nav-state" role="alert">
+            <p>Không tải được danh sách tài liệu cuộc thi.</p>
+            <button type="button" className="btn btn-secondary" onClick={() => void reloadContents()}>
+              Thử lại
+            </button>
+          </div>
+        ) : contents.length > 0 ? (
+          <nav aria-label="Tài liệu cuộc thi">
+            <ul className="ov-docs">
+              {contents.map((item) => (
+                <li key={item.id}>
+                  <Link className="ov-doc" to={`content/${item.slug}`}>
+                    <span className="ov-doc-title">{item.title}</span>
+                    <span>
+                      {item.visibility === "members" && (
+                        <span className="chip">{VISIBILITY_LABEL.members}</span>
+                      )}{" "}
+                      Cập nhật {formatLocal(item.updated_at)}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ) : (
+          <p className="ov-hint">Ban Tổ chức chưa đăng tài liệu cho cuộc thi này.</p>
+        )}
+      </section>
 
       <div className="ov-actions">
         {canSubmit ? (

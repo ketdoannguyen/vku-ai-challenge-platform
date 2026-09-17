@@ -1,105 +1,104 @@
 # AI Challenge Platform - Current Project State
 
 ## 1. Current checkpoint
-- Last completed sprint: SPRINT_07
-- Date: 2026-09-16
-- Branch: main
-- Commit/working tree status: Sprint 06 đã commit tại `e06f2ea`; Sprint 07 implemented trong working tree, chưa commit/push
-- Overall state: **release candidate** — 133 backend tests + 53 frontend tests pass; frontend production build + lint, Compose config, Docker image build pass; full E2E local MVP/security smoke qua Nginx/Mongo/filesystem thật pass (xem Commands verified)
+- Date: 2026-09-17
+- Branch: `feat/admin-competitions-ui`
+- Commit/working tree status: HEAD `48169c3` (Sprint 08 + UI admin/participant đã commit); thay đổi **chưa commit** trong working tree: block "Vận hành cuộc thi" (ADR-015→ADR-020) và phần tổng quan participant
+- Overall state: **release candidate** — 177 backend tests + 114 frontend tests pass; typecheck, production build, lint và Compose config pass. Vòng này chỉ chạy test tự động, **chưa** chạy lại live E2E smoke trên stack Compose (xem §9)
 
 ## 2. Implemented capabilities
-- Sprint 01-06: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets, participant portal, scoring + ground truth private, submission policy/quota, my submissions, leaderboard, XLSX export
-- Sprint 07 hardening:
-  - Login abuse control: limiter in-process `app/auth/rate_limit.py` — 10 lần sai/15 phút theo identifier đã normalize, vượt → 429 `RATE_LIMITED` + `Retry-After`; login đúng reset counter; state process-local, bounded 10.000 identifiers (ADR-013)
-  - Error contract ổn định: unhandled exception → 500 `INTERNAL_ERROR` generic không lộ traceback/detail; 405 → `METHOD_NOT_ALLOWED`; non-dict 4xx → `HTTP_ERROR`; HTTPException giữ header (Retry-After)
-  - Logging đầy đủ và an toàn: join completed/reused, content/asset upload + delete, submission reject theo stable code, submission scoring failure (log exception riêng), export, health degraded; log chỉ chứa ID/email/code/bytes — không password/cookie/join code/ground truth/CSV values
-  - Nginx: thêm `Permissions-Policy` + `Content-Security-Policy-Report-Only` same-origin; giữ nosniff/X-Frame-Options DENY/Referrer-Policy; `/data/` 404 tường minh
-- Sprint 07 admin/UX completion:
-  - Admin competition detail có khối "Thông tin chung" (status/dates/join mode/metric/quota)
-  - Accounts + members admin tải `limit=200` (đủ 40-80 đội; tổng hiển thị)
-  - Confirm destructive: xóa content, xóa asset, đổi mã tham gia, member active toggle, account active toggle, thay ground truth khi đã có file
-  - Mã tham gia input `type=password`; đặt mã lần đầu không cần confirm, đổi mã có confirm và refetch trạng thái configured
-  - Account create/reset password dùng `type=password` + `minLength=10` + `autoComplete=new-password`; busy labels nhất quán
-  - Closed competition không cho mở form Sửa (disabled + title lý do); client validate `end_at > start_at` trước khi gửi
-  - SubmissionPage derive lý do "chưa mở nhận bài"/"đã hết hạn" từ `start_at`/`end_at` (backend vẫn là nguồn enforce)
-  - ResultsPanel loading/error nhất quán (loading state, không render table trống khi lỗi)
-  - Modal/ConfirmModal dùng chung `components/Modal.tsx`: portal ra body, focus vào input đầu tiên khi mở, restore focus + Escape đóng
+- Sprint 01-07: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets, participant portal, scoring + ground truth private, submission policy/quota, my submissions, leaderboard, XLSX export, login rate limit + error envelope + CSP Report-Only
+- Sprint 08 (ADR-014): đọc công khai cho khách (danh sách, chi tiết, nội dung `public`, assets)
+- Vận hành cuộc thi (working tree, ADR-015→ADR-019):
+  - **Tài nguyên tải về**: `competitions.resources` là link Google Drive (tối đa 10, https, host Drive/Docs, không credentials); không host dataset/binary. Block nằm dưới "Mục lục nội dung" trong tab Tổng quan, ẩn khi rỗng, link ngoài có `rel="noopener noreferrer nofollow"` (ADR-015)
+  - **Publish chỉ khi chấm được**: `app/scoring/readiness.py` là một nguồn sự thật, đọc và parse lại ground truth thật; thiếu/sai → 422 với code cụ thể và giữ nguyên `draft`. Admin detail trả `publish_ready`/`publish_blocked_reason` (ADR-017)
+  - **Join từ publish đến hết `end_at`**: non-member sau `end_at` → 422 `JOIN_DEADLINE_PASSED`; không kiểm tra `start_at`; membership hiện có luôn idempotent kể cả sau deadline/closed (ADR-017)
+  - **Privacy payload**: bỏ `created_by` khỏi representation public; `pos_label` chỉ trả cho admin và thành viên active (ADR-016); datetime naive/aware chuẩn hoá qua một helper dùng chung
+  - **Quota trước khi nộp**: `GET /api/competitions/{slug}` trả `quota {per_day,used_today,remaining,resets_at}` cho thành viên active; UI hiện "Còn X/Y lượt" và khoá form khi hết lượt (ADR-019)
+  - **Leaderboard phân trang**: `limit`/`offset`/`has_more` + `me` (hạng toàn cục, tìm trên full list trước khi cắt trang, không có account id) (ADR-019)
+  - **Đường thoát**: participant `POST /leave` (soft deactivate, giữ điểm); admin xoá cứng member chỉ khi chưa có bài `completed`, ngược lại 409 `MEMBER_HAS_SUBMISSIONS`; admin `DELETE` competition chỉ với `draft` + `confirm_slug`, cascade con-trước-cha-sau và dọn file best-effort (ADR-018)
+  - **Countdown sống**: formatter thuần + hook dùng chung, dashboard dùng một page-level clock, nhịp 30 giây trên 1 ngày và 1 giây dưới 1 ngày, resync khi tab visible
+- Tổng quan participant (working tree, user làm song song): tab Tổng quan là trang thật với thể lệ/quy cách bài nộp/danh sách tài liệu, không tự nhảy sang tài liệu đầu tiên
 
 ## 3. Not implemented yet (đúng kế hoạch)
 - Production deploy (GCE, Cloudflare Tunnel, compose prod, HSTS, CSP enforce, edge/IP-based rate limit) — Sprint 08
 - Backup/restore/pilot — Sprint 09
+- Public/private leaderboard split — **tạm hoãn có chủ đích** (ADR-020); không giải quyết bằng cách nhân đôi competition
 
 ## 4. Repository structure that matters
-- `backend/app/auth/rate_limit.py`: FailedLoginLimiter process-local (fixed window, thread-safe, bounded)
-- `backend/app/main.py`: error handlers (HTTPException với headers, RequestValidationError, unhandled 500), health degraded log
-- `backend/app/auth/router.py`, `memberships/router.py`, `content/admin_router.py`, `submissions/router.py`, `submissions/admin_router.py`: limiter hook + safe event logs
-- `frontend/src/components/Modal.tsx`: Modal + ConfirmModal dùng chung (portal, focus, Escape)
-- `frontend/src/pages/AdminAccountsPage.tsx` + test mới (2), `AdminCompetitionDetailPage.tsx` + test, `AdminCompetitionsPage.tsx` + test, `SubmissionPage.tsx` + test
-- `frontend/nginx.conf`: security headers + CSP Report-Only
-- `backend/tests/test_auth.py` (+4 tests), `backend/tests/test_health.py` (+2), `backend/tests/test_submissions.py` (+1), `backend/tests/conftest.py` (autouse reset limiter)
+- `backend/app/core/datetimes.py`: `as_utc`, `utc_day_bounds`, `iso_z` dùng chung (naive Mongo được hiểu là UTC)
+- `backend/app/scoring/readiness.py`: `check_readiness` / `blocked_reason` cho publish + banner admin + endpoint scoring
+- `backend/app/competitions/service.py`: `public_competition` vs `admin_competition`, `normalize_resources`, `delete_competition_cascade`, `remove_competition_files`
+- `backend/app/memberships/{router,admin_router}.py`: join deadline policy, `POST /leave`, `DELETE member` có điều kiện, `active_total`
+- `backend/app/leaderboard/service.py`: `leaderboard_response` (participant, phân trang + `me`) vs `admin_leaderboard_response` (full list)
+- `frontend/src/lib/countdown.ts`, `frontend/src/hooks/useCountdown.ts`: formatter thuần + clock sống
+- `frontend/src/components/CompetitionResources.tsx`: block tài nguyên, tự lọc URL trước khi render anchor
+- `backend/tests/helpers.py`: fixture dùng chung (`configure_scoring`, `publish_competition`) — `backend/tests` là package nên import qua `tests.helpers`
 
 ## 5. Runtime/services
-- Kiến trước web/api/mongo và volume `/data` giữ nguyên; không dependency mới ở Sprint 07
-- Limiter state nằm trong process API (1 uvicorn worker) — restart API reset
+- Kiến trúc web/api/mongo và volume `/data` giữ nguyên; không thêm dependency, service hay collection mới
+- Không có collection mới: `resources` nằm trong `competitions`, quota và `me` là dữ liệu derived
 
 ## 6. Current API contract summary
-- `POST /api/auth/login` thêm hành vi 429 `RATE_LIMITED` + `Retry-After` sau 10 lần sai/15 phút (ADR-013)
-- Error codes mới: `RATE_LIMITED` (429), `METHOD_NOT_ALLOWED` (405), `HTTP_ERROR` (generic 4xx), `INTERNAL_ERROR` (500)
-- Không endpoint/schema nào khác thay đổi
-- Chi tiết: `docs/API_CONTRACT.md`
+- Mới: `POST /api/competitions/{slug}/leave`; `DELETE /api/admin/competitions/{id}` (draft + `confirm_slug`); `DELETE /api/admin/competitions/{id}/members/{account_id}`
+- Đổi: `GET /api/competitions/{slug}` thêm `quota`; leaderboard participant thêm `limit`/`offset`/`has_more`/`me`; admin members thêm `active_total`; competition create/update thêm `resources`; join thêm `JOIN_DEADLINE_PASSED`
+- Error code mới: `JOIN_DEADLINE_PASSED`, `GROUND_TRUTH_REQUIRED`, `CONFIRM_SLUG_MISMATCH`, `COMPETITION_NOT_DELETABLE`, `MEMBER_HAS_SUBMISSIONS`
+- Chi tiết: `docs/API_CONTRACT.md` §3-§6
 
 ## 7. Current data model and indexes
-- Không thay đổi collection/field/index ở Sprint 07
-- Chi tiết: `docs/DATA_MODEL.md`
+- `competitions.resources` (list `{label,url}`, default `[]`; document cũ thiếu field vẫn đọc được, không migration)
+- Membership: `active=false` giờ cũng do participant tự đặt qua `/leave`; admin xoá cứng chỉ khi chưa có bài `completed`
+- Không thêm index mới (các truy vấn mới đều dùng index sẵn có)
+- Chi tiết: `docs/DATA_MODEL.md` §9-§10
 
 ## 8. Environment variables in use
-- Không env mới; toàn bộ config limiter hiện là hằng số trong `rate_limit.py` (10 lần/15 phút) — nâng env khi Sprint 08 cần tune
-- Lưu ý: docker-compose hiện chỉ truyền các env cần thiết cho API; `SESSION_SECRET` trong `.env.example` vẫn không được dùng (ADR-008)
+- Không env mới. `MAX_UPLOAD_MB`, `MAX_CONTENT_MB`, `MAX_ASSET_MB`, `DATA_DIR` giữ nguyên
 
 ## 9. Commands verified
-- `cd backend && .venv/bin/pytest` — 133 passed
-- `cd frontend && npm test` — 53 passed (13 files)
-- `cd frontend && npm run build` — pass (strict TS + Vite production build)
-- `cd frontend && npm run lint` — exit 0, chỉ warnings pattern cũ (set-state-in-effect/Fast Refresh)
+- `cd backend && .venv/bin/pytest -q` — **177 passed**
+- `cd frontend && npx vitest run` — **114 passed (17 files)**
+- `cd frontend && npx tsc -b --force` — pass (không lỗi)
+- `cd frontend && npm run build` — pass
+- `cd frontend && npx oxlint src` — exit 0, chỉ warnings có sẵn (set-state-in-effect, Fast Refresh, `Date.now` trong JoinControl)
 - `docker compose config --quiet` — pass
-- `docker compose build` + `docker compose up -d` — pass
-- Sprint 07 live smoke qua Nginx (2026-09-16): headers (nosniff/DENY/Referrer-Policy/Permissions-Policy/CSP-Report-Only) trên `/`; `/data/` 404; unknown ground-truth route 404; admin API 401 khi unauth; Mongo không publish
-- Full E2E RC smoke (isolated, qua Nginx + Mongo thật): seed admin/participant → tạo competition → scoring config + ground truth → upload Markdown malicious (`<script>`, `javascript:` link) → publish → participant join → admin API 403 với participant → content API trả markdown thô (frontend sanitize đã test riêng) → submission sai ID 422 không persist → submission đúng score 1.0 → vượt quota 429 → history/leaderboard đúng → export.xlsx là file xlsx hợp lệ → dọn sạch data + file
-- Rate limit live smoke: 10 lần sai → 429 `RATE_LIMITED` + `Retry-After` qua Nginx
-- Log review qua `docker compose logs api`: login/join/content/submission/export events có đủ, không có secret
+- **Chưa chạy lại vòng này**: live E2E smoke qua Nginx + Mongo thật, `docker compose build/up`, log review. Kết quả smoke gần nhất vẫn là của Sprint 07/08 (xem git history). Các luồng mới (leave, xoá member/competition, quota, phân trang) mới có test tự động, chưa smoke trên stack thật.
 
 ## 10. Tests currently passing
-- Backend: 133 (Sprint 02-06: 126; Sprint 07 thêm 7: rate limit ×2, cookie flags, log redaction ×2, 500 envelope, 405, submission reject log)
-- Frontend: 53 (Sprint 06: 48; Sprint 07 thêm 5: accounts ×2, closed-edit + date-order, member confirm, deadline gating)
+- Backend: 177 (con số 133 ghi ở Sprint 07; tăng do Sprint 08 và block vận hành — file mới `test_datetimes.py` 6 test, `test_competitions_delete.py` 4 test, còn lại rải trong `test_competitions_{admin,public}.py`, `test_memberships.py`, `test_results.py`, `test_scoring_admin.py`, `test_submissions.py`)
+- Frontend: 114 (17 files; file mới `lib/countdown.test.ts`, `hooks/useCountdown.test.tsx`, `pages/CompetitionOverview.test.tsx`, cộng các case thêm trong page/component tests)
 
 ## 11. Known issues / technical debt (non-blocking)
-- Limiter key theo email: kẻ xấu biết email có thể gây lockout 15 phút cho chủ email (trade-off MVP, đã ghi ADR-013); cần IP companion khi có Cloudflare trusted headers
-- Limiter state process-local: chỉ đúng khi API chạy 1 worker; multi-worker/distributed cần external store
-- Limit 200 cho admin accounts/members: quá 200 dòng sẽ truncate (hiện thị total); thêm pagination khi quy mô vượt
-- Join code không rate limit (chỉ Argon2 verify chậm) — cân nhắc ở Sprint 08 cùng edge limit
-- CSP chỉ Report-Only; enforce + HSTS chờ domain/HTTPS thật (Sprint 08)
-- Quota check count-then-insert vẫn không transaction (debt Sprint 05); scoring synchronous đọc lại ground truth mỗi lần; leaderboard aggregate in-memory — giữ nguyên, đo trước khi scale
-- Modal chưa có focus trap đầy đủ (chỉ focus ban đầu + Escape + restore); tab keyboard arrows chưa implement — polish sau nếu cần
-- Deadline gating frontend chỉ re-evaluate khi re-render (tab để qua deadline cần refresh)
-- `SESSION_SECRET` trong `.env.example` không dùng (ADR-008) — giữ nguyên để tránh đổi env khi cần ký sau này
-- dev_up.sh default passwords `1` (user-mandated local dev); override bằng env khi cần policy mạnh hơn
-- Lint warnings set-state-in-effect/Fast Refresh là pattern hiện có, thêm admin pages cũ; không có lint error
+- Limiter login process-local theo email (ADR-013): lockout 15 phút nếu kẻ xấu biết email; cần IP companion khi có Cloudflare trusted headers
+- Limit 200 cho admin accounts/members: vượt 200 dòng sẽ truncate (có hiển thị total); thêm pagination khi quy mô vượt
+- Leaderboard vẫn tính full ranking trong bộ nhớ: phù hợp 40-80 người; phân trang chỉ giảm payload/UI, không đổi độ phức tạp query — review nếu vượt quy mô
+- Cascade xoá competition không có transaction (Mongo standalone): đã xoá con-trước-cha-sau + test failure injection, nhưng file cleanup chỉ best-effort và có thể báo partial (`files_removed:false`)
+- Race nhỏ giữa check `has_completed_submission` và xoá member với một submission đồng thời; backend vẫn enforce membership khi nộp nên không mất điểm đã chấm
+- Quota check count-then-insert không transaction; UI quota có thể stale trên nhiều tab — backend 429 vẫn là authority
+- Modal chưa có focus trap đầy đủ (chỉ focus ban đầu + Escape + restore)
+- Lint warnings set-state-in-effect/Fast Refresh là pattern có sẵn; không có lint error
+- Link Drive không được kiểm tra còn truy cập được (chủ đích, ADR-015) — BTC tự đảm bảo quyền chia sẻ
 
 ## 12. Decisions made this sprint
-- ADR-013: login limiter in-process theo identifier, 429 `RATE_LIMITED` + `Retry-After`; CSP Report-Only + Permissions-Policy; error envelope 500/405 ổn định
+- ADR-015: resources là link Drive, không host binary
+- ADR-016: tách representation public/admin; không lộ `created_by`/`pos_label`
+- ADR-017: publish readiness là một nguồn sự thật; join mở đến hết `end_at`
+- ADR-018: xoá theo hướng giữ lịch sử (leave soft, hard-delete member có điều kiện, delete competition chỉ draft)
+- ADR-019: quota hiển thị trước khi nộp; leaderboard phân trang nhưng hạng vẫn toàn cục
+- ADR-020: tạm hoãn public/private leaderboard split (deferred)
 
 ## 13. Preconditions for next sprint
-- Sprint 08 có stable RC local stack + docs đồng bộ
-- Cần chuẩn bị trước Sprint 08: GCE VM, domain, Cloudflare Tunnel token, production `.env` (danh sách trong `docs/DEPLOYMENT.md`)
+- Sprint 08 cần: GCE VM, domain, Cloudflare Tunnel token, production `.env` (danh sách trong `docs/DEPLOYMENT.md`)
+- Trước khi deploy nên chạy lại live smoke cho các luồng vận hành mới (§9)
 
 ## 14. Exact next sprint
 - `plans/sprints/SPRINT_08_PRODUCTION_GCE_DOCKER_CLOUDFLARE_DEPLOY.md`
 
 ## 15. Handoff notes for the next AI agent
-- Giữ limiter theo ADR-013; nếu Sprint 08 chạy nhiều API worker hoặc cần IP-key, phải quyết định lại (external store hoặc Nginx/Cloudflare edge)
-- CSP Report-Only: khi enforce ở Sprint 08, kiểm tra console violations trên domain thật trước; HSTS bật sau khi HTTPS ổn định
-- Không expose thêm participant data; mọi error mới phải vào `docs/API_CONTRACT.md` §6
-- Dev-up passwords yếu là chủ đích local; không "fix" mà không hỏi user
+- Muốn "public/private leaderboard" thì đọc ADR-020 trước: **không** nhân đôi competition; hướng đúng là một ground truth có partition và một submission sinh hai score
+- Mọi thay đổi publish/join phải đi qua `app/scoring/readiness.py` và giữ thứ tự policy trong `memberships/router.py`
+- Xoá dữ liệu: luôn con-trước-cha-sau, dọn file sau khi DB xong, không thêm force flag cho published/closed/member đã có bài `completed`
+- Không expose `created_by`/`pos_label` ra representation public; field mới phải chọn rõ bên public hay admin
+- Mọi error code mới phải vào `docs/API_CONTRACT.md` §6
 
 ---
 

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition } from "../api/competitions";
+import type { AdminCompetition, Competition } from "../api/competitions";
 import {
   formatLocal,
   JOIN_MODE_LABEL,
@@ -27,6 +27,7 @@ import {
 } from "../api/results";
 import {
   CompetitionActionConfirmModal,
+  CompetitionDeleteModal,
   CompetitionFormModal,
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
@@ -66,6 +67,7 @@ interface ScoringConfig {
 
 interface ScoringStatus {
   ready: boolean;
+  not_ready_reason: { code: string; message: string } | null;
   locked: boolean;
   config: ScoringConfig | null;
   ground_truth: {
@@ -249,19 +251,20 @@ function formatBytes(bytes: number): string {
 export function AdminCompetitionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [competition, setCompetition] = useState<Competition | null>(null);
+  const [competition, setCompetition] = useState<AdminCompetition | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<Tab>("contents");
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState<CompetitionAction | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const messageTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      setCompetition(await api.get<Competition>(`/admin/competitions/${id}`));
+      setCompetition(await api.get<AdminCompetition>(`/admin/competitions/${id}`));
     } catch (err) {
       setError(err);
     } finally {
@@ -310,6 +313,8 @@ export function AdminCompetitionDetailPage() {
 
   const editDisabled = competition.status === "closed";
   const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
+  // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
+  const publishBlocked = competition.publish_blocked_reason ?? null;
 
   return (
     <div className="page admin-detail-page">
@@ -347,6 +352,11 @@ export function AdminCompetitionDetailPage() {
               <IconEdit className="admin-detail-action-icon" />
               <span>Sửa</span>
             </button>
+            {editDisabled && (
+              <span className="sr-only" id={`edit-reason-${competition.id}`}>
+                {editReason}
+              </span>
+            )}
             <button
               type="button"
               className="admin-detail-action"
@@ -359,6 +369,11 @@ export function AdminCompetitionDetailPage() {
               <button
                 type="button"
                 className="admin-detail-action primary"
+                disabled={publishBlocked !== null}
+                title={publishBlocked?.message}
+                aria-describedby={
+                  publishBlocked ? `publish-blocked-${competition.id}` : undefined
+                }
                 onClick={() => setConfirming("publish")}
               >
                 <IconPublish className="admin-detail-action-icon" />
@@ -373,6 +388,17 @@ export function AdminCompetitionDetailPage() {
               >
                 <IconStop className="admin-detail-action-icon" />
                 <span>Kết thúc</span>
+              </button>
+            )}
+            {/* Xoá chỉ dành cho draft; published/closed phải giữ lịch sử thi. */}
+            {competition.status === "draft" && (
+              <button
+                type="button"
+                className="admin-detail-action danger"
+                onClick={() => setDeleting(true)}
+              >
+                <IconTrash className="admin-detail-action-icon" />
+                <span>Xóa</span>
               </button>
             )}
           </div>
@@ -413,6 +439,25 @@ export function AdminCompetitionDetailPage() {
           ))}
         </nav>
       </header>
+
+      {competition.status === "draft" && publishBlocked && (
+        <div
+          className="status-banner warning admin-detail-publish-banner"
+          role="status"
+          id={`publish-blocked-${competition.id}`}
+        >
+          <span className="admin-detail-publish-banner-text">
+            <strong>Chưa thể publish.</strong> {publishBlocked.message}
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => setTab("scoring")}
+          >
+            Mở tab Chấm điểm
+          </button>
+        </div>
+      )}
 
       {message && (
         <div className="status-banner success admin-detail-toast" role="status">
@@ -463,6 +508,13 @@ export function AdminCompetitionDetailPage() {
             }
           }}
           onClose={() => setConfirming(null)}
+        />
+      )}
+      {deleting && (
+        <CompetitionDeleteModal
+          competition={competition}
+          onDeleted={() => navigate("/admin/competitions")}
+          onClose={() => setDeleting(false)}
         />
       )}
     </div>
@@ -754,6 +806,9 @@ function ScoringPanel({ competition }: { competition: Competition }) {
             Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
           </div>
         )}
+        {status && !status.ready && status.not_ready_reason && (
+          <div className="status-banner warning">{status.not_ready_reason.message}</div>
+        )}
         {message && (
           <div className="status-banner success" role="status">
             <span>{message}</span>
@@ -767,7 +822,16 @@ function ScoringPanel({ competition }: { competition: Competition }) {
             </button>
           </div>
         )}
-        <ErrorBox error={error} />
+        {error ? (
+          <div className="admin-section-error">
+            <ErrorBox error={error} />
+            {!status && (
+              <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
+                Thử lại
+              </button>
+            )}
+          </div>
+        ) : null}
 
         <form onSubmit={saveConfig}>
           <div className="form-grid">
@@ -966,17 +1030,24 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
           </button>
         </div>
       )}
-      <ErrorBox error={error} />
+      {error ? (
+        <div className="admin-section-error">
+          <ErrorBox error={error} />
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
+            Thử lại
+          </button>
+        </div>
+      ) : null}
       <div className="table-wrap" aria-busy={loading}>
         <table className="table">
           <thead>
             <tr>
-              <th>Thứ tự</th>
-              <th>Tiêu đề</th>
-              <th>Slug</th>
-              <th>Hiển thị</th>
-              <th>File</th>
-              <th>Thao tác</th>
+              <th scope="col">Thứ tự</th>
+              <th scope="col">Tiêu đề</th>
+              <th scope="col">Slug</th>
+              <th scope="col">Hiển thị</th>
+              <th scope="col">File</th>
+              <th scope="col">Thao tác</th>
             </tr>
           </thead>
           <tbody>
@@ -1000,7 +1071,7 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
                   onChanged={notify}
                 />
               ))
-            ) : (
+            ) : error ? null : (
               <tr>
                 <td colSpan={6} className="table-state">
                   Chưa có trang nội dung nào.
@@ -1173,7 +1244,7 @@ function ContentRow({
       {rowError && (
         <tr>
           <td colSpan={6} className="table-state error-cell">
-            {rowError}
+            <span role="alert">{rowError}</span>
           </td>
         </tr>
       )}
@@ -1476,17 +1547,24 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
             </button>
           </div>
         )}
-        <ErrorBox error={error} />
+        {error ? (
+          <div className="admin-section-error">
+            <ErrorBox error={error} />
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
+              Thử lại
+            </button>
+          </div>
+        ) : null}
 
         <div className="table-wrap s14-table-wrap" aria-busy={loading}>
           <table className="table s14-table">
             <thead>
               <tr>
-                <th className="s14-th-name">Tên file</th>
-                <th className="s14-th-type">Loại</th>
-                <th className="s14-th-size">Dung lượng</th>
-                <th className="s14-th-md">Dùng trong Markdown</th>
-                <th className="s14-th-actions">Thao tác</th>
+                <th scope="col" className="s14-th-name">Tên file</th>
+                <th scope="col" className="s14-th-type">Loại</th>
+                <th scope="col" className="s14-th-size">Dung lượng</th>
+                <th scope="col" className="s14-th-md">Dùng trong Markdown</th>
+                <th scope="col" className="s14-th-actions">Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -1554,7 +1632,7 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
                     Không tìm thấy tài nguyên nào phù hợp với "{searchQuery}".
                   </td>
                 </tr>
-              ) : (
+              ) : error ? null : (
                 <tr>
                   <td colSpan={5} className="table-state s14-empty-state">
                     Chưa có ảnh nào. Trong Markdown dùng đường dẫn tương đối <code>assets/ten-file.png</code>.
@@ -1594,6 +1672,7 @@ function MembersPanel({
 }) {
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [activeTotal, setActiveTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
@@ -1602,6 +1681,7 @@ function MembersPanel({
   const [joinCode, setJoinCode] = useState("");
   const [pendingJoinCode, setPendingJoinCode] = useState("");
   const [pendingMember, setPendingMember] = useState<MemberItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<MemberItem | null>(null);
   const [busy, setBusy] = useState(false);
   const messageTimer = useRef<number | null>(null);
 
@@ -1625,10 +1705,13 @@ function MembersPanel({
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await api.get<{ members: MemberItem[]; total: number }>(
-        `/admin/competitions/${competition.id}/members?limit=200`,
-      );
+      const data = await api.get<{
+        members: MemberItem[];
+        total: number;
+        active_total: number;
+      }>(`/admin/competitions/${competition.id}/members?limit=200`);
       setMembers(data.members);
+      setActiveTotal(data.active_total);
       setTotal(data.total);
     } catch (err) {
       setError(err);
@@ -1729,7 +1812,10 @@ function MembersPanel({
         <div className="admin-members-head">
           <div>
             <h2>Thành viên cuộc thi</h2>
-            <p>{total} thành viên</p>
+            <p>
+              {activeTotal} đang hoạt động
+              {total > activeTotal ? ` · ${total} tổng cộng` : ""}
+            </p>
           </div>
           <form
             className="admin-members-add-form"
@@ -1788,10 +1874,13 @@ function MembersPanel({
                       <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => setPendingMember(member)}>
                         {member.active ? "Vô hiệu hóa" : "Kích hoạt"}
                       </button>
+                      <button className="btn btn-ghost btn-sm btn-danger-ghost" type="button" disabled={busy} onClick={() => setPendingDelete(member)}>
+                        Xóa
+                      </button>
                     </td>
                   </tr>
                 ))
-              ) : (
+              ) : error ? null : (
                 <tr><td colSpan={6} className="table-state">Chưa có thành viên nào.</td></tr>
               )}
             </tbody>
@@ -1846,6 +1935,23 @@ function MembersPanel({
             setPendingMember(null);
           }}
           onClose={() => setPendingMember(null)}
+        />
+      )}
+      {pendingDelete && (
+        <ConfirmModal
+          title="Xóa thành viên"
+          body={`Xóa ${pendingDelete.email} khỏi cuộc thi? Chỉ xóa được thành viên chưa từng có bài nộp được chấm điểm.`}
+          confirmLabel="Xóa"
+          danger
+          onConfirm={async () => {
+            const member = pendingDelete;
+            await runConfirmed(
+              () => api.del(`/admin/competitions/${competition.id}/members/${member.account_id}`),
+              "Đã xóa thành viên.",
+            );
+            setPendingDelete(null);
+          }}
+          onClose={() => setPendingDelete(null)}
         />
       )}
     </div>

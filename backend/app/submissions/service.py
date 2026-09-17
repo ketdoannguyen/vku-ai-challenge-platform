@@ -1,8 +1,10 @@
 """Submission persistence and safe result representations."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.core.datetimes import iso_z, utc_day_bounds
 
 SUBMISSIONS_COLLECTION = "submissions"
 _PUBLIC_ERROR_MESSAGES = {
@@ -45,19 +47,16 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     )
 
 
-async def has_completed_submission(db, competition_id) -> bool:
-    return (
-        await db[SUBMISSIONS_COLLECTION].count_documents(
-            {"competition_id": competition_id, "status": "completed"}, limit=1
-        )
-        > 0
-    )
+async def has_completed_submission(db, competition_id, account_id=None) -> bool:
+    """Không truyền account_id là kiểm tra toàn cuộc thi (dùng cho scoring lock)."""
+    query = {"competition_id": competition_id, "status": "completed"}
+    if account_id is not None:
+        query["account_id"] = account_id
+    return await db[SUBMISSIONS_COLLECTION].count_documents(query, limit=1) > 0
 
 
 async def completed_today_count(db, competition_id, account_id, now: datetime) -> int:
-    now = _as_utc(now)
-    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(days=1)
+    day_start, day_end = utc_day_bounds(now)
     return await db[SUBMISSIONS_COLLECTION].count_documents(
         {
             "competition_id": competition_id,
@@ -68,6 +67,20 @@ async def completed_today_count(db, competition_id, account_id, now: datetime) -
     )
 
 
+async def quota_status(
+    db, competition_id, account_id, quota_per_day: int, now: datetime
+) -> dict:
+    """Quota của một account trong ngày UTC hiện tại, kèm mốc reset để UI hiển thị giờ local."""
+    used = await completed_today_count(db, competition_id, account_id, now)
+    _, day_end = utc_day_bounds(now)
+    return {
+        "per_day": quota_per_day,
+        "used_today": used,
+        "remaining": max(0, quota_per_day - used),
+        "resets_at": iso_z(day_end),
+    }
+
+
 def public_submission(submission: dict, quota_remaining: int) -> dict:
     return {
         "id": str(submission["_id"]),
@@ -75,7 +88,7 @@ def public_submission(submission: dict, quota_remaining: int) -> dict:
         "status": submission["status"],
         "metrics": submission["metrics"],
         "primary_score": submission["primary_score"],
-        "created_at": _as_utc(submission["created_at"]).isoformat().replace("+00:00", "Z"),
+        "created_at": iso_z(submission["created_at"]),
         "quota_remaining": quota_remaining,
     }
 
@@ -89,7 +102,7 @@ def submission_history_item(submission: dict) -> dict:
         "status": submission["status"],
         "metrics": submission.get("metrics"),
         "primary_score": submission.get("primary_score"),
-        "created_at": iso_datetime(submission["created_at"]),
+        "created_at": iso_z(submission["created_at"]),
     }
     if submission.get("error_code") or submission.get("error_message"):
         error_code = submission.get("error_code")
@@ -112,13 +125,3 @@ async def list_account_submissions(
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
     return [submission_history_item(item) async for item in cursor], total
-
-
-def iso_datetime(value: datetime) -> str:
-    return _as_utc(value).isoformat().replace("+00:00", "Z")
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)

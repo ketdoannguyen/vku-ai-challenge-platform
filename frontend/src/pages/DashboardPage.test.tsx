@@ -18,7 +18,6 @@ const PUBLISHED = {
   primary_metric: "f1",
   quota_per_day: 5,
   leaderboard_visible: true,
-  created_by: "admin@vku.vn",
   join_code_configured: false,
   membership: { active: false, joined_at: null },
 };
@@ -70,6 +69,11 @@ function renderDashboard() {
   );
 }
 
+/** Mốc ISO cách hiện tại `seconds` giây — clock chạy bằng timer thật trong test này. */
+function inSeconds(seconds: number): string {
+  return new Date(Date.now() + seconds * 1000).toISOString();
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -115,4 +119,34 @@ test("khách: ẩn ô thống kê 'Đã tham gia', thẻ mời đăng nhập tha
   // PUBLISHED mời đăng nhập; CLOSED vẫn chỉ báo đã kết thúc (đăng nhập không mở được).
   expect(screen.getAllByRole("link", { name: "Đăng nhập để tham gia" }).length).toBe(1);
   expect(screen.getByText(/Cuộc thi đã kết thúc/)).toBeTruthy();
+});
+
+test("mọi thẻ đang mở dùng chung clock của trang: nhãn cùng nhảy theo giây", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "a", name: "Cuộc thi A", end_at: inSeconds(65) },
+      { ...PUBLISHED, id: "b", slug: "b", name: "Cuộc thi B", end_at: inSeconds(125) },
+    ],
+  });
+  renderDashboard();
+
+  // Cả hai thẻ đều nhận mốc giờ từ clock cấp trang, không thẻ nào tự đếm riêng.
+  const before = (await screen.findAllByText(/^còn \d{2}:\d{2}:\d{2}$/)).map((el) => el.textContent);
+  expect(before).toHaveLength(2);
+
+  // Số timer thật của clock (đúng một timer cho cả trang) được khẳng định ở useCountdown.test.tsx.
+  await waitFor(
+    () => {
+      const after = screen.getAllByText(/^còn /).map((el) => el.textContent);
+      expect(after).not.toEqual(before);
+    },
+    { timeout: 3000 },
+  );
+});
+
+test("hết hạn: thẻ vẫn hiện nhưng không còn chip đếm ngược", async () => {
+  mockApi({ competitions: [{ ...PUBLISHED, id: "c", slug: "c", name: "Cuộc thi C", end_at: "2026-09-01T00:00:00Z" }] });
+  renderDashboard();
+  expect(await screen.findByRole("heading", { name: "Cuộc thi C" })).toBeTruthy();
+  expect(screen.queryByText(/còn /)).toBeNull();
 });

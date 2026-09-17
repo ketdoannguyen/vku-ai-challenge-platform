@@ -12,6 +12,7 @@ from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
 from app.content import storage
 from app.core.config import get_settings
+from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
 from app.scoring import service as scoring_service
@@ -41,9 +42,9 @@ async def submit_csv(
         raise api_error(403, "MEMBERSHIP_INACTIVE", "Quyền tham gia cuộc thi đã bị vô hiệu hóa.")
 
     now = datetime.now(timezone.utc)
-    if now < _as_utc(competition["start_at"]):
+    if now < as_utc(competition["start_at"]):
         raise api_error(422, "SUBMISSION_NOT_OPEN", "Cuộc thi chưa mở nhận bài.")
-    if now > _as_utc(competition["end_at"]):
+    if now > as_utc(competition["end_at"]):
         raise api_error(422, "SUBMISSION_DEADLINE_PASSED", "Đã hết hạn nộp bài.")
 
     config = _ready_config(competition)
@@ -194,9 +195,3 @@ async def _read_limited(file: UploadFile) -> bytes:
 def _safe_original_filename(filename: str | None) -> str:
     safe_name = Path((filename or "submission.csv").replace("\\", "/")).name
     return safe_name[:255] or "submission.csv"
-
-
-def _as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)

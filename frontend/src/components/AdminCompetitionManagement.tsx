@@ -1,9 +1,11 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../api/client";
-import type { Competition } from "../api/competitions";
+import type { AdminCompetition, Competition, CompetitionResource } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
+  MAX_COMPETITION_RESOURCES,
   METRIC_LABEL,
+  isSafeResourceUrl,
   isoToLocalInput,
   localInputToIso,
 } from "../api/competitions";
@@ -114,6 +116,99 @@ export function CompetitionActionConfirmModal({
   );
 }
 
+/** Xoá cuộc thi nháp: backend cascade nội dung/thành viên/bài nộp nên phải gõ đúng slug mới cho bấm. */
+export function CompetitionDeleteModal({
+  competition,
+  onDeleted,
+  onClose,
+}: {
+  competition: Competition;
+  onDeleted: () => void | Promise<void>;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const matches = typed.trim() === competition.slug;
+
+  async function confirm() {
+    setBusy(true);
+    setError("");
+    try {
+      await api.del(
+        `/admin/competitions/${competition.id}?confirm_slug=${encodeURIComponent(typed.trim())}`,
+      );
+      await onDeleted();
+    } catch (err) {
+      // Modal vẫn mở để admin đọc lý do (409 sai trạng thái, 422 sai slug) rồi sửa.
+      setError(err instanceof Error ? err.message : "Lỗi không xác định");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Xóa cuộc thi" onClose={onClose} large={false}>
+      <div className="confirm-modal confirm-modal-danger">
+        <div className="confirm-modal-body">
+          <span className="confirm-modal-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none">
+              <path
+                d="M12 8v5m0 3.5v.01M10.3 3.84 2.82 17a2 2 0 0 0 1.74 3h14.88a2 2 0 0 0 1.74-3L13.7 3.84a2 2 0 0 0-3.4 0Z"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <p>
+            Xóa vĩnh viễn <strong>{competition.name}</strong>? Toàn bộ nội dung, thành viên và bài
+            nộp của cuộc thi sẽ bị xoá theo. Thao tác này không hoàn tác được.
+          </p>
+        </div>
+
+        <div className="form-field">
+          <label className="field-label" htmlFor="delete-confirm-slug">
+            Gõ chính xác slug <code>{competition.slug}</code> để xác nhận
+          </label>
+          <input
+            id="delete-confirm-slug"
+            className="input"
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            autoComplete="off"
+            autoFocus
+          />
+        </div>
+
+        {error && (
+          <div className="confirm-modal-error" role="alert">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M12 7.5v5m0 4v.01" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )}
+
+        <div className="modal-actions confirm-modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            Hủy
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => void confirm()}
+            disabled={!matches || busy}
+          >
+            {busy ? "Đang xử lý..." : "Xóa vĩnh viễn"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /** Dùng chung create/edit. Create: nhập mọi field. Edit: slug/status khóa (backend enforce). */
 export function CompetitionFormModal({
   competition,
@@ -122,7 +217,7 @@ export function CompetitionFormModal({
 }: {
   competition?: Competition;
   onClose: () => void;
-  onSaved: (competition: Competition) => void;
+  onSaved: (competition: AdminCompetition) => void;
 }) {
   const isEdit = competition !== undefined;
   const [name, setName] = useState(competition?.name ?? "");
@@ -148,7 +243,11 @@ export function CompetitionFormModal({
   const [leaderboardVisible, setLeaderboardVisible] = useState(
     competition?.leaderboard_visible ?? true,
   );
+  const [resources, setResources] = useState<CompetitionResource[]>(
+    competition?.resources ?? [],
+  );
   const [dateError, setDateError] = useState("");
+  const [resourceError, setResourceError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const title = isEdit
@@ -156,9 +255,40 @@ export function CompetitionFormModal({
     : "Tạo cuộc thi";
   const metricLocked = isEdit && competition.status === "published";
 
+  function updateResource(index: number, patch: Partial<CompetitionResource>) {
+    setResources((rows) =>
+      rows.map((row, position) => (position === index ? { ...row, ...patch } : row)),
+    );
+  }
+
+  /** Dòng bỏ trống hoàn toàn bị lọc; gửi [] khi xóa hết để backend clear. */
+  function cleanResources(): CompetitionResource[] | null {
+    const rows = resources
+      .map((row) => ({ label: row.label.trim(), url: row.url.trim() }))
+      .filter((row) => row.label !== "" || row.url !== "");
+    if (rows.length > MAX_COMPETITION_RESOURCES) {
+      setResourceError(`Mỗi cuộc thi tối đa ${MAX_COMPETITION_RESOURCES} tài nguyên.`);
+      return null;
+    }
+    for (const row of rows) {
+      if (!row.label) {
+        setResourceError("Mỗi tài nguyên cần có tên.");
+        return null;
+      }
+      if (!isSafeResourceUrl(row.url)) {
+        setResourceError(
+          "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+        );
+        return null;
+      }
+    }
+    return rows;
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setDateError("");
+    setResourceError("");
     setError("");
 
     const start = new Date(startAt);
@@ -167,6 +297,9 @@ export function CompetitionFormModal({
       setDateError("Thời gian kết thúc phải sau thời gian bắt đầu.");
       return;
     }
+
+    const cleanedResources = cleanResources();
+    if (cleanedResources === null) return;
 
     setBusy(true);
     const payload = {
@@ -179,15 +312,17 @@ export function CompetitionFormModal({
       primary_metric: metric,
       quota_per_day: Number(quota),
       leaderboard_visible: leaderboardVisible,
+      resources: cleanedResources,
     };
 
     try {
+      // Cả hai endpoint admin đều trả detail kèm readiness, không chỉ public projection.
       const saved = isEdit
-        ? await api.patch<Competition>(
+        ? await api.patch<AdminCompetition>(
             `/admin/competitions/${competition.id}`,
             payload,
           )
-        : await api.post<Competition>("/admin/competitions", payload);
+        : await api.post<AdminCompetition>("/admin/competitions", payload);
       onSaved(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi không xác định");
@@ -388,6 +523,62 @@ export function CompetitionFormModal({
               </span>
             </label>
           </div>
+
+          <fieldset className="ac-resource-fieldset">
+            <legend>Tài nguyên tải về (link Google Drive)</legend>
+            <p className="ac-resource-hint">
+              Chỉ nhận link Google Drive — hệ thống không lưu file dataset. Nhớ đặt quyền
+              chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
+            </p>
+
+            {resources.length === 0 ? (
+              <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
+            ) : (
+              resources.map((row, index) => (
+                <div className="ac-resource-row" key={index}>
+                  <input
+                    className="ac-form-control"
+                    value={row.label}
+                    onChange={(event) => updateResource(index, { label: event.target.value })}
+                    placeholder="Tên tài nguyên"
+                    aria-label={`Tên tài nguyên ${index + 1}`}
+                  />
+                  <input
+                    className="ac-form-control ac-form-mono"
+                    value={row.url}
+                    onChange={(event) => updateResource(index, { url: event.target.value })}
+                    placeholder="https://drive.google.com/..."
+                    aria-label={`Link tài nguyên ${index + 1}`}
+                  />
+                  <button
+                    type="button"
+                    className="ac-resource-remove"
+                    onClick={() =>
+                      setResources((rows) => rows.filter((_, position) => position !== index))
+                    }
+                    aria-label={`Xóa tài nguyên ${index + 1}`}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+
+            <button
+              type="button"
+              className="ac-form-button secondary"
+              onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
+              disabled={resources.length >= MAX_COMPETITION_RESOURCES}
+            >
+              + Thêm tài nguyên
+            </button>
+
+            {resourceError && (
+              <div className="ac-date-error" role="alert">
+                {resourceError}
+              </div>
+            )}
+          </fieldset>
 
           {error && (
             <div className="error-box ac-form-error" role="alert">

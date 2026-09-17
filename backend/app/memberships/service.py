@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
+from app.core.datetimes import iso_z
+
 MEMBERSHIPS_COLLECTION = "competition_memberships"
 
 
@@ -67,7 +69,7 @@ def public_membership(membership: dict | None) -> dict:
         return {"active": False, "joined_at": None}
     return {
         "active": membership.get("active", True),
-        "joined_at": _iso(membership["joined_at"]),
+        "joined_at": iso_z(membership["joined_at"]),
     }
 
 
@@ -78,11 +80,5 @@ def member_view(membership: dict, account: dict) -> dict:
         "name": account["name"],
         "role": account["role"],
         "active": membership.get("active", True),
-        "joined_at": _iso(membership["joined_at"]),
+        "joined_at": iso_z(membership["joined_at"]),
     }
-
-
-def _iso(value) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")

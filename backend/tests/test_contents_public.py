@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import get_settings
+from tests.helpers import publish_competition
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +52,7 @@ def _setup(client, slug="docs-cup", status="published"):
         )
         contents.append(content)
     if status != "draft":
-        client.post(f"/api/admin/competitions/{competition['id']}/publish")
+        assert publish_competition(client, competition["id"]).status_code == 200
     if status == "closed":
         client.post(f"/api/admin/competitions/{competition['id']}/close")
     _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")

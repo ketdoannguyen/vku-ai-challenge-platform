@@ -10,8 +10,26 @@ export interface SubmissionConfig {
   id_column: string | null;
   prediction_column: string | null;
   average: "binary" | "macro" | "weighted" | null;
-  pos_label: string | null;
+  /** Chỉ có với admin và thành viên đang hoạt động — nhãn dương là thông tin của ground truth. */
+  pos_label?: string | null;
   max_upload_mb: number;
+}
+
+/** Link tài nguyên BTC khai báo — nền tảng chỉ lưu URL, không host dataset. */
+export interface CompetitionResource {
+  label: string;
+  url: string;
+}
+
+/** Khớp RESOURCES_MAX ở backend — chặn thêm dòng ngay trên UI. */
+export const MAX_COMPETITION_RESOURCES = 10;
+
+/** Hạn mức nộp trong ngày UTC — chỉ detail trả về, và chỉ cho thành viên đang hoạt động. */
+export interface QuotaStatus {
+  per_day: number;
+  used_today: number;
+  remaining: number;
+  resets_at: string;
 }
 
 export interface Competition {
@@ -26,10 +44,12 @@ export interface Competition {
   primary_metric: "f1" | "precision" | "recall";
   quota_per_day: number;
   leaderboard_visible: boolean;
-  created_by: string;
   join_code_configured: boolean;
+  resources: CompetitionResource[];
   membership: Membership;
   submission_config: SubmissionConfig;
+  /** Vắng mặt với guest, người chưa join, member bị vô hiệu hóa và cuộc thi đã đóng. */
+  quota?: QuotaStatus;
 }
 
 export interface JoinResponse {
@@ -38,14 +58,33 @@ export interface JoinResponse {
   joined_now: boolean;
 }
 
+export interface LeaveResponse {
+  competition_id: string;
+  membership: Membership;
+  /** false khi gọi lại trên membership đã rời — thao tác vẫn thành công. */
+  left_now: boolean;
+}
+
 export interface CompetitionsResponse {
   competitions: Competition[];
 }
 
-/** Bảng admin kèm số liệu tổng hợp — endpoint public không trả về hai field này. */
+/** Bảng admin kèm số liệu tổng hợp và created_by — endpoint public không trả về các field này. */
 export interface AdminCompetition extends Competition {
+  created_by: string;
+  /** Chỉ đếm thành viên đang hoạt động; người đã rời/bị vô hiệu hóa nằm ở inactive_member_count. */
   member_count: number;
+  inactive_member_count: number;
   submission_count: number;
+  /** Chỉ endpoint admin detail trả về — list cố ý không đọc ground truth cho từng dòng. */
+  publish_ready?: boolean;
+  publish_blocked_reason?: PublishBlockedReason | null;
+}
+
+/** Lý do publish bị chặn, khớp mã lỗi backend trả về khi gọi publish. */
+export interface PublishBlockedReason {
+  code: string;
+  message: string;
 }
 
 export interface AdminCompetitionsResponse {
@@ -91,6 +130,29 @@ export function localInputToIso(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString();
+}
+
+const RESOURCE_URL_MAX = 2048;
+const RESOURCE_HOSTS = ["drive.google.com", "docs.google.com"];
+
+/**
+ * Lọc lại URL tài nguyên ngay trước khi render: backend đã validate, nhưng dữ liệu
+ * legacy hoặc ghi trực tiếp vào DB vẫn không được phép tạo thành link sống.
+ */
+export function isSafeResourceUrl(value: string): boolean {
+  if (!value || value.length > RESOURCE_URL_MAX) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (parsed.username || parsed.password) return false;
+  const host = parsed.hostname.toLowerCase();
+  return RESOURCE_HOSTS.some(
+    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
+  );
 }
 
 /** published → success, closed → muted, draft (admin-only view) → warning. */

@@ -13,33 +13,25 @@ import {
 } from "../api/competitions";
 import { fetchContents, type ContentSummary } from "../api/contents";
 import { ErrorBox } from "../components/ui";
+import { CompetitionResources } from "../components/CompetitionResources";
 import { JoinControl } from "../components/JoinControl";
+import { useCountdown } from "../hooks/useCountdown";
 
 export interface CompetitionContext {
   competition: Competition;
   contents: ContentSummary[];
   contentsLoading?: boolean;
   contentsError?: unknown;
+  /** Tải lại mục lục nội dung — dùng ở trạng thái lỗi của khối tài liệu trong Tổng quan. */
+  reloadContents: () => Promise<void>;
+  /** Tải lại cuộc thi (quota sau khi nộp) mà không bật skeleton, để không unmount trang con. */
+  refreshCompetition: () => Promise<void>;
 }
 
 export const VISIBILITY_LABEL: Record<ContentSummary["visibility"], string> = {
   public: "Mọi thí sinh",
   members: "Chỉ thành viên cuộc thi",
 };
-
-const DAY_MS = 86_400_000;
-
-/** Đếm ngược tới end_at; quá hạn trả null để không hiện chip (cùng quy ước DashboardPage). */
-function countdown(endAt: string): string | null {
-  const remaining = new Date(endAt).getTime() - Date.now();
-  if (!Number.isFinite(remaining) || remaining <= 0) return null;
-  const days = Math.floor(remaining / DAY_MS);
-  if (days >= 1) return `còn ${days} ngày`;
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `còn ${pad(Math.floor(remaining / 3_600_000))}:${pad(
-    Math.floor((remaining % 3_600_000) / 60_000),
-  )}:${pad(Math.floor((remaining % 60_000) / 1000))}`;
-}
 
 /** Wrapper SVG dùng chung: icon trang trí nên luôn aria-hidden. */
 function Icon({ children }: { children: React.ReactNode }) {
@@ -134,6 +126,15 @@ export function CompetitionDetailPage() {
     }
   }, [slug]);
 
+  /** Refetch im lặng: quota là thông tin phụ, lỗi mạng không được xoá nội dung đang xem. */
+  const refreshCompetition = useCallback(async () => {
+    try {
+      setCompetition(await api.get<Competition>(`/competitions/${slug}`));
+    } catch {
+      // Giữ nguyên dữ liệu cũ; lần nộp kế tiếp vẫn được backend kiểm tra quota thật.
+    }
+  }, [slug]);
+
   // Danh sách nội dung tải độc lập với cuộc thi: lỗi ở đây hiện trạng thái lỗi + "Thử lại",
   // tuyệt đối không rơi về "chưa có nội dung" vì hai tình huống này khác nhau.
   const loadContents = useCallback(async () => {
@@ -154,6 +155,9 @@ export function CompetitionDetailPage() {
     void loadCompetition();
     void loadContents();
   }, [loadCompetition, loadContents]);
+
+  // Gọi vô điều kiện trước mọi nhánh return; chuỗi rỗng khi chưa tải xong cũng trả null.
+  const remaining = useCountdown(competition?.end_at ?? "");
 
   if (loading) {
     return (
@@ -204,7 +208,8 @@ export function CompetitionDetailPage() {
   }
 
   const c = competition;
-  const remaining = c.status === "published" ? countdown(c.end_at) : null;
+  // Chip chỉ có nghĩa với cuộc thi đang mở — cuộc thi đã đóng không đếm ngược nữa.
+  const countdownLabel = c.status === "published" ? remaining : null;
   const currentPath = pathname.replace(/\/+$/, "");
   const basePath = `/competitions/${slug}`.replace(/\/+$/, "");
   const isOverview = currentPath === basePath || currentPath.startsWith(`${basePath}/content`);
@@ -227,13 +232,13 @@ export function CompetitionDetailPage() {
             <span className="chip-dot" aria-hidden="true" />
             {STATUS_LABEL[c.status]}
           </span>
-          {remaining && (
+          {countdownLabel && (
             <span className="chip">
               <Icon>
                 <circle cx="12" cy="12" r="9" />
                 <path d="M12 7v5l3 2" />
               </Icon>
-              {remaining}
+              {countdownLabel}
             </span>
           )}
           <span className="chip">{JOIN_MODE_LABEL[c.join_mode]}</span>
@@ -248,7 +253,11 @@ export function CompetitionDetailPage() {
           <div className="comp-masthead-actions">
             <JoinControl
               competition={c}
-              onJoined={(membership: Membership) => setCompetition({ ...c, membership })}
+              onMembershipChange={(membership: Membership) => {
+                setCompetition({ ...c, membership });
+                // Quota chỉ xuất hiện sau khi join — tải lại để chỗ nộp bài biết còn bao nhiêu lượt.
+                void refreshCompetition();
+              }}
             />
           </div>
         </div>
@@ -301,52 +310,56 @@ export function CompetitionDetailPage() {
       <div className={`content-layout${!isOverview ? " is-workspace" : ""}`}>
         {isOverview && (
           <aside className="content-sidebar">
-            <div className="content-sidebar-head">
-              <span className="content-sidebar-title">
-                <Icon>
-                  <path d="M9 6h11" />
-                  <path d="M9 12h11" />
-                  <path d="M9 18h11" />
-                  <path d="M4.5 6h.01" />
-                  <path d="M4.5 12h.01" />
-                  <path d="M4.5 18h.01" />
-                </Icon>
-                Mục lục nội dung
-              </span>
-              {!contentsLoading && !contentsError && contents.length > 0 && (
-                <span className="content-sidebar-count">{contents.length} mục</span>
-              )}
-            </div>
-
-            {contentsLoading ? (
-              <p className="content-nav-state" role="status">
-                Đang tải nội dung…
-              </p>
-            ) : contentsError ? (
-              <div className="content-nav-state" role="alert">
-                <p>Không tải được danh sách nội dung.</p>
-                <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
-                  Thử lại
-                </button>
+            <section className="content-card content-card-toc">
+              <div className="content-card-head">
+                <span className="content-card-title">
+                  <Icon>
+                    <path d="M9 6h11" />
+                    <path d="M9 12h11" />
+                    <path d="M9 18h11" />
+                    <path d="M4.5 6h.01" />
+                    <path d="M4.5 12h.01" />
+                    <path d="M4.5 18h.01" />
+                  </Icon>
+                  Mục lục nội dung
+                </span>
+                {!contentsLoading && !contentsError && contents.length > 0 && (
+                  <span className="content-card-count">{contents.length} mục</span>
+                )}
               </div>
-            ) : contents.length > 0 ? (
-              <nav className="content-nav" aria-label="Nội dung cuộc thi">
-                {contents.map((item) => (
-                  <NavLink
-                    key={item.id}
-                    to={`content/${item.slug}`}
-                    className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
-                  >
-                    <span className="content-nav-title">{item.title}</span>
-                    {item.visibility === "public" && (
-                      <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
-                    )}
-                  </NavLink>
-                ))}
-              </nav>
-            ) : (
-              <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
-            )}
+
+              {contentsLoading ? (
+                <p className="content-nav-state" role="status">
+                  Đang tải nội dung…
+                </p>
+              ) : contentsError ? (
+                <div className="content-nav-state" role="alert">
+                  <p>Không tải được danh sách nội dung.</p>
+                  <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
+                    Thử lại
+                  </button>
+                </div>
+              ) : contents.length > 0 ? (
+                <nav className="content-nav" aria-label="Nội dung cuộc thi">
+                  {contents.map((item) => (
+                    <NavLink
+                      key={item.id}
+                      to={`content/${item.slug}`}
+                      className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
+                    >
+                      <span className="content-nav-title">{item.title}</span>
+                      {item.visibility === "public" && (
+                        <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
+                      )}
+                    </NavLink>
+                  ))}
+                </nav>
+              ) : (
+                <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
+              )}
+            </section>
+
+            <CompetitionResources resources={c.resources} />
           </aside>
         )}
 
@@ -358,6 +371,8 @@ export function CompetitionDetailPage() {
                 contents,
                 contentsLoading,
                 contentsError,
+                reloadContents: loadContents,
+                refreshCompetition,
               } satisfies CompetitionContext
             }
           />

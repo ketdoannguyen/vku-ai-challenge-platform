@@ -16,7 +16,7 @@ const COMPETITION: Competition = {
   primary_metric: "f1",
   quota_per_day: 5,
   leaderboard_visible: true,
-  created_by: "admin@vku.vn",
+  resources: [],
   join_code_configured: false,
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   submission_config: {
@@ -30,15 +30,17 @@ const COMPETITION: Competition = {
 };
 
 function renderPage(competition: Competition = COMPETITION) {
-  return render(
+  const refreshCompetition = vi.fn(async () => {});
+  const view = render(
     <MemoryRouter initialEntries={["/competitions/submit-cup/submit"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition, contents: [] }} />}>
+        <Route element={<Outlet context={{ competition, contents: [], refreshCompetition }} />}>
           <Route path="/competitions/:slug/submit" element={<SubmissionPage />} />
         </Route>
       </Routes>
     </MemoryRouter>,
   );
+  return { ...view, refreshCompetition };
 }
 
 afterEach(() => {
@@ -94,6 +96,62 @@ test("submit hiển thị loading rồi metrics và quota còn lại", async () 
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
   expect(screen.getAllByText("0.500000")).toHaveLength(3);
   expect(screen.getByText("Còn 4 lượt nộp hôm nay.")).toBeTruthy();
+});
+
+test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp thành công", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "submission-1",
+            competition_id: COMPETITION.id,
+            status: "completed",
+            metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
+            primary_score: 0.5,
+            created_at: "2026-09-15T00:00:00Z",
+            quota_remaining: 2,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+    ),
+  );
+  const { refreshCompetition } = renderPage({
+    ...COMPETITION,
+    quota: {
+      per_day: 5,
+      used_today: 2,
+      remaining: 3,
+      resets_at: "2026-09-18T00:00:00Z",
+    },
+  });
+  const rules = screen.getByLabelText("Quy định file submission");
+  expect(rules).toHaveTextContent("Còn 3/5 lượt hôm nay");
+
+  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+    target: { files: [new File(["id,prediction\n1,1\n"], "result.csv", { type: "text/csv" })] },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
+  await screen.findByText("Kết quả chấm điểm");
+  await waitFor(() => expect(refreshCompetition).toHaveBeenCalledTimes(1));
+});
+
+test("hết quota thì khóa form và nêu giờ làm mới", () => {
+  renderPage({
+    ...COMPETITION,
+    quota: {
+      per_day: 5,
+      used_today: 5,
+      remaining: 0,
+      resets_at: "2026-09-18T00:00:00Z",
+    },
+  });
+  const banner = screen.getByText(/Bạn đã dùng hết 5 lượt nộp hôm nay/);
+  expect(banner).toBeTruthy();
+  expect(banner.textContent).toContain("Hạn mức làm mới lúc");
+  expect(screen.getByLabelText("Chọn file CSV")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
 });
 
 test("validation error từ backend được hiển thị rõ", async () => {

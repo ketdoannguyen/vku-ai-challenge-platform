@@ -7,6 +7,8 @@ from bson import ObjectId
 
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
+from app.memberships.service import MEMBERSHIPS_COLLECTION
+from tests.helpers import publish_competition
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +24,7 @@ def _login(client, email="admin@vku.vn", password="adminmatkhau1"):
     assert response.status_code == 200
 
 
-def _competition(client, slug="scoring-cup", publish=False):
+def _competition(client, slug="scoring-cup"):
     _login(client)
     response = client.post(
         "/api/admin/competitions",
@@ -36,10 +38,7 @@ def _competition(client, slug="scoring-cup", publish=False):
         },
     )
     assert response.status_code == 201
-    competition = response.json()
-    if publish:
-        assert client.post(f"/api/admin/competitions/{competition['id']}/publish").status_code == 200
-    return competition
+    return response.json()
 
 
 def _config(**overrides):
@@ -72,12 +71,16 @@ def test_scoring_admin_requires_login_and_admin_role(client):
 
 
 def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir):
-    competition = _competition(client, publish=True)
+    competition = _competition(client)
     cid = competition["id"]
     initial = client.get(f"/api/admin/competitions/{cid}/scoring")
     assert initial.status_code == 200
     assert initial.json() == {
         "ready": False,
+        "not_ready_reason": {
+            "code": "SCORING_CONFIG_REQUIRED",
+            "message": "Cần cấu hình chấm điểm trước khi publish cuộc thi.",
+        },
         "locked": False,
         "config": None,
         "ground_truth": None,
@@ -123,15 +126,18 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
     }
     assert stored["ground_truth"]["path"] == f"competitions/{cid}/private/ground_truth.csv"
 
+    # Config + ground truth đã sẵn sàng nên publish qua được readiness gate.
+    assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 200
+
     _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")
     public = client.get("/api/competitions/scoring-cup")
     assert public.status_code == 200
+    # Participant chưa join vẫn thấy cấu hình, nhưng pos_label (nhãn dương thật) bị giấu.
     assert public.json()["submission_config"] == {
         "ready": True,
         "id_column": "id",
         "prediction_column": "prediction",
         "average": "binary",
-        "pos_label": "1",
         "max_upload_mb": 10,
     }
     assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404
@@ -148,6 +154,30 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
     incompatible_storage = _put_config(client, cid, prediction_column="answer")
     assert incompatible_storage.status_code == 422
     assert incompatible_storage.json()["error"]["code"] == "GROUND_TRUTH_INVALID"
+
+
+def test_pos_label_revealed_only_to_active_member(client, isolated_data_dir):
+    """pos_label là nhãn dương thật — chỉ thành viên đang hoạt động được thấy."""
+    competition = _competition(client)
+    cid = competition["id"]
+    assert _put_config(client, cid).status_code == 200
+    assert client.put(
+        f"/api/admin/competitions/{cid}/ground-truth",
+        files={"file": ("truth.csv", b"id,label\n1,1\n2,0\n")},
+    ).status_code == 200
+    assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 200
+
+    _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")
+    assert "pos_label" not in client.get("/api/competitions/scoring-cup").json()["submission_config"]
+
+    assert client.post("/api/competitions/scoring-cup/join", json={}).status_code == 200
+    assert client.get("/api/competitions/scoring-cup").json()["submission_config"]["pos_label"] == "1"
+
+    async def deactivate():
+        await client.app.state.mongo.db[MEMBERSHIPS_COLLECTION].update_many({}, {"$set": {"active": False}})
+
+    asyncio.run(deactivate())
+    assert "pos_label" not in client.get("/api/competitions/scoring-cup").json()["submission_config"]
 
 
 def test_ground_truth_requires_valid_config_and_keeps_invalid_file_out(client, isolated_data_dir):
@@ -234,8 +264,9 @@ def test_scoring_config_and_ground_truth_lock_after_completed_submission(client)
 
 
 def test_closed_competition_scoring_is_locked_even_without_submission(client):
-    competition = _competition(client, publish=True)
+    competition = _competition(client)
     cid = competition["id"]
+    assert publish_competition(client, cid).status_code == 200
     assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 200
     response = _put_config(client, cid)
     assert response.status_code == 422

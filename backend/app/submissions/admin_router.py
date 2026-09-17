@@ -67,9 +67,7 @@ async def admin_leaderboard(
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
     entries = await leaderboard_service.ranked_entries(db, competition["_id"])
-    return leaderboard_service.leaderboard_response(
-        competition, entries, include_account_id=True
-    )
+    return leaderboard_service.admin_leaderboard_response(competition, entries)
 
 
 @router.get("/{competition_id}/export.xlsx")

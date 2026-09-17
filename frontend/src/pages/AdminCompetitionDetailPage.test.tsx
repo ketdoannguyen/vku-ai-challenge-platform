@@ -19,6 +19,9 @@ const COMPETITION = {
   leaderboard_visible: true,
   created_by: "admin@vku.vn",
   join_code_configured: true,
+  resources: [],
+  publish_ready: true,
+  publish_blocked_reason: null,
   membership: { active: false, joined_at: null },
 };
 
@@ -41,10 +44,12 @@ const MEMBERS = {
     },
   ],
   total: 1,
+  active_total: 1,
 };
 
 const SCORING = {
   ready: true,
+  not_ready_reason: null,
   locked: false,
   config: {
     id_column: "id",
@@ -77,6 +82,11 @@ function mockApi(handler: (url: string, init?: RequestInit) => { body: unknown; 
       return new Response(JSON.stringify(r.body), { status: r.status, headers: { "Content-Type": "application/json" } });
     }),
   );
+}
+
+/** Nhóm action ở header trang chi tiết — tách khỏi nút "Xóa" của từng dòng nội dung. */
+function headerActions(): HTMLElement {
+  return document.querySelector(".admin-detail-actions") as HTMLElement;
 }
 
 function renderPage() {
@@ -386,6 +396,68 @@ test("header publish/close/clone gọi đúng endpoint modal xác nhận", async
   });
 });
 
+test("draft chưa sẵn sàng chấm điểm: banner lý do, disable Publish, nhảy sang tab Chấm điểm", async () => {
+  const blocked = {
+    code: "GROUND_TRUTH_REQUIRED",
+    message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+  };
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) {
+      return {
+        body: { ...SCORING, ready: false, ground_truth: null, not_ready_reason: blocked },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return {
+      body: { ...COMPETITION, status: "draft", publish_ready: false, publish_blocked_reason: blocked },
+      status: 200,
+    };
+  });
+  renderPage();
+
+  // Loading cũng mang role="status" nên bám vào nội dung banner thay vì role.
+  const banner = (await screen.findByText("Chưa thể publish.")).closest(
+    ".status-banner",
+  ) as HTMLElement;
+  expect(banner).not.toBeNull();
+  expect(banner).toHaveTextContent(blocked.message);
+  expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+
+  fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Chấm điểm" }));
+  // Cùng một nguồn readiness: tab Chấm điểm nhắc lại đúng lý do đang chặn publish.
+  expect(await screen.findByText(blocked.message)).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Chấm điểm" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("Cấu hình CSV")).toBeTruthy();
+});
+
+test("publish trả 422 vẫn hiển thị lỗi trong modal xác nhận", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/publish") && init?.method === "POST") {
+      return {
+        body: {
+          error: {
+            code: "GROUND_TRUTH_REQUIRED",
+            message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+          },
+        },
+        status: 422,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    // Detail luôn mang readiness; nút vẫn bấm được khi backend là bên quyết định cuối cùng.
+    return { body: { ...COMPETITION, status: "draft" }, status: 200 };
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Publish" }));
+  const dialog = screen.getByRole("dialog", { name: "Publish cuộc thi" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Cần tải lên ground truth trước khi publish cuộc thi.",
+  );
+});
+
 test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và upload/delete", async () => {
   const ASSETS = {
     assets: [
@@ -476,4 +548,129 @@ test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và up
     expect(uploadCall).toBeTruthy();
     expect(uploadCall?.init?.body).toBeInstanceOf(FormData);
   });
+});
+
+test("xóa thành viên: xác nhận rồi mới DELETE", async () => {
+  mockApi((url, init) => {
+    if (url.includes("/members/") && init?.method === "DELETE") {
+      return { body: { deleted: true, account_id: "u1" }, status: 200 };
+    }
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Xóa" }));
+
+  const dialog = screen.getByRole("dialog", { name: "Xóa thành viên" });
+  expect(within(dialog).getByText(/chưa từng có bài nộp được chấm điểm/)).toBeTruthy();
+  expect(calls.some((c) => c.init?.method === "DELETE")).toBe(false);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Xóa" }));
+  await waitFor(() => {
+    const call = calls.find((c) => c.init?.method === "DELETE");
+    expect(call?.url).toContain("/members/u1");
+  });
+});
+
+test("xóa thành viên đã có bài chấm điểm: 409 hiện ngay trong modal, không xóa gì", async () => {
+  mockApi((url, init) => {
+    if (url.includes("/members/") && init?.method === "DELETE") {
+      return {
+        body: {
+          error: {
+            code: "MEMBER_HAS_SUBMISSIONS",
+            message: "Thành viên đã có bài nộp được chấm điểm. Hãy dùng Vô hiệu hóa thay vì xoá.",
+          },
+        },
+        status: 409,
+      };
+    }
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Xóa" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Xóa thành viên" })).getByRole("button", { name: "Xóa" }));
+
+  expect(await screen.findByText(/Hãy dùng Vô hiệu hóa thay vì xoá/)).toBeTruthy();
+  // Danh sách chỉ được tải lại sau khi xóa thành công.
+  expect(screen.getByRole("dialog", { name: "Xóa thành viên" })).toBeTruthy();
+  expect(screen.getByText("thi.sinh@vku.vn")).toBeTruthy();
+});
+
+test("đếm thành viên tách người đang hoạt động khỏi người đã vô hiệu hóa", async () => {
+  mockApi((url) => {
+    if (url.includes("/members")) {
+      return {
+        body: {
+          members: [
+            { ...MEMBERS.members[0], active: false },
+            { ...MEMBERS.members[0], account_id: "u2", email: "khac@vku.vn", name: "Khác" },
+          ],
+          total: 2,
+          active_total: 1,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+
+  expect(await screen.findByText("1 đang hoạt động · 2 tổng cộng")).toBeTruthy();
+});
+
+test("chỉ draft mới có nút Xóa cuộc thi", async () => {
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: { ...COMPETITION, status: "draft" }, status: 200 },
+  );
+  renderPage();
+  await screen.findByText("Code Cup");
+  // Bảng nội dung cũng có nút "Xóa" cho từng dòng nên chỉ soi đúng nhóm action ở header.
+  expect(within(headerActions()).getByRole("button", { name: "Xóa" })).toBeTruthy();
+});
+
+test("published không hiện nút Xóa cuộc thi", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Code Cup");
+  expect(within(headerActions()).queryByRole("button", { name: "Xóa" })).toBeNull();
+});
+
+test("xóa draft từ trang chi tiết: gõ đúng slug, gọi DELETE rồi về danh sách", async () => {
+  mockApi((url, init) => {
+    if (init?.method === "DELETE") {
+      return { body: { deleted: true, competition_id: COMPETITION.id, slug: COMPETITION.slug, files_removed: true }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "draft" }, status: 200 };
+  });
+  render(
+    <MemoryRouter initialEntries={[`/admin/competitions/${COMPETITION.id}`]}>
+      <Routes>
+        <Route path="/admin/competitions/:id" element={<AdminCompetitionDetailPage />} />
+        <Route path="/admin/competitions" element={<div>DANH SÁCH CUỘC THI</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "Xóa" }));
+  const dialog = screen.getByRole("dialog", { name: "Xóa cuộc thi" });
+  const confirm = within(dialog).getByRole("button", { name: "Xóa vĩnh viễn" });
+  fireEvent.change(within(dialog).getByLabelText(/Gõ chính xác slug/), { target: { value: COMPETITION.slug } });
+  fireEvent.click(confirm);
+
+  await waitFor(() => {
+    const call = calls.find((c) => c.init?.method === "DELETE");
+    expect(call?.url).toContain(`confirm_slug=${COMPETITION.slug}`);
+  });
+  expect(await screen.findByText("DANH SÁCH CUỘC THI")).toBeTruthy();
 });

@@ -14,6 +14,8 @@ import {
 import { Loading } from "../components/ui";
 import { JoinControl } from "../components/JoinControl";
 import { useOptionalAuth } from "../auth/AuthContext";
+import { useDeadlineClock } from "../hooks/useCountdown";
+import { formatCountdown } from "../lib/countdown";
 
 type StatusFilter = "all" | "published" | "closed";
 
@@ -22,20 +24,6 @@ const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "published", label: "Đang diễn ra" },
   { id: "closed", label: "Đã kết thúc" },
 ];
-
-const DAY_MS = 86_400_000;
-
-/** Đếm ngược từ end_at; quá hạn trả null để không hiện chip. */
-function countdown(endAt: string): string | null {
-  const remaining = new Date(endAt).getTime() - Date.now();
-  if (!Number.isFinite(remaining) || remaining <= 0) return null;
-  const days = Math.floor(remaining / DAY_MS);
-  if (days >= 1) return `còn ${days} ngày`;
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `còn ${pad(Math.floor(remaining / 3_600_000))}:${pad(
-    Math.floor((remaining % 3_600_000) / 60_000),
-  )}:${pad(Math.floor((remaining % 60_000) / 1000))}`;
-}
 
 function IconSearch() {
   return (
@@ -186,6 +174,16 @@ export function DashboardPage() {
 
   const competitions = data?.competitions;
 
+  // Một clock duy nhất cho cả trang, nhịp theo deadline gần nhất trong các cuộc thi đang mở.
+  const publishedDeadlines = useMemo(
+    () =>
+      (competitions ?? [])
+        .filter((item) => item.status === "published")
+        .map((item) => item.end_at),
+    [competitions],
+  );
+  const now = useDeadlineClock(publishedDeadlines);
+
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return (competitions ?? []).filter((item) => {
@@ -286,7 +284,8 @@ export function DashboardPage() {
             <CompetitionCard
               key={competition.id}
               competition={competition}
-              onJoined={(slug, membership) =>
+              now={now}
+              onMembershipChange={(slug, membership) =>
                 setData((prev) =>
                   prev
                     ? {
@@ -316,13 +315,17 @@ export function DashboardPage() {
 
 function CompetitionCard({
   competition,
-  onJoined,
+  now,
+  onMembershipChange,
 }: {
   competition: Competition;
-  onJoined: (slug: string, membership: Membership) => void;
+  /** Mốc giờ dùng chung của cả trang — mỗi thẻ không tự mở timer riêng. */
+  now: number | null;
+  onMembershipChange: (slug: string, membership: Membership) => void;
 }) {
   const c = competition;
-  const remaining = c.status === "published" ? countdown(c.end_at) : null;
+  const remaining =
+    c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
 
   return (
     <article className={`card comp-card ${statusClass(c.status)}`}>
@@ -387,7 +390,7 @@ function CompetitionCard({
       </div>
 
       <div className="comp-card-footer">
-        <JoinControl competition={c} onJoined={(membership) => onJoined(c.slug, membership)} />
+        <JoinControl competition={c} onMembershipChange={(membership) => onMembershipChange(c.slug, membership)} />
       </div>
     </article>
   );

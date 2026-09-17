@@ -11,8 +11,10 @@ from app.competitions import service as competitions_service
 from app.competitions.admin_router import _get_competition_or_404
 from app.content import storage
 from app.core.config import get_settings
+from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.scoring import service, storage as scoring_storage
+from app.scoring.readiness import blocked_reason, check_readiness
 from app.submissions.service import has_completed_submission
 
 logger = logging.getLogger(__name__)
@@ -123,8 +125,11 @@ async def upload_ground_truth(
 async def _scoring_view(db, competition: dict) -> dict:
     config = service.config_from_competition(competition)
     metadata = competition.get("ground_truth")
+    # Dùng chung check_readiness với publish gate để UI và backend không lệch nhau.
+    readiness = check_readiness(competition)
     return {
-        "ready": config is not None and scoring_storage.ground_truth_available(competition),
+        "ready": readiness.ready,
+        "not_ready_reason": blocked_reason(readiness),
         "locked": await _is_locked(db, competition),
         "config": config.model_dump() if config else None,
         "ground_truth": _ground_truth_metadata(metadata),
@@ -160,11 +165,8 @@ async def _read_limited(file: UploadFile) -> bytes:
 def _ground_truth_metadata(metadata: dict | None) -> dict | None:
     if metadata is None:
         return None
-    uploaded_at = metadata["uploaded_at"]
-    if uploaded_at.tzinfo is None:
-        uploaded_at = uploaded_at.replace(tzinfo=timezone.utc)
     return {
         "row_count": metadata["row_count"],
         "columns": metadata["columns"],
-        "uploaded_at": uploaded_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "uploaded_at": iso_z(metadata["uploaded_at"]),
     }

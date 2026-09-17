@@ -1,0 +1,65 @@
+/** Block "Tài nguyên tải về": link dataset/sample do BTC khai báo, nằm dưới Mục lục nội dung. */
+
+import { isSafeResourceUrl, type CompetitionResource } from "../api/competitions";
+
+function Icon({ children }: { children: React.ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  );
+}
+
+export function CompetitionResources({
+  resources,
+}: {
+  resources: CompetitionResource[];
+}) {
+  const safe = resources.filter((item) => isSafeResourceUrl(item.url));
+  if (safe.length === 0) return null;
+
+  return (
+    <section className="content-card content-card-resources">
+      <div className="content-card-head">
+        <span className="content-card-title">
+          <Icon>
+            <ellipse cx="12" cy="6" rx="7" ry="3" />
+            <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" />
+            <path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
+          </Icon>
+          Tài nguyên tải về
+        </span>
+      </div>
+      <ul className="resource-list">
+        {safe.map((item, index) => (
+          <li key={`${item.url}-${index}`}>
+            <a
+              className="resource-link"
+              href={item.url}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+            >
+              <span className="resource-label">{item.label}</span>
+              <Icon>
+                <path d="M14 5h5v5" />
+                <path d="M19 5l-8 8" />
+                <path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
+              </Icon>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

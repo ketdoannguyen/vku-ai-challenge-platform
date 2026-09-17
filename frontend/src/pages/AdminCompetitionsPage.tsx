@@ -8,6 +8,7 @@ import type { AdminCompetition, AdminCompetitionsResponse, Competition } from ".
 import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, statusClass } from "../api/competitions";
 import {
   CompetitionActionConfirmModal,
+  CompetitionDeleteModal,
   CompetitionFormModal,
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
@@ -104,6 +105,7 @@ export function AdminCompetitionsPage() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Competition | null>(null);
   const [confirming, setConfirming] = useState<{ action: CompetitionAction; competition: Competition } | null>(null);
+  const [deleting, setDeleting] = useState<Competition | null>(null);
 
   const load = useCallback(async (refresh = false) => {
     setError(null);
@@ -321,6 +323,7 @@ export function AdminCompetitionsPage() {
                     competition={competition}
                     onEdit={() => setEditing(competition)}
                     onConfirm={(action) => setConfirming({ action, competition })}
+                    onDelete={() => setDeleting(competition)}
                   />
                 ))
               )}
@@ -395,6 +398,18 @@ export function AdminCompetitionsPage() {
           onClose={() => setConfirming(null)}
         />
       )}
+      {deleting && (
+        <CompetitionDeleteModal
+          competition={deleting}
+          onDeleted={() => {
+            const name = deleting.name;
+            setDeleting(null);
+            // notify() tải lại danh sách nên row vừa xoá biến mất ngay.
+            notify(`Đã xóa cuộc thi "${name}".`);
+          }}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -438,10 +453,12 @@ function CompetitionRow({
   competition,
   onEdit,
   onConfirm,
+  onDelete,
 }: {
   competition: AdminCompetition;
   onEdit: () => void;
   onConfirm: (action: CompetitionAction) => void;
+  onDelete: () => void;
 }) {
   const c = competition;
 
@@ -488,7 +505,7 @@ function CompetitionRow({
         <span className={`ac-count${c.submission_count === 0 ? " is-empty" : ""}`}>{c.submission_count}</span>
       </td>
       <td className="ac-actions-cell">
-        <RowActionMenu competition={c} onEdit={onEdit} onConfirm={onConfirm} />
+        <RowActionMenu competition={c} onEdit={onEdit} onConfirm={onConfirm} onDelete={onDelete} />
       </td>
     </tr>
   );
@@ -502,10 +519,12 @@ function RowActionMenu({
   competition,
   onEdit,
   onConfirm,
+  onDelete,
 }: {
   competition: AdminCompetition;
   onEdit: () => void;
   onConfirm: (action: CompetitionAction) => void;
+  onDelete: () => void;
 }) {
   const c = competition;
   const editDisabled = c.status === "closed";
@@ -646,6 +665,20 @@ function RowActionMenu({
             <button className="ac-menu-item" type="button" role="menuitem" onClick={() => run(() => onConfirm("clone"))}>
               Clone
             </button>
+            {/* Chỉ draft xoá được — published/closed giữ lịch sử thi (ADR-009). */}
+            {c.status === "draft" && (
+              <>
+                <div className="ac-menu-separator" />
+                <button
+                  className="ac-menu-item ac-menu-item-danger"
+                  type="button"
+                  role="menuitem"
+                  onClick={() => run(onDelete)}
+                >
+                  Xóa
+                </button>
+              </>
+            )}
           </div>,
           document.body,
         )}

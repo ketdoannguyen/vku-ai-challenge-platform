@@ -306,3 +306,84 @@ def test_admin_xlsx_export_has_rank_values_counts_and_formula_safe_names(client)
     assert rows[2][8] == 2
     assert all("@vku.vn" not in str(value) for row in rows for value in row if value)
     assert all(cell.data_type != "f" for row in sheet.iter_rows() for cell in row)
+
+
+def test_leaderboard_paginates_but_me_stays_global_and_participant_safe(client):
+    current = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "paged-cup")
+    base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
+    others = [
+        _create_account(client, f"Đội {index}", f"paged{index}@vku.vn") for index in range(1, 5)
+    ]
+    _submission(client, competition_id, others[0], 0.95, base)
+    _submission(client, competition_id, others[1], 0.9, base + timedelta(minutes=1))
+    _submission(client, competition_id, others[2], 0.8, base + timedelta(minutes=2))
+    _submission(client, competition_id, others[3], 0.7, base + timedelta(minutes=3))
+    current_best_id = _submission(
+        client, competition_id, current["_id"], 0.6, base + timedelta(minutes=4)
+    )
+    _submission(client, competition_id, current["_id"], 0.5, base + timedelta(minutes=5))
+
+    _login_participant(client)
+    response = client.get(
+        f"/api/competitions/{competition_id}/leaderboard", params={"limit": 2, "offset": 2}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 5
+    assert body["limit"] == 2
+    assert body["offset"] == 2
+    assert body["has_more"] is True
+    # Hạng là thứ hạng toàn cục, không đánh lại số theo trang.
+    assert [row["rank"] for row in body["entries"]] == [3, 4]
+    assert not any(row["is_current_user"] for row in body["entries"])
+    # `me` tìm trên toàn bộ danh sách nên vẫn đúng khi người xem nằm ngoài trang.
+    assert body["me"]["rank"] == 5
+    assert body["me"]["best_submission_id"] == str(current_best_id)
+    assert body["me"]["is_current_user"] is True
+    assert all("account_id" not in row and "email" not in row for row in body["entries"])
+    assert "account_id" not in body["me"]
+
+    last_page = client.get(
+        f"/api/competitions/{competition_id}/leaderboard", params={"limit": 2, "offset": 4}
+    ).json()
+    assert last_page["has_more"] is False
+    assert [row["rank"] for row in last_page["entries"]] == [5]
+    assert last_page["entries"][0]["is_current_user"] is True
+
+
+def test_leaderboard_me_is_null_without_completed_submission(client):
+    participant = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "spectator-cup")
+    other_account_id = _create_account(client, "Đội Khác", "spectator-other@vku.vn")
+    base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
+    _submission(client, competition_id, other_account_id, 0.9, base)
+    # Bài bị từ chối không tính là đã có kết quả nên không được sinh ra `me`.
+    _submission(
+        client,
+        competition_id,
+        participant["_id"],
+        0.0,
+        base + timedelta(minutes=1),
+        status="rejected",
+        error_code="SUBMISSION_ID_MISMATCH",
+    )
+
+    _login_participant(client)
+    body = client.get(f"/api/competitions/{competition_id}/leaderboard").json()
+
+    assert body["total"] == 1
+    assert body["has_more"] is False
+    assert body["me"] is None
+
+
+def test_leaderboard_rejects_out_of_range_pagination_params(client):
+    competition_id = _create_competition(client, "params-cup")
+    _login_participant(client)
+    url = f"/api/competitions/{competition_id}/leaderboard"
+
+    for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        response = client.get(url, params=params)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"

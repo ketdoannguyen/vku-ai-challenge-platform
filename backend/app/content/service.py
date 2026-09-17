@@ -6,6 +6,7 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 
+from app.core.datetimes import iso_z
 from app.core.slugs import is_valid_slug
 
 CONTENTS_COLLECTION = "competition_contents"
@@ -104,14 +105,10 @@ def public_content(content: dict, include_markdown: str | None = None) -> dict:
         "order": content["order"],
         "visibility": content["visibility"],
         "size_bytes": content.get("size_bytes"),
-        "updated_at": _iso(content["updated_at"]),
+        "updated_at": iso_z(content["updated_at"]),
     }
     if include_markdown is not None:
         result["markdown"] = include_markdown
     return result
 
 
-def _iso(value) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")

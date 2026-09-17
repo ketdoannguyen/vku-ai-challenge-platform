@@ -146,3 +146,76 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Điều hướng khách: navbar hiện mục "Cuộc thi"; drawer mobile (dưới 40rem nút "Đăng nhập" trên header bị ẩn) có thêm lối "Đăng nhập"; thẻ cuộc thi hiện CTA "Đăng nhập để tham gia" kèm `state.from` để quay lại đúng trang, thay vì bắn POST join rồi ăn 401. Ô thống kê "Đã tham gia" bị ẩn với khách vì luôn bằng 0.
 - Consequences: `assets/{name}` trước đây chỉ đòi đăng nhập chứ không kiểm tra visibility của content; mở cho khách giữ nguyên mức phơi nhiễm với participant và mở rộng thêm cho khách — chấp nhận để ảnh trong nội dung public hiển thị. `Cache-Control: private, max-age=300` giữ nguyên. Leaderboard vẫn chặn đăng nhập vì nằm ngoài phạm vi user xác nhận.
 - Affected files/contracts: `backend/app/auth/dependencies.py`, `backend/app/competitions/router.py`, `backend/app/content/router.py`, `frontend/src/App.tsx`, `frontend/src/components/JoinControl.tsx`, `frontend/src/pages/DashboardPage.tsx`, `docs/API_CONTRACT.md` §3, `docs/TEST_MATRIX.md` §4-5
+
+## ADR-015 - Tài nguyên cuộc thi là link Google Drive, không host binary
+- Date: 2026-09-17
+- Status: accepted
+- Context: BTC cần chỗ khai báo dataset/sample submission cho thí sinh, nhưng nền tảng không có object storage và không muốn biến máy chủ thi thành nơi phân phối file nặng. User chốt: "về dataset chỉ cho phép update link drive thôi, ko cho ảnh lên hệ thống".
+- Decision:
+  - Thêm `competitions.resources`: list `{label, url}`, tối đa 10 mục, label ≤120 ký tự, url ≤2048 ký tự, bắt buộc `https`, không credentials, host thuộc `drive.google.com`/`docs.google.com` (kể cả subdomain).
+  - Không upload dataset/zip/binary lên hệ thống; không proxy download, không gọi Drive API, không lưu kích thước/version/checksum. Platform chỉ validate shape của URL và **không** kiểm tra link còn truy cập được.
+  - FE re-filter URL lần nữa trước khi render anchor (`target="_blank"`, `rel="noopener noreferrer nofollow"`) để document legacy/DB sửa tay không tạo được link nguy hiểm; không dùng attribute `download` vì cross-origin.
+  - Block "Tài nguyên tải về" nằm dưới "Mục lục nội dung" trong tab Tổng quan, ẩn khi rỗng. Feature upload ảnh dùng trong Markdown giữ nguyên, không liên quan.
+- Consequences: Rủi ro chuyển sang phía BTC — link có thể private/hết hạn mà platform không biết; helper text yêu cầu bật "Bất kỳ ai có liên kết". Đổi lại không có file người dùng nào đi vào `/data`, không tốn dung lượng, không cần thêm hạ tầng.
+- Affected files/contracts: `backend/app/competitions/service.py` (`normalize_resources`, `_validate_resource_url`), `frontend/src/components/CompetitionResources.tsx`, `docs/API_CONTRACT.md` §3+§5.6, `docs/DATA_MODEL.md` §9
+
+## ADR-016 - Tách representation public/admin, không lộ `created_by`/`pos_label`, chuẩn hoá datetime
+- Date: 2026-09-17
+- Status: accepted
+- Context: Payload public trả `created_by` (email admin) cho cả khách ẩn danh, và `submission_config.pos_label` cho cả người chưa join. `pos_label` là nhãn dương thật của ground truth nên tiết lộ nó cho non-member là rò thông tin đề bài.
+- Decision:
+  - Một serializer public (`public_competition`) cho guest/participant: **không bao giờ** có `created_by`; `submission_config.pos_label` chỉ xuất hiện khi membership đang active. Guest, non-member và inactive member không nhận key này.
+  - Một serializer admin (`admin_competition`) cho route `/api/admin/...`: có `created_by` và luôn có `pos_label` (admin đã thấy ground truth).
+  - Không thêm field admin-only nào trở lại serializer public; mọi field mới phải xác định rõ nó thuộc bên nào.
+  - Chuẩn hoá luôn việc xử lý datetime: helper dùng chung ở `backend/app/core/datetimes.py` (`as_utc`, `utc_day_bounds`, `iso_z`), naive datetime từ motor được hiểu là UTC. Trước đó PATCH chỉ một trong `start_at`/`end_at` có thể so aware với naive và trả 500 thay vì 422.
+- Consequences: FE TypeScript bỏ `created_by` khỏi `Competition` (chỉ `AdminCompetition` có). `pos_label` là optional ở type dùng chung, nên chỗ render phải chịu được thiếu key. Không có migration.
+- Affected files/contracts: `backend/app/competitions/service.py`, `backend/app/core/datetimes.py`, `frontend/src/api/competitions.ts`, `docs/API_CONTRACT.md` §3
+
+## ADR-017 - Publish phải chấm được, join mở đến hết `end_at`
+- Date: 2026-09-17
+- Status: accepted
+- Context: Publish chỉ kiểm tra trạng thái nên BTC publish được một cuộc thi thiếu scoring config hoặc ground truth hỏng — mọi bài nộp sau đó đều 422 `SCORING_NOT_READY`. Ở chiều ngược lại, join chỉ chặn draft/closed nên thí sinh vẫn join được sau `end_at` cho tới khi admin bấm close thủ công.
+- Decision:
+  - `backend/app/scoring/readiness.py` là **một** nguồn sự thật: đọc và parse lại ground truth thật bằng chính code chấm điểm (không chỉ `is_file()`), trả `{ready, code, message}`. Publish, banner admin và endpoint scoring đều đi qua đây.
+  - Thứ tự kiểm tra khi publish: join code (`JOIN_CODE_REQUIRED`) trước, readiness sau (`SCORING_CONFIG_REQUIRED`/`SCORING_CONFIG_INVALID`/`GROUND_TRUTH_REQUIRED`/`GROUND_TRUTH_INVALID`). Publish thất bại giữ nguyên `draft`; submission runtime vẫn map về code chung `SCORING_NOT_READY` để không phá contract cũ.
+  - Admin detail trả `publish_ready`/`publish_blocked_reason`; list cố ý không, vì readiness phải đọc file (N+1). Nút Publish ở list vẫn gọi backend và hiển thị lỗi API.
+  - Join mở từ lúc publish đến hết `end_at`. Không có khái niệm "hạn đăng ký". Không kiểm tra `start_at` — join sớm để chuẩn bị là hợp lệ, chỉ nộp bài mới phụ thuộc `start_at`.
+  - Thứ tự policy join: draft/unknown → 404; inactive membership → 403; đã join → 200 idempotent (kể cả sau deadline/closed); closed → `JOIN_CLOSED`; `now > end_at` → `JOIN_DEADLINE_PASSED`; rồi mới tới invite/code. Membership hiện có được xử lý trước cửa sổ thời gian để UI luôn đọc được trạng thái của mình.
+- Consequences: BTC phải có config + ground truth hợp lệ trước khi mở cuộc thi; đổi lại không còn tình huống publish xong mà không ai nộp được. `JOIN_CLOSED` và `JOIN_DEADLINE_PASSED` cùng 422 nhưng khác code để UI phân biệt "BTC đã đóng" với "đã quá hạn".
+- Affected files/contracts: `backend/app/scoring/readiness.py`, `backend/app/competitions/admin_router.py`, `backend/app/memberships/router.py`, `frontend/src/components/JoinControl.tsx`, `docs/API_CONTRACT.md` §3+§5.2+§6
+
+## ADR-018 - Xoá theo hướng giữ lịch sử thi
+- Date: 2026-09-17
+- Status: accepted
+- Context: Thiếu cả ba đường thoát: participant không rời được cuộc thi, admin không xoá cứng được member, và không có `DELETE` cho competition. Đồng thời phải tránh việc dọn dữ liệu làm mất kết quả đã chấm.
+- Decision:
+  - Participant **rời** cuộc thi = soft deactivate (`active=false`) qua `POST /leave`, áp dụng cả published/closed, idempotent, giữ nguyên bài nộp/điểm/thứ hạng. Tự join lại vẫn bị 403 `MEMBERSHIP_INACTIVE`; muốn quay lại phải nhờ BTC kích hoạt.
+  - Admin **xoá cứng member** chỉ khi account chưa có bài `completed` trong cuộc thi (`has_completed_submission`). Có bài đã chấm → 409 `MEMBER_HAS_SUBMISSIONS` và không xoá gì. Khi được phép: xoá record submission chưa hoàn thành + file (best-effort, containment-check) rồi xoá membership sau cùng. Không có "force" flag.
+  - **Xoá competition chỉ cho `draft`** (`confirm_slug` phải khớp, sai → 422 `CONFIRM_SLUG_MISMATCH`, không phải draft → 409 `COMPETITION_NOT_DELETABLE`). Published/closed phải giữ lịch sử; muốn kết thúc thì Đóng cuộc thi.
+  - Cascade không dùng transaction (Mongo standalone): xoá con trước, cha sau, để lỗi giữa đường vẫn retry được. File dọn **sau** khi DB xong, best-effort; không phục hồi DB nếu xoá file lỗi mà báo `files_removed:false`.
+  - `member_count` của admin đổi nghĩa thành số membership đang hoạt động, thêm `active_total` bên cạnh `total` để UI không trộn hai con số.
+- Consequences: Không có đường nào xoá mất điểm đã chấm. Đổi lại, dữ liệu membership inactive tồn tại vĩnh viễn (đúng chủ đích) và race nhỏ giữa check-vs-delete member với một submission đồng thời vẫn tồn tại — chấp nhận, backend vẫn enforce membership khi nộp (ghi ở technical debt).
+- Affected files/contracts: `backend/app/competitions/service.py` (`delete_competition_cascade`, `remove_competition_files`), `backend/app/memberships/{router,admin_router}.py`, `backend/app/submissions/service.py`, `docs/API_CONTRACT.md` §3+§5.2+§5.3, `docs/DATA_MODEL.md` §10
+
+## ADR-019 - Quota hiển thị trước khi nộp; leaderboard phân trang nhưng hạng vẫn toàn cục
+- Date: 2026-09-17
+- Status: accepted
+- Context: Người dùng chỉ biết còn bao nhiêu lượt **sau** khi POST thành công, nên rất dễ đâm vào 429 khi đã hết quota. Leaderboard trả `total` và `account_id` nhưng UI không render gì: không có "hạng của bạn #47/120", cũng không phân trang.
+- Decision:
+  - `quota_status(...)` trả `{per_day, used_today, remaining, resets_at}` (ngày UTC, `resets_at` = 00:00 UTC kế tiếp để UI đổi sang giờ local). Chỉ tính trong `GET /api/competitions/{slug}` khi người gọi là thành viên active của cuộc thi `published`; list không tính (N+1). Sau khi nộp, FE gọi lại detail để cập nhật; response POST vẫn trả `quota_remaining` làm nguồn tức thời.
+  - `remaining=0` thì FE khoá form nộp kèm message; backend 429 vẫn là authority khi race/stale tab.
+  - Leaderboard participant nhận `limit` (1-200, default 50)/`offset` và trả `{entries,total,limit,offset,has_more,me}`. Ranking vẫn tính full trong bộ nhớ (quy mô 40-80), `rank` giữ nguyên thứ hạng toàn cục, `me` tìm trên full list trước rồi mới cắt trang nên vẫn đúng khi người dùng ngoài page.
+  - `me` dùng chung serializer participant: không có `account_id`/email. Admin leaderboard và XLSX export vẫn lấy toàn bộ danh sách, contract không đổi.
+  - Countdown ở dashboard/chi tiết đổi thành clock sống: một page-level clock cho dashboard (không mở timer cho từng thẻ), nhịp thưa 30 giây khi còn trên 1 ngày và mỗi giây khi dưới 1 ngày, dọn timer khi unmount, đồng bộ lại khi tab visible trở lại.
+- Consequences: Thêm một `count_documents` cho mỗi lần mở detail của thành viên — chấp nhận. Phân trang chỉ giảm payload/UI, không đổi độ phức tạp query; còn in-memory nên phải xem lại nếu vượt quy mô hiện tại. Countdown không còn đứng yên nhưng tốn timer chạy nền; nhịp thưa giữ chi phí thấp.
+- Affected files/contracts: `backend/app/submissions/service.py` (`quota_status`), `backend/app/competitions/router.py`, `backend/app/leaderboard/{router,service}.py`, `frontend/src/hooks/useCountdown.ts`, `frontend/src/lib/countdown.ts`, `docs/API_CONTRACT.md` §3+§4
+
+## ADR-020 - Tạm hoãn public/private leaderboard split (deferred)
+- Date: 2026-09-17
+- Status: deferred — không implement trong scope này
+- Context: Cần bảng xếp hạng public và private (theo mùa thi). Đề xuất ban đầu là tạo hai competition, một public một private.
+- Decision: Không làm theo hướng hai competition, và cũng chưa implement split trong scope hiện tại.
+  - Hai competition không tương đương: join/quota/content/submission/export bị nhân đôi, một lần nộp không sinh được hai điểm đúng nghĩa, và thí sinh phải join hai lần.
+  - Hướng đúng khi làm thật: **một** ground truth có partition public/private, một submission sinh hai score, private chỉ reveal/finalize sau khi close (hoặc theo cờ "final submission" do BTC chọn). Việc này chạm vào scoring nên phải là thay đổi riêng, có ADR mới.
+- Consequences: Trong khi chờ, chỉ có một bảng xếp hạng duy nhất và nó bị `leaderboard_visible` bật/tắt. Ghi lại để lần sau không ai "giải quyết" bằng cách nhân đôi competition.
+- Affected files/contracts: `docs/DECISIONS.md`, `docs/PROJECT_STATE.md` §3

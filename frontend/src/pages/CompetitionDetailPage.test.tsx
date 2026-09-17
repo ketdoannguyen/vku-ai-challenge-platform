@@ -1,6 +1,6 @@
 /** Competition layout: load theo slug, header + sidebar content, submit enabled, Sprint 06 tabs disabled. */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
@@ -18,9 +18,17 @@ const COMPETITION = {
   primary_metric: "f1",
   quota_per_day: 7,
   leaderboard_visible: true,
-  created_by: "admin@vku.vn",
   join_code_configured: true,
+  resources: [],
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  submission_config: {
+    ready: true,
+    id_column: "id",
+    prediction_column: "label",
+    average: "binary",
+    pos_label: "1",
+    max_upload_mb: 50,
+  },
 };
 
 const CONTENTS = {
@@ -60,7 +68,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("load competition + sidebar sắp theo order, tự chuyển đến trang md đầu tiên và tab active Tổng quan", async () => {
+test("load competition + sidebar sắp theo order, dừng ở Tổng quan và tab active Tổng quan", async () => {
   apiMock((url) => {
     if (url.endsWith("/contents/problem")) {
       return {
@@ -83,10 +91,12 @@ test("load competition + sidebar sắp theo order, tự chuyển đến trang md
   expect(items[0].textContent).toContain("Đề bài");
   expect(items[0].textContent).toContain("Mọi thí sinh");
   expect(items[1].textContent).toBe("Rules");
-  expect(screen.queryByText("Chỉ thành viên cuộc thi")).toBeNull();
+  // Chip chỉ gắn cho tài liệu công khai, nên mục "Rules" (members) không có nhãn này.
+  expect(nav.textContent).not.toContain("Chỉ thành viên cuộc thi");
   expect(screen.getByText(/2\s*mục/)).toBeTruthy();
-  // Tự chuyển sang trang md đầu tiên ngay lập tức
-  expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 1 })).toBeTruthy();
+  // Tổng quan là đích dừng thật: không tự chuyển sang tài liệu đầu tiên.
+  expect(await screen.findByRole("heading", { name: "Tổng quan", level: 2 })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Đề bài chi tiết" })).toBeNull();
 });
 
 test("ở các tab workspace (submit, submissions, leaderboard): không hiển thị sidebar Mục lục nội dung", async () => {
@@ -147,4 +157,97 @@ test("deep-link content/:contentSlug render markdown panel", async () => {
   renderAt("/competitions/ai-challenge-2026/content/problem");
   expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 1 })).toBeTruthy();
   expect(screen.getByText("quan trọng")).toBeTruthy();
+});
+
+test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link không an toàn", async () => {
+  apiMock((url) => {
+    if (url.endsWith("/contents/problem")) {
+      return { body: { ...CONTENTS.contents[0], markdown: "# Đề bài chi tiết" }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        resources: [
+          { label: "Dataset huấn luyện", url: "https://drive.google.com/drive/folders/abc" },
+          { label: "Sample submission", url: "https://docs.google.com/spreadsheets/d/xyz" },
+          { label: "Link lạ", url: "https://evil.example.com/dataset.zip" },
+        ],
+      },
+      status: 200,
+    };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+
+  const resources = await screen.findByText("Tài nguyên tải về");
+  const toc = screen.getByText("Mục lục nội dung");
+  const following = toc.compareDocumentPosition(resources) & Node.DOCUMENT_POSITION_FOLLOWING;
+  expect(following).toBeTruthy();
+
+  const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
+  expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
+  expect(dataset.getAttribute("target")).toBe("_blank");
+  expect(dataset.getAttribute("rel")).toBe("noopener noreferrer nofollow");
+  // Host ngoài Drive bị lọc trước khi render nên không tạo thành link sống.
+  expect(screen.queryByText("Link lạ")).toBeNull();
+  expect(document.querySelectorAll(".resource-link")).toHaveLength(2);
+});
+
+test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nháy skeleton", async () => {
+  let detailCalls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      if (url.endsWith("/join")) {
+        return json({
+          competition_id: "1",
+          membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+          joined_now: true,
+        });
+      }
+      if (url.includes("/contents")) return json(CONTENTS);
+      detailCalls += 1;
+      // Lần 1: chưa join nên backend chưa trả quota. Lần 2: đã là thành viên nên có quota.
+      return json({
+        ...COMPETITION,
+        join_mode: "open",
+        membership:
+          detailCalls === 1
+            ? { active: false, joined_at: null }
+            : { active: true, joined_at: "2026-09-15T00:00:00Z" },
+        quota: { per_day: 7, used_today: 2, remaining: 5, resets_at: "2026-11-02T00:00:00Z" },
+      });
+    }),
+  );
+
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+  fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
+
+  await waitFor(() => expect(detailCalls).toBe(2));
+  expect(screen.getByText("Đã tham gia")).toBeTruthy();
+  expect(screen.queryByText("Đang tải cuộc thi…")).toBeNull();
+});
+
+test("không có tài nguyên hợp lệ thì không render block tài nguyên", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        resources: [{ label: "Link hỏng", url: "http://drive.google.com/khong-phai-https" }],
+      },
+      status: 200,
+    };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+  expect(screen.queryByText("Tài nguyên tải về")).toBeNull();
 });

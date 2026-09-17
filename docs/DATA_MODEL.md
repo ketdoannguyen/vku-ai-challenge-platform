@@ -4,6 +4,7 @@ Nguộc sự thật về MongoDB collections và indexes. Trạng thái `impleme
 
 Quy ước chung:
 - Thời gian lưu UTC trong DB; UI format theo local timezone.
+- Motor đọc về naive datetime: mọi chỗ so sánh/format đi qua `backend/app/core/datetimes.py` (`as_utc`, `utc_day_bounds`, `iso_z`), naive được hiểu là UTC (ADR-016).
 - Naming snake_case.
 - Mọi dữ liệu nghiệp vụ gắn `competition_id` (ADR-005).
 - Files không nằm trong Mongo — xem layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11.
@@ -50,9 +51,10 @@ Fields:
 - `primary_metric`: `f1` | `precision` | `recall`
 - `quota_per_day` (0-1000)
 - `leaderboard_visible` (bool)
+- `resources` (list, default `[]` | absent ở document cũ) — link Google Drive cho participant tải, xem §9
 - `scoring_config` (object | absent) — Sprint 05; chỉ chứa CSV/metric behavior, xem §7
 - `ground_truth` (object | absent) — Sprint 05; metadata/path private, xem §8
-- `created_by` (email của admin tạo)
+- `created_by` (email của admin tạo) — chỉ trả trong represent admin, không bao giờ lộ cho guest/participant (ADR-016)
 - `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
@@ -64,7 +66,7 @@ Fields:
 - `_id` (ObjectId)
 - `competition_id` (ObjectId → competitions._id)
 - `account_id` (ObjectId → accounts._id)
-- `active`: bool — khóa trong riêng một competition (participant không tự kích hoạt lại; admin reactivate giữ `joined_at`)
+- `active`: bool — khóa trong riêng một competition (participant không tự kích hoạt lại; admin reactivate giữ `joined_at`). Từ ADR-018, participant tự đặt `false` bằng `POST /leave` (soft deactivate); admin xoá cứng được bằng `DELETE .../members/{account_id}` **chỉ khi** account chưa có bài `completed` — document bị xoá hẳn trong trường hợp đó.
 - `joined_at` (UTC, timezone-aware)
 - `updated_at` (UTC, timezone-aware)
 
@@ -136,3 +138,21 @@ Không lưu `scoring_config.json`. `primary_metric` và `quota_per_day` dùng to
 - `uploaded_at` (UTC)
 
 File thật private trên persistent disk. Scoring ready khi có `scoring_config`, metadata path hợp lệ và file thường tồn tại (không chấp nhận symlink). Config/ground truth khóa khi competition closed hoặc có submission completed.
+
+Readiness dùng cho publish là **một** hàm dùng chung (`backend/app/scoring/readiness.py`) đọc và parse lại ground truth thật, không chỉ kiểm tra file tồn tại (ADR-017).
+
+## 9. Competition resources (embedded trong competitions)
+
+`competitions.resources`: list `{label, url}`, tối đa 10 phần tử, label ≤120 ký tự, url ≤2048 ký tự và phải là `https` trên `drive.google.com`/`docs.google.com` (không credentials). Đây là link ngoài, không phải file trên hệ thống — không có collection, không có thư mục trong `<DATA_DIR>` (ADR-015).
+
+Document tạo trước thay đổi này không có field; serializer trả `[]` nên không cần migration Mongo. `clone` copy nguyên list.
+
+## 10. Deletion semantics (ADR-018)
+
+Không dùng Mongo transaction (standalone). Thứ tự xoá luôn là con trước – cha sau để lỗi giữa đường vẫn còn bản ghi gốc cho lần gọi lại:
+
+- `DELETE /api/admin/competitions/{id}` (chỉ `draft`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>`. `accounts` và `sessions` không bị đụng.
+- `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm file, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá — vướng thì trả 409 và dừng.
+- `POST /api/competitions/{slug}/leave`: chỉ `update` `active=false`, không xoá gì.
+
+Xoá competition/published/closed không có trong phạm vi: lịch sử thi là dữ liệu phải giữ.

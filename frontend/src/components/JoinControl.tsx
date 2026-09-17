@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition, JoinResponse, Membership } from "../api/competitions";
+import type { Competition, JoinResponse, LeaveResponse, Membership } from "../api/competitions";
 import { useOptionalAuth } from "../auth/AuthContext";
-import { Modal } from "./Modal";
+import { ConfirmModal, Modal } from "./Modal";
 
 function IconArrow() {
   return (
@@ -70,14 +70,15 @@ function IconError() {
 
 export function JoinControl({
   competition,
-  onJoined,
+  onMembershipChange,
 }: {
   competition: Competition;
-  onJoined: (membership: Membership) => void;
+  onMembershipChange: (membership: Membership) => void;
 }) {
   const membership = competition.membership;
   const auth = useOptionalAuth();
   const { pathname } = useLocation();
+  const [leaveOpen, setLeaveOpen] = useState(false);
   // Ngoài AuthProvider (test dựng component lẻ) không biết được trạng thái phiên nên
   // giữ nguyên hành vi cũ; trong app thì khách thấy lối đăng nhập thay vì POST ăn 401.
   const isGuest = auth !== null && !auth.loading && auth.account === null;
@@ -95,6 +96,29 @@ export function JoinControl({
           Vào cuộc thi
           <IconArrow />
         </Link>
+        <button
+          className="btn btn-ghost"
+          type="button"
+          onClick={() => setLeaveOpen(true)}
+        >
+          Rời cuộc thi
+        </button>
+        {leaveOpen && (
+          <ConfirmModal
+            title="Rời cuộc thi"
+            body={`Rời ${competition.name}? Kết quả và thứ hạng đã có vẫn được giữ, nhưng bạn cần Ban Tổ chức kích hoạt lại mới nộp bài tiếp được.`}
+            confirmLabel="Rời cuộc thi"
+            danger
+            onConfirm={async () => {
+              const result = await api.post<LeaveResponse>(
+                `/competitions/${competition.slug}/leave`,
+              );
+              setLeaveOpen(false);
+              onMembershipChange(result.membership);
+            }}
+            onClose={() => setLeaveOpen(false)}
+          />
+        )}
       </span>
     );
   }
@@ -113,6 +137,15 @@ export function JoinControl({
     return (
       <span className="join-state">
         <span className="join-state-note">Cuộc thi đã kết thúc.</span>
+      </span>
+    );
+  }
+
+  // Backend chặn join sau end_at; nút chỉ phản chiếu để người dùng không bấm rồi ăn 422.
+  if (new Date(competition.end_at).getTime() < Date.now()) {
+    return (
+      <span className="join-state">
+        <span className="join-state-note">Đã hết thời gian tham gia.</span>
       </span>
     );
   }
@@ -139,18 +172,18 @@ export function JoinControl({
   }
 
   if (competition.join_mode === "code") {
-    return <CodeJoin competition={competition} onJoined={onJoined} />;
+    return <CodeJoin competition={competition} onMembershipChange={onMembershipChange} />;
   }
 
-  return <OpenJoin competition={competition} onJoined={onJoined} />;
+  return <OpenJoin competition={competition} onMembershipChange={onMembershipChange} />;
 }
 
 function OpenJoin({
   competition,
-  onJoined,
+  onMembershipChange,
 }: {
   competition: Competition;
-  onJoined: (membership: Membership) => void;
+  onMembershipChange: (membership: Membership) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -160,7 +193,7 @@ function OpenJoin({
     setError("");
     try {
       const result = await api.post<JoinResponse>(`/competitions/${competition.slug}/join`, {});
-      onJoined(result.membership);
+      onMembershipChange(result.membership);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {
@@ -184,10 +217,10 @@ function OpenJoin({
 
 function CodeJoin({
   competition,
-  onJoined,
+  onMembershipChange,
 }: {
   competition: Competition;
-  onJoined: (membership: Membership) => void;
+  onMembershipChange: (membership: Membership) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
@@ -209,7 +242,7 @@ function CodeJoin({
       });
       setCode("");
       setOpen(false);
-      onJoined(result.membership);
+      onMembershipChange(result.membership);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Lỗi không xác định");
     } finally {

@@ -12,11 +12,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.accounts.service import AccountCreate  # noqa: E402
 from app.auth.rate_limit import login_limiter  # noqa: E402
+from app.core.config import get_settings  # noqa: E402
 from app.core.database import MongoContext  # noqa: E402
 
 
 def _mk(email, name, password, role):
     return AccountCreate(email=email, name=name, password=password, role=role)
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_dir(tmp_path, monkeypatch):
+    """Mọi test ghi file vào tmp_path — publish giờ cần ground truth nên không được rơi vào data/ thật."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    yield tmp_path
+    get_settings.cache_clear()
 
 
 @pytest.fixture(autouse=True)

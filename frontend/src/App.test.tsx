@@ -18,8 +18,8 @@ const COMPETITION = {
   primary_metric: "f1",
   quota_per_day: 5,
   leaderboard_visible: true,
-  created_by: "admin@vku.vn",
   join_code_configured: false,
+  resources: [],
   membership: { active: false, joined_at: null },
   submission_config: {
     ready: false,
