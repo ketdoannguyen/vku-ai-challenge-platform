@@ -39,8 +39,72 @@ function mockFetch(handler: (url: string, init?: RequestInit) => { body: unknown
   );
 }
 
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+}
+
+function makeCompetition(index: number, overrides: Record<string, unknown> = {}) {
+  return { ...DRAFT, id: String(index), slug: `cuoc-thi-${index}`, name: `Cuộc thi ${index}`, ...overrides };
+}
+
+/** 6 cuộc thi: 2 draft, 3 published, 1 closed — đủ để kiểm cả đếm thống kê lẫn phân trang. */
+const SIX = [
+  makeCompetition(1),
+  makeCompetition(2),
+  makeCompetition(3, { status: "published" }),
+  makeCompetition(4, { status: "published" }),
+  makeCompetition(5, { status: "published" }),
+  makeCompetition(6, { status: "closed" }),
+];
+
+/** Card thống kê chứa nhãn đã cho — tìm qua phần tử cha để không phụ thuộc cấu trúc bên trong. */
+function statArticle(stats: HTMLElement, label: string) {
+  return within(stats).getByText(label).closest("article") as HTMLElement;
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+test("khu vực thống kê giữ đủ 4 ô; đầu bảng có tiêu đề khối kèm số cuộc thi", async () => {
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText("AI Challenge 2026");
+
+  const stats = screen.getByRole("region", { name: "Tổng quan cuộc thi" });
+  expect(within(stats).getByText("Tổng cuộc thi")).toBeTruthy();
+  expect(within(stats).getByText("Đang diễn ra")).toBeTruthy();
+  expect(within(stats).getByText("Bản nháp")).toBeTruthy();
+  expect(within(stats).getByText("Đã kết thúc")).toBeTruthy();
+
+  expect(screen.getByRole("heading", { name: "Danh sách cuộc thi" })).toBeTruthy();
+  expect(screen.getByText("1 cuộc thi")).toBeTruthy();
+});
+
+test("bảng danh sách cuộc thi là vùng cuộn focus được bằng bàn phím", async () => {
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText("AI Challenge 2026");
+
+  const region = screen.getByRole("region", { name: "Bảng danh sách cuộc thi" });
+  expect(region).toHaveAttribute("tabindex", "0");
+  expect(within(region).getByRole("table")).toBeTruthy();
 });
 
 test("hiển thị table competitions với status badge và hành động theo trạng thái", async () => {
@@ -301,6 +365,34 @@ test("xóa draft thất bại: modal giữ nguyên và hiện lỗi từ API", a
   expect(screen.getByRole("dialog", { name: "Xóa cuộc thi" })).toBeTruthy();
 });
 
+test("modal mở từ menu ba chấm trả focus về nút trigger của row", async () => {
+  mockFetch(() => ({ body: { competitions: [DRAFT] }, status: 200 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  const trigger = await screen.findByRole("button", { name: MENU_LABEL });
+
+  await openRowMenu();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Xóa" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Xóa cuộc thi" })).getByRole("button", { name: "Hủy" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Xóa cuộc thi" })).toBeNull(),
+  );
+  expect(document.activeElement).toBe(trigger);
+
+  // Escape trên form sửa cũng phải trả focus về đúng row, không rơi xuống body.
+  await openRowMenu();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Sửa" }));
+  await screen.findByRole("dialog", { name: /Sửa cuộc thi/ });
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: /Sửa cuộc thi/ })).toBeNull());
+  expect(document.activeElement).toBe(trigger);
+});
+
 test("published không có hành động xóa", async () => {
   mockFetch(() => ({
     body: { competitions: [{ ...DRAFT, status: "published" }] },
@@ -314,4 +406,104 @@ test("published không có hành động xóa", async () => {
   await openRowMenu();
   expect(await screen.findByRole("menuitem", { name: "Kết thúc" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Xóa" })).toBeNull();
+});
+
+test("bốn ô thống kê là bốn card rời, số lấy từ dữ liệu thật", async () => {
+  mockFetch(() => ({ body: { competitions: SIX }, status: 200 }));
+  renderPage();
+  await screen.findByText("Cuộc thi 1");
+
+  const stats = screen.getByRole("region", { name: "Tổng quan cuộc thi" });
+  expect(within(stats).getAllByRole("article")).toHaveLength(4);
+  expect(statArticle(stats, "Tổng cuộc thi").textContent).toContain("6");
+  expect(statArticle(stats, "Đang diễn ra").textContent).toContain("3");
+  expect(statArticle(stats, "Bản nháp").textContent).toContain("2");
+  expect(statArticle(stats, "Đã kết thúc").textContent).toContain("1");
+});
+
+test("tìm kiếm khớp cả slug và tên, xóa bộ lọc phục hồi danh sách", async () => {
+  mockFetch(() => ({ body: { competitions: SIX }, status: 200 }));
+  renderPage();
+  await screen.findByText("Cuộc thi 1");
+
+  const search = screen.getByLabelText("Tìm kiếm cuộc thi");
+  fireEvent.change(search, { target: { value: "cuoc-thi-4" } });
+  expect(screen.getByText("Cuộc thi 4")).toBeTruthy();
+  expect(screen.queryByText("Cuộc thi 1")).toBeNull();
+
+  fireEvent.change(search, { target: { value: "khong-co-cuoc-thi-nao" } });
+  expect(await screen.findByText("Không tìm thấy cuộc thi phù hợp.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa bộ lọc" }));
+  expect(screen.getByText("Cuộc thi 1")).toBeTruthy();
+});
+
+test("lọc theo trạng thái giữ aria-pressed và số đếm lấy từ dữ liệu", async () => {
+  mockFetch(() => ({ body: { competitions: SIX }, status: 200 }));
+  renderPage();
+  await screen.findByText("Cuộc thi 1");
+
+  const draftFilter = screen.getByRole("button", { name: "Bản nháp (2)" });
+  expect(draftFilter).toHaveAttribute("aria-pressed", "false");
+
+  fireEvent.click(draftFilter);
+  expect(draftFilter).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText("Cuộc thi 1")).toBeTruthy();
+  expect(screen.getByText("Cuộc thi 2")).toBeTruthy();
+  expect(screen.queryByText("Cuộc thi 3")).toBeNull();
+});
+
+test("phân trang 5 dòng mỗi trang; đổi tìm kiếm từ trang 2 quay về trang 1", async () => {
+  mockFetch(() => ({ body: { competitions: SIX }, status: 200 }));
+  renderPage();
+  await screen.findByText("Cuộc thi 1");
+
+  const region = screen.getByRole("region", { name: "Bảng danh sách cuộc thi" });
+  // 1 header + 5 dòng của trang đầu.
+  expect(within(region).getAllByRole("row")).toHaveLength(6);
+  expect(screen.queryByText("Cuộc thi 6")).toBeNull();
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  expect(within(region).getAllByRole("row")).toHaveLength(2);
+  expect(screen.getByText("Cuộc thi 6")).toBeTruthy();
+
+  // "cuoc-thi" khớp slug của cả 6 cuộc thi: về trang 1 thì phải thấy lại 5 dòng.
+  fireEvent.change(screen.getByLabelText("Tìm kiếm cuộc thi"), { target: { value: "cuoc-thi" } });
+  expect(within(region).getAllByRole("row")).toHaveLength(6);
+});
+
+test("nút Làm mới gọi lại API và khoá nút trong lúc chờ", async () => {
+  let calls = 0;
+  let resolveSecond!: (value: Response) => void;
+  const second = new Promise<Response>((resolve) => {
+    resolveSecond = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls += 1;
+      return calls === 1 ? json({ competitions: SIX }) : second;
+    }),
+  );
+  renderPage();
+  await screen.findByText("Cuộc thi 1");
+
+  fireEvent.click(screen.getByRole("button", { name: "Làm mới" }));
+  const busy = await screen.findByRole("button", { name: "Đang tải..." });
+  expect(busy).toBeDisabled();
+
+  resolveSecond(json({ competitions: [makeCompetition(9)] }));
+  expect(await screen.findByText("Cuộc thi 9")).toBeTruthy();
+  expect(screen.queryByText("Cuộc thi 1")).toBeNull();
+});
+
+test("tiêu đề tab đặt theo tên trang", async () => {
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText("AI Challenge 2026");
+  expect(document.title).toBe("Quản lý cuộc thi — AI Challenge");
 });

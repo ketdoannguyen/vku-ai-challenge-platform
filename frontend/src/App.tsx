@@ -369,12 +369,17 @@ export function App() {
   const bare = pathname === "/login";
   // Dashboard là lưới 3 cột nên cần trần rộng hơn các màn còn lại.
   const dashboard = pathname === "/";
+  // Danh sách quản trị có bảng 8 cột nên cũng cần trần rộng; màn chi tiết cuộc thi
+  // (`/admin/competitions/:id`) vẫn giữ 1280px, nên so khớp đúng hai đường dẫn này.
+  const adminList = pathname === "/admin/competitions" || pathname === "/admin";
   useRouteFocus();
   return (
     <AuthProvider>
       <Header />
       <main
-        className={`app-main${bare ? " app-main-bare" : ""}${dashboard ? " app-main-dashboard" : ""}`}
+        className={`app-main${bare ? " app-main-bare" : ""}${dashboard ? " app-main-dashboard" : ""}${
+          adminList ? " app-main-admin-list" : ""
+        }`}
         id="main-content"
         tabIndex={-1}
       >

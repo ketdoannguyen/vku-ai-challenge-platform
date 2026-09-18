@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api } from "../api/client";
 import type { AdminCompetition, Competition, CompetitionResource } from "../api/competitions";
 import {
@@ -60,6 +60,7 @@ export function CompetitionActionConfirmModal({
   competition,
   onSuccess,
   onClose,
+  returnFocusRef,
 }: {
   action: CompetitionAction;
   competition: Competition;
@@ -68,6 +69,7 @@ export function CompetitionActionConfirmModal({
     clonedCompetition?: Competition,
   ) => void | Promise<void>;
   onClose: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const confirmation =
     action === "publish"
@@ -112,6 +114,7 @@ export function CompetitionActionConfirmModal({
       danger={confirmation.danger}
       onConfirm={confirm}
       onClose={onClose}
+      returnFocusRef={returnFocusRef}
     />
   );
 }
@@ -121,10 +124,12 @@ export function CompetitionDeleteModal({
   competition,
   onDeleted,
   onClose,
+  returnFocusRef,
 }: {
   competition: Competition;
   onDeleted: () => void | Promise<void>;
   onClose: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -147,7 +152,7 @@ export function CompetitionDeleteModal({
   }
 
   return (
-    <Modal title="Xóa cuộc thi" onClose={onClose} large={false}>
+    <Modal title="Xóa cuộc thi" onClose={onClose} large={false} returnFocusRef={returnFocusRef}>
       <div className="confirm-modal confirm-modal-danger">
         <div className="confirm-modal-body">
           <span className="confirm-modal-icon" aria-hidden="true">
@@ -214,10 +219,12 @@ export function CompetitionFormModal({
   competition,
   onClose,
   onSaved,
+  returnFocusRef,
 }: {
   competition?: Competition;
   onClose: () => void;
   onSaved: (competition: AdminCompetition) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const isEdit = competition !== undefined;
   const [name, setName] = useState(competition?.name ?? "");
@@ -332,7 +339,7 @@ export function CompetitionFormModal({
   }
 
   return (
-    <Modal title={title} onClose={onClose} variant="competition-form">
+    <Modal title={title} onClose={onClose} variant="competition-form" returnFocusRef={returnFocusRef}>
       <form className="ac-form" onSubmit={submit}>
         <div className="ac-form-eyebrow">
           <span aria-hidden="true" />

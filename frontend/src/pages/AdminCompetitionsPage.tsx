@@ -13,6 +13,7 @@ import {
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
 import { Loading } from "../components/ui";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const PAGE_SIZE = 5;
 type StatusFilter = "all" | Competition["status"];
@@ -23,6 +24,17 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "published", label: "Đang diễn ra" },
   { value: "closed", label: "Đã kết thúc" },
 ];
+
+/**
+ * Accent đầu mỗi hàng lặp theo VỊ TRÍ trong trang đang render, không theo trạng thái:
+ * hàng 1 xanh, hàng 2 đỏ, hàng 3 vàng rồi lặp lại. Cuộc thi đã kết thúc nằm ở hàng 2
+ * vẫn giữ accent đỏ — status vẫn là nguồn semantic duy nhất qua badge chữ.
+ */
+const ROW_ACCENTS = ["blue", "red", "yellow"] as const;
+
+function getRowAccent(index: number) {
+  return ROW_ACCENTS[index % ROW_ACCENTS.length];
+}
 
 function Icon({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -37,6 +49,42 @@ function IconFolder({ className }: { className?: string }) {
     <Icon className={className}>
       <path d="M3.75 6.75h5l2 2h9.5v8.5a2 2 0 0 1-2 2H5.75a2 2 0 0 1-2-2Z" />
       <path d="M3.75 9.25h16.5" />
+    </Icon>
+  );
+}
+
+function IconPulse({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3 12h4l3-7 4 14 3-7h4" />
+    </Icon>
+  );
+}
+
+function IconDraft({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M5.75 3.75h8l4.5 4.5v12H5.75Z" />
+      <path d="M13.5 3.75v4.5h4.5" />
+      <path d="M9 14h6M9 17h4" />
+    </Icon>
+  );
+}
+
+function IconFlag({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M6 21V4M6 4h12l-2.5 4L18 12H6" />
+    </Icon>
+  );
+}
+
+/** Accent đầu hàng: một icon dùng chung cho mọi hàng, màu chỉ đổi theo vị trí. */
+function IconLayers({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="m12 3.75 8.25 4.5L12 12.75 3.75 8.25Z" />
+      <path d="m4 13 8 4.25 8-4.25" />
     </Icon>
   );
 }
@@ -106,6 +154,12 @@ export function AdminCompetitionsPage() {
   const [editing, setEditing] = useState<Competition | null>(null);
   const [confirming, setConfirming] = useState<{ action: CompetitionAction; competition: Competition } | null>(null);
   const [deleting, setDeleting] = useState<Competition | null>(null);
+  // Modal mở từ menu ba chấm: menu unmount ngay khi chọn item nên Modal không thấy
+  // được nút trigger là "focus trước đó" — nhớ ref của row để trả focus về đúng chỗ.
+  const editReturnFocus = useRef<HTMLButtonElement | null>(null);
+  const confirmReturnFocus = useRef<HTMLButtonElement | null>(null);
+  const deleteReturnFocus = useRef<HTMLButtonElement | null>(null);
+  useDocumentTitle("Quản lý cuộc thi");
 
   const load = useCallback(async (refresh = false) => {
     setError(null);
@@ -196,9 +250,14 @@ export function AdminCompetitionsPage() {
   return (
     <div className="page ac-page">
       <header className="ac-page-head">
-        <div>
+        <div className="ac-page-head-copy">
           <h1 className="ac-title">Quản lý cuộc thi</h1>
           <p className="ac-subtitle">Tạo, chỉnh sửa, publish/close và clone cuộc thi</p>
+          <span className="ac-brand-accent" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
         </div>
         <button className="ac-create-button" type="button" onClick={() => setCreating(true)}>
           <span aria-hidden="true">+</span>
@@ -207,10 +266,34 @@ export function AdminCompetitionsPage() {
       </header>
 
       <section className="ac-stats" aria-label="Tổng quan cuộc thi">
-        <StatCard label="Tổng cuộc thi" value={counts.all} detail="toàn hệ thống" icon={<IconFolder className="ac-stat-icon" />} />
-        <StatCard label="Đang diễn ra" value={counts.published} detail="cuộc thi" badge="Live" tone="live" />
-        <StatCard label="Bản nháp" value={counts.draft} detail="Chỉ admin thấy" badge="Draft" tone="draft" />
-        <StatCard label="Đã kết thúc" value={counts.closed} detail="cuộc thi" badge="Closed" tone="closed" />
+        <StatCard
+          label="Tổng cuộc thi"
+          value={counts.all}
+          detail="toàn hệ thống"
+          tone="blue"
+          icon={<IconFolder className="ac-stat-glyph" />}
+        />
+        <StatCard
+          label="Đang diễn ra"
+          value={counts.published}
+          detail="cuộc thi"
+          tone="red"
+          icon={<IconPulse className="ac-stat-glyph" />}
+        />
+        <StatCard
+          label="Bản nháp"
+          value={counts.draft}
+          detail="Chỉ admin thấy"
+          tone="yellow"
+          icon={<IconDraft className="ac-stat-glyph" />}
+        />
+        <StatCard
+          label="Đã kết thúc"
+          value={counts.closed}
+          detail="cuộc thi"
+          tone="neutral"
+          icon={<IconFlag className="ac-stat-glyph" />}
+        />
       </section>
 
       <section className="ac-toolbar" aria-label="Tìm và lọc cuộc thi">
@@ -219,7 +302,7 @@ export function AdminCompetitionsPage() {
             <button
               key={filter.value}
               type="button"
-              className={`ac-filter${statusFilter === filter.value ? " active" : ""}`}
+              className="ac-filter"
               aria-pressed={statusFilter === filter.value}
               onClick={() => changeStatusFilter(filter.value)}
             >
@@ -251,7 +334,21 @@ export function AdminCompetitionsPage() {
       )}
 
       <section className="ac-table-card" aria-busy={loading || refreshing}>
-        <div className="ac-table-scroll">
+        <div className="ac-table-head">
+          <div className="ac-table-head-left">
+            <span className="ac-head-accent" aria-hidden="true" />
+            <h2 className="ac-table-head-title">Danh sách cuộc thi</h2>
+          </div>
+          {!loading && !error && (
+            <p className="ac-table-head-count">{competitions.length} cuộc thi</p>
+          )}
+        </div>
+        <div
+          className="ac-table-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng danh sách cuộc thi"
+        >
           <table className="ac-table">
             <colgroup>
               <col className="ac-col-name" />
@@ -317,13 +414,23 @@ export function AdminCompetitionsPage() {
                   </td>
                 </tr>
               ) : (
-                pageItems.map((competition) => (
+                pageItems.map((competition, index) => (
                   <CompetitionRow
                     key={competition.id}
                     competition={competition}
-                    onEdit={() => setEditing(competition)}
-                    onConfirm={(action) => setConfirming({ action, competition })}
-                    onDelete={() => setDeleting(competition)}
+                    accent={getRowAccent(index)}
+                    onEdit={(trigger) => {
+                      editReturnFocus.current = trigger;
+                      setEditing(competition);
+                    }}
+                    onConfirm={(action, trigger) => {
+                      confirmReturnFocus.current = trigger;
+                      setConfirming({ action, competition });
+                    }}
+                    onDelete={(trigger) => {
+                      deleteReturnFocus.current = trigger;
+                      setDeleting(competition);
+                    }}
                   />
                 ))
               )}
@@ -374,6 +481,7 @@ export function AdminCompetitionsPage() {
       {editing && (
         <CompetitionFormModal
           competition={editing}
+          returnFocusRef={editReturnFocus}
           onClose={() => setEditing(null)}
           onSaved={(saved) => {
             setEditing(null);
@@ -385,6 +493,7 @@ export function AdminCompetitionsPage() {
         <CompetitionActionConfirmModal
           action={confirming.action}
           competition={confirming.competition}
+          returnFocusRef={confirmReturnFocus}
           onSuccess={(action, clone) => {
             setConfirming(null);
             notify(
@@ -401,6 +510,7 @@ export function AdminCompetitionsPage() {
       {deleting && (
         <CompetitionDeleteModal
           competition={deleting}
+          returnFocusRef={deleteReturnFocus}
           onDeleted={() => {
             const name = deleting.name;
             setDeleting(null);
@@ -414,36 +524,29 @@ export function AdminCompetitionsPage() {
   );
 }
 
+/** Màu card chỉ để nhận diện thương hiệu — không suy ra trạng thái hay quyền thao tác. */
+type StatTone = "blue" | "red" | "yellow" | "neutral";
+
 function StatCard({
   label,
   value,
   detail,
   icon,
-  badge,
   tone,
 }: {
   label: string;
   value: number;
   detail: string;
-  icon?: ReactNode;
-  badge?: string;
-  tone?: "live" | "draft" | "closed";
+  icon: ReactNode;
+  tone: StatTone;
 }) {
   return (
-    <article className="ac-stat-card">
-      <div className="ac-stat-head">
-        <span>{label}</span>
-        {icon}
-        {badge && (
-          <span className={`ac-stat-badge ${tone}`}>
-            <span aria-hidden="true" />
-            {badge}
-          </span>
-        )}
-      </div>
-      <div>
+    <article className="ac-stat-card" data-tone={tone}>
+      <span className="ac-stat-icon">{icon}</span>
+      <div className="ac-stat-body">
+        <p className="ac-stat-label">{label}</p>
         <strong className="ac-stat-value">{value}</strong>
-        <div className={`ac-stat-detail${tone === "draft" ? " draft" : ""}`}>{detail}</div>
+        <p className="ac-stat-detail">{detail}</p>
       </div>
     </article>
   );
@@ -451,14 +554,17 @@ function StatCard({
 
 function CompetitionRow({
   competition,
+  accent,
   onEdit,
   onConfirm,
   onDelete,
 }: {
   competition: AdminCompetition;
-  onEdit: () => void;
-  onConfirm: (action: CompetitionAction) => void;
-  onDelete: () => void;
+  /** Accent decorative theo vị trí trong trang — không phải trạng thái cuộc thi. */
+  accent: (typeof ROW_ACCENTS)[number];
+  onEdit: (trigger: HTMLButtonElement | null) => void;
+  onConfirm: (action: CompetitionAction, trigger: HTMLButtonElement | null) => void;
+  onDelete: (trigger: HTMLButtonElement | null) => void;
 }) {
   const c = competition;
 
@@ -466,8 +572,13 @@ function CompetitionRow({
     <tr>
       <td>
         <div className="ac-name-cell">
-          <Link to={`/admin/competitions/${c.id}`}>{c.name}</Link>
-          <span>{JOIN_MODE_LABEL[c.join_mode]}</span>
+          <span className={`ac-row-accent ${accent}`} aria-hidden="true">
+            <IconLayers />
+          </span>
+          <div className="ac-name-text">
+            <Link to={`/admin/competitions/${c.id}`}>{c.name}</Link>
+            <span>{JOIN_MODE_LABEL[c.join_mode]}</span>
+          </div>
         </div>
       </td>
       <td>
@@ -522,9 +633,9 @@ function RowActionMenu({
   onDelete,
 }: {
   competition: AdminCompetition;
-  onEdit: () => void;
-  onConfirm: (action: CompetitionAction) => void;
-  onDelete: () => void;
+  onEdit: (trigger: HTMLButtonElement | null) => void;
+  onConfirm: (action: CompetitionAction, trigger: HTMLButtonElement | null) => void;
+  onDelete: (trigger: HTMLButtonElement | null) => void;
 }) {
   const c = competition;
   const editDisabled = c.status === "closed";
@@ -604,9 +715,11 @@ function RowActionMenu({
     };
   }, [open, close]);
 
-  function run(action: () => void) {
+  /** `triggerRef.current` vẫn hợp lệ sau khi menu đóng vì row không unmount. */
+  function runFromMenu(action: (trigger: HTMLButtonElement | null) => void) {
+    const trigger = triggerRef.current;
     close();
-    action();
+    action(trigger);
   }
 
   return (
@@ -646,23 +759,23 @@ function RowActionMenu({
               disabled={editDisabled}
               title={editDisabled ? EDIT_LOCKED_REASON : undefined}
               aria-describedby={editDisabled ? `edit-reason-${c.id}` : undefined}
-              onClick={() => run(onEdit)}
+              onClick={() => runFromMenu(onEdit)}
             >
               {editDisabled && <IconLock className="ac-action-lock" />}
               Sửa
             </button>
             {(c.status === "draft" || c.status === "published") && <div className="ac-menu-separator" />}
             {c.status === "draft" && (
-              <button className="ac-menu-item ac-menu-item-strong" type="button" role="menuitem" onClick={() => run(() => onConfirm("publish"))}>
+              <button className="ac-menu-item ac-menu-item-strong" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("publish", trigger))}>
                 Publish
               </button>
             )}
             {c.status === "published" && (
-              <button className="ac-menu-item ac-menu-item-danger" type="button" role="menuitem" onClick={() => run(() => onConfirm("close"))}>
+              <button className="ac-menu-item ac-menu-item-danger" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("close", trigger))}>
                 Kết thúc
               </button>
             )}
-            <button className="ac-menu-item" type="button" role="menuitem" onClick={() => run(() => onConfirm("clone"))}>
+            <button className="ac-menu-item" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("clone", trigger))}>
               Clone
             </button>
             {/* Chỉ draft xoá được — published/closed giữ lịch sử thi (ADR-009). */}
@@ -673,7 +786,7 @@ function RowActionMenu({
                   className="ac-menu-item ac-menu-item-danger"
                   type="button"
                   role="menuitem"
-                  onClick={() => run(onDelete)}
+                  onClick={() => runFromMenu(onDelete)}
                 >
                   Xóa
                 </button>

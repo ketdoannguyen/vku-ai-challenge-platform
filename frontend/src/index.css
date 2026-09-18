@@ -762,6 +762,12 @@ samp {
   max-width: var(--container-wide);
 }
 
+/* Danh sách quản trị có bảng 8 cột nên dùng chung trần rộng với dashboard;
+   chỉ áp cho đúng `/admin/competitions` và alias `/admin`. */
+.app-main-admin-list {
+  max-width: var(--container-wide);
+}
+
 /* =============================================================================
    Page
    ============================================================================= */
@@ -5528,34 +5534,68 @@ select.input {
 }
 
 /* =============================================================================
-   Admin competitions — Stitch S11 + S12
+   Admin competitions — Quản lý cuộc thi (ADMIN_COMPETITIONS_DESIGN.md)
+   Cùng ngôn ngữ token với DashboardPage; thuần trình bày, không đổi nghiệp vụ.
    ============================================================================= */
 .ac-page {
-  --ac-bg: #fafaf9;
-  --ac-ink: #111111;
-  --ac-secondary: #6f6f6f;
-  --ac-outline: #8e8e93;
-  --ac-chip: #f4f4f2;
-  --ac-live: #1b5e20;
-  --ac-live-dot: #2e7d32;
-  --ac-live-bg: #e8f5e9;
+  --ac-bg: #f8fafc;
+  --ac-ink: var(--vku-ink);
+  --ac-secondary: var(--vku-ink-muted);
+  --ac-outline: #94a3b8;
+  --ac-chip: #f3f5f7;
+  --ac-live: #047857;
+  --ac-live-dot: #047857;
+  --ac-live-bg: #d1fae5;
   --ac-draft-dot: #b45309;
   --ac-draft-bg: #fef3c7;
-  --ac-closed: #4b5563;
-  --ac-closed-dot: #9ca3af;
-  --ac-closed-bg: #f3f4f6;
-  width: min(100%, 1240px);
-  margin: 0 auto;
+  --ac-closed: #475569;
+  --ac-closed-dot: #94a3b8;
+  --ac-closed-bg: #f1f5f9;
+  /* Trần rộng do `.app-main-admin-list` quyết định; ở đây chỉ căn giữa. */
+  width: 100%;
+  margin-inline: auto;
   color: var(--ac-ink);
 }
 
+/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
 .ac-page-head {
+  position: relative;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: 28px;
-  padding-top: 8px;
+  gap: var(--space-lg);
+  min-height: 148px;
+  margin-bottom: var(--space-lg);
+  padding: var(--space-lg);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. `pointer-events: none` để không chắn nút "Tạo cuộc thi". */
+.ac-page-head::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.ac-page-head > * {
+  position: relative;
 }
 
 .ac-title {
@@ -5564,11 +5604,37 @@ select.input {
 }
 
 .ac-subtitle {
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-sm) 0 0;
+  max-width: 42rem;
   color: var(--ac-secondary);
   font-size: var(--text-body);
   line-height: var(--leading-body);
   letter-spacing: var(--tracking-body);
+}
+
+/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
+.ac-brand-accent {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--space-md);
+}
+
+.ac-brand-accent > span {
+  width: 32px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.ac-brand-accent > span:nth-child(1) {
+  background: var(--vku-blue-600);
+}
+
+.ac-brand-accent > span:nth-child(2) {
+  background: var(--vku-red-600);
+}
+
+.ac-brand-accent > span:nth-child(3) {
+  background: var(--vku-yellow-600);
 }
 
 .ac-create-button {
@@ -5576,23 +5642,28 @@ select.input {
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  min-height: 40px;
-  padding: 0 var(--space-md);
-  border: 1px solid var(--ac-ink);
-  border-radius: var(--radius-md);
-  background: var(--ac-ink);
+  flex: none;
+  min-height: 46px;
+  padding: 0 24px;
+  border: 1px solid var(--vku-blue-700);
+  border-radius: 9px;
+  background: var(--vku-blue-700);
   box-shadow: var(--shadow-sm);
-  color: var(--surface);
+  color: #ffffff;
   font-family: var(--font-sans);
   font-size: var(--text-control);
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.25;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
 .ac-create-button:hover {
-  background: #000000;
+  border-color: var(--vku-blue-800);
+  background: var(--vku-blue-800);
 }
 
 .ac-create-button > span {
@@ -5601,166 +5672,154 @@ select.input {
   line-height: 1;
 }
 
-/* Một surface chung cho cả dải thống kê; các ô ngăn nhau bằng đường kẻ, không bằng
-   khung riêng — bốn chiếc card rời làm màn quản trị nặng hơn mức cần thiết. */
+/* Bốn KPI là bốn card rời; tone chỉ để nhận diện thương hiệu, không dùng để suy ra
+   trạng thái hay quyền thao tác. Số liệu vẫn lấy từ dữ liệu thật. */
 .ac-stats {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  margin-bottom: 28px;
-  padding: var(--space-md) 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+  gap: 20px;
+  margin-bottom: var(--space-lg);
 }
 
 .ac-stat-card {
-  min-width: 0;
-  padding: 0 20px;
-  border-left: 1px solid var(--border);
-}
+  --stat-bg: linear-gradient(135deg, #f3f8ff 0%, var(--vku-blue-100) 100%);
+  --stat-border: #cfe1ff;
+  --stat-icon-bg: #dbeafe;
+  --stat-ink: var(--vku-blue-700);
 
-.ac-stat-card:first-child {
-  border-left: 0;
-}
-
-.ac-stat-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 22px;
-  margin-bottom: 12px;
-  color: var(--ac-secondary);
-  font-size: 13px;
-  font-weight: 500;
+  align-items: flex-start;
+  gap: var(--space-md);
+  min-width: 0;
+  min-height: 136px;
+  padding: 22px 24px;
+  border: 1px solid var(--stat-border);
+  border-radius: var(--radius-2xl);
+  background: var(--stat-bg);
+}
+
+.ac-stat-card[data-tone="red"] {
+  --stat-bg: linear-gradient(135deg, #fff7f8 0%, var(--vku-red-100) 100%);
+  --stat-border: #ffd0d6;
+  --stat-icon-bg: #ffdde2;
+  --stat-ink: var(--vku-red-700);
+}
+
+/* Vàng 800 là tông vàng duy nhất đủ tương phản để làm màu chữ. */
+.ac-stat-card[data-tone="yellow"] {
+  --stat-bg: linear-gradient(135deg, #fffdf5 0%, #fff7de 100%);
+  --stat-border: #f6d987;
+  --stat-icon-bg: var(--vku-yellow-100);
+  --stat-ink: var(--vku-yellow-800);
+}
+
+.ac-stat-card[data-tone="neutral"] {
+  --stat-bg: linear-gradient(135deg, #ffffff 0%, #f5f7fa 100%);
+  --stat-border: #dce3ec;
+  --stat-icon-bg: #eef1f5;
+  --stat-ink: var(--vku-ink);
 }
 
 .ac-stat-icon {
-  width: 19px;
-  height: 19px;
-  color: var(--ac-outline);
-}
-
-.ac-stat-badge,
-.ac-status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border-radius: var(--radius-pill);
-  white-space: nowrap;
-}
-
-.ac-stat-badge {
-  padding: 2px 8px;
-  font-family: var(--font-sans);
-  font-size: var(--text-label);
-  font-weight: 500;
-  line-height: var(--leading-label);
-}
-
-.ac-stat-badge > span,
-.ac-status > span {
-  width: 6px;
-  height: 6px;
+  justify-content: center;
   flex: none;
-  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--stat-icon-bg);
+  color: var(--stat-ink);
 }
 
-.ac-stat-badge.live {
-  background: var(--ac-live-bg);
-  color: var(--ac-live);
+.ac-stat-glyph {
+  width: 20px;
+  height: 20px;
 }
 
-.ac-stat-badge.live > span {
-  background: var(--ac-live-dot);
+.ac-stat-body {
+  min-width: 0;
 }
 
-.ac-stat-badge.draft {
-  background: var(--ac-draft-bg);
-  color: var(--warning);
-}
-
-.ac-stat-badge.draft > span {
-  background: var(--ac-draft-dot);
-}
-
-.ac-stat-badge.closed {
-  background: var(--ac-closed-bg);
-  color: var(--ac-closed);
-}
-
-.ac-stat-badge.closed > span {
-  background: var(--ac-closed-dot);
+.ac-stat-label {
+  margin: 0;
+  color: var(--stat-ink);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .ac-stat-value {
   display: block;
-  color: var(--ac-ink);
-  font-size: 32px;
-  font-weight: 600;
+  margin-top: 6px;
+  color: var(--stat-ink);
+  font-size: 38px;
+  font-weight: 700;
   line-height: 1;
   letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
 }
 
 .ac-stat-detail {
-  margin-top: 6px;
+  margin: 6px 0 0;
   color: var(--ac-secondary);
-  font-family: var(--font-sans);
   font-size: var(--text-label);
-  font-weight: 400;
   line-height: var(--leading-label);
-}
-
-.ac-stat-detail.draft {
-  color: var(--ac-outline);
-  font-family: var(--font-sans);
-  font-style: italic;
 }
 
 .ac-toolbar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 20px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding: 12px 16px;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
   background: var(--surface);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.02),
+    0 6px 20px rgba(15, 23, 42, 0.035);
 }
 
+/* Bộ lọc là hàng pill rời; cuộn ngang nội bộ khi hẹp để không đẩy tràn toolbar. */
 .ac-filter-list {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
   min-width: 0;
   overflow-x: auto;
 }
 
 .ac-filter {
-  padding: 6px 12px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--ac-secondary);
+  height: 44px;
+  padding: 0 var(--space-md);
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface-container-low);
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: var(--text-control);
   font-weight: 500;
   line-height: 1.25;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .ac-filter:hover {
-  background: var(--ac-chip);
-  color: var(--ac-ink);
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
-.ac-filter.active {
-  background: var(--ac-ink);
-  color: var(--surface);
+.ac-filter[aria-pressed="true"] {
+  border-color: var(--vku-blue-700);
+  background: var(--vku-blue-700);
+  color: #ffffff;
 }
 
 .ac-toolbar-actions {
@@ -5791,15 +5850,14 @@ select.input {
 
 .ac-search input {
   width: 100%;
-  height: 32px;
-  padding: 0 12px 0 36px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--ac-bg);
+  height: 44px;
+  padding: 0 14px 0 36px;
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface);
   color: var(--ac-ink);
   font-family: var(--font-sans);
   font-size: var(--text-control);
-  font-weight: 400;
   line-height: 1.25;
 }
 
@@ -5807,10 +5865,11 @@ select.input {
   color: var(--ac-outline);
 }
 
+/* `outline: none` chỉ được phép đi kèm thay thế nhìn thấy được: viền xanh + ring. */
 .ac-search input:focus {
   outline: none;
-  border-color: var(--ac-ink);
-  background: var(--surface);
+  border-color: var(--vku-blue-500);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14);
 }
 
 .ac-refresh {
@@ -5818,11 +5877,11 @@ select.input {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--ac-bg);
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface);
   color: var(--ac-ink);
   font-family: var(--font-sans);
   font-size: var(--text-control);
@@ -5830,22 +5889,26 @@ select.input {
   line-height: 1.25;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .ac-refresh:hover:not(:disabled) {
-  border-color: var(--border-strong);
-  background: var(--ac-chip);
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
 .ac-refresh:disabled {
-  opacity: 0.6;
+  color: var(--ac-outline);
   cursor: wait;
 }
 
 .ac-refresh-icon {
   width: 16px;
   height: 16px;
-  color: var(--ac-secondary);
 }
 
 .ac-refresh-icon.spinning {
@@ -5895,10 +5958,48 @@ select.input {
 .ac-table-card {
   overflow: hidden;
   margin-bottom: var(--space-lg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
   background: var(--surface);
-  box-shadow: var(--shadow-card);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.02),
+    0 6px 20px rgba(15, 23, 42, 0.035);
+}
+
+.ac-table-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 18px 20px 14px;
+}
+
+.ac-table-head-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ac-head-accent {
+  flex: none;
+  width: 4px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    var(--vku-blue-600) 0 33%,
+    var(--vku-red-600) 33% 66%,
+    var(--vku-yellow-600) 66% 100%
+  );
+}
+
+.ac-table-head-title {
+  margin: 0;
+  color: var(--vku-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .ac-table-scroll {
@@ -5911,15 +6012,15 @@ select.input {
 
 .ac-table {
   width: 100%;
-  /* .app-main chặn ở 1280px -> bề rộng khả dụng thật của bảng là 1214px.
-     Để min-width cao hơn sẽ đẩy thanh cuộn ngang hiện thường trực. */
+  /* Trần của màn list là 1440px (`.app-main-admin-list`); min-width này chỉ để chốt
+     sàn cho tablet/mobile, nơi khung cuộn ngang bên trong mới là thứ chạy. */
   min-width: 1200px;
   border-collapse: collapse;
   table-layout: fixed;
   text-align: left;
 }
 
-/* Tỉ lệ dưới đây đo trực tiếp trên DOM (bảng rộng tối đa 1214px). Mỗi cột phải
+/* Tỉ lệ dưới đây đo trực tiếp trên DOM. Mỗi cột phải
    chứa được header không xuống dòng, cộng nội dung dài nhất của nó:
      Trạng thái 90px · Thời gian 160px · Metric 69px · Thành viên 81px
      · Bài nộp 54px · Thao tác 68px (header, đã tính gutter 20px hai bên)
@@ -5958,12 +6059,13 @@ select.input {
 
 .ac-table th {
   padding: 12px var(--space-md);
-  border-bottom: 1px solid var(--border);
-  background: var(--ac-bg);
+  border-top: 1px solid var(--vku-border-soft);
+  border-bottom: 1px solid var(--vku-border);
+  background: #fafbfd;
   color: var(--ac-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-label);
-  font-weight: 600;
+  font-weight: 700;
   line-height: var(--leading-label);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -5982,47 +6084,93 @@ select.input {
   text-align: right;
 }
 
+/* Padding dọc 20px cho hàng cao ~84px khi ô chỉ có một dòng. */
 .ac-table td {
-  padding: 14px var(--space-md);
-  border-bottom: 1px solid var(--border);
+  padding: 20px var(--space-md);
+  border-bottom: 1px solid var(--vku-border-soft);
   color: var(--ac-ink);
   font-size: 13px;
-  vertical-align: top;
+  vertical-align: middle;
 }
 
 .ac-table tbody tr:last-child td {
   border-bottom: 0;
 }
 
+.ac-table tbody tr {
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
 .ac-table tbody tr:hover {
-  background: rgba(250, 250, 249, 0.8);
+  background: #fbfdff;
 }
 
 .ac-name-cell {
   display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Accent đầu hàng: lặp theo vị trí trong trang đang render, thuần trang trí.
+   Trạng thái thật vẫn nằm ở badge chữ bên cột Trạng thái. */
+.ac-row-accent {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.ac-row-accent svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ac-row-accent.blue {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-600);
+}
+
+.ac-row-accent.red {
+  background: var(--vku-red-100);
+  color: var(--vku-red-600);
+}
+
+.ac-row-accent.yellow {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.ac-name-text {
+  display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 5px;
+  min-width: 0;
 }
 
-.ac-name-cell a {
+.ac-name-text a {
   color: var(--ac-ink);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.3;
 }
 
-.ac-name-cell a:hover {
-  color: #1e40af;
+.ac-name-text a:hover {
+  color: var(--vku-blue-700);
   text-decoration: none;
 }
 
-.ac-name-cell span {
+/* Chỉ badge chế độ tham gia, không phải ô accent trang trí ở trên. */
+.ac-name-text > span {
   padding: 2px var(--space-sm);
-  border-radius: var(--radius-sm);
+  border-radius: 7px;
   background: var(--ac-chip);
-  color: #4f4f4f;
-  font-size: 11px;
+  color: var(--vku-ink-muted);
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -6031,9 +6179,9 @@ select.input {
   display: inline-block;
   max-width: 100%;
   padding: 4px var(--space-sm);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--ac-bg);
+  border: 1px solid var(--vku-border);
+  border-radius: 6px;
+  background: #f6f7f9;
   color: var(--ac-ink);
   font-family: var(--font-mono);
   font-size: var(--text-code);
@@ -6049,11 +6197,24 @@ select.input {
   gap: 4px;
 }
 
+/* Badge trạng thái luôn có chữ + chấm màu, không bao giờ chỉ dựa vào màu. */
 .ac-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 10px;
+  border-radius: var(--radius-pill);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ac-status > span {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
 }
 
 .ac-status.success {
@@ -6093,7 +6254,7 @@ select.input {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  color: #4f4f4f;
+  color: var(--ac-secondary);
   font-size: 12.5px;
   line-height: 1.35;
 }
@@ -6158,13 +6319,17 @@ select.input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--vku-border);
+  border-radius: 9px;
   background: var(--surface);
   color: var(--ac-secondary);
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
 }
 
 .ac-menu-trigger svg {
@@ -6174,9 +6339,9 @@ select.input {
 
 .ac-menu-trigger:hover,
 .ac-menu-trigger[aria-expanded="true"] {
-  border-color: var(--ac-outline);
-  background: var(--ac-chip);
-  color: var(--ac-ink);
+  border-color: var(--vku-blue-500);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
 /* Neo theo viewport (position: fixed) để không bị `.ac-table-scroll` cắt. */
@@ -6187,8 +6352,8 @@ select.input {
   flex-direction: column;
   min-width: 172px;
   padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
 }
@@ -6197,7 +6362,7 @@ select.input {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  min-height: 32px;
+  min-height: 36px;
   padding: 6px 10px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -6212,16 +6377,17 @@ select.input {
   cursor: pointer;
 }
 
+/* Mục menu dùng roving focus: nền xanh thay cho outline là dấu hiệu được thấy rõ. */
 .ac-menu-item:hover:not(:disabled),
 .ac-menu-item:focus-visible {
-  background: var(--ac-chip);
-  color: var(--ac-ink);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
   text-decoration: none;
   outline: none;
 }
 
 .ac-menu-item:disabled {
-  color: #a3a3a3;
+  color: var(--ac-outline);
   cursor: not-allowed;
 }
 
@@ -6230,19 +6396,19 @@ select.input {
 }
 
 .ac-menu-item-danger {
-  color: #dc2626;
+  color: var(--vku-red-700);
 }
 
 .ac-menu-item-danger:hover:not(:disabled),
 .ac-menu-item-danger:focus-visible {
-  background: #fef2f2;
-  color: #dc2626;
+  background: var(--vku-red-50);
+  color: var(--vku-red-700);
 }
 
 .ac-menu-separator {
   height: 1px;
   margin: 4px 0;
-  background: var(--border);
+  background: var(--vku-border);
 }
 
 .ac-action-lock {
@@ -6283,11 +6449,11 @@ select.input {
 }
 
 .ac-state-button {
-  min-height: 32px;
+  min-height: 36px;
   margin-top: 4px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  padding: 0 14px;
+  border: 1px solid var(--vku-border);
+  border-radius: 9px;
   background: var(--surface);
   color: var(--ac-ink);
   font-size: 12px;
@@ -6296,8 +6462,9 @@ select.input {
 }
 
 .ac-state-button:hover {
-  border-color: var(--border-strong);
-  background: var(--ac-chip);
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
 .ac-pagination {
@@ -6306,15 +6473,15 @@ select.input {
   justify-content: space-between;
   gap: 12px;
   padding: 14px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--ac-bg);
+  border-top: 1px solid var(--vku-border);
+  background: #fafbfd;
   color: var(--ac-secondary);
   font-size: 13px;
 }
 
 .ac-pagination strong {
   color: var(--ac-ink);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .ac-pagination-controls {
@@ -6324,25 +6491,36 @@ select.input {
 }
 
 .ac-pagination-controls button {
-  min-width: 28px;
-  height: 28px;
+  min-width: 34px;
+  height: 34px;
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border: 1px solid var(--vku-border);
+  border-radius: 8px;
   background: var(--surface);
   color: var(--ac-ink);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.ac-pagination-controls button:hover:not(:disabled) {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
 .ac-pagination-controls button.active {
-  border-color: var(--ac-ink);
-  background: var(--ac-ink);
-  color: var(--surface);
+  border-color: var(--vku-blue-700);
+  background: var(--vku-blue-700);
+  color: #ffffff;
 }
 
 .ac-pagination-controls button:disabled {
-  color: #a3a3a3;
+  color: var(--ac-outline);
   cursor: not-allowed;
 }
 
@@ -6816,21 +6994,28 @@ select.input {
   cursor: wait;
 }
 
-@media (max-width: 63.99rem) {
+@media (max-width: 74.99rem) {
   .ac-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
 
-  /* Hai cột: ô ở cột 1 không mang vạch dọc, hàng thứ hai tự tách bằng khoảng đệm. */
-  .ac-stat-card:nth-child(odd) {
-    border-left: 0;
+/* 48–74.99rem: toolbar còn là hàng ngang nên tách filter và search/refresh thành hai
+   hàng. Dưới 48rem toolbar đã là cột — `flex-wrap` ở đó sẽ biến trục ngang thành trục
+   wrap và khoá bề rộng toolbar theo nội dung, đẩy tràn cả trang. */
+@media (min-width: 48rem) and (max-width: 74.99rem) {
+  .ac-toolbar {
+    flex-wrap: wrap;
   }
 
-  .ac-stat-card:nth-child(n + 3) {
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
+  .ac-filter-list,
+  .ac-toolbar-actions {
+    flex: 1 1 100%;
+    max-width: none;
   }
+}
 
+@media (max-width: 63.99rem) {
   .ac-table {
     min-width: 1270px;
   }
@@ -6903,6 +7088,7 @@ select.input {
     align-self: flex-start;
   }
 
+  /* Toolbar đã là cột: bỏ trần 448px để filter và search cùng rộng bằng nhau. */
   .ac-toolbar-actions {
     max-width: none;
   }
@@ -6974,15 +7160,8 @@ select.input {
     grid-template-columns: 1fr;
   }
 
-  /* Một cột: bỏ hết vạch dọc, mỗi hàng cách nhau bằng khoảng đệm dọc. */
-  .ac-stat-card,
-  .ac-stat-card:nth-child(odd) {
-    border-left: 0;
-  }
-
-  .ac-stat-card:not(:first-child) {
-    margin-top: var(--space-md);
-    padding-top: var(--space-md);
+  .ac-page-head {
+    padding: var(--space-lg) var(--space-md);
   }
 
   /* Giữ nút xóa cạnh URL, chỉ xếp tên tài nguyên xuống dòng riêng. */
@@ -8055,6 +8234,11 @@ button:focus-visible {
     flex-direction: column;
     align-items: stretch;
     gap: 0.875rem;
+  }
+  /* Basis 24rem của desktop là chiều rộng; khi xếp dọc nó thành chiều cao tối thiểu,
+     để lại một khoảng trống lớn dưới tiêu đề. */
+  .admin-detail-heading {
+    flex: 0 0 auto;
   }
   .admin-detail-actions {
     width: 100%;
