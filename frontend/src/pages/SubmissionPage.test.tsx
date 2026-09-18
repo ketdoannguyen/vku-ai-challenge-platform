@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
@@ -60,6 +60,38 @@ test("hiển thị rule summary và file đã chọn", () => {
   fireEvent.change(screen.getByLabelText("Chọn file CSV"), { target: { files: [file] } });
   expect(screen.getByText("team-result.csv")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
+});
+
+test("thanh hạn mức dài theo đúng tỉ lệ còn lại và hạ mức màu khi gần hết", () => {
+  const withQuota = (remaining: number) =>
+    renderPage({
+      ...COMPETITION,
+      quota: { per_day: 5, used_today: 5 - remaining, remaining, resets_at: "2026-09-18T00:00:00Z" },
+    });
+
+  const four = withQuota(4);
+  const fill = document.querySelector(".sub-quota-fill") as HTMLElement;
+  expect(fill.style.width).toBe("80%");
+  expect(fill.dataset.level).toBe("ok");
+  // Câu chữ trong ribbon là kênh thông tin chính; thẻ hướng dẫn bên phải lặp lại cùng
+  // nhãn nên phải khoanh vùng trước khi đọc.
+  expect(within(screen.getByLabelText("Quy định file submission")).getByText("Còn 4/5 lượt hôm nay")).toBeTruthy();
+  four.unmount();
+
+  const one = withQuota(1);
+  expect((document.querySelector(".sub-quota-fill") as HTMLElement).dataset.level).toBe("low");
+  one.unmount();
+
+  const none = withQuota(0);
+  expect((document.querySelector(".sub-quota-fill") as HTMLElement).dataset.level).toBe("empty");
+  expect((document.querySelector(".sub-quota-fill") as HTMLElement).style.width).toBe("0%");
+  none.unmount();
+});
+
+test("chưa có số liệu quota thì không vẽ thanh, chỉ còn câu chữ", () => {
+  renderPage();
+  expect(document.querySelector(".sub-quota-track")).toBeNull();
+  expect(within(screen.getByLabelText("Quy định file submission")).getByText("5 lượt/ngày")).toBeTruthy();
 });
 
 test("nút chọn file CSV là <button> thật nên Tab/Enter mở được picker", () => {

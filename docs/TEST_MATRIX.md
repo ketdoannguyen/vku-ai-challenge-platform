@@ -322,6 +322,125 @@ Tailwind viết trong TSX không khớp selector nào trong `index.css` và là 
 tầng nguồn TSX với allowlist hẹp 15 token đã biết, chứ không cài Tailwind, không thêm CSS linter và
 không gắn cờ các class no-op có chủ đích hay class thật của ứng dụng.
 
+## 9g. Participant Competition Module (redesign VKU)
+
+Contract trình bày ở `PARTICIPANT_COMPETITION_DESIGN.md` (root), kế thừa `VKU_GLOBAL_DESIGN.md`; module
+gồm bốn route con dùng chung một shell `CompetitionDetailPage`. Bảng dưới là bằng chứng thu được từ
+Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (5 route × 7 width + leaderboard ẩn +
+guest = 37 lượt đo, `FAILED: none`) và từ test tự động.
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Một `h1` duy nhất ở masthead trên cả 37 lượt đo; workspace title là `h2` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Tab navigation là `<nav>` (`tabNavTag=NAV` ở mọi lượt), không có `role="tablist"`/`role="tab"` nào (`tablistCount=0`) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| `aria-current="page"` có mặt đúng chỗ: 1 ở ba workspace (tab đang mở), 2 ở route nội dung (tab **và** mục lục `Mục lục nội dung`) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Một khung duy nhất `68rem` (1088px) cho cả bốn tab: `.comp-page` rộng 339/354/604/704/960/**1088/1088** tương ứng 375/390/640/768/1024/1200/1440; breadcrumb, masthead và tab bar (`chrome`) luôn **bằng đúng** chiều rộng khung ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Không phần tử nào thoát khỏi khung: `outsideFrame` rỗng ở cả 35 lượt đo có `.comp-page` (chỉ bỏ qua vùng cuộn ngang có chủ đích) — đây là phép đo trực tiếp lỗi "chữ tràn ra ngoài lề" | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Trần rộng không rò sang route khác: `.app-main` đo được **1280px** ở 1440 trên cả bốn tab, và `App.tsx` không còn class shell rộng nào cho `/competitions/*` (`rg app-main-participant` → 0 kết quả) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`mainWidth`), `rg` toàn `frontend/src` |
+| Không tràn ngang body ở cả 37 lượt: `documentElement.scrollWidth == viewport`, danh sách phần tử tràn rỗng, không page error | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Chiều rộng bảng dữ liệu trong khung 1088px: `Bảng bài đã nộp` cuộn trong ở 375/390/640/768/1024 (`scrollsX=true`), vừa khung từ 1200; `Bảng xếp hạng` cuộn trong ở 375/390/640/768; `Bảng dữ liệu` (Markdown) vừa khung ở mọi width — body vẫn không tràn | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Masthead dùng đúng công thức mặt `.ac-page-head` của trang quản trị cuộc thi: gradient `135deg` trắng → `--vku-blue-50`, ribbon `::before` chéo lam/đỏ/vàng góc phải, kèm `.comp-brand-accent` ba sọc lam–đỏ–vàng dưới mô tả | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` + ảnh `/tmp/uiverify/shots-participant/` |
+| Dải quy định Nộp bài: **4** thẻ `.sub-spec-item` với icon trang trí `aria-hidden`, màu icon xoay lam/đỏ/vàng theo vị trí (`rgb(9,105,232)` / `rgb(236,22,49)` / `rgb(180,83,9)` / `rgb(9,105,232)`) — đo giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Thanh hạn mức full-width dưới 4 thẻ: với `quota = 4/5` đo được `width: 80%`, `data-level="ok"`, nền `rgb(16, 185, 129)` (`--success-bright`), nhãn `Còn 4/5 lượt hôm nay`; track thật sự trải hết hàng (536/596/461/247 px ở 1440/768/1024/375 = bề ngang ribbon trừ padding) và fill bằng đúng 80% track — giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Bốn thẻ quy định chia đúng 4 cột bằng nhau (`grid-template-columns` tính ra `131.875px × 4` ở 1440, `127.5px × 2` ở 375), đủ chỗ để `Binary` và `positive label: 1` xuống hai tầng theo thiết kế thay vì ngắt dòng giữa câu | passing | Chromium headless `/tmp/uiverify/measure-strip.mjs` |
+| Ngưỡng màu thanh hạn mức: `4/5` → `ok`; `1/5` → `low`; `0/5` → `empty` + rộng `0%`; khi backend không trả `quota` thì **không vẽ thanh** (`.sub-quota-track` là `null`) và chỉ còn câu `5 lượt/ngày` | passing | `frontend/src/pages/SubmissionPage.test.tsx` (10 test) |
+| `color-scheme: light` trên cả 37 lượt (kể cả guest và leaderboard ẩn); không có dark mode | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Guest (401 ở `/auth/me`) vẫn vào được `/competitions/:slug`, render đúng 1 `h1`, không tràn ngang | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Ba region bảng có tên và focus được: `Bảng dữ liệu`, `Bảng bài đã nộp`, `Bảng xếp hạng` — đều `tabindex=0` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Keyboard đi được tới region bảng Markdown kèm focus ring thật `2px solid rgb(6, 79, 196)`; `subm-id-copy-btn` (Sao chép ID), `Chọn file CSV`, tab links và nút pager đều nhận focus và có outline hiển thị | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`probeKeyboard`, 45 lần Tab ở 1440) |
+| Thứ tự tab khớp DOM: skip link → brand → nav → đăng xuất → breadcrumb → vào/rời cuộc thi → bốn tab → nội dung workspace | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Chiều cao control đo được ở 1440: `.btn` chính/phụ 40–41px (spec toàn cục "control thường 40–42px"), nút toolbar/pager 32px, nút copy icon 24px — đúng như baseline các trang khác, không phát sinh control cao bất thường | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`btnHeights`) |
+| Leaderboard ẩn: **không request `/leaderboard` nào** phát ra (log chỉ có competition, `/auth/me`, `/contents`); card khoá render thay bảng | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Leaderboard mở: có request `/leaderboard`, bảng 7 cột nằm trong region `Bảng xếp hạng`; `Trang trước`/`Trang sau` nằm **ngoài** region cuộn | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Markdown runtime: `h2` có vạch trái `4px rgb(9, 105, 232)`; blockquote gradient `rgb(245,249,255) → rgb(255,251,235)`; inline code `rgb(211, 11, 35)`; `hr` là gradient; `script`/`iframe` trong nội dung = 0; link ngoài `rel="noopener noreferrer"` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Ảnh Markdown chỉ nhận asset same-origin: `src` render thành `/api/competitions/ai-challenge-2026/assets/diagram.png` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs`, `frontend/src/markdown/MarkdownView.test.tsx` |
+| Heading tác giả hạ một bậc: `#` → `h2`, không sinh `h1` thứ hai trong Markdown | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Blockquote, inline code ngoài `pre`, và `hr` render đúng phần tử để CSS VKU bám vào | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Bảng GFM vẫn nằm trong region có tên, `tabindex=0`, giữ ngữ nghĩa `table` | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| XSS: `script`, `iframe`, handler `onerror`, `javascript:` đều không sống sót | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Ảnh external/`data:`/traversal bị loại, chỉ `assets/...` same-competition được transform | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Full frontend gate sau thay đổi khung, masthead và dải quy định | passing | `npx vitest run --maxWorkers 1` → **291 passed (23 file)**; `npm test` (song song) dao động 289–291 do flake ở ghi chú dưới; `npx tsc -b --force` → exit 0; `npm run lint` → 0 error (22 warning có sẵn, không phát sinh mới); `npm run build` → OK, chunk `MarkdownView-CE0sU9dR.js` 159.71 kB vẫn tách riêng khỏi entry `index-CSYoikAK.js` |
+| Dọn CSS chết: `.submission-rules` + `.submission-rules > span` (rule cũ ép dải quy định thành flex-wrap và ghi đè `display: grid` của `.sub-specs-strip`, khiến bốn thẻ co theo nội dung) đã xoá khỏi `index.css`; `rg` xác nhận không còn file nào nhắc tên | passing | `rg submission-rules frontend/src` (0 kết quả) |
+| Dọn dead code: `.comp-body.comp-body-workspace { width: 100% }` là rule no-op sau khi khôi phục card — đã xoá cùng class `comp-body-workspace` khỏi `CompetitionDetailPage.tsx` (`.content-layout.is-workspace` vẫn giữ vì nó thật sự bỏ cột sidebar) | passing | `rg comp-body-workspace frontend/src` (0 kết quả); `npx tsc -b --force` exit 0 |
+| Backend regression (UI migration không kéo theo contract break) | passing | `uv run pytest -q` → 190 passed |
+| Repo hygiene | passing | `git diff --check` → exit 0 |
+
+Ghi chú: `npm test` chạy mặc định song song vẫn còn flake liên file đã ghi ở mục 9f
+(`CompetitionDetailPage.test.tsx > deep-link content/:contentSlug render markdown panel`, dòng 219),
+thỉnh thoảng lan sang `AdminCompetitionDetailPage.test.tsx > findByText("Đề bài")` — cùng một họ test
+(panel Markdown lazy render: `findBy*` hết thời gian chờ khi 23 worker tranh nhau). Cùng một mã nguồn
+cho ra 291/291 rồi 290/291 rồi 289/291 ở ba lần chạy liên tiếp, trong khi `--maxWorkers 1` luôn
+291/291 và chạy riêng file đó luôn 14/14. Không phải lỗi do thay đổi CSS/TSX trong mục này.
+
+Nút copy ID cao 24px và nút toolbar/pager 32px là kích thước có sẵn của design system, không thay
+đổi trong lần redesign này — ghi đúng số đo, không suy diễn thành ≥44px.
+
+## 9h. Dialog Tạo/Sửa cuộc thi (redesign VKU)
+
+Hợp đồng: `CREATE_COMPETITION_DIALOG_DESIGN.md`. Phạm vi chỉ presentation:
+`CompetitionFormModal` trong `AdminCompetitionManagement.tsx` + block CSS `.modal-competition-form`/`.ac-form*`.
+Không đổi API, payload, validation, enum, default, route hay quyền.
+
+### Bằng chứng tự động (Vitest / lint / build)
+
+| Check | Kết quả |
+|---|---|
+| `vitest run AdminCompetitionManagement + AdminCompetitionsPage + AdminCompetitionDetailPage` | 3 file, 81/81 pass |
+| `npm test` | 291/291 pass (4 lần chạy liên tiếp) |
+| `npm run lint` | exit 0, 0 finding trong `AdminCompetitionManagement.tsx` |
+| `npm run build` (`tsc -b && vite build`) | exit 0, 308 module, CSS 165.93 kB, 646ms |
+| `git diff --check` | sạch |
+| Diff TSX (bỏ whitespace) | chỉ xoá 8 dòng trình bày: eyebrow cũ, 2 `<legend>` chuyển `sr-only`, class nút phụ |
+| Diff theo bất biến | 8 `id="comp-*"`, `name="comp-join"`, 12 `required`, `autoFocus`, `isoToLocalInput`/`localInputToIso`, `MAX_COMPETITION_RESOURCES` đều còn |
+| Diff payload/mutation | **0 dòng** đụng `fetch`/payload/`slug:`/`join_mode:`/`primary_metric:` |
+| File ngoài phạm vi | không backend/api/auth/route/`package.json`/`Modal.tsx` |
+
+### Bằng chứng browser (Chromium headless, mock `/api`, 375/390/640/768/1024/1200/1440px)
+
+| Oracle | Kết quả đo được |
+|---|---|
+| `documentElement.scrollWidth <= clientWidth` | 0 ở cả 7 bề rộng; không phần tử nào của dialog tràn ngang |
+| Header/footer cố định, chỉ body cuộn | `headTop` 0 (mobile)/16 (≥640) và `footerBottom` 900/884 **không đổi** khi `bodyScrollTop` đi 0 → 400 → cuối; `overflow-y: auto` chỉ ở body, dialog `overflow: hidden` |
+| Focus control cuối không bị footer che | radio/ô tài nguyên/nút thêm/nút xoá đều `obscured: false`, `visible: true` ở 375 và 1440 → không cần `scroll-padding` |
+| Footer trọn viewport, mobile full-screen | dialog 375×900 và 390×900, `border-radius: 0`; ≥640 rộng 592/720/960 (chặn ở 960), radius 18px, không sát mép |
+| Số cột participation | 1 cột ở 375/390 (card 62px), 2 cột ở 640 (2+1), 3 cột từ 768 (card 82px) |
+| 5 section + nhịp màu | tone `blue/red/yellow/blue/yellow`, số `01–05`, icon nền `#eaf3ff`/`#ffecef`/`#fff5cc` |
+| Tiêu đề dài không chồng nút đóng | đo `Range` từng dòng chữ: 0 dòng giao nút đóng ở 375/390/640/1440; khe hở nhỏ nhất 16px (390), 25px (375), 5px (1440) |
+| Esc + trả focus | dialog đóng và focus về `.ac-create-button` ở cả 7 bề rộng |
+| Focus trap | 40 lần Tab liên tiếp đều nằm trong dialog; Shift+Tab cũng vậy |
+| Cả 3 chế độ tham gia | chọn được `open`/`code`/`invite_only`, card selected đổi đúng tone; radio dùng chung ring xanh `--vku-blue-700` với checkbox leaderboard |
+| Lỗi ngày | `end <= start` → `.ac-date-error[role="alert"]` "Thời gian kết thúc phải sau thời gian bắt đầu.", dialog giữ nguyên và **không gửi POST** |
+| Lỗi API | 409 → dialog vẫn mở, đúng 1 `role="alert"`, footer vẫn thấy |
+| Trần tài nguyên | 10 dòng thì nút "Thêm tài nguyên" `disabled`; không tràn ngang; viền `dashed --vku-blue-500` |
+| Reduced motion | `prefers-reduced-motion: reduce` → `transition-duration` về ~0, không animation |
+| Lỗi runtime | 0 `pageerror` ở mọi kịch bản |
+
+### Phát hiện ngoài phạm vi (không sửa)
+
+1. **Focus khi mở dialog rơi vào nút đóng, không phải `Tên cuộc thi`.** Chuỗi `focusin` thật:
+   `.ac-create-button` → `#comp-name` (React `autoFocus`) → `.ac-create-button` → `.modal-close`.
+   `Modal.tsx:41-42` chỉ can thiệp khi focus đang ở ngoài dialog, rồi lấy
+   `querySelector(FOCUSABLE)` — mà phần tử khớp đầu tiên theo thứ tự DOM là `button.modal-close`
+   trong `.modal-head`. **Có từ trước, không phải hồi quy**: modal tài khoản (không thuộc task này)
+   cho kết quả y hệt. Sửa được chỉ bằng cách đụng `Modal.tsx`, mà kế hoạch cấm — nên giữ nguyên và
+   ghi lại. Test jsdom khẳng định focus ở `#comp-name` vì jsdom không mô phỏng `autofocus` như trình duyệt.
+2. **`datetime-local` tốn 7 lần Tab mỗi ô** (từng phân đoạn ngày/giờ là một điểm dừng). Hành vi gốc
+   của trình duyệt với input native, không phải do redesign.
+3. **Menu thao tác hàng trong danh sách tự đóng khi trang cuộn** (neo theo toạ độ viewport). Ở 375px
+   Playwright tự cuộn trigger vào tầm nhìn nên menu đóng ngay; cuộn trước rồi mới click thì mở bình
+   thường — đúng thiết kế hiện có của `AdminCompetitionsPage.tsx`, không liên quan dialog.
+
+### Sai lệch có chủ ý so với đặc tả
+
+| Đặc tả | Thực tế | Lý do |
+|---|---|---|
+| `border: 1.5px solid` cho card chọn | `1px` + ring `3px` | tránh reflow dưới nửa pixel khi chọn |
+| Viền `#9CBDE5` cho nút thêm tài nguyên | `--vku-blue-500` | `#9CBDE5` không có trong token |
+| Nền body `white → #FBFCFE` | `--surface` phẳng | §5 quy định token `--vku-*` là chuẩn |
+| `font-weight: 750` | `700` | stylesheet chỉ có 400/500/600/700 (§6) |
+| Helper footer ẩn dưới 640px | ẩn dưới 768px | cùng ý định, gộp vào nhánh tablet |
+| `position: sticky` header/footer | bỏ | ở shell này chúng là flex item `flex: none` ngoài vùng cuộn, sticky là no-op |
+
 ## 10. Production deploy (Sprint 08) — planned
 
 | Check | Status |

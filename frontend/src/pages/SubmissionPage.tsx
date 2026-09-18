@@ -32,9 +32,21 @@ export function SubmissionPage() {
   const unavailableMessage = submissionUnavailableMessage(competition);
   const config = competition.submission_config;
   // Chỉ có khi backend trả quota (thành viên đang hoạt động, cuộc thi đang mở).
-  const quotaLabel = competition.quota
-    ? `Còn ${competition.quota.remaining}/${competition.quota.per_day} lượt hôm nay`
+  const quota = competition.quota;
+  const quotaLabel = quota
+    ? `Còn ${quota.remaining}/${quota.per_day} lượt hôm nay`
     : `${competition.quota_per_day} lượt/ngày`;
+  // Không có số liệu thì không vẽ thanh — một thanh rỗng sẽ bị đọc thành "hết lượt".
+  const quotaPercent =
+    quota && quota.per_day > 0 ? Math.round((quota.remaining / quota.per_day) * 100) : 0;
+  // Mức còn lại chỉ chọn màu cho thanh; con số bên cạnh mới là kênh thông tin chính.
+  const quotaLevel = !quota
+    ? "unknown"
+    : quota.remaining <= 0
+      ? "empty"
+      : quota.remaining / quota.per_day >= 0.5
+        ? "ok"
+        : "low";
 
   function validateAndSelectFile(selectedFile: File | null) {
     if (!selectedFile) {
@@ -98,12 +110,15 @@ export function SubmissionPage() {
           </p>
         </div>
 
-        {/* Dải 5 quy định bento ribbon */}
-        <div
-          className="sub-specs-strip submission-rules"
-          aria-label="Quy định file submission"
-        >
+        {/* Bốn quy định định dạng file xếp một hàng, thanh hạn mức nằm riêng một hàng
+            ngang bên dưới để đủ dài mà đọc được tỉ lệ còn lại. */}
+        <div className="sub-specs-strip" aria-label="Quy định file submission">
           <div className="sub-spec-item">
+            <span className="sub-spec-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" focusable="false">
+                <path d="M9 3 7 21M17 3l-2 18M3 9h18M3 15h18" />
+              </svg>
+            </span>
             <span className="sub-spec-label">Cột ID</span>
             <span className="sub-spec-val">
               <code>{config.id_column ?? "chưa cấu hình"}</code>
@@ -111,6 +126,13 @@ export function SubmissionPage() {
             <span className="sr-only">ID: {config.id_column ?? "chưa cấu hình"}</span>
           </div>
           <div className="sub-spec-item">
+            <span className="sub-spec-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" focusable="false">
+                <path d="M4 12h11" />
+                <path d="m11 8 4 4-4 4" />
+                <path d="M19 4v16" />
+              </svg>
+            </span>
             <span className="sub-spec-label">Cột Output</span>
             <span className="sub-spec-val">
               <code>{config.prediction_column ?? "chưa cấu hình"}</code>
@@ -120,21 +142,46 @@ export function SubmissionPage() {
             </span>
           </div>
           <div className="sub-spec-item">
+            <span className="sub-spec-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" focusable="false">
+                <rect x="2" y="8" width="20" height="8" rx="4" />
+                <circle cx="8" cy="12" r="2.5" />
+              </svg>
+            </span>
             <span className="sub-spec-label">Định dạng</span>
             <span className="sub-spec-val">
               {averageLabel(config.average)}
-              {config.average === "binary" &&
-                config.pos_label != null &&
-                ` · positive label: ${config.pos_label}`}
+              {config.average === "binary" && config.pos_label != null && (
+                <span className="sub-spec-sub">positive label: {config.pos_label}</span>
+              )}
             </span>
           </div>
           <div className="sub-spec-item">
+            <span className="sub-spec-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" focusable="false">
+                <ellipse cx="12" cy="6" rx="8" ry="3" />
+                <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6" />
+                <path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+              </svg>
+            </span>
             <span className="sub-spec-label">Dung lượng</span>
             <span className="sub-spec-val">Tối đa {config.max_upload_mb} MiB</span>
           </div>
-          <div className="sub-spec-item">
-            <span className="sub-spec-label">Hạn mức</span>
-            <span className="sub-spec-val">{quotaLabel}</span>
+
+          <div className="sub-quota">
+            <div className="sub-quota-head">
+              <span className="sub-spec-label">Hạn mức</span>
+              <span className="sub-quota-count">{quotaLabel}</span>
+            </div>
+            {quota && (
+              <div className="sub-quota-track" aria-hidden="true">
+                <span
+                  className="sub-quota-fill"
+                  data-level={quotaLevel}
+                  style={{ width: `${quotaPercent}%` }}
+                />
+              </div>
+            )}
           </div>
         </div>
 

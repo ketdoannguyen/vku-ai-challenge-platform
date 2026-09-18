@@ -311,6 +311,11 @@ export function CompetitionDetailPage() {
             <p className="comp-eyebrow">{c.slug}</p>
             <h1 className="comp-title">{c.name}</h1>
             {c.short_description && <p className="comp-lead">{c.short_description}</p>}
+            <div className="comp-brand-accent" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </div>
           </div>
           <div className="comp-masthead-actions">
             <JoinControl
@@ -425,7 +430,7 @@ export function CompetitionDetailPage() {
           </aside>
         )}
 
-        <div className={`card comp-body${!isOverview ? " comp-body-workspace" : ""}`}>
+        <div className="card comp-body">
           <Outlet
             context={
               {

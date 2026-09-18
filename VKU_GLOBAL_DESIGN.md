@@ -12,9 +12,11 @@ Order of visual authority:
 1. `VKU_GLOBAL_DESIGN.md`
 2. `DESIGN.md`
 3. `ADMIN_COMPETITIONS_DESIGN.md`
-4. `COMPETITION_DETAIL_DESIGN.md`
-5. `ACCOUNT_MANAGEMENT_DESIGN.md`
-6. Existing source code
+4. `CREATE_COMPETITION_DIALOG_DESIGN.md`
+5. `COMPETITION_DETAIL_DESIGN.md`
+6. `PARTICIPANT_COMPETITION_DESIGN.md`
+7. `ACCOUNT_MANAGEMENT_DESIGN.md`
+8. Existing source code
 
 Page-specific documents still define the detailed layout of their pages. If visual guidance conflicts, this document wins. If data or behavior guidance conflicts, the existing source and API contract win.
 
@@ -199,6 +201,7 @@ Continue using the shared portaled modal. Root/shared tokens must therefore prov
 - Admin competition rows rotate decorative blue/red/yellow accents by rendered row index.
 - Dashboard and admin competition list/alias use the 1440px shell. Other pages retain the existing 1280px shell unless a page-specific document says otherwise.
 - Admin competition detail and account management are established VKU baselines; shared-token changes must not regress their behavior or layouts.
+- The participant competition module (`/competitions/:slug` and its four child routes) keeps the default shell and confines all four tabs to one `68rem` frame via `.comp-page`. Its 7-column tables scroll inside their own named regions rather than widening the page. Its masthead reuses the `.ac-page-head` surface recipe from the admin competitions page. See `PARTICIPANT_COMPETITION_DESIGN.md`.
 - Participant detail keeps its nested routing, sticky content navigation, content order, resources, join controls, and outlet context.
 - About and Support keep only sourced content from `frontend/src/lib/vkuInfo.ts`.
 

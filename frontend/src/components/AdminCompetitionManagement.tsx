@@ -55,6 +55,137 @@ function IconCheck({ className }: { className?: string }) {
   );
 }
 
+function IconTrophy({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" />
+      <path d="M8 5.5H5.5A2.5 2.5 0 0 0 8 10M16 5.5h2.5A2.5 2.5 0 0 1 16 10" />
+      <path d="M12 13v4M9 20h6M10 20l.5-3h3l.5 3" />
+    </Icon>
+  );
+}
+
+function IconInfo({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5M12 8v.01" />
+    </Icon>
+  );
+}
+
+function IconCalendar({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <rect x="3.5" y="5" width="17" height="15" rx="2" />
+      <path d="M3.5 10h17M8 3.5V6M16 3.5V6" />
+    </Icon>
+  );
+}
+
+function IconUserPlus({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="10" cy="8" r="3.5" />
+      <path d="M4 20a6 6 0 0 1 12 0M18 8v6M15 11h6" />
+    </Icon>
+  );
+}
+
+function IconGauge({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M4 18a8 8 0 1 1 16 0" />
+      <path d="M12 18l4-5M4 18h16" />
+    </Icon>
+  );
+}
+
+function IconFolder({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3.5 7a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.6.8l1 1.2H18.5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7Z" />
+      <path d="M12 10.5v5M9.5 13h5" />
+    </Icon>
+  );
+}
+
+function IconUsersRound({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20a6.5 6.5 0 0 1 13 0" />
+      <path d="M16 5.2a3.5 3.5 0 0 1 0 6.6M17.5 14.4A6.5 6.5 0 0 1 21.5 20" />
+    </Icon>
+  );
+}
+
+function IconKeyRound({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="8" cy="15" r="3.5" />
+      <path d="M10.6 12.6 19 4.5M16.5 7l2 2M14 9.5l2 2" />
+    </Icon>
+  );
+}
+
+function IconMailCheck({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3.5 6.5h17v11h-17z" />
+      <path d="m3.5 7.5 8.5 6 8.5-6M14.5 20l2 2 4-4" />
+    </Icon>
+  );
+}
+
+type SectionTone = "blue" | "red" | "yellow";
+
+/** Icon và tone trang trí cho từng chế độ tham gia — không đọc trạng thái nghiệp vụ nào khác. */
+const JOIN_MODE_TONE: Record<Competition["join_mode"], SectionTone> = {
+  open: "blue",
+  code: "red",
+  invite_only: "yellow",
+};
+
+const JOIN_MODE_ICON: Record<Competition["join_mode"], ReactNode> = {
+  open: <IconUsersRound />,
+  code: <IconKeyRound />,
+  invite_only: <IconMailCheck />,
+};
+
+/**
+ * Khung một nhóm field của dialog tạo/sửa cuộc thi. Số thứ tự và icon block chỉ là trang
+ * trí; tên nhóm do `h3` mang để heading hierarchy và accessible name không bị lẫn.
+ */
+function FormSection({
+  index,
+  title,
+  tone,
+  icon,
+  children,
+}: {
+  index: string;
+  title: string;
+  tone: SectionTone;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="ac-form-section" data-tone={tone}>
+      <div className="ac-form-section-head">
+        <span className="ac-form-section-num" aria-hidden="true">
+          {index}
+        </span>
+        <span className="ac-form-section-icon" aria-hidden="true">
+          {icon}
+        </span>
+        <h3 className="ac-form-section-title">{title}</h3>
+      </div>
+      <div className="ac-form-section-body">{children}</div>
+    </section>
+  );
+}
+
 export function CompetitionActionConfirmModal({
   action,
   competition,
@@ -341,251 +472,285 @@ export function CompetitionFormModal({
   return (
     <Modal title={title} onClose={onClose} variant="competition-form" returnFocusRef={returnFocusRef}>
       <form className="ac-form" onSubmit={submit}>
-        <div className="ac-form-eyebrow">
-          <span aria-hidden="true" />
-          CẤU HÌNH CUỘC THI / COMPETITION SETUP
-        </div>
+        <span className="ac-form-emblem" aria-hidden="true">
+          <IconTrophy />
+        </span>
+        <div className="ac-form-eyebrow">CẤU HÌNH CUỘC THI / COMPETITION SETUP</div>
 
         <div className="ac-form-body">
-          <div className="ac-form-field">
-            <label className="ac-required" htmlFor="comp-name">
-              Tên cuộc thi
-            </label>
-            <input
-              id="comp-name"
-              className="ac-form-control"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-              autoFocus
-            />
-          </div>
-
-          <div className="ac-form-field">
-            <div className="ac-form-label-row">
-              <label className="ac-required" htmlFor="comp-slug">
-                Slug {isEdit && "(không đổi được)"}
+          <FormSection
+            index="01"
+            title="Thông tin cơ bản"
+            tone="blue"
+            icon={<IconInfo />}
+          >
+            <div className="ac-form-field">
+              <label className="ac-required" htmlFor="comp-name">
+                Tên cuộc thi
               </label>
-              {isEdit && <IconLock className="ac-form-lock" />}
-            </div>
-            <div className={`ac-slug-input${isEdit ? " locked" : ""}`}>
-              <span aria-hidden="true">/competitions/</span>
               <input
-                id="comp-slug"
+                id="comp-name"
                 className="ac-form-control"
-                value={slug}
-                onChange={(event) => setSlug(event.target.value)}
-                pattern="[a-z0-9]+(-[a-z0-9]+)*"
-                title="Chỉ a-z, 0-9 và dấu gạch ngang"
-                disabled={isEdit}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
                 required
+                autoFocus
               />
-              {isEdit && <IconLock className="ac-form-lock" />}
             </div>
-            <small>
-              Slug dùng làm URL định danh: /competitions/{slug || "slug-cuoc-thi"}
-            </small>
-          </div>
 
-          <div className="ac-form-field">
-            <label htmlFor="comp-desc">Mô tả ngắn</label>
-            <textarea
-              id="comp-desc"
-              className="ac-form-control ac-form-textarea"
-              rows={3}
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </div>
-
-          <div className="ac-date-group">
-            <div className="ac-form-grid">
-              <div className="ac-form-field">
-                <label className="ac-required" htmlFor="comp-start">
-                  Bắt đầu
-                </label>
-                <input
-                  id="comp-start"
-                  className="ac-form-control ac-form-mono"
-                  type="datetime-local"
-                  value={startAt}
-                  onChange={(event) => setStartAt(event.target.value)}
-                  required
-                />
-              </div>
-              <div className="ac-form-field">
-                <label className="ac-required" htmlFor="comp-end">
-                  Kết thúc
-                </label>
-                <input
-                  id="comp-end"
-                  className="ac-form-control ac-form-mono"
-                  type="datetime-local"
-                  value={endAt}
-                  onChange={(event) => setEndAt(event.target.value)}
-                  required
-                />
-              </div>
-            </div>
-            {dateError && (
-              <div className="ac-date-error" role="alert">
-                {dateError}
-              </div>
-            )}
-          </div>
-
-          <fieldset className="ac-join-fieldset">
-            <legend className="ac-required">Cách tham gia</legend>
-            <div className="ac-join-options">
-              {(Object.keys(JOIN_MODE_LABEL) as Competition["join_mode"][]).map(
-                (mode) => (
-                  <label
-                    key={mode}
-                    className={joinMode === mode ? "selected" : ""}
-                  >
-                    <input
-                      type="radio"
-                      name="comp-join"
-                      value={mode}
-                      checked={joinMode === mode}
-                      onChange={() => setJoinMode(mode)}
-                    />
-                    <span>
-                      <strong>{JOIN_MODE_LABEL[mode]}</strong>
-                      <small>{mode}</small>
-                    </span>
-                    {joinMode === mode && (
-                      <IconCheck className="ac-join-check" />
-                    )}
-                  </label>
-                ),
-              )}
-            </div>
-          </fieldset>
-
-          <div className="ac-form-grid">
             <div className="ac-form-field">
               <div className="ac-form-label-row">
-                <label className="ac-required" htmlFor="comp-metric">
-                  Chỉ số chính
+                <label className="ac-required" htmlFor="comp-slug">
+                  Slug {isEdit && "(không đổi được)"}
                 </label>
-                {metricLocked && <IconLock className="ac-form-lock" />}
+                {isEdit && <IconLock className="ac-form-lock" />}
               </div>
-              <select
-                id="comp-metric"
-                className="ac-form-control ac-form-mono"
-                value={metric}
-                onChange={(event) =>
-                  setMetric(
-                    event.target.value as Competition["primary_metric"],
-                  )
-                }
-                disabled={metricLocked}
-              >
-                <option value="f1">{METRIC_LABEL.f1}</option>
-                <option value="precision">{METRIC_LABEL.precision}</option>
-                <option value="recall">{METRIC_LABEL.recall}</option>
-              </select>
-              {metricLocked && (
-                <small>Cuộc thi đã publish — không thể đổi chỉ số chính.</small>
-              )}
+              <div className={`ac-slug-input${isEdit ? " locked" : ""}`}>
+                <span aria-hidden="true">/competitions/</span>
+                <input
+                  id="comp-slug"
+                  className="ac-form-control"
+                  value={slug}
+                  onChange={(event) => setSlug(event.target.value)}
+                  pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                  title="Chỉ a-z, 0-9 và dấu gạch ngang"
+                  disabled={isEdit}
+                  required
+                />
+                {isEdit && <IconLock className="ac-form-lock" />}
+              </div>
+              <small>
+                Slug dùng làm URL định danh: /competitions/{slug || "slug-cuoc-thi"}
+              </small>
             </div>
 
             <div className="ac-form-field">
-              <label className="ac-required" htmlFor="comp-quota">
-                Giới hạn nộp bài (lượt/ngày)
-              </label>
-              <div className="ac-quota-input">
-                <input
-                  id="comp-quota"
+              <label htmlFor="comp-desc">Mô tả ngắn</label>
+              <textarea
+                id="comp-desc"
+                className="ac-form-control ac-form-textarea"
+                rows={3}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+              />
+            </div>
+          </FormSection>
+
+          <FormSection index="02" title="Thời gian" tone="red" icon={<IconCalendar />}>
+            <div className="ac-date-group">
+              <div className="ac-form-grid">
+                <div className="ac-form-field">
+                  <label className="ac-required" htmlFor="comp-start">
+                    Bắt đầu
+                  </label>
+                  <input
+                    id="comp-start"
+                    className="ac-form-control ac-form-mono"
+                    type="datetime-local"
+                    value={startAt}
+                    onChange={(event) => setStartAt(event.target.value)}
+                    required
+                  />
+                </div>
+                <div className="ac-form-field">
+                  <label className="ac-required" htmlFor="comp-end">
+                    Kết thúc
+                  </label>
+                  <input
+                    id="comp-end"
+                    className="ac-form-control ac-form-mono"
+                    type="datetime-local"
+                    value={endAt}
+                    onChange={(event) => setEndAt(event.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              {dateError && (
+                <div className="ac-date-error" role="alert">
+                  {dateError}
+                </div>
+              )}
+            </div>
+          </FormSection>
+
+          <FormSection
+            index="03"
+            title="Cách tham gia"
+            tone="yellow"
+            icon={<IconUserPlus />}
+          >
+            <fieldset className="ac-join-fieldset">
+              <legend className="ac-required sr-only">Cách tham gia</legend>
+              <div className="ac-join-options">
+                {(Object.keys(JOIN_MODE_LABEL) as Competition["join_mode"][]).map(
+                  (mode) => (
+                    <label
+                      key={mode}
+                      className={joinMode === mode ? "selected" : ""}
+                      data-tone={JOIN_MODE_TONE[mode]}
+                    >
+                      <input
+                        type="radio"
+                        name="comp-join"
+                        value={mode}
+                        checked={joinMode === mode}
+                        onChange={() => setJoinMode(mode)}
+                      />
+                      <span className="ac-join-icon" aria-hidden="true">
+                        {JOIN_MODE_ICON[mode]}
+                      </span>
+                      <span>
+                        <strong>{JOIN_MODE_LABEL[mode]}</strong>
+                        <small>{mode}</small>
+                      </span>
+                      {joinMode === mode && (
+                        <IconCheck className="ac-join-check" />
+                      )}
+                    </label>
+                  ),
+                )}
+              </div>
+            </fieldset>
+          </FormSection>
+
+          <FormSection
+            index="04"
+            title="Chấm điểm & giới hạn"
+            tone="blue"
+            icon={<IconGauge />}
+          >
+            <div className="ac-form-grid">
+              <div className="ac-form-field">
+                <div className="ac-form-label-row">
+                  <label className="ac-required" htmlFor="comp-metric">
+                    Chỉ số chính
+                  </label>
+                  {metricLocked && <IconLock className="ac-form-lock" />}
+                </div>
+                <select
+                  id="comp-metric"
                   className="ac-form-control ac-form-mono"
-                  type="number"
-                  min={0}
-                  max={1000}
-                  value={quota}
-                  onChange={(event) => setQuota(event.target.value)}
-                  required
-                />
-                <span aria-hidden="true">lượt / ngày</span>
+                  value={metric}
+                  onChange={(event) =>
+                    setMetric(
+                      event.target.value as Competition["primary_metric"],
+                    )
+                  }
+                  disabled={metricLocked}
+                >
+                  <option value="f1">{METRIC_LABEL.f1}</option>
+                  <option value="precision">{METRIC_LABEL.precision}</option>
+                  <option value="recall">{METRIC_LABEL.recall}</option>
+                </select>
+                {metricLocked && (
+                  <small>Cuộc thi đã publish — không thể đổi chỉ số chính.</small>
+                )}
+              </div>
+
+              <div className="ac-form-field">
+                <label className="ac-required" htmlFor="comp-quota">
+                  Giới hạn nộp bài (lượt/ngày)
+                </label>
+                <div className="ac-quota-input">
+                  <input
+                    id="comp-quota"
+                    className="ac-form-control ac-form-mono"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={quota}
+                    onChange={(event) => setQuota(event.target.value)}
+                    required
+                  />
+                  <span aria-hidden="true">lượt / ngày</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="ac-leaderboard-field">
-            <label htmlFor="comp-leaderboard">
-              <input
-                id="comp-leaderboard"
-                type="checkbox"
-                checked={leaderboardVisible}
-                onChange={(event) =>
-                  setLeaderboardVisible(event.target.checked)
-                }
-              />
-              <span>
-                <strong>Leaderboard hiển thị với thí sinh</strong>
-                <small>
-                  Nếu tắt, thí sinh sẽ thấy thông báo bảng xếp hạng chưa được
-                  công bố.
-                </small>
-              </span>
-            </label>
-          </div>
+            <div className="ac-leaderboard-field">
+              <label htmlFor="comp-leaderboard">
+                <input
+                  id="comp-leaderboard"
+                  type="checkbox"
+                  checked={leaderboardVisible}
+                  onChange={(event) =>
+                    setLeaderboardVisible(event.target.checked)
+                  }
+                />
+                <span>
+                  <strong>Leaderboard hiển thị với thí sinh</strong>
+                  <small>
+                    Nếu tắt, thí sinh sẽ thấy thông báo bảng xếp hạng chưa được
+                    công bố.
+                  </small>
+                </span>
+              </label>
+            </div>
+          </FormSection>
 
-          <fieldset className="ac-resource-fieldset">
-            <legend>Tài nguyên tải về (link Google Drive)</legend>
-            <p className="ac-resource-hint">
-              Chỉ nhận link Google Drive — hệ thống không lưu file dataset. Nhớ đặt quyền
-              chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
-            </p>
+          <FormSection
+            index="05"
+            title="Tài nguyên tải về"
+            tone="yellow"
+            icon={<IconFolder />}
+          >
+            <fieldset className="ac-resource-fieldset">
+              <legend className="sr-only">Tài nguyên tải về</legend>
+              <p className="ac-resource-hint">
+                Chỉ nhận link Google Drive — hệ thống không lưu file dataset. Nhớ đặt quyền
+                chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
+              </p>
 
-            {resources.length === 0 ? (
-              <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
-            ) : (
-              resources.map((row, index) => (
-                <div className="ac-resource-row" key={index}>
-                  <input
-                    className="ac-form-control"
-                    value={row.label}
-                    onChange={(event) => updateResource(index, { label: event.target.value })}
-                    placeholder="Tên tài nguyên"
-                    aria-label={`Tên tài nguyên ${index + 1}`}
-                  />
-                  <input
-                    className="ac-form-control ac-form-mono"
-                    value={row.url}
-                    onChange={(event) => updateResource(index, { url: event.target.value })}
-                    placeholder="https://drive.google.com/..."
-                    aria-label={`Link tài nguyên ${index + 1}`}
-                  />
-                  <button
-                    type="button"
-                    className="ac-resource-remove"
-                    onClick={() =>
-                      setResources((rows) => rows.filter((_, position) => position !== index))
-                    }
-                    aria-label={`Xóa tài nguyên ${index + 1}`}
-                  >
-                    ×
-                  </button>
+              {resources.length === 0 ? (
+                <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
+              ) : (
+                resources.map((row, index) => (
+                  <div className="ac-resource-row" key={index}>
+                    <input
+                      className="ac-form-control"
+                      value={row.label}
+                      onChange={(event) => updateResource(index, { label: event.target.value })}
+                      placeholder="Tên tài nguyên"
+                      aria-label={`Tên tài nguyên ${index + 1}`}
+                    />
+                    <input
+                      className="ac-form-control ac-form-mono"
+                      value={row.url}
+                      onChange={(event) => updateResource(index, { url: event.target.value })}
+                      placeholder="https://drive.google.com/..."
+                      aria-label={`Link tài nguyên ${index + 1}`}
+                    />
+                    <button
+                      type="button"
+                      className="ac-resource-remove"
+                      onClick={() =>
+                        setResources((rows) => rows.filter((_, position) => position !== index))
+                      }
+                      aria-label={`Xóa tài nguyên ${index + 1}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+
+              <button
+                type="button"
+                className="ac-form-button ac-resource-add"
+                onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
+                disabled={resources.length >= MAX_COMPETITION_RESOURCES}
+              >
+                + Thêm tài nguyên
+              </button>
+
+              {resourceError && (
+                <div className="ac-date-error" role="alert">
+                  {resourceError}
                 </div>
-              ))
-            )}
-
-            <button
-              type="button"
-              className="ac-form-button secondary"
-              onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
-              disabled={resources.length >= MAX_COMPETITION_RESOURCES}
-            >
-              + Thêm tài nguyên
-            </button>
-
-            {resourceError && (
-              <div className="ac-date-error" role="alert">
-                {resourceError}
-              </div>
-            )}
-          </fieldset>
+              )}
+            </fieldset>
+          </FormSection>
 
           {error && (
             <div className="error-box ac-form-error" role="alert">

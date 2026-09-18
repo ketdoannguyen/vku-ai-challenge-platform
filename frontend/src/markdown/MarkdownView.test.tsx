@@ -29,6 +29,34 @@ print("hello")
 ![Diagram](assets/diagram.png)
 `;
 
+test("heading tác giả bị hạ một bậc để trang không có H1 thứ hai", () => {
+  const { container } = render(
+    <MarkdownView markdown={"# Đề bài\n\n## Thể lệ\n\n### Lưu ý"} competitionSlug="ai-cup" />,
+  );
+  expect(container.querySelector("h1")).toBeNull();
+  // `#` của tác giả thành h2 — đây là mốc mục cấp cao nhất của prose.
+  expect(screen.getByRole("heading", { level: 2, name: "Đề bài" })).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 3, name: "Thể lệ" })).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 4, name: "Lưu ý" })).toBeTruthy();
+});
+
+test("blockquote, code trong dòng và vạch ngăn render đúng phần tử để CSS VKU bám vào", () => {
+  const md = [
+    "> Ghi chú của Ban Tổ chức",
+    "",
+    "Dùng `id,prediction` cho dòng tiêu đề.",
+    "",
+    "---",
+  ].join("\n");
+  const { container } = render(<MarkdownView markdown={md} competitionSlug="ai-cup" />);
+  expect(container.querySelector("blockquote")?.textContent).toContain("Ghi chú của Ban Tổ chức");
+  // Code trong dòng phải nằm ngoài `pre`, nếu không sẽ ăn style của code block.
+  const inline = container.querySelector("code");
+  expect(inline?.textContent).toBe("id,prediction");
+  expect(inline?.closest("pre")).toBeNull();
+  expect(container.querySelector("hr")).toBeTruthy();
+});
+
 test("render GFM: heading, list, table, code, link, image", () => {
   const { container } = render(<MarkdownView markdown={FIXTURE} competitionSlug="ai-cup" />);
   expect(screen.getByRole("heading", { name: "Đề bài" })).toBeTruthy();

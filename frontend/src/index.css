@@ -2436,7 +2436,10 @@ select.input {
    S04 & S05: Competition participant shell & Markdown content
    ============================================================================= */
 
-/* Khung trang chi tiết cuộc thi: tối đa 68rem (1088px), khớp .dash-page */
+/* Khung trang chi tiết cuộc thi: tối đa 68rem (1088px), khớp .dash-page.
+   Bốn tab dùng chung đúng một khung này — breadcrumb, masthead, tab bar, lưới có
+   sidebar và cả ba workspace dữ liệu — nên chuyển tab không làm nội dung nhảy ra
+   ngoài lề. */
 .comp-page {
   max-width: 68rem;
   margin-inline: auto;
@@ -2469,32 +2472,79 @@ select.input {
   color: var(--accent);
 }
 
-/* Masthead editorial: thẻ bề mặt lớn p-space-lg..xl.
-   Nền là surface VKU sáng (xanh rất nhạt chuyển dần sang trắng) cộng ba khối chéo
-   thương hiệu ở góc — cùng công thức hình học với `.login-page`, không dùng pseudo-element
-   nên không ảnh hưởng flex layout hay thứ tự vẽ của nội dung bên trong. */
+/* Masthead dùng đúng công thức nền của `.ac-page-head` (trang quản lý cuộc thi):
+   gradient chéo trắng → xanh rất nhạt, cộng một dải chéo xanh/đỏ/vàng ở góc phải.
+   Hai trang là anh em trong cùng hệ VKU nên panel đầu trang phải cùng một họ. */
 .comp-masthead {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-lg);
   padding: var(--space-lg);
-  border: 1px solid var(--border);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
   border-top: 3px solid var(--vku-blue-600);
-  border-radius: var(--radius-xl);
-  background-color: var(--surface);
-  background-image:
-    linear-gradient(135deg, rgba(6, 79, 196, 0.05) 0 18%, transparent 18%),
-    linear-gradient(315deg, rgba(236, 22, 49, 0.035) 0 10%, transparent 10%),
-    linear-gradient(180deg, var(--vku-blue-50) 0, transparent 240px);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
   box-shadow: var(--shadow-card);
   margin-bottom: var(--space-lg);
+}
+
+/* Dải chéo ba màu nhạt ở góc phải, y hệt `.ac-page-head`. Thuần trang trí:
+   `pointer-events: none` để không chắn nút tham gia/rời cuộc thi. */
+.comp-masthead::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.comp-masthead > * {
+  position: relative;
 }
 
 @media (min-width: 48rem) {
   .comp-masthead {
     padding: var(--space-xl);
   }
+}
+
+/* Ba vạch màu VKU dưới mô tả ngắn — cùng chi tiết nhận diện với `.ac-brand-accent`.
+   Không mang thông tin nghiệp vụ nào. */
+.comp-brand-accent {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--space-sm);
+}
+
+.comp-brand-accent > span {
+  width: 32px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.comp-brand-accent > span:nth-child(1) {
+  background: var(--vku-blue-600);
+}
+
+.comp-brand-accent > span:nth-child(2) {
+  background: var(--vku-red-600);
+}
+
+.comp-brand-accent > span:nth-child(3) {
+  background: var(--vku-yellow-600);
 }
 
 .comp-badges {
@@ -2594,9 +2644,19 @@ select.input {
   text-transform: uppercase;
 }
 
-.comp-fact dt svg {
-  flex: none;
-  color: var(--accent);
+/* Icon dữ kiện xoay vòng xanh–đỏ–vàng theo vị trí render — cùng quy tắc với thẻ cuộc
+   thi ở dashboard và dòng bảng quản trị. Vàng dùng tông 800 vì 500/700 quá sáng cho
+   nét mảnh 16px. Đây thuần trang trí: chữ nhãn bên cạnh mới mang thông tin. */
+.comp-fact:nth-child(3n + 1) dt svg {
+  color: var(--vku-blue-600);
+}
+
+.comp-fact:nth-child(3n + 2) dt svg {
+  color: var(--vku-red-600);
+}
+
+.comp-fact:nth-child(3n) dt svg {
+  color: var(--vku-yellow-800);
 }
 
 .comp-fact-value {
@@ -2850,10 +2910,6 @@ select.input {
   background: var(--surface);
   box-shadow: var(--shadow-card);
   min-height: 240px;
-}
-
-.comp-body.comp-body-workspace {
-  width: 100%;
 }
 
 @media (min-width: 48rem) {
@@ -3176,7 +3232,15 @@ select.input {
 }
 
 /* =============================================================================
-   Markdown prose
+   Markdown prose — lớp trình bày VKU dùng chung cho MỌI nội dung Markdown.
+
+   Nguồn `.md`, parser, sanitizer và asset policy không đổi; chỉ HTML do
+   `MarkdownView` render ra được tạo dáng ở đây. Nhờ vậy tài liệu thêm sau này tự
+   mang đúng ngôn ngữ VKU mà không phải sửa từng file `.md` hay viết TSX riêng.
+
+   Lưu ý về bậc heading: `MarkdownView` hạ một bậc mọi heading của tác giả (trang đã
+   có H1 riêng), nên `#` của tác giả render thành `h2` — đó là mốc mục cấp cao nhất
+   trong bài và là chỗ đặt vạch xanh bên trái.
    ============================================================================= */
 .markdown-body {
   font-family: var(--font-sans);
@@ -3184,6 +3248,8 @@ select.input {
   font-weight: 400;
   line-height: var(--leading-body);
   letter-spacing: var(--tracking-body);
+  /* Slug, URL và ID dài không được đẩy tràn body. */
+  overflow-wrap: anywhere;
 }
 
 .markdown-body h1,
@@ -3195,6 +3261,8 @@ select.input {
   font-family: var(--font-display);
   font-weight: 600;
   color: var(--text);
+  /* Fixed header không che tiêu đề khi nhảy tới bằng anchor. */
+  scroll-margin-top: var(--header-offset);
 }
 
 .markdown-body h1 {
@@ -3233,6 +3301,21 @@ select.input {
   margin-top: 0;
 }
 
+/* Mục cấp cao nhất của tài liệu (author `#` đã hạ thành h2): vạch xanh VKU bên trái.
+   Dùng border-left thay pseudo-element cho gọn và không phụ thuộc containing block. */
+.markdown-body h2 {
+  padding-left: 14px;
+  border-left: 4px solid var(--vku-blue-600);
+  border-radius: var(--radius-xs);
+}
+
+/* Mục cấp hai chỉ cần vạch ngăn mảnh, không thêm màu để không cạnh tranh với vạch
+   xanh phía trên; màu vẫn không phải kênh thông tin duy nhất. */
+.markdown-body h3 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
 .markdown-body p {
   margin: 0.8em 0;
 }
@@ -3243,16 +3326,61 @@ select.input {
   padding-left: 1.6em;
 }
 
-.markdown-body blockquote {
-  margin: 1em 0;
-  padding: var(--space-xs) var(--space-md);
-  border-left: 3px solid var(--border);
-  color: var(--text-muted);
+.markdown-body li + li {
+  margin-top: 0.3em;
 }
 
+.markdown-body li::marker {
+  color: var(--accent);
+}
+
+.markdown-body ol li::marker {
+  font-weight: 600;
+}
+
+.markdown-body strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.markdown-body a {
+  color: var(--accent);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.markdown-body a:hover {
+  color: var(--vku-red-600);
+}
+
+/* Trích dẫn là nhịp VKU rõ nhất trong bài viết: nền xanh rất nhạt chuyển dần sang
+   vàng rất nhạt, viền trái xanh. Đây thuần trình bày — không suy ra trạng thái nào. */
+.markdown-body blockquote {
+  margin: 1.2em 0;
+  padding: var(--space-sm) var(--space-md);
+  border-left: 4px solid var(--vku-blue-600);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background: linear-gradient(90deg, var(--vku-blue-50), var(--vku-yellow-50));
+  color: var(--text-secondary);
+}
+
+.markdown-body blockquote > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Khối code giữ nguyên nội dung; chỉ thêm vạch vàng VKU phía trên và cuộn nội bộ. */
 .markdown-body pre {
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding: 14px var(--space-md);
+  border-top: 3px solid var(--vku-yellow-500);
   border-radius: var(--radius-lg);
   background: var(--code-surface);
   color: var(--code-surface-text);
@@ -3267,6 +3395,7 @@ select.input {
   color: inherit;
 }
 
+/* Code trong dòng: mono + đỏ tiết chế để tách khỏi văn xuôi mà không thành báo lỗi. */
 .markdown-body :not(pre) > code {
   font-family: var(--font-mono);
   font-size: var(--text-code);
@@ -3274,19 +3403,21 @@ select.input {
   border-radius: var(--radius-xs);
   background: var(--surface-subtle);
   border: 1px solid var(--border);
+  color: var(--vku-red-700);
 }
 
 .markdown-body table {
   width: 100%;
-  margin: 1em 0;
+  margin: 0;
   border-collapse: collapse;
 }
 
 .markdown-body th,
 .markdown-body td {
-  padding: 8px 14px;
-  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
   text-align: left;
+  vertical-align: top;
 }
 
 .markdown-body th {
@@ -3298,6 +3429,11 @@ select.input {
   line-height: var(--leading-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.markdown-body tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .markdown-body td {
@@ -3305,10 +3441,37 @@ select.input {
   line-height: var(--leading-control);
 }
 
+/* Ảnh không bị cắt: giữ đúng tỉ lệ và luôn nằm gọn trong cột nội dung. */
 .markdown-body img {
+  display: block;
   max-width: 100%;
   height: auto;
+  margin: 1.2em auto;
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Vạch ngăn ba màu VKU — chi tiết nhận diện, không mang thông tin. */
+.markdown-body hr {
+  height: 4px;
+  margin: 2em 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    var(--vku-blue-600) 0 22%,
+    var(--vku-red-600) 22% 34%,
+    var(--vku-yellow-500) 34% 46%,
+    var(--border-soft) 46% 100%
+  );
+}
+
+.markdown-body a:focus-visible,
+.markdown-body .md-table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 @media (min-width: 48rem) {
@@ -3527,10 +3690,10 @@ select.input {
   line-height: 1.6;
 }
 
-/* Bento Ribbon 5 Quy định (S06) */
+/* Ribbon 4 quy định định dạng file + thanh hạn mức (S06) */
 .sub-specs-strip {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 12px;
   background: var(--surface);
@@ -3541,20 +3704,44 @@ select.input {
 
 @media (min-width: 36rem) {
   .sub-specs-strip {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 48rem) {
-  .sub-specs-strip {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
 .sub-spec-item {
   display: flex;
   flex-direction: column;
-  padding: 4px 8px;
+  gap: 2px;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+
+.sub-spec-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+/* Icon xoay vòng xanh–đỏ–vàng theo vị trí render, cùng quy tắc với dải dữ kiện ở
+   masthead. Thuần trang trí: nhãn chữ bên dưới mới mang thông tin. */
+.sub-spec-item:nth-child(3n + 1) .sub-spec-icon {
+  color: var(--vku-blue-600);
+}
+
+.sub-spec-item:nth-child(3n + 2) .sub-spec-icon {
+  color: var(--vku-red-600);
+}
+
+.sub-spec-item:nth-child(3n) .sub-spec-icon {
+  color: var(--vku-yellow-800);
 }
 
 .sub-spec-label {
@@ -3565,13 +3752,81 @@ select.input {
   letter-spacing: 0.02em;
 }
 
+/* Giá trị đọc bằng Inter như mọi chữ UI; chỉ định danh thật (`id`, `label`) mới giữ
+   mono, và chúng đã tự có pill mono từ rule `code` toàn cục. */
 .sub-spec-val {
-  font-family: var(--font-mono);
-  font-size: var(--text-mono-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
+  line-height: var(--leading-control);
   font-weight: 500;
   color: var(--text);
   margin-top: 2px;
   word-break: break-word;
+}
+
+/* Phần phụ của giá trị (nhãn dương của bài toán binary) xuống dòng riêng theo thiết kế,
+   thay vì tự ngắt giữa câu và làm một thẻ cao hơn ba thẻ còn lại. */
+.sub-spec-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-label);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* Thanh hạn mức chiếm trọn một hàng dưới 4 thẻ quy định: đủ dài để đọc tỉ lệ còn lại. */
+.sub-quota {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: var(--space-sm);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+
+.sub-quota-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sub-quota-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-mono-sm);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.sub-quota-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+}
+
+.sub-quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: width var(--duration-base) var(--ease-standard);
+}
+
+/* Màu chỉ là kênh phụ: câu "Còn x/y lượt hôm nay" bên trên mới nói rõ trạng thái. */
+.sub-quota-fill[data-level="ok"] {
+  background: var(--success-bright);
+}
+
+.sub-quota-fill[data-level="low"] {
+  background: var(--vku-yellow-600);
+}
+
+.sub-quota-fill[data-level="empty"] {
+  background: var(--danger);
 }
 
 /* S06b Blocked Banner */
@@ -5018,22 +5273,6 @@ select.input {
 
 .submission-head p {
   margin-top: var(--space-xs);
-}
-
-.submission-rules {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin: 18px 0;
-}
-
-.submission-rules > span {
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
-  font-family: var(--font-sans);
-  font-size: var(--text-mono-xs);
 }
 
 .submission-form {
@@ -7207,84 +7446,248 @@ select.input {
 }
 
 .modal-overlay-competition-form {
-  padding: 12px;
+  padding: 16px;
   overflow-y: auto;
+  background: rgba(7, 20, 42, 0.42);
+  backdrop-filter: blur(2px);
 }
 
+/* Một dialog duy nhất: header và footer là flex item cố định, chỉ body cuộn. */
 .modal-competition-form {
   position: relative;
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 720px;
-  max-height: 92vh;
+  max-width: 960px;
+  max-height: min(900px, calc(100dvh - 32px));
   padding: 0;
   overflow: hidden;
-  border-radius: var(--radius-2xl);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.18);
+  border: 0;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(7, 20, 42, 0.22);
 }
 
+/* Emblem + eyebrow nằm ngoài `.modal-head` (do shared `Modal.tsx` render) nên được đặt
+   tuyệt đối trong khung dialog. Chỉ đổi presentation, không mở rộng API của Modal. */
 .modal-competition-form .modal-head {
+  position: relative;
+  z-index: 2;
+  display: flex;
   flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0;
   margin: 0;
-  padding: 39px 52px 16px 24px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  padding: 44px 56px 18px 88px;
+  overflow: hidden;
+  border-top: 3px solid var(--vku-blue-700);
+  border-bottom: 1px solid var(--vku-border-soft);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Hình học chéo rất nhẹ ở góc phải, cùng công thức với `.ac-page-head` / `.dash-hero`. */
+.modal-competition-form .modal-head::before {
+  content: "";
+  position: absolute;
+  top: -46px;
+  right: -40px;
+  width: min(260px, 48%);
+  height: 180px;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 0 58%,
+    rgba(9, 105, 232, 0.06) 58% 72%,
+    rgba(236, 22, 49, 0.05) 72% 81%,
+    rgba(245, 184, 0, 0.07) 81% 100%
+  );
+}
+
+/* Ba thanh xanh–đỏ–vàng ngay dưới tiêu đề, thuần decorative. */
+.modal-competition-form .modal-head::after {
+  content: "";
+  width: 78px;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--vku-blue-700) 0 26px,
+    transparent 26px 32px,
+    var(--vku-red-700) 32px 58px,
+    transparent 58px 64px,
+    var(--vku-yellow-600) 64px 78px
+  );
 }
 
 .modal-competition-form .modal-title {
+  color: var(--vku-ink);
   font-family: var(--font-display);
-  font-size: var(--text-h2);
-  font-weight: 600;
-  line-height: var(--leading-h2);
-  letter-spacing: var(--tracking-h2);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
 }
 
 .modal-competition-form .modal-close {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  border-radius: var(--radius-sm);
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--vku-ink-muted);
 }
 
+.modal-competition-form .modal-close:hover {
+  border-color: transparent;
+  background: var(--surface-container-low);
+  color: var(--vku-ink);
+}
+
+@media (min-width: 48rem) {
+  .modal-competition-form .modal-title {
+    font-size: 28px;
+  }
+}
+
+/* `.ac-form` KHÔNG bọc layout: `display: contents` biến nó thành trong suốt để
+   `.ac-form-body` và `.ac-form-footer` là flex item trực tiếp của
+   `.modal-competition-form`. Thêm một wrapper nữa quanh body/footer là header/footer
+   mất tư cách flex item và layout cố định vỡ ngay. */
 .ac-form {
   display: contents;
 }
 
-.ac-form-eyebrow {
+.ac-form-emblem {
   position: absolute;
-  top: 20px;
+  top: 30px;
   left: 24px;
+  z-index: 3;
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.ac-form-emblem svg {
+  width: 24px;
+  height: 24px;
+}
+
+.ac-form-eyebrow {
+  position: absolute;
+  top: 26px;
+  left: 88px;
+  z-index: 3;
   color: var(--text-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-label);
-  font-weight: 600;
+  font-weight: 700;
   line-height: var(--leading-label);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-}
-
-.ac-form-eyebrow > span {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--palette-data-green);
 }
 
 .ac-form-body {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 20px;
+  gap: 0;
   min-height: 0;
-  padding: 20px 24px;
+  padding: 4px 28px 28px;
   overflow-y: auto;
   background: var(--surface);
   scrollbar-width: thin;
   scrollbar-color: var(--border-strong) transparent;
+}
+
+/* Section nhẹ: chỉ đệm + separator mảnh, không card lồng nhau. Tone là literal theo
+   section, không đọc status/join_mode/metric. */
+.ac-form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 0 24px;
+  border-bottom: 1px solid var(--vku-border-soft);
+}
+
+.ac-form-section:last-of-type {
+  border-bottom: 0;
+}
+
+.ac-form-section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ac-form-section-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--vku-border-soft);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ac-form-section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 9px;
+}
+
+.ac-form-section-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.ac-form-section-title {
+  margin: 0;
+  color: var(--vku-ink);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.ac-form-section[data-tone="blue"] .ac-form-section-icon {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.ac-form-section[data-tone="red"] .ac-form-section-icon {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.ac-form-section[data-tone="yellow"] .ac-form-section-icon {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.ac-form-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .ac-form-field {
@@ -7294,10 +7697,11 @@ select.input {
   min-width: 0;
 }
 
-.ac-form-field label,
-.ac-join-fieldset legend {
-  color: var(--text);
-  font-size: var(--text-label-md);
+/* Legend của fieldset tham gia/tài nguyên là `.sr-only`; heading h3 mới là hierarchy
+   nhìn thấy được, nên chỉ label mới cần style nhãn. */
+.ac-form-field label {
+  color: var(--vku-ink);
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.25;
 }
@@ -7323,12 +7727,12 @@ select.input {
 
 .ac-form-control {
   width: 100%;
-  height: 40px;
+  height: 46px;
   padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
-  color: var(--text);
+  border: 1px solid var(--vku-border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--vku-ink);
   font-family: var(--font-sans);
   font-size: var(--text-control);
   font-weight: 400;
@@ -7337,23 +7741,24 @@ select.input {
 
 .ac-form-control:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--vku-blue-600);
   background: var(--surface);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 3px rgba(9, 105, 232, 0.1);
 }
 
 .ac-form-control:disabled {
-  background: rgba(238, 238, 237, 0.6);
+  border-color: var(--vku-border-soft);
+  background: var(--surface-container-high);
   color: var(--text-secondary);
   cursor: not-allowed;
 }
 
 .ac-form-textarea {
   height: auto;
-  min-height: 82px;
-  padding: 12px;
+  min-height: 92px;
+  padding: 12px 14px;
   line-height: 1.5;
-  resize: none;
+  resize: vertical;
 }
 
 .ac-form-mono {
@@ -7364,7 +7769,7 @@ select.input {
 .ac-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-md);
+  gap: 18px;
 }
 
 .ac-slug-input,
@@ -7385,14 +7790,24 @@ select.input {
   pointer-events: none;
 }
 
+/* Quota: suffix "lượt / ngày" là một khối trong input group, có divider + surface nhẹ. */
 .ac-quota-input > span {
   position: absolute;
-  right: 12px;
+  top: 1px;
+  right: 1px;
+  bottom: 1px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-left: 1px solid var(--vku-border-soft);
+  border-radius: 0 8px 8px 0;
+  background: var(--surface-container-low);
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: var(--text-label);
-  font-weight: 400;
-  line-height: var(--leading-label);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
   pointer-events: none;
 }
 
@@ -7419,16 +7834,17 @@ select.input {
 .ac-date-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: 12px;
 }
 
 .ac-date-error {
-  padding: 7px 12px;
+  padding: 9px 12px;
   border: 1px solid var(--danger-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   background: var(--danger-soft-30);
   color: var(--danger);
   font-size: 13px;
+  line-height: 1.45;
 }
 
 .ac-join-fieldset {
@@ -7438,10 +7854,7 @@ select.input {
   border: 0;
 }
 
-.ac-join-fieldset legend {
-  margin-bottom: var(--space-sm);
-}
-
+/* Card tham gia gọn: 3 cột desktop, cao 82px; radio vẫn là native trong `<label>`. */
 .ac-join-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7452,23 +7865,28 @@ select.input {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 62px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-subtle);
+  gap: 10px;
+  min-height: 82px;
+  padding: 14px 16px;
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface);
   cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
 }
 
 .ac-join-options > label:hover {
-  background: var(--surface-container-high);
+  border-color: var(--vku-blue-500);
+  background: var(--vku-blue-50);
 }
 
+/* Selected state là blue cấu trúc, không lấy màu icon của từng mode. */
 .ac-join-options > label.selected {
-  border: 2px solid var(--accent);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--vku-blue-100) 0%, var(--surface) 100%);
+  box-shadow: 0 0 0 3px rgba(9, 105, 232, 0.07);
 }
 
 .ac-join-options input {
@@ -7478,47 +7896,78 @@ select.input {
   accent-color: var(--accent);
 }
 
-.ac-join-options label > span {
+.ac-join-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 8px;
+  background: var(--surface-container-low);
+  color: var(--text-secondary);
+}
+
+.ac-join-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ac-join-options label[data-tone="blue"] .ac-join-icon {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.ac-join-options label[data-tone="red"] .ac-join-icon {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.ac-join-options label[data-tone="yellow"] .ac-join-icon {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.ac-join-options label > span:not(.ac-join-icon) {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
 
 .ac-join-options strong {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--vku-ink);
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.3;
 }
 
 .ac-join-options small {
-  color: var(--text-secondary);
-  font-family: var(--font-sans);
-  font-size: var(--text-label);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
   font-weight: 400;
-  line-height: var(--leading-label);
+  line-height: 1.4;
 }
 
 .ac-join-check {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   margin-left: auto;
+  flex: none;
   color: var(--accent);
 }
 
 .ac-quota-input .ac-form-control {
-  padding-right: 92px;
+  padding-right: 108px;
 }
 
-.ac-quota-input > span {
-  right: 12px;
-}
-
+/* Leaderboard là một setting row gọn: gradient xanh nhạt, viền trái xanh cấu trúc. */
 .ac-leaderboard-field {
-  padding: var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-subtle);
+  padding: 15px 16px;
+  border: 1px solid var(--vku-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--vku-blue-50) 0%, var(--surface) 100%);
 }
 
 .ac-leaderboard-field label {
@@ -7543,15 +7992,15 @@ select.input {
 }
 
 .ac-leaderboard-field strong {
-  color: var(--text);
-  font-size: var(--text-label-md);
+  color: var(--vku-ink);
+  font-size: 14px;
   font-weight: 600;
 }
 
 .ac-leaderboard-field small {
   color: var(--text-secondary);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 /* Danh sách link tài nguyên: mỗi dòng là một cặp tên + URL Drive. */
@@ -7565,15 +8014,17 @@ select.input {
   border: 0;
 }
 
-.ac-resource-fieldset > legend {
-  margin-bottom: var(--space-xs);
-}
-
+/* Ràng buộc Google Drive là info note vàng, không phải paragraph trôi nổi. */
 .ac-resource-hint {
   margin: 0;
-  color: var(--text-muted);
+  padding: 12px 14px;
+  border: 1px solid var(--vku-yellow-100);
+  border-left: 3px solid var(--vku-yellow-600);
+  border-radius: 8px;
+  background: var(--vku-yellow-50);
+  color: var(--text);
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .ac-resource-row {
@@ -7587,23 +8038,23 @@ select.input {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--vku-red-50);
+  color: var(--vku-red-700);
   font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  transition: border-color var(--duration-fast) var(--ease-standard),
+  transition: background-color var(--duration-fast) var(--ease-standard),
               color var(--duration-fast) var(--ease-standard);
 }
 
 .ac-resource-remove:hover {
-  border-color: var(--danger-border);
-  color: var(--danger);
+  background: var(--vku-red-100);
+  color: var(--vku-red-800);
 }
 
 .ac-resource-empty {
@@ -7616,30 +8067,32 @@ select.input {
   margin: 0;
 }
 
+/* Footer là flex item cố định của dialog: không cuộn, hành động luôn nhìn thấy. */
 .ac-form-footer {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: var(--space-md) 24px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-subtle);
+  padding: 14px 28px;
+  border-top: 1px solid var(--vku-border);
+  background: var(--surface);
+  box-shadow: 0 -1px 0 rgba(7, 20, 42, 0.03);
 }
 
 .ac-form-footer > span {
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-family: var(--font-sans);
-  font-size: var(--text-label);
+  font-size: 12px;
   font-weight: 400;
-  line-height: var(--leading-label);
+  line-height: 1.4;
 }
 
 .ac-form-footer > div {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
 }
 
 .ac-form-button {
@@ -7647,19 +8100,46 @@ select.input {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 36px;
-  padding: 0 var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  font-size: var(--text-label-md);
-  font-weight: 500;
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--vku-border);
+  border-radius: 9px;
+  box-shadow: none;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
 }
 
 .ac-form-button.secondary {
   background: var(--surface);
-  color: var(--text);
+  color: var(--vku-ink);
+}
+
+.ac-form-button.secondary:hover:not(:disabled) {
+  border-color: var(--vku-blue-500);
+  background: var(--surface-container-low);
+}
+
+/* Nút thêm tài nguyên: dashed blue, không dùng black. */
+.ac-form-button.ac-resource-add {
+  width: 100%;
+  height: 42px;
+  border: 1px dashed var(--vku-blue-500);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ac-form-button.ac-resource-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--vku-blue-50);
 }
 
 /* Nút chính của modal tạo/sửa cuộc thi. Modal portal ra `document.body`, ra ngoài cây
@@ -7682,7 +8162,7 @@ select.input {
 
 .ac-form-button:disabled {
   opacity: 0.55;
-  cursor: wait;
+  cursor: not-allowed;
 }
 
 @media (max-width: 74.99rem) {
@@ -7810,6 +8290,41 @@ select.input {
   .ac-form-footer > div {
     width: 100%;
   }
+
+  /* Tablet: dialog co lại, participation xếp 2+1. Padding phải ≥ bề rộng nút đóng
+     (38px + lề 14px) để tiêu đề dài không chạy xuống dưới nút. */
+  .modal-competition-form .modal-head {
+    padding: 42px 58px 16px 78px;
+  }
+
+  .ac-form-emblem {
+    top: 26px;
+    left: 20px;
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+  }
+
+  .ac-form-emblem svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .ac-form-eyebrow {
+    top: 24px;
+    left: 74px;
+    font-size: 11px;
+  }
+
+  .ac-form-body,
+  .ac-form-footer {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .ac-join-options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 39.99rem) {
@@ -7895,23 +8410,79 @@ select.input {
     max-width: calc(100vw - 24px);
   }
 
+  /* Mobile: dialog full-screen, mọi thứ 1 cột, touch target ≥ 44px. */
+  .modal-overlay-competition-form {
+    padding: 0;
+  }
+
+  .modal-competition-form {
+    width: 100vw;
+    height: 100dvh;
+    max-width: 100vw;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  /* Padding phải ≥ vùng nút đóng (44px + lề 10px) để tiêu đề dài không lọt xuống dưới nút. */
   .modal-competition-form .modal-head {
-    padding-right: 48px;
-    padding-left: 18px;
+    padding: 40px 58px 14px 66px;
+  }
+
+  .modal-competition-form .modal-title {
+    font-size: 20px;
+  }
+
+  .modal-competition-form .modal-close {
+    top: 10px;
+    right: 10px;
+    width: 44px;
+    height: 44px;
+  }
+
+  .ac-form-emblem {
+    top: 18px;
+    left: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .ac-form-emblem svg {
+    width: 20px;
+    height: 20px;
   }
 
   .ac-form-eyebrow {
-    left: 18px;
+    top: 20px;
+    left: 64px;
+    font-size: 10px;
   }
 
-  .ac-form-body,
+  .ac-form-body {
+    padding: 0 18px 20px;
+  }
+
   .ac-form-footer {
-    padding-right: 18px;
-    padding-left: 18px;
+    padding: 12px 18px;
   }
 
-  .ac-form-footer > div,
-  .ac-form-button {
+  .ac-form-section {
+    padding: 18px 0 20px;
+  }
+
+  .ac-join-options > label {
+    min-height: 0;
+    padding: 13px 14px;
+  }
+
+  .ac-resource-remove {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Hai hành động luôn cùng hàng và luôn nhìn thấy; nút thêm tài nguyên không bị kéo
+     giãn theo trục dọc của fieldset (flex: 1 trong cột sẽ ép chiều cao về min-content). */
+  .ac-form-footer .ac-form-button {
     flex: 1;
   }
 }
@@ -7930,6 +8501,9 @@ select.input {
 .login-toggle:focus-visible,
 .dash-filter:focus-visible,
 .ac-leaderboard-field input:focus-visible,
+/* Radio tham gia là control native trong dialog: phải cùng ring xanh như checkbox
+   leaderboard, thay vì ring mặc định của trình duyệt. */
+.ac-join-options input:focus-visible,
 /* Vùng cuộn ngang của bảng: có tabIndex=0 nên phải thấy được focus. */
 .table-wrap:focus-visible,
 .md-table-wrap:focus-visible,
@@ -7968,8 +8542,7 @@ button:focus-visible {
   .empty-state h2,
   .modal-title,
   .ov-title,
-  .lb-locked-title,
-  .modal-competition-form .modal-title {
+  .lb-locked-title {
     font-size: var(--text-h2-desktop);
   }
 

@@ -198,5 +198,5 @@ Không backend, không API, không route, không schema, không permission.
 Không mock data, không hardcode số liệu, không đổi business copy.
 Không thêm pagination, sort, filter hay action mới.
 Không rewrite bảng thành card view.
-Không đụng vào `AdminCompetitionManagement.tsx` / `Modal.tsx` trong đợt này.
+Riêng `CompetitionFormModal` (dialog Tạo/Sửa cuộc thi) theo `CREATE_COMPETITION_DIALOG_DESIGN.md`; phần còn lại của `AdminCompetitionManagement.tsx` vẫn theo tài liệu này. Shared `Modal.tsx` và các confirm modal không đổi.
 Không đổi `DESIGN.md` hay `--container` toàn cục.
