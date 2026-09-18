@@ -36,7 +36,7 @@ curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o 
 sudo chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 sudo apt-get update
 sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
@@ -129,6 +129,9 @@ dcp exec api python -c "import urllib.request;print(urllib.request.urlopen('http
 dcp exec api python scripts/create_admin.py admin@vku.udn.vn "ADMIN NKD"
 ```
 
+Đăng nhập sai quá 10 lần cho cùng một email sẽ bị khoá 15 phút (`429 RATE_LIMITED`). Bộ đếm nằm
+trong RAM của tiến trình API, không lưu vào Mongo, nên restart `api` sẽ xoá bộ đếm.
+
 Script idempotent: email đã tồn tại thì thoát code 1 và không ghi đè. Import thí sinh hàng loạt bằng
 `dcp exec api python scripts/import_accounts.py <file.csv>` (header `email,name,password`, policy ≥10 ký tự);
 copy CSV vào container bằng `docker compose cp` rồi xoá file tạm sau khi import.
@@ -169,6 +172,10 @@ dcp exec mongo rm -f /tmp/restore-check.gz
 
 Không bao giờ restore đè lên database đang chạy. Lưu ý đã kiểm chứng: `mongorestore --nsFrom/--nsTo`
 **treo khi đọc archive từ stdin**, nên phải copy file vào container rồi dùng `--archive=/path`.
+
+Khi chạy các lệnh trên trong script/CI (không phải gõ tay), thêm `-T` và `</dev/null` cho mỗi
+`docker compose exec`: thiếu `-T`, Docker mở TTY và `exec` sẽ đọc hết stdin còn lại — nếu script được
+pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script dừng giữa chừng mà không báo lỗi.
 
 ## 7. Cảnh báo và giới hạn
 
