@@ -102,8 +102,9 @@ export function JoinControl({
         </Link>
         {showLeave && (
           <button
-            className="btn btn-ghost"
+            className="btn btn-danger-ghost"
             type="button"
+            aria-haspopup="dialog"
             onClick={() => setLeaveOpen(true)}
           >
             Rời cuộc thi

@@ -30,9 +30,12 @@ export function CompetitionResources({
   if (safe.length === 0) return null;
 
   return (
-    <section className="content-card content-card-resources">
+    <section
+      className="content-card content-card-resources content-card-vku"
+      aria-labelledby="competition-resources-title"
+    >
       <div className="content-card-head">
-        <span className="content-card-title">
+        <span className="content-card-title" id="competition-resources-title">
           <Icon>
             <ellipse cx="12" cy="6" rx="7" ry="3" />
             <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" />
@@ -40,6 +43,7 @@ export function CompetitionResources({
           </Icon>
           Tài nguyên tải về
         </span>
+        <span className="content-card-count">{safe.length} tài nguyên</span>
       </div>
       <ul className="resource-list">
         {safe.map((item, index) => (

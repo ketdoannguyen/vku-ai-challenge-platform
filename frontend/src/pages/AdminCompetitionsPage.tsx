@@ -249,20 +249,27 @@ export function AdminCompetitionsPage() {
 
   return (
     <div className="page ac-page">
-      <header className="ac-page-head">
-        <div>
-          <h1 className="ac-title">Quản lý cuộc thi</h1>
-          <p className="ac-subtitle">Tạo, chỉnh sửa, publish/close và clone cuộc thi</p>
-          <span className="ac-brand-accent" aria-hidden="true">
-            <span />
-            <span />
-            <span />
+      <header className="page-hero">
+        <div className="page-hero-row">
+          <span className="page-hero-icon" aria-hidden="true">
+            <IconLayers className="page-hero-glyph" />
           </span>
+          <div className="page-hero-copy">
+            <h1 className="page-hero-title">Quản lý cuộc thi</h1>
+            <p className="page-hero-subtitle">Tạo, chỉnh sửa, publish/close và clone cuộc thi</p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
+          </div>
+          <div className="page-hero-aside">
+            <button className="ac-create-button" type="button" onClick={() => setCreating(true)}>
+              <span aria-hidden="true">+</span>
+              Tạo cuộc thi
+            </button>
+          </div>
         </div>
-        <button className="ac-create-button" type="button" onClick={() => setCreating(true)}>
-          <span aria-hidden="true">+</span>
-          Tạo cuộc thi
-        </button>
       </header>
 
       <section className="ac-stats" aria-label="Tổng quan cuộc thi">

@@ -204,9 +204,9 @@ border-radius: 12–14px;
 - Footer `margin-top: auto`, viền trên mảnh, action căn đáy. Nút cao 40px, bo 8px.
 - Nút primary theo màu cột; `btn-outline` theo màu cột.
 - Text và action của button giữ nguyên theo logic hiện tại.
-- Thẻ đã tham gia chỉ hiện "Đã tham gia" + "Vào cuộc thi". Nút `btn-ghost` "Rời cuộc thi"
-  **không đặt trong danh sách** — `JoinControl` nhận `showLeave={false}`; thao tác rời vẫn
-  nằm nguyên ở trang chi tiết cuộc thi.
+- Thẻ đã tham gia chỉ hiện "Đã tham gia" + "Vào cuộc thi". Nút `btn-danger-ghost` "Rời cuộc thi"
+  **không đặt trong danh sách** — `JoinControl` nhận `showLeave={false}`; thao tác rời màu đỏ
+  vẫn nằm ở trang chi tiết cuộc thi và mở modal xác nhận danger.
 
 Hover: dịch lên 2px + shadow nhẹ, 180–220ms. Chỉ bật trong
 `@media (prefers-reduced-motion: no-preference)`.

@@ -180,9 +180,10 @@ function IconPulse() {
   );
 }
 
-function IconTrophy() {
+function IconTrophy({ className }: { className?: string }) {
   return (
     <svg
+      className={className}
       viewBox="0 0 24 24"
       width={14}
       height={14}
@@ -307,13 +308,21 @@ export function DashboardPage() {
 
   return (
     <div className="page dash-page">
-      <section className="dash-hero">
-        <div className="dash-hero-top">
-          <div className="dash-hero-copy">
-            <h1 className="dash-title">Cuộc thi</h1>
-            <p className="dash-subtitle">Các cuộc thi bạn có thể tham gia</p>
+      <header className="page-hero">
+        <div className="page-hero-row">
+          <span className="page-hero-icon" aria-hidden="true">
+            <IconTrophy className="page-hero-glyph" />
+          </span>
+          <div className="page-hero-copy">
+            <h1 className="page-hero-title">Cuộc thi</h1>
+            <p className="page-hero-subtitle">Các cuộc thi bạn có thể tham gia</p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
           </div>
-          <section className="dash-stats" aria-label="Thống kê cuộc thi">
+          <section className="dash-stats page-hero-aside" aria-label="Thống kê cuộc thi">
             <dl className="dash-stat">
               <dt className="dash-stat-label">
                 <IconPulse />
@@ -371,7 +380,7 @@ export function DashboardPage() {
             </div>
           </div>
         </div>
-      </section>
+      </header>
 
       {loading ? (
         <Loading />

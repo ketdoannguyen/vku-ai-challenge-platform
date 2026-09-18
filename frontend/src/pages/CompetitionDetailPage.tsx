@@ -377,7 +377,7 @@ export function CompetitionDetailPage() {
       <div className={`content-layout${!isOverview ? " is-workspace" : ""}`}>
         {isOverview && (
           <aside className="content-sidebar">
-            <section className="content-card content-card-toc">
+            <section className="content-card content-card-toc content-card-vku">
               <div className="content-card-head">
                 <span className="content-card-title">
                   <Icon>

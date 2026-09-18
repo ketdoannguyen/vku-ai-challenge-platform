@@ -235,6 +235,27 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
   });
 });
 
+test("dialog tạo mới dùng validation tài nguyên chung và không phát POST khi link sai", async () => {
+  mockApi(() => ({ body: BASE, status: 200 }));
+  renderForm();
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Test Cup" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "test-cup" } });
+  fireEvent.change(screen.getByLabelText("Bắt đầu"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "+ Thêm tài nguyên" }));
+  fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), { target: { value: "Dataset" } });
+  fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
+    target: { value: "https://example.com/data.csv" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+  );
+  expect(postedBodies("POST")).toHaveLength(0);
+});
+
 test("lỗi API giữ dialog mở, hiện đúng một alert và cho phép submit lại", async () => {
   let attempts = 0;
   mockApi((init) => {
@@ -264,18 +285,24 @@ test("lỗi API giữ dialog mở, hiện đúng một alert và cho phép submi
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
-test("sửa cuộc thi published: slug và metric bị khoá, field khác vẫn sửa được", async () => {
+test("sửa cuộc thi published: slug và metric bị khoá, tài nguyên chuyển sang tab riêng", async () => {
   mockApi((init) =>
     init.method === "PATCH"
       ? { body: { ...BASE, status: "published" }, status: 200 }
       : { body: BASE, status: 200 },
   );
-  const published: Competition = { ...BASE, status: "published" };
+  const published: Competition = {
+    ...BASE,
+    status: "published",
+    resources: [{ label: "Dataset", url: "https://drive.google.com/file/d/abc" }],
+  };
   const { onSaved } = renderForm(published);
 
   expect(screen.getByRole("dialog", { name: /Sửa cuộc thi/ })).toBeTruthy();
   expect(screen.getByLabelText(/Slug/)).toBeDisabled();
   expect(screen.getByLabelText("Chỉ số chính")).toBeDisabled();
+  expect(screen.queryByRole("group", { name: "Tài nguyên tải về" })).toBeNull();
+  expect(sections()).toHaveLength(4);
 
   fireEvent.change(screen.getByLabelText("Tên cuộc thi"), {
     target: { value: "Đổi tên" },
@@ -289,6 +316,7 @@ test("sửa cuộc thi published: slug và metric bị khoá, field khác vẫn 
     slug: "ai-challenge-2026",
     quota_per_day: 9,
   });
+  expect(postedBodies("PATCH")[0]).not.toHaveProperty("resources");
   await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
 });
 

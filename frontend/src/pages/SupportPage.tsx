@@ -26,13 +26,16 @@ function Icon({
   children,
   size = 18,
   strokeWidth = 1.75,
+  className,
 }: {
   children: ReactNode;
   size?: number;
   strokeWidth?: number;
+  className?: string;
 }) {
   return (
     <svg
+      className={className}
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -49,9 +52,9 @@ function Icon({
   );
 }
 
-function IconLifeBuoy({ size }: { size: number }) {
+function IconLifeBuoy({ className }: { className?: string }) {
   return (
-    <Icon size={size} strokeWidth={1.6}>
+    <Icon className={className} strokeWidth={1.6}>
       <circle cx="12" cy="12" r="9" />
       <circle cx="12" cy="12" r="3.5" />
       <path d="m5.6 5.6 3.9 3.9m5 5 3.9 3.9m0-12.8-3.9 3.9m-5 5-3.9 3.9" />
@@ -284,19 +287,21 @@ export function SupportPage() {
 
   return (
     <div className="support-page">
-      <header className="support-hero">
-        <span className="support-hero-icon">
-          <IconLifeBuoy size={28} />
-        </span>
-        <div className="support-hero-copy">
-          <h1 className="support-title">Hỗ trợ &amp; Liên hệ</h1>
-          <p className="support-subtitle">
-            Cách tham gia một cuộc thi, các câu hỏi thường gặp và đầu mối liên hệ chính thức.
-          </p>
-          <div className="support-accent">
-            <span />
-            <span />
-            <span />
+      <header className="page-hero">
+        <div className="page-hero-row">
+          <span className="page-hero-icon" aria-hidden="true">
+            <IconLifeBuoy className="page-hero-glyph" />
+          </span>
+          <div className="page-hero-copy">
+            <h1 className="page-hero-title">Hỗ trợ &amp; Liên hệ</h1>
+            <p className="page-hero-subtitle">
+              Cách tham gia một cuộc thi, các câu hỏi thường gặp và đầu mối liên hệ chính thức.
+            </p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
           </div>
         </div>
       </header>

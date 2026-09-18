@@ -262,7 +262,12 @@ test("đã tham gia: rời cuộc thi phải xác nhận rồi mới gọi API",
     </MemoryRouter>,
   );
 
-  fireEvent.click(screen.getByRole("button", { name: "Rời cuộc thi" }));
+  const leaveButton = screen.getByRole("button", { name: "Rời cuộc thi" });
+  expect(leaveButton).toHaveClass("btn-danger-ghost");
+  expect(leaveButton).not.toHaveClass("btn-ghost");
+  expect(leaveButton).toHaveAttribute("aria-haspopup", "dialog");
+
+  fireEvent.click(leaveButton);
   // Modal xác nhận nêu rõ hậu quả trước khi gọi API.
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByText(/Kết quả và thứ hạng đã có vẫn được giữ/)).toBeTruthy();

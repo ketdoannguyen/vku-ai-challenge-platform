@@ -247,6 +247,12 @@ test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link
   const following = toc.compareDocumentPosition(resources) & Node.DOCUMENT_POSITION_FOLLOWING;
   expect(following).toBeTruthy();
 
+  const resourceSection = resources.closest("section");
+  expect(resourceSection).toHaveClass("content-card-vku", "content-card-resources");
+  expect(resourceSection).toHaveAttribute("aria-labelledby", "competition-resources-title");
+  expect(resources).toHaveAttribute("id", "competition-resources-title");
+  expect(screen.getByText("2 tài nguyên")).toBeTruthy();
+
   const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
   expect(dataset.getAttribute("target")).toBe("_blank");

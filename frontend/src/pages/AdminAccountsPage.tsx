@@ -121,17 +121,19 @@ export function AdminAccountsPage() {
 
   return (
     <div className="page admin-accounts">
-      <header className="admin-accounts-head">
-        <span className="admin-accounts-head-icon" aria-hidden="true">
-          <IconUsers className="admin-accounts-head-glyph" />
-        </span>
-        <div className="admin-accounts-head-copy">
-          <h1 className="admin-accounts-title">Quản lý tài khoản</h1>
-          <p className="admin-accounts-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa tài khoản thí sinh/admin</p>
-          <div className="admin-accounts-accent" aria-hidden="true">
-            <span />
-            <span />
-            <span />
+      <header className="page-hero">
+        <div className="page-hero-row">
+          <span className="page-hero-icon" aria-hidden="true">
+            <IconUsers className="page-hero-glyph" />
+          </span>
+          <div className="page-hero-copy">
+            <h1 className="page-hero-title">Quản lý tài khoản</h1>
+            <p className="page-hero-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa tài khoản thí sinh/admin</p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
           </div>
         </div>
       </header>

@@ -5,10 +5,10 @@ import {
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
   METRIC_LABEL,
-  isSafeResourceUrl,
   isoToLocalInput,
   localInputToIso,
 } from "../api/competitions";
+import { cleanCompetitionResources } from "../lib/competitionResources";
 import { ConfirmModal, Modal } from "./Modal";
 
 export type CompetitionAction = "publish" | "close" | "clone";
@@ -399,30 +399,6 @@ export function CompetitionFormModal({
     );
   }
 
-  /** Dòng bỏ trống hoàn toàn bị lọc; gửi [] khi xóa hết để backend clear. */
-  function cleanResources(): CompetitionResource[] | null {
-    const rows = resources
-      .map((row) => ({ label: row.label.trim(), url: row.url.trim() }))
-      .filter((row) => row.label !== "" || row.url !== "");
-    if (rows.length > MAX_COMPETITION_RESOURCES) {
-      setResourceError(`Mỗi cuộc thi tối đa ${MAX_COMPETITION_RESOURCES} tài nguyên.`);
-      return null;
-    }
-    for (const row of rows) {
-      if (!row.label) {
-        setResourceError("Mỗi tài nguyên cần có tên.");
-        return null;
-      }
-      if (!isSafeResourceUrl(row.url)) {
-        setResourceError(
-          "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
-        );
-        return null;
-      }
-    }
-    return rows;
-  }
-
   async function submit(event: FormEvent) {
     event.preventDefault();
     setDateError("");
@@ -436,8 +412,15 @@ export function CompetitionFormModal({
       return;
     }
 
-    const cleanedResources = cleanResources();
-    if (cleanedResources === null) return;
+    let resourcesPayload: CompetitionResource[] | undefined;
+    if (!isEdit) {
+      const cleanedResources = cleanCompetitionResources(resources);
+      if (!cleanedResources.ok) {
+        setResourceError(cleanedResources.message);
+        return;
+      }
+      resourcesPayload = cleanedResources.resources;
+    }
 
     setBusy(true);
     const payload = {
@@ -450,7 +433,7 @@ export function CompetitionFormModal({
       primary_metric: metric,
       quota_per_day: Number(quota),
       leaderboard_visible: leaderboardVisible,
-      resources: cleanedResources,
+      resources: resourcesPayload,
     };
 
     try {
@@ -689,68 +672,70 @@ export function CompetitionFormModal({
             </div>
           </FormSection>
 
-          <FormSection
-            index="05"
-            title="Tài nguyên tải về"
-            tone="yellow"
-            icon={<IconFolder />}
-          >
-            <fieldset className="ac-resource-fieldset">
-              <legend className="sr-only">Tài nguyên tải về</legend>
-              <p className="ac-resource-hint">
-                Chỉ nhận link Google Drive — hệ thống không lưu file dataset. Nhớ đặt quyền
-                chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
-              </p>
+          {!isEdit && (
+            <FormSection
+              index="05"
+              title="Tài nguyên tải về"
+              tone="yellow"
+              icon={<IconFolder />}
+            >
+              <fieldset className="ac-resource-fieldset">
+                <legend className="sr-only">Tài nguyên tải về</legend>
+                <p className="ac-resource-hint">
+                  Chỉ nhận link Google Drive hoặc Google Docs — hệ thống không lưu file dataset.
+                  Nhớ đặt quyền chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
+                </p>
 
-              {resources.length === 0 ? (
-                <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
-              ) : (
-                resources.map((row, index) => (
-                  <div className="ac-resource-row" key={index}>
-                    <input
-                      className="ac-form-control"
-                      value={row.label}
-                      onChange={(event) => updateResource(index, { label: event.target.value })}
-                      placeholder="Tên tài nguyên"
-                      aria-label={`Tên tài nguyên ${index + 1}`}
-                    />
-                    <input
-                      className="ac-form-control ac-form-mono"
-                      value={row.url}
-                      onChange={(event) => updateResource(index, { url: event.target.value })}
-                      placeholder="https://drive.google.com/..."
-                      aria-label={`Link tài nguyên ${index + 1}`}
-                    />
-                    <button
-                      type="button"
-                      className="ac-resource-remove"
-                      onClick={() =>
-                        setResources((rows) => rows.filter((_, position) => position !== index))
-                      }
-                      aria-label={`Xóa tài nguyên ${index + 1}`}
-                    >
-                      ×
-                    </button>
+                {resources.length === 0 ? (
+                  <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
+                ) : (
+                  resources.map((row, index) => (
+                    <div className="ac-resource-row" key={index}>
+                      <input
+                        className="ac-form-control"
+                        value={row.label}
+                        onChange={(event) => updateResource(index, { label: event.target.value })}
+                        placeholder="Tên tài nguyên"
+                        aria-label={`Tên tài nguyên ${index + 1}`}
+                      />
+                      <input
+                        className="ac-form-control ac-form-mono"
+                        value={row.url}
+                        onChange={(event) => updateResource(index, { url: event.target.value })}
+                        placeholder="https://drive.google.com/..."
+                        aria-label={`Link tài nguyên ${index + 1}`}
+                      />
+                      <button
+                        type="button"
+                        className="ac-resource-remove"
+                        onClick={() =>
+                          setResources((rows) => rows.filter((_, position) => position !== index))
+                        }
+                        aria-label={`Xóa tài nguyên ${index + 1}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))
+                )}
+
+                <button
+                  type="button"
+                  className="ac-form-button ac-resource-add"
+                  onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
+                  disabled={resources.length >= MAX_COMPETITION_RESOURCES}
+                >
+                  + Thêm tài nguyên
+                </button>
+
+                {resourceError && (
+                  <div className="ac-date-error" role="alert">
+                    {resourceError}
                   </div>
-                ))
-              )}
-
-              <button
-                type="button"
-                className="ac-form-button ac-resource-add"
-                onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
-                disabled={resources.length >= MAX_COMPETITION_RESOURCES}
-              >
-                + Thêm tài nguyên
-              </button>
-
-              {resourceError && (
-                <div className="ac-date-error" role="alert">
-                  {resourceError}
-                </div>
-              )}
-            </fieldset>
-          </FormSection>
+                )}
+              </fieldset>
+            </FormSection>
+          )}
 
           {error && (
             <div className="error-box ac-form-error" role="alert">

@@ -120,3 +120,103 @@ test("không còn utility token Tailwind chết trong className của TSX", () =
   );
   expect(violations).toEqual([]);
 });
+
+/**
+ * Guard panel tiêu đề đầu trang.
+ *
+ * Năm màn từng dựng panel tiêu đề bằng năm nhóm class riêng nên lệch nhau về
+ * chiều cao, cỡ chữ, icon và khoảng cách. Chúng đã được gom về `.page-hero`, và
+ * guard này chặn việc mỗi màn tự dựng lại biến thể của riêng mình.
+ */
+const LEGACY_HERO_TOKENS = new Set([
+  "dash-hero",
+  "dash-hero-top",
+  "dash-hero-copy",
+  "dash-title",
+  "dash-subtitle",
+  "ac-page-head",
+  "ac-title",
+  "ac-subtitle",
+  "ac-brand-accent",
+  "admin-accounts-head",
+  "admin-accounts-head-icon",
+  "admin-accounts-head-glyph",
+  "admin-accounts-head-copy",
+  "admin-accounts-title",
+  "admin-accounts-subtitle",
+  "admin-accounts-accent",
+  "support-hero",
+  "support-hero-icon",
+  "support-hero-copy",
+  "support-title",
+  "support-subtitle",
+  "support-accent",
+  "about-hero",
+  "about-hero-icon",
+  "about-hero-copy",
+  "about-title",
+  "about-subtitle",
+]);
+
+/** Cấu trúc tối thiểu mọi panel tiêu đề phải có: icon → tiêu đề → mô tả → vạch VKU. */
+const PAGE_HERO_CLASSES = [
+  "page-hero",
+  "page-hero-row",
+  "page-hero-icon",
+  "page-hero-glyph",
+  "page-hero-copy",
+  "page-hero-title",
+  "page-hero-subtitle",
+  "vku-accent",
+];
+
+/** Slot chỉ một số màn có (Dashboard: thống kê, Quản lý cuộc thi: nút tạo). */
+const PAGE_HERO_OPTIONAL_CLASSES = ["page-hero-aside"];
+
+const PAGE_HERO_PAGES = [
+  "DashboardPage.tsx",
+  "AboutPage.tsx",
+  "SupportPage.tsx",
+  "AdminCompetitionsPage.tsx",
+  "AdminAccountsPage.tsx",
+];
+
+/** Nguồn TSX của một màn, tra theo tên file. */
+function pageSource(fileName: string): string {
+  const found = Object.entries(TSX_SOURCES).find(([path]) => path.endsWith(`/${fileName}`));
+  expect(found, `không tìm thấy nguồn ${fileName}`).toBeTruthy();
+  return found![1];
+}
+
+function classTokensOf(source: string): Set<string> {
+  return new Set(classNameValues(source).flatMap(classTokens));
+}
+
+test("năm màn dựng panel tiêu đề bằng đúng bộ class dùng chung", () => {
+  for (const page of PAGE_HERO_PAGES) {
+    const tokens = classTokensOf(pageSource(page));
+    const missing = PAGE_HERO_CLASSES.filter((required) => !tokens.has(required));
+    expect(missing, `${page} thiếu class`).toEqual([]);
+  }
+});
+
+test("class panel tiêu đề riêng của từng màn không quay lại", () => {
+  const violations = Object.entries(TSX_SOURCES).flatMap(([file, source]) =>
+    [...classTokensOf(source)]
+      .filter((token) => LEGACY_HERO_TOKENS.has(token))
+      .map((token) => `${file}: ${token}`),
+  );
+  expect(violations).toEqual([]);
+});
+
+test("mọi biến thể page-hero đều nằm trong nhóm class dùng chung", () => {
+  // Nguồn CSS không đọc được từ test (Vitest stub import CSS), nên chốt ở phía TSX:
+  // chỉ được phép có các class `page-hero*` đã khai báo ở đây.
+  const declared = new Set([...PAGE_HERO_CLASSES, ...PAGE_HERO_OPTIONAL_CLASSES]);
+  const violations = Object.entries(TSX_SOURCES).flatMap(([file, source]) =>
+    [...classTokensOf(source)]
+      .filter((token) => token.startsWith("page-hero") && !declared.has(token))
+      .map((token) => `${file}: ${token}`),
+  );
+  expect(violations).toEqual([]);
+});

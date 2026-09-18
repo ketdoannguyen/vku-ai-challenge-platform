@@ -24,13 +24,16 @@ function Icon({
   children,
   size = 18,
   strokeWidth = 1.75,
+  className,
 }: {
   children: ReactNode;
   size?: number;
   strokeWidth?: number;
+  className?: string;
 }) {
   return (
     <svg
+      className={className}
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -47,9 +50,9 @@ function Icon({
   );
 }
 
-function IconLandmark({ size }: { size: number }) {
+function IconLandmark({ className }: { className?: string }) {
   return (
-    <Icon size={size} strokeWidth={1.6}>
+    <Icon className={className} strokeWidth={1.6}>
       <path d="M3 21h18" />
       <path d="M5 21V9.5l7-5 7 5V21" />
       <path d="M9.5 21v-6h5v6" />
@@ -301,18 +304,20 @@ export function AboutPage() {
 
   return (
     <div className="about-page">
-      <header className="about-hero">
-        <span className="about-hero-icon">
-          <IconLandmark size={28} />
-        </span>
-        <div className="about-hero-copy">
-          <h1 className="about-title">Giới thiệu</h1>
-          <p className="about-subtitle">Nền tảng tổ chức các cuộc thi AI của {VKU_NAME}.</p>
-          <span className="vku-accent" aria-hidden="true">
-            <span className="blue" />
-            <span className="red" />
-            <span className="yellow" />
+      <header className="page-hero">
+        <div className="page-hero-row">
+          <span className="page-hero-icon" aria-hidden="true">
+            <IconLandmark className="page-hero-glyph" />
           </span>
+          <div className="page-hero-copy">
+            <h1 className="page-hero-title">Giới thiệu</h1>
+            <p className="page-hero-subtitle">Nền tảng tổ chức các cuộc thi AI của {VKU_NAME}.</p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
+          </div>
         </div>
       </header>
 

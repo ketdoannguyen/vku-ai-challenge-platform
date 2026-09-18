@@ -10,13 +10,13 @@
 - Sprint 01-07: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets, participant portal, scoring + ground truth private, submission policy/quota, my submissions, leaderboard, XLSX export, login rate limit + error envelope + CSP Report-Only
 - Sprint 08 (ADR-014): đọc công khai cho khách (danh sách, chi tiết, nội dung `public`, assets)
 - Vận hành cuộc thi (working tree, ADR-015→ADR-019):
-  - **Tài nguyên tải về**: `competitions.resources` là link Google Drive (tối đa 10, https, host Drive/Docs, không credentials); không host dataset/binary. Block nằm dưới "Mục lục nội dung" trong tab Tổng quan, ẩn khi rỗng, link ngoài có `rel="noopener noreferrer nofollow"` (ADR-015)
+  - **Tài nguyên tải về**: `competitions.resources` là link Google Drive (tối đa 10, https, host Drive/Docs, không credentials); không host dataset/binary. Admin quản lý trực tiếp tại tab **Tài nguyên** trong chi tiết cuộc thi (dialog chỉ nhập khi tạo mới); block participant nằm dưới "Mục lục nội dung" trong tab Tổng quan, dùng cùng card shell VKU và format đánh số, ẩn khi rỗng, link ngoài có `rel="noopener noreferrer nofollow"` (ADR-015)
   - **Publish chỉ khi chấm được**: `app/scoring/readiness.py` là một nguồn sự thật, đọc và parse lại ground truth thật; thiếu/sai → 422 với code cụ thể và giữ nguyên `draft`. Admin detail trả `publish_ready`/`publish_blocked_reason` (ADR-017)
   - **Join từ publish đến hết `end_at`**: non-member sau `end_at` → 422 `JOIN_DEADLINE_PASSED`; không kiểm tra `start_at`; membership hiện có luôn idempotent kể cả sau deadline/closed (ADR-017)
   - **Privacy payload**: bỏ `created_by` khỏi representation public; `pos_label` chỉ trả cho admin và thành viên active (ADR-016); datetime naive/aware chuẩn hoá qua một helper dùng chung
   - **Quota trước khi nộp**: `GET /api/competitions/{slug}` trả `quota {per_day,used_today,remaining,resets_at}` cho thành viên active; UI hiện "Còn X/Y lượt" và khoá form khi hết lượt (ADR-019)
   - **Leaderboard phân trang**: `limit`/`offset`/`has_more` + `me` (hạng toàn cục, tìm trên full list trước khi cắt trang, không có account id) (ADR-019)
-  - **Đường thoát**: participant `POST /leave` (soft deactivate, giữ điểm); admin xoá cứng member chỉ khi chưa có bài `completed`, ngược lại 409 `MEMBER_HAS_SUBMISSIONS`; admin `DELETE` competition chỉ với `draft` + `confirm_slug`, cascade con-trước-cha-sau và dọn file best-effort (ADR-018)
+  - **Đường thoát**: participant `POST /leave` (soft deactivate, giữ điểm; trigger danger-ghost đỏ và modal xác nhận danger); admin xoá cứng member chỉ khi chưa có bài `completed`, ngược lại 409 `MEMBER_HAS_SUBMISSIONS`; admin `DELETE` competition chỉ với `draft` + `confirm_slug`, cascade con-trước-cha-sau và dọn file best-effort (ADR-018)
   - **Countdown sống**: formatter thuần + hook dùng chung, dashboard dùng một page-level clock, nhịp 30 giây trên 1 ngày và 1 giây dưới 1 ngày, resync khi tab visible
 - Tổng quan participant (working tree, user làm song song): tab Tổng quan là trang thật với thể lệ/quy cách bài nộp/danh sách tài liệu, không tự nhảy sang tài liệu đầu tiên
 

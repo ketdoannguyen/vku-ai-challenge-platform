@@ -805,20 +805,18 @@ samp {
 
 .page-title,
 .comp-title,
-.ac-title,
 .login-title {
   overflow-wrap: anywhere;
 }
 
 /* Tiêu đề trang: mọi màn dùng đúng một kiểu, lấy theo trang Cuộc thi (S02).
-   Các class bên dưới chỉ giữ margin/màu riêng của từng màn. */
+   Các class bên dưới chỉ giữ margin/màu riêng của từng màn; tiêu đề nằm trong
+   panel đầu trang do `.page-hero-title` quy định riêng. */
 .page-title,
-.dash-title,
 .comp-title,
 .sub-title,
 .subm-title,
 .lb-title,
-.ac-title,
 .login-title {
   font-family: var(--font-display);
   font-size: var(--text-h1);
@@ -829,12 +827,10 @@ samp {
 
 @media (min-width: 48rem) {
   .page-title,
-  .dash-title,
   .comp-title,
   .sub-title,
   .subm-title,
   .lb-title,
-  .ac-title,
   .login-title {
     font-size: var(--text-h1-desktop);
   }
@@ -881,6 +877,151 @@ samp {
 
 .vku-accent .yellow {
   background: var(--vku-yellow-500);
+}
+
+/* =============================================================================
+   Page hero — panel tiêu đề đầu trang dùng chung
+   Một cấu trúc duy nhất cho năm màn (Cuộc thi, Giới thiệu, Hỗ trợ & Liên hệ,
+   Quản lý cuộc thi, Quản lý tài khoản): icon trang trí → tiêu đề → mô tả ngắn →
+   ba vạch VKU. Nội dung riêng của từng màn (thống kê, CTA) nằm trong
+   `.page-hero-aside`; phần nối tiếp như toolbar là con trực tiếp của `.page-hero`.
+   ============================================================================= */
+.page-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. `pointer-events: none` để không chắn thao tác. */
+.page-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Màn hẹp: phần chữ chiếm trọn bề ngang panel nên vệt màu chỉ trang trí góc trên bên
+   phải — khoảng trống cạnh icon — rồi mờ dần trước khi tới tiêu đề. Nếu để nguyên
+   như màn rộng, đuôi các tiêu đề dài (`Hỗ trợ & Liên hệ`, `Quản lý tài khoản`) chạy
+   vào vệt màu. */
+@media (max-width: 47.99rem) {
+  .page-hero::before {
+    width: min(180px, 45%);
+    height: 88px;
+    /* Mờ hết đúng ở đáy khối: dưới 88px vệt màu không còn đóng góp gì. */
+    -webkit-mask-image: linear-gradient(to bottom, #000 38%, transparent 100%);
+    mask-image: linear-gradient(to bottom, #000 38%, transparent 100%);
+  }
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.page-hero > * {
+  position: relative;
+}
+
+/* Hàng tiêu đề: xếp dọc ở màn hẹp, chuyển ngang từ 48rem cho mọi màn. */
+.page-hero-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.page-hero-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 60px;
+  height: 60px;
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-2xl);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.page-hero-glyph {
+  width: 26px;
+  height: 26px;
+}
+
+.page-hero-copy {
+  min-width: 0;
+}
+
+.page-hero-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
+}
+
+.page-hero-subtitle {
+  margin: var(--space-sm) 0 0;
+  max-width: 42rem;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+}
+
+/* Ba vạch VKU dưới mô tả ngắn — thuần trang trí, không mang nghĩa nghiệp vụ. */
+.page-hero-copy > .vku-accent {
+  margin-top: var(--space-md);
+}
+
+/* Cột nội dung riêng của màn (thống kê, CTA). Ở màn hẹp nó chiếm hết bề rộng
+   hàng để nội dung bên trong tự quyết định cách xếp. */
+.page-hero-aside {
+  flex: 0 1 auto;
+  align-self: stretch;
+  min-width: 0;
+}
+
+@media (min-width: 48rem) {
+  .page-hero {
+    min-height: 148px;
+    padding: var(--space-lg);
+  }
+
+  .page-hero-row {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-lg);
+  }
+
+  .page-hero-title {
+    font-size: var(--text-h1-desktop);
+  }
+
+  /* Aside dồn về mép phải nhưng vẫn co được để không đẩy tràn hàng. */
+  .page-hero-aside {
+    align-self: center;
+    margin-inline-start: auto;
+  }
 }
 
 /* --- Buttons --- */
@@ -954,7 +1095,7 @@ samp {
   border-color: transparent;
   color: var(--text);
 }
-/* Nút xóa cấp hàng trong bảng admin (S13: text-error). */
+/* Hành động nguy hiểm dạng nhẹ: xóa cấp hàng hoặc rời cuộc thi. */
 .btn-danger-ghost {
   border-color: transparent;
   background: transparent;
@@ -2159,72 +2300,7 @@ select.input {
   margin-inline: auto;
 }
 
-/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
-.dash-hero {
-  position: relative;
-  width: 100%;
-  margin-bottom: var(--space-lg);
-  padding: var(--space-lg);
-  overflow: hidden;
-  border: 1px solid var(--vku-border);
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
-   không animation. `pointer-events: none` để không chắn thao tác. */
-.dash-hero::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(360px, 45%);
-  height: 100%;
-  background: linear-gradient(
-    115deg,
-    transparent 0 44%,
-    var(--vku-blue-100) 44% 58%,
-    var(--vku-red-50) 58% 70%,
-    var(--vku-yellow-50) 70% 82%,
-    transparent 82%
-  );
-  pointer-events: none;
-}
-
-/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
-.dash-hero > * {
-  position: relative;
-}
-
-.dash-hero-top {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
-  padding-bottom: var(--space-lg);
-  border-bottom: 1px solid var(--vku-border-soft);
-}
-
-.dash-hero-copy {
-  min-width: 0;
-}
-
-.dash-title {
-  margin: 0;
-  color: var(--vku-ink);
-  font-size: var(--text-h1);
-  font-weight: 700;
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-}
-
-.dash-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--vku-ink-muted);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-  letter-spacing: var(--tracking-body);
-}
+/* Panel đầu trang dùng `.page-hero`; dưới đây chỉ là phần riêng của màn. */
 
 /* Ô thống kê: ba thẻ tint xanh–đỏ–vàng, hiển thị ở mọi bề rộng màn hình. */
 .dash-stats {
@@ -2232,6 +2308,14 @@ select.input {
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: var(--space-sm);
   margin: 0;
+}
+
+/* Từ md panel xếp ngang nên cột phải hẹp hơn: hai ô một hàng thay vì ba. */
+@media (min-width: 48rem) {
+  .dash-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 24rem;
+  }
 }
 
 .dash-stat {
@@ -2286,12 +2370,14 @@ select.input {
   font-variant-numeric: tabular-nums;
 }
 
-/* Toolbar là phần cuối của panel hero nên không cần khoảng đệm dưới riêng. */
+/* Toolbar là hàng thứ hai trong panel hero, ngăn với hàng tiêu đề bằng vạch mảnh
+   (`gap` của `.page-hero` lo khoảng trên vạch, `padding-top` lo khoảng dưới). */
 .dash-toolbar {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  padding-top: var(--space-md);
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--vku-border-soft);
 }
 
 .dash-toolbar-left {
@@ -2457,7 +2543,7 @@ select.input {
   color: var(--accent);
 }
 
-/* Masthead dùng đúng công thức nền của `.ac-page-head` (trang quản lý cuộc thi):
+/* Masthead dùng đúng công thức nền của `.page-hero` (panel đầu trang dùng chung):
    gradient chéo trắng → xanh rất nhạt, cộng một dải chéo xanh/đỏ/vàng ở góc phải.
    Hai trang là anh em trong cùng hệ VKU nên panel đầu trang phải cùng một họ. */
 .comp-masthead {
@@ -2475,7 +2561,7 @@ select.input {
   margin-bottom: var(--space-lg);
 }
 
-/* Dải chéo ba màu nhạt ở góc phải, y hệt `.ac-page-head`. Thuần trang trí:
+/* Dải chéo ba màu nhạt ở góc phải, y hệt `.page-hero`. Thuần trang trí:
    `pointer-events: none` để không chắn nút tham gia/rời cuộc thi. */
 .comp-masthead::before {
   content: "";
@@ -2506,7 +2592,7 @@ select.input {
   }
 }
 
-/* Ba vạch màu VKU dưới mô tả ngắn — cùng chi tiết nhận diện với `.ac-brand-accent`.
+/* Ba vạch màu VKU dưới mô tả ngắn — cùng chi tiết nhận diện với `.vku-accent`.
    Không mang thông tin nghiệp vụ nào. */
 .comp-brand-accent {
   display: flex;
@@ -2743,10 +2829,6 @@ select.input {
   box-shadow: var(--shadow-card);
 }
 
-.content-card-resources {
-  background: var(--surface-subtle);
-}
-
 .content-card-head {
   display: flex;
   align-items: center;
@@ -2755,10 +2837,6 @@ select.input {
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--surface-subtle);
-}
-
-.content-card-resources .content-card-head {
-  background: var(--surface);
 }
 
 .content-card-title {
@@ -2787,13 +2865,13 @@ select.input {
    Nhận diện VKU: vạch ba màu ở mép trên, dải tiêu đề nền xanh nhạt, mỗi đầu mục có số
    thứ tự để quét mắt nhanh. Số chèn bằng pseudo-element nên không lọt vào `textContent`
    của link (điều hướng vẫn đọc đúng tên tài liệu). */
-.content-card-toc {
+.content-card-vku {
   gap: 0;
   padding: 0;
   overflow: hidden;
 }
 
-.content-card-toc::before {
+.content-card-vku::before {
   content: "";
   flex: none;
   height: 3px;
@@ -2805,14 +2883,14 @@ select.input {
   );
 }
 
-.content-card-toc .content-card-head {
+.content-card-vku .content-card-head {
   padding: 12px 16px;
   border-bottom: 1px solid var(--vku-blue-100);
   border-radius: 0;
   background: var(--vku-blue-50);
 }
 
-.content-card-toc .content-card-title {
+.content-card-vku .content-card-title {
   color: var(--vku-blue-800);
   font-size: var(--text-label-md);
   font-weight: 700;
@@ -2820,11 +2898,11 @@ select.input {
   text-transform: uppercase;
 }
 
-.content-card-toc .content-card-title svg {
+.content-card-vku .content-card-title svg {
   color: var(--vku-blue-700);
 }
 
-.content-card-toc .content-card-count {
+.content-card-vku .content-card-count {
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   background: var(--vku-blue-100);
@@ -2876,6 +2954,47 @@ select.input {
 
 .content-card-toc .content-nav-state {
   padding: 12px 16px;
+}
+
+/* Tài nguyên dùng cùng nhịp đánh số với mục lục nhưng vẫn là liên kết ngoài. */
+.content-card-resources .resource-list {
+  counter-reset: resource-item;
+  padding: 10px;
+}
+
+.content-card-resources .resource-link {
+  position: relative;
+  counter-increment: resource-item;
+  min-height: 44px;
+  padding: 9px 12px 9px 46px;
+  border-color: var(--vku-border-soft);
+}
+
+.content-card-resources .resource-link::before {
+  content: counter(resource-item, decimal-leading-zero);
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  transform: translateY(-50%);
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-sm);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.content-card-resources .resource-link:hover::before {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-600);
+  color: #fff;
 }
 
 .resource-list {
@@ -4425,10 +4544,39 @@ select.input {
   overflow: hidden;
 }
 
-/* Card mang chỉ số chính được nhấn bằng xanh hành động, không phải mực đậm. */
-.sub-result-card.primary {
-  border-color: var(--accent);
-  border-width: 2px;
+/* Chỉ số chính dùng vòng nhấn riêng để không ghi đè màu nhận diện của metric. */
+.metric-card.sub-result-card.primary {
+  border-color: var(--border);
+  border-width: 1px;
+  box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm);
+}
+
+/* Màu metric là lớp nhận diện bổ sung; tên metric vẫn truyền đạt ý nghĩa chính. */
+.metric-card.sub-result-card[data-metric="f1"] {
+  border-top: 3px solid var(--vku-blue-600);
+  background: var(--vku-blue-50);
+}
+
+.metric-card.sub-result-card[data-metric="precision"] {
+  border-top: 3px solid var(--vku-red-600);
+  background: var(--vku-red-50);
+}
+
+.metric-card.sub-result-card[data-metric="recall"] {
+  border-top: 3px solid var(--vku-yellow-600);
+  background: var(--vku-yellow-50);
+}
+
+.metric-card.sub-result-card[data-metric="f1"] .sub-result-metric-label {
+  color: var(--vku-blue-700);
+}
+
+.metric-card.sub-result-card[data-metric="precision"] .sub-result-metric-label {
+  color: var(--vku-red-700);
+}
+
+.metric-card.sub-result-card[data-metric="recall"] .sub-result-metric-label {
+  color: var(--vku-yellow-800);
 }
 
 .sub-result-card-top {
@@ -5768,110 +5916,7 @@ select.input {
   color: var(--vku-ink);
 }
 
-/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
-.admin-accounts-head {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: var(--space-lg);
-  min-height: 132px;
-  margin-bottom: var(--space-lg);
-  padding: var(--space-lg);
-  overflow: hidden;
-  border: 1px solid var(--vku-border);
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
-   không animation. */
-.admin-accounts-head::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(320px, 42%);
-  height: 100%;
-  background: linear-gradient(
-    115deg,
-    transparent 0 44%,
-    var(--vku-blue-100) 44% 58%,
-    var(--vku-red-50) 58% 70%,
-    var(--vku-yellow-50) 70% 82%,
-    transparent 82%
-  );
-  pointer-events: none;
-}
-
-/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
-.admin-accounts-head > * {
-  position: relative;
-}
-
-.admin-accounts-head-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 60px;
-  height: 60px;
-  border: 1px solid #cee1ff;
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--vku-blue-100) 0%, var(--vku-blue-50) 100%);
-  color: var(--vku-blue-700);
-}
-
-.admin-accounts-head-glyph {
-  width: 26px;
-  height: 26px;
-}
-
-.admin-accounts-head-copy {
-  min-width: 0;
-}
-
-.admin-accounts-title {
-  margin: 0;
-  color: var(--vku-ink);
-  font-family: var(--font-display);
-  font-size: var(--text-h1);
-  font-weight: 700;
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-}
-
-.admin-accounts-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--acc-secondary);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-}
-
-/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
-.admin-accounts-accent {
-  display: flex;
-  gap: 6px;
-  margin-top: var(--space-md);
-}
-
-.admin-accounts-accent > span {
-  width: 32px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-}
-
-.admin-accounts-accent > span:nth-child(1) {
-  background: var(--vku-blue-600);
-}
-
-.admin-accounts-accent > span:nth-child(2) {
-  background: var(--vku-red-600);
-}
-
-.admin-accounts-accent > span:nth-child(3) {
-  background: var(--vku-yellow-600);
-}
+/* Panel đầu trang dùng `.page-hero`; màn này bắt đầu từ các thẻ KPI. */
 
 /* Bốn KPI là bốn card rời; tone chỉ để nhận diện thương hiệu, không dùng để suy
    ra trạng thái hay quyền thao tác. Số liệu lấy từ aggregate toàn hệ thống. */
@@ -6556,86 +6601,7 @@ select.input {
   color: var(--ac-ink);
 }
 
-/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
-.ac-page-head {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-lg);
-  min-height: 148px;
-  margin-bottom: var(--space-lg);
-  padding: var(--space-lg);
-  overflow: hidden;
-  border: 1px solid var(--vku-border);
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
-   không animation. `pointer-events: none` để không chắn nút "Tạo cuộc thi". */
-.ac-page-head::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(360px, 45%);
-  height: 100%;
-  background: linear-gradient(
-    115deg,
-    transparent 0 44%,
-    var(--vku-blue-100) 44% 58%,
-    var(--vku-red-50) 58% 70%,
-    var(--vku-yellow-50) 70% 82%,
-    transparent 82%
-  );
-  pointer-events: none;
-}
-
-/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
-.ac-page-head > * {
-  position: relative;
-}
-
-.ac-title {
-  margin: 0;
-  color: var(--ac-ink);
-}
-
-.ac-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--ac-secondary);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-  letter-spacing: var(--tracking-body);
-}
-
-/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
-.ac-brand-accent {
-  display: flex;
-  gap: 6px;
-  margin-top: var(--space-md);
-}
-
-.ac-brand-accent > span {
-  width: 32px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-}
-
-.ac-brand-accent > span:nth-child(1) {
-  background: var(--vku-blue-600);
-}
-
-.ac-brand-accent > span:nth-child(2) {
-  background: var(--vku-red-600);
-}
-
-.ac-brand-accent > span:nth-child(3) {
-  background: var(--vku-yellow-600);
-}
-
+/* Panel đầu trang dùng `.page-hero`; CTA nằm trong `.page-hero-aside`. */
 .ac-create-button {
   display: inline-flex;
   align-items: center;
@@ -7564,7 +7530,7 @@ select.input {
   background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
 }
 
-/* Hình học chéo rất nhẹ ở góc phải, cùng công thức với `.ac-page-head` / `.dash-hero`. */
+/* Hình học chéo rất nhẹ ở góc phải, cùng công thức với `.page-hero`. */
 .modal-competition-form .modal-head::before {
   content: "";
   position: absolute;
@@ -8298,11 +8264,6 @@ select.input {
     width: 100%;
   }
 
-  .admin-accounts-head {
-    align-items: flex-start;
-    min-height: 0;
-  }
-
   .admin-accounts-create {
     align-self: flex-start;
   }
@@ -8340,16 +8301,11 @@ select.input {
     padding: 20px 24px 24px;
   }
 
-  .ac-page-head,
   .ac-toolbar,
   .ac-pagination,
   .ac-form-footer {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .ac-create-button {
-    align-self: flex-start;
   }
 
   /* Toolbar đã là cột: bỏ trần 448px để filter và search cùng rộng bằng nhau. */
@@ -8458,10 +8414,6 @@ select.input {
   .ac-form-grid,
   .ac-join-options {
     grid-template-columns: 1fr;
-  }
-
-  .ac-page-head {
-    padding: var(--space-lg) var(--space-md);
   }
 
   /* Giữ nút xóa cạnh URL, chỉ xếp tên tài nguyên xuống dòng riêng. */
@@ -8701,21 +8653,9 @@ button:focus-visible {
     display: block;
   }
 
-  /* Hero xếp ngang: tiêu đề bên trái, ô thống kê bên phải. */
-  .dash-hero-top {
-    flex-direction: row;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--space-xl);
-  }
-
-  .dash-hero-copy {
-    max-width: 30rem;
-  }
-
+  /* Đủ chỗ cho ba ô thống kê trên một hàng ở cột phải của panel. */
   .dash-stats {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    flex: none;
     width: 34rem;
   }
 }
@@ -8777,6 +8717,17 @@ button:focus-visible {
   }
   .content-card-toc .content-card-head {
     display: none;
+  }
+  .content-card-resources {
+    padding: 0;
+  }
+  .content-card-resources .resource-list {
+    padding: 8px;
+  }
+  .content-card-resources .resource-label {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
   /* Mobile: mục lục là dải pill cuộn ngang nên bỏ số thứ tự và trả padding về như cũ;
      giữ `padding: 0` để vạch ba màu chạy sát mép thẻ. */
@@ -8981,6 +8932,71 @@ button:focus-visible {
   line-height: 1.5;
 }
 
+.admin-resource-form,
+.admin-resource-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-resource-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.admin-resource-row {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.75fr) minmax(18rem, 1.5fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--vku-yellow-100);
+  border-radius: var(--radius-lg);
+}
+
+.admin-resource-url {
+  font-family: var(--font-mono);
+}
+
+.admin-resource-add {
+  margin-top: 1rem;
+}
+
+.admin-resource-empty {
+  margin: 0;
+  padding: 1rem;
+  color: var(--text-muted);
+  text-align: center;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.admin-resource-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+@media (max-width: 47.99rem) {
+  .admin-resource-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-resource-remove,
+  .admin-resource-actions .btn {
+    width: 100%;
+  }
+
+  .admin-resource-actions {
+    flex-direction: column-reverse;
+  }
+}
+
 /* Khối gợi ý cách chia nội dung: thẻ vàng nối tiếp thẻ chính của tab Nội dung.
    `.admin-detail-panel` không đặt gap nên khoảng cách nằm ở đây. */
 .admin-detail-topic-card {
@@ -9094,7 +9110,7 @@ button:focus-visible {
 }
 
 /* Panel header: nền trắng → xanh rất nhạt kèm ba vệt chéo xanh–đỏ–vàng vẽ bằng
-   CSS, cùng công thức với `.dash-hero`. Tĩnh, không animation, không chặn chuột. */
+   CSS, cùng công thức với `.page-hero`. Tĩnh, không animation, không chặn chuột. */
 .admin-detail-shell {
   position: relative;
   overflow: hidden;
@@ -10149,120 +10165,7 @@ button:focus-visible {
   color: var(--vku-ink);
 }
 
-/* --- Hero --- */
-.support-hero {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-md);
-  margin-bottom: var(--space-lg);
-  padding: var(--space-md);
-  overflow: hidden;
-  border: 1px solid var(--vku-border);
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
-   không animation. `pointer-events: none` để không chắn thao tác. */
-.support-hero::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(360px, 45%);
-  height: 100%;
-  background: linear-gradient(
-    115deg,
-    transparent 0 44%,
-    var(--vku-blue-100) 44% 58%,
-    var(--vku-red-50) 58% 70%,
-    var(--vku-yellow-50) 70% 82%,
-    transparent 82%
-  );
-  pointer-events: none;
-}
-
-/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
-.support-hero > * {
-  position: relative;
-}
-
-.support-hero-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  border: 1px solid var(--vku-blue-100);
-  border-radius: var(--radius-2xl);
-  background: var(--vku-blue-100);
-  color: var(--vku-blue-600);
-}
-
-.support-hero-copy {
-  min-width: 0;
-}
-
-.support-title {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--vku-ink);
-  font-family: var(--font-display);
-  font-size: var(--text-h1);
-  font-weight: 700;
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-}
-
-@media (min-width: 48rem) {
-  .support-hero {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-lg);
-    min-height: 148px;
-    padding: var(--space-lg);
-  }
-
-  .support-title {
-    font-size: clamp(30px, 2.5vw, 38px);
-  }
-}
-
-.support-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--vku-ink-muted);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-  letter-spacing: var(--tracking-body);
-}
-
-/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
-.support-accent {
-  display: flex;
-  gap: 6px;
-  margin-top: var(--space-md);
-}
-
-.support-accent > span {
-  width: 32px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-}
-
-.support-accent > span:nth-child(1) {
-  background: var(--vku-blue-600);
-}
-
-.support-accent > span:nth-child(2) {
-  background: var(--vku-red-600);
-}
-
-.support-accent > span:nth-child(3) {
-  background: var(--vku-yellow-600);
-}
+/* Panel đầu trang dùng `.page-hero`. */
 
 /* --- Lưới nội dung --- */
 .support-grid {
@@ -10624,99 +10527,7 @@ button:focus-visible {
   color: var(--vku-ink);
 }
 
-/* --- Hero --- */
-.about-hero {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-md);
-  margin-bottom: var(--space-lg);
-  padding: var(--space-md);
-  overflow: hidden;
-  border: 1px solid var(--vku-border);
-  border-radius: var(--radius-2xl);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
-   không animation. `pointer-events: none` để không chắn thao tác. */
-.about-hero::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: min(420px, 45%);
-  height: 100%;
-  background: linear-gradient(
-    115deg,
-    transparent 0 42%,
-    var(--vku-blue-100) 42% 58%,
-    var(--vku-red-50) 58% 72%,
-    var(--vku-yellow-50) 72% 86%,
-    transparent 86%
-  );
-  pointer-events: none;
-}
-
-/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
-.about-hero > * {
-  position: relative;
-}
-
-.about-hero-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  border: 1px solid var(--vku-blue-100);
-  border-radius: var(--radius-2xl);
-  background: var(--vku-blue-100);
-  color: var(--vku-blue-700);
-}
-
-.about-hero-copy {
-  min-width: 0;
-}
-
-.about-title {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--vku-ink);
-  font-family: var(--font-display);
-  font-size: var(--text-h1);
-  font-weight: 700;
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-}
-
-.about-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--vku-ink-muted);
-  font-size: var(--text-body);
-  line-height: var(--leading-body);
-  letter-spacing: var(--tracking-body);
-}
-
-.about-hero-copy > .vku-accent {
-  margin-top: var(--space-md);
-}
-
-@media (min-width: 48rem) {
-  .about-hero {
-    flex-direction: row;
-    align-items: center;
-    gap: var(--space-lg);
-    min-height: 160px;
-    padding: var(--space-lg);
-  }
-
-  .about-title {
-    font-size: clamp(32px, 2.7vw, 40px);
-  }
-}
+/* Panel đầu trang dùng `.page-hero`. */
 
 /* --- Lưới nội dung --- */
 .about-grid {

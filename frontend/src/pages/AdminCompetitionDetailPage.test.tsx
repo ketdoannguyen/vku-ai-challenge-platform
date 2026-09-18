@@ -111,7 +111,7 @@ function renderPage() {
   );
 }
 
-/** Mock đủ endpoint của cả 5 panel để đổi tab không phụ thuộc shape dữ liệu. */
+/** Mock đủ endpoint của cả 6 panel để đổi tab không phụ thuộc shape dữ liệu. */
 async function renderRail() {
   mockApi((url) => {
     if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
@@ -192,7 +192,7 @@ test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter m�
   expectKeyboardFilePicker(/^Upload \.md/, 'Upload file Markdown cho "Rules"');
 });
 
-test("rail quản trị: đủ 5 khu vực, panel gắn đúng tab đang mở", async () => {
+test("rail quản trị: đủ 6 khu vực, panel gắn đúng tab đang mở", async () => {
   mockApi((url) => {
     if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -206,7 +206,8 @@ test("rail quản trị: đủ 5 khu vực, panel gắn đúng tab đang mở", 
   const tabs = within(rail).getAllByRole("tab");
   expect(tabs.map((tab) => tab.textContent)).toEqual([
     "Nội dung",
-    "Assets",
+    "Hình ảnh",
+    "Tài nguyên",
     "Chấm điểm",
     "Kết quả",
     "Thành viên & mã tham gia",
@@ -228,27 +229,31 @@ test("rail quản trị: đủ 5 khu vực, panel gắn đúng tab đang mở", 
 
 test("rail quản trị: roving tabindex — chỉ focused tab có tabIndex=0, Arrow/Home/End wrap đúng", async () => {
   await renderRail();
-  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
 
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
-  expect(railTab("Assets")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1"]);
+  expect(railTab("Hình ảnh")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1", "-1"]);
 
-  fireEvent.keyDown(railTab("Assets"), { key: "ArrowRight" });
+  fireEvent.keyDown(railTab("Hình ảnh"), { key: "ArrowRight" });
+  expect(railTab("Tài nguyên")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1", "-1"]);
+
+  fireEvent.keyDown(railTab("Tài nguyên"), { key: "ArrowRight" });
   expect(railTab("Chấm điểm")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "0", "-1", "-1"]);
 
   fireEvent.keyDown(railTab("Chấm điểm"), { key: "ArrowLeft" });
-  expect(railTab("Assets")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1"]);
+  expect(railTab("Tài nguyên")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1", "-1"]);
 
-  fireEvent.keyDown(railTab("Assets"), { key: "End" });
+  fireEvent.keyDown(railTab("Tài nguyên"), { key: "End" });
   expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "-1", "0"]);
+  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "-1", "-1", "0"]);
 
   fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "Home" });
   expect(railTab("Nội dung")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
 
   // Wrap ở biên: trái từ tab đầu về tab cuối, phải từ tab cuối về tab đầu.
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowLeft" });
@@ -262,13 +267,13 @@ test("rail quản trị: Arrow/Home/End dời focus nhưng chưa đổi panel đ
   const contentsPanel = screen.getByRole("tabpanel", { name: "Nội dung" });
 
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
-  expect(railTab("Assets")).toHaveFocus();
+  expect(railTab("Hình ảnh")).toHaveFocus();
   expect(screen.getByRole("tabpanel", { name: "Nội dung" })).toBe(contentsPanel);
-  expect(screen.queryByRole("tabpanel", { name: "Assets" })).toBeNull();
+  expect(screen.queryByRole("tabpanel", { name: "Hình ảnh" })).toBeNull();
   expect(railTab("Nội dung")).toHaveAttribute("aria-selected", "true");
-  expect(railTab("Assets")).toHaveAttribute("aria-selected", "false");
+  expect(railTab("Hình ảnh")).toHaveAttribute("aria-selected", "false");
 
-  fireEvent.keyDown(railTab("Assets"), { key: "End" });
+  fireEvent.keyDown(railTab("Hình ảnh"), { key: "End" });
   expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
   expect(screen.getByRole("tabpanel", { name: "Nội dung" })).toBe(contentsPanel);
 });
@@ -277,16 +282,16 @@ test("rail quản trị: Enter và Space activate focused tab", async () => {
   await renderRail();
 
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
-  fireEvent.keyDown(railTab("Assets"), { key: "Enter" });
-  expect(await screen.findByRole("tabpanel", { name: "Assets" })).toBeTruthy();
-  expect(railTab("Assets")).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(railTab("Hình ảnh"), { key: "Enter" });
+  expect(await screen.findByRole("tabpanel", { name: "Hình ảnh" })).toBeTruthy();
+  expect(railTab("Hình ảnh")).toHaveAttribute("aria-selected", "true");
   expect(screen.queryByRole("tabpanel", { name: "Nội dung" })).toBeNull();
 
-  fireEvent.keyDown(railTab("Assets"), { key: "ArrowRight" });
-  expect(railTab("Chấm điểm")).toHaveFocus();
-  fireEvent.keyDown(railTab("Chấm điểm"), { key: " " });
-  expect(await screen.findByRole("tabpanel", { name: "Chấm điểm" })).toBeTruthy();
-  expect(railTab("Chấm điểm")).toHaveAttribute("aria-selected", "true");
+  fireEvent.keyDown(railTab("Hình ảnh"), { key: "ArrowRight" });
+  expect(railTab("Tài nguyên")).toHaveFocus();
+  fireEvent.keyDown(railTab("Tài nguyên"), { key: " " });
+  expect(await screen.findByRole("tabpanel", { name: "Tài nguyên" })).toBeTruthy();
+  expect(railTab("Tài nguyên")).toHaveAttribute("aria-selected", "true");
 });
 
 test("rail quản trị: chỉ selected tab có aria-controls, không trỏ tới panel không tồn tại", async () => {
@@ -324,8 +329,168 @@ test("rail quản trị: tablist nằm ngang nên ArrowUp/ArrowDown để trang 
   for (const key of ["ArrowDown", "ArrowUp"]) {
     fireEvent.keyDown(first, { key });
     expect(first).toHaveFocus();
-    expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+    expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
   }
+});
+
+test("tab Tài nguyên hiển thị dữ liệu hiện có và PATCH đúng field resources", async () => {
+  const current = {
+    ...COMPETITION,
+    resources: [
+      { label: "Dataset", url: "https://drive.google.com/drive/folders/old" },
+    ],
+  };
+  mockApi((url, init) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.endsWith(`/admin/competitions/${COMPETITION.id}`) && init?.method === "PATCH") {
+      const resources = JSON.parse(String(init.body)).resources;
+      return { body: { ...current, resources }, status: 200 };
+    }
+    return { body: current, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+
+  expect(screen.getByLabelText("Tên tài nguyên 1")).toHaveValue("Dataset");
+  fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), {
+    target: { value: "  Dataset cập nhật  " },
+  });
+  fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
+    target: { value: "  https://docs.google.com/document/d/new  " },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+  await waitFor(() => {
+    const request = calls.find((call) => call.init?.method === "PATCH");
+    expect(request).toBeTruthy();
+    expect(JSON.parse(String(request?.init?.body))).toEqual({
+      resources: [
+        { label: "Dataset cập nhật", url: "https://docs.google.com/document/d/new" },
+      ],
+    });
+  });
+  expect(await screen.findByRole("status")).toHaveTextContent("Đã cập nhật tài nguyên.");
+  expect(screen.getByLabelText("Tên tài nguyên 1")).toHaveValue("Dataset cập nhật");
+});
+
+test("tab Tài nguyên giữ draft khi chuyển tab và cho hủy thay đổi", async () => {
+  const current = {
+    ...COMPETITION,
+    resources: [
+      { label: "Dataset", url: "https://drive.google.com/drive/folders/old" },
+    ],
+  };
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: current, status: 200 },
+  );
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+
+  expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), {
+    target: { value: "Bản nháp" },
+  });
+  expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeEnabled();
+
+  fireEvent.click(railTab("Nội dung"));
+  fireEvent.click(railTab("Tài nguyên"));
+  expect(screen.getByLabelText("Tên tài nguyên 1")).toHaveValue("Bản nháp");
+
+  fireEvent.click(screen.getByRole("button", { name: "Hủy thay đổi" }));
+  expect(screen.getByLabelText("Tên tài nguyên 1")).toHaveValue("Dataset");
+  expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
+});
+
+test("tab Tài nguyên chặn link ngoài Drive và hỗ trợ xóa toàn bộ", async () => {
+  const current = {
+    ...COMPETITION,
+    resources: [
+      { label: "Dataset", url: "https://drive.google.com/drive/folders/old" },
+    ],
+  };
+  mockApi((url, init) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (init?.method === "PATCH") {
+      return { body: { ...current, resources: JSON.parse(String(init.body)).resources }, status: 200 };
+    }
+    return { body: current, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+
+  fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
+    target: { value: "https://example.com/data.csv" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+  );
+  expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa tài nguyên 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+  await waitFor(() => {
+    const request = calls.find((call) => call.init?.method === "PATCH");
+    expect(JSON.parse(String(request?.init?.body))).toEqual({ resources: [] });
+  });
+});
+
+test("tab Tài nguyên giới hạn 10 dòng và khóa chỉnh sửa khi cuộc thi đã kết thúc", async () => {
+  const closed = { ...COMPETITION, status: "closed", resources: [] };
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: closed, status: 200 },
+  );
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+
+  expect(screen.getByText("Cuộc thi đã kết thúc — không thể sửa tài nguyên.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Thêm tài nguyên" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
+});
+
+test("tab Tài nguyên giữ draft và hiện lỗi backend khi lưu thất bại", async () => {
+  mockApi((url, init) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (init?.method === "PATCH") {
+      return {
+        body: { error: { code: "VALIDATION_ERROR", message: "Không thể lưu tài nguyên." } },
+        status: 422,
+      };
+    }
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+  fireEvent.click(screen.getByRole("button", { name: "Thêm tài nguyên" }));
+  fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), {
+    target: { value: "Dataset" },
+  });
+  fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
+    target: { value: "https://drive.google.com/file/d/abc" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Không thể lưu tài nguyên.");
+  expect(screen.getByLabelText("Tên tài nguyên 1")).toHaveValue("Dataset");
+});
+
+test("tab Tài nguyên khóa nút thêm khi đủ 10 dòng", async () => {
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: COMPETITION, status: 200 },
+  );
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
+
+  const add = screen.getByRole("button", { name: "Thêm tài nguyên" });
+  for (let index = 0; index < 10; index += 1) fireEvent.click(add);
+  expect(screen.getByLabelText("Tên tài nguyên 10")).toBeTruthy();
+  expect(add).toBeDisabled();
 });
 
 test("thêm thành viên gửi email đúng endpoint", async () => {
@@ -684,7 +849,7 @@ test("publish trả 422 vẫn hiển thị lỗi trong modal xác nhận", async
   );
 });
 
-test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và upload/delete", async () => {
+test("tab Hình ảnh render Bento 8/4, inventory table 5 cột, copy markdown và upload/delete", async () => {
   const ASSETS = {
     assets: [
       {
@@ -730,10 +895,10 @@ test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và up
   });
 
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Assets" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Hình ảnh" }));
 
   // Bento 8/4 items
-  expect(await screen.findByText("Kho lưu trữ hình ảnh (Assets)")).toBeTruthy();
+  expect(await screen.findByText("Kho lưu trữ hình ảnh")).toBeTruthy();
   expect(screen.getByText("2 tệp")).toBeTruthy();
   expect(screen.getByText("Quy chuẩn nhúng Markdown")).toBeTruthy();
   expect(screen.getByText("assets/ten-file.png")).toBeTruthy();
@@ -776,14 +941,14 @@ test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và up
   });
 });
 
-test("nút upload ảnh trong tab Assets là <button> thật nên Tab/Enter mở được picker", async () => {
+test("nút upload ảnh trong tab Hình ảnh là <button> thật nên Tab/Enter mở được picker", async () => {
   mockApi((url) => {
     if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Assets" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Hình ảnh" }));
   await screen.findByText(/Upload ảnh/);
   expectKeyboardFilePicker(/^Upload ảnh/, "Chọn tệp ảnh");
 });
@@ -1088,7 +1253,7 @@ test("trần upload lấy từ backend: hint render giá trị runtime, không h
 
   expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 7 MiB");
 
-  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
   const uploadButton = await screen.findByRole("button", { name: /Upload ảnh/ });
   expect(uploadButton.textContent).toContain("9 MiB");
   expect(screen.getByText(/Tối đa 9 MiB \/ tệp/)).toBeTruthy();
@@ -1105,7 +1270,7 @@ test("backend cũ chưa trả upload_limits: rơi về mặc định thay vì �
 
   expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 2 MiB");
 
-  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
   expect(await screen.findByText(/Tối đa 2 MiB \/ tệp/)).toBeTruthy();
 });
 
@@ -1142,7 +1307,7 @@ test("ảnh asset vượt trần bị chặn ở client, không phát request up
   });
   renderPage();
   await screen.findByText("Đề bài");
-  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
   await screen.findByRole("button", { name: /Upload ảnh/ });
 
   const input = screen.getByLabelText("Chọn tệp ảnh") as HTMLInputElement;
@@ -1314,7 +1479,14 @@ test("dải tóm tắt: đủ sáu field theo formatter hiện có, tone xoay th
 test("tab rail: icon decorative aria-hidden, accessible name vẫn đúng bằng nhãn chữ", async () => {
   await renderRail();
 
-  const labels = ["Nội dung", "Assets", "Chấm điểm", "Kết quả", "Thành viên & mã tham gia"];
+  const labels = [
+    "Nội dung",
+    "Hình ảnh",
+    "Tài nguyên",
+    "Chấm điểm",
+    "Kết quả",
+    "Thành viên & mã tham gia",
+  ];
   const tabs = within(rail()).getAllByRole("tab");
   expect(tabs.map((tab) => tab.textContent)).toEqual(labels);
 
@@ -1334,7 +1506,8 @@ test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không s
   expect(cardTones(screen.getByRole("tabpanel", { name: "Nội dung" }))).toEqual(["blue", "yellow"]);
 
   for (const [name, tones] of [
-    ["Assets", ["blue", "yellow", "red"]],
+    ["Hình ảnh", ["blue", "yellow", "red"]],
+    ["Tài nguyên", ["yellow"]],
     ["Chấm điểm", ["blue", "red", "yellow"]],
     ["Kết quả", ["yellow", "blue"]],
     ["Thành viên & mã tham gia", ["red", "blue"]],
@@ -1402,7 +1575,7 @@ test("năm bảng vẫn là vùng focus được và giữ nguyên accessible na
 
   await expectRegion("Bảng nội dung cuộc thi");
 
-  fireEvent.click(railTab("Assets"));
+  fireEvent.click(railTab("Hình ảnh"));
   await expectRegion("Bảng tài nguyên cuộc thi");
 
   // Chấm điểm: không có bảng; form cấu hình vẫn nằm trong tabpanel.

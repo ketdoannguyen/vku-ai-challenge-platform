@@ -12,11 +12,16 @@ import {
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
-import type { AdminCompetition, Competition } from "../api/competitions";
+import type {
+  AdminCompetition,
+  Competition,
+  CompetitionResource,
+} from "../api/competitions";
 import {
   DEFAULT_UPLOAD_LIMITS,
   formatLocal,
   JOIN_MODE_LABEL,
+  MAX_COMPETITION_RESOURCES,
   METRIC_LABEL,
   STATUS_LABEL,
   statusClass,
@@ -36,15 +41,20 @@ import {
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, FileButton, Loading } from "../components/ui";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
+import {
+  cleanCompetitionResources,
+  sameCompetitionResources,
+} from "../lib/competitionResources";
 
-type Tab = "contents" | "assets" | "scoring" | "members" | "results";
+type Tab = "contents" | "assets" | "resources" | "scoring" | "members" | "results";
 
 type IconComponent = (props: { className?: string }) => ReactNode;
 
 /** Định nghĩa tab ở module scope để không tạo mảng mới mỗi lần render. */
 const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }> = [
   { key: "contents", label: "Nội dung", Icon: IconFileText },
-  { key: "assets", label: "Assets", Icon: IconImage },
+  { key: "assets", label: "Hình ảnh", Icon: IconImage },
+  { key: "resources", label: "Tài nguyên", Icon: IconFolder },
   { key: "scoring", label: "Chấm điểm", Icon: IconGauge },
   { key: "results", label: "Kết quả", Icon: IconTrophy },
   { key: "members", label: "Thành viên & mã tham gia", Icon: IconUsers },
@@ -369,6 +379,15 @@ function IconKey({ className }: { className?: string }) {
   );
 }
 
+function IconFolder({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3.5 7a2 2 0 0 1 2-2h3.2a2 2 0 0 1 1.6.8l1 1.2H18.5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7Z" />
+      <path d="M12 10.5v5M9.5 13h5" />
+    </Icon>
+  );
+}
+
 function formatAssetType(contentType: string): string {
   switch (contentType.toLowerCase()) {
     case "image/png":
@@ -410,6 +429,7 @@ export function AdminCompetitionDetailPage() {
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<Tab>("contents");
   const [focusedTab, setFocusedTab] = useState<Tab>("contents");
+  const [resourceDraft, setResourceDraft] = useState<CompetitionResource[] | null>(null);
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState<CompetitionAction | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -709,6 +729,18 @@ export function AdminCompetitionDetailPage() {
           )}
           {tab === "assets" && (
             <AssetsPanel competitionId={competition.id} maxAssetMb={uploadLimits.asset_mb} />
+          )}
+          {tab === "resources" && (
+            <ResourcesPanel
+              competition={competition}
+              draft={resourceDraft}
+              onDraftChange={setResourceDraft}
+              onSaved={(saved) => {
+                setCompetition(saved);
+                setResourceDraft(null);
+              }}
+              onNotify={notify}
+            />
           )}
           {tab === "scoring" && <ScoringPanel competition={competition} />}
           {tab === "results" && <ResultsPanel competition={competition} />}
@@ -1771,7 +1803,194 @@ function ContentFormModal({
   );
 }
 
-/** ---------- Assets ---------- */
+/** ---------- Tài nguyên ---------- */
+
+function ResourcesPanel({
+  competition,
+  draft,
+  onDraftChange,
+  onSaved,
+  onNotify,
+}: {
+  competition: AdminCompetition;
+  draft: CompetitionResource[] | null;
+  onDraftChange: (resources: CompetitionResource[] | null) => void;
+  onSaved: (competition: AdminCompetition) => void;
+  onNotify: (message: string) => void;
+}) {
+  const initialResources = competition.resources ?? [];
+  const resources = draft ?? initialResources;
+  const [resourceError, setResourceError] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const locked = competition.status === "closed";
+  const dirty = !sameCompetitionResources(resources, initialResources);
+
+  function updateResource(index: number, patch: Partial<CompetitionResource>) {
+    onDraftChange(
+      resources.map((row, position) =>
+        position === index ? { ...row, ...patch } : row,
+      ),
+    );
+    setResourceError("");
+    setError(null);
+  }
+
+  function reset() {
+    onDraftChange(null);
+    setResourceError("");
+    setError(null);
+  }
+
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    if (locked || !dirty) return;
+
+    setResourceError("");
+    setError(null);
+    const cleaned = cleanCompetitionResources(resources);
+    if (!cleaned.ok) {
+      setResourceError(cleaned.message);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const saved = await api.patch<AdminCompetition>(
+        `/admin/competitions/${competition.id}`,
+        { resources: cleaned.resources },
+      );
+      onSaved(saved);
+      onNotify("Đã cập nhật tài nguyên.");
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="admin-detail-card" data-tone="yellow">
+      <div className="admin-detail-card-head">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconFolder className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Tài nguyên tải về</h2>
+            <p className="admin-detail-card-desc">
+              Chỉ nhận link Google Drive hoặc Google Docs. Hãy đặt quyền chia sẻ “Bất kỳ ai có
+              liên kết” để thí sinh có thể mở tài liệu.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {locked && (
+        <div className="status-banner warning">
+          Cuộc thi đã kết thúc — không thể sửa tài nguyên.
+        </div>
+      )}
+
+      <form className="admin-resource-form" onSubmit={save} noValidate>
+        <fieldset className="admin-resource-fieldset" disabled={locked || busy}>
+          <legend className="sr-only">Danh sách tài nguyên tải về</legend>
+          {resources.length === 0 ? (
+            <p className="admin-resource-empty">Chưa có tài nguyên nào.</p>
+          ) : (
+            <div className="admin-resource-list">
+              {resources.map((resource, index) => (
+                <div className="admin-resource-row" key={index}>
+                  <div className="form-field">
+                    <label className="field-label" htmlFor={`resource-label-${index}`}>
+                      Tên tài nguyên {index + 1}
+                    </label>
+                    <input
+                      id={`resource-label-${index}`}
+                      className="input"
+                      value={resource.label}
+                      onChange={(event) => updateResource(index, { label: event.target.value })}
+                      placeholder="Ví dụ: Dataset huấn luyện"
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="field-label" htmlFor={`resource-url-${index}`}>
+                      Link tài nguyên {index + 1}
+                    </label>
+                    <input
+                      id={`resource-url-${index}`}
+                      className="input admin-resource-url"
+                      type="url"
+                      value={resource.url}
+                      onChange={(event) => updateResource(index, { url: event.target.value })}
+                      placeholder="https://drive.google.com/..."
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="btn admin-detail-danger-action admin-resource-remove"
+                    onClick={() => {
+                      onDraftChange(
+                        resources.filter((_, position) => position !== index),
+                      );
+                      setResourceError("");
+                      setError(null);
+                    }}
+                    aria-label={`Xóa tài nguyên ${index + 1}`}
+                  >
+                    <IconTrash className="admin-detail-primary-icon" />
+                    <span>Xóa</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="btn admin-detail-outline-action admin-resource-add"
+            onClick={() => {
+              onDraftChange([...resources, { label: "", url: "" }]);
+              setResourceError("");
+              setError(null);
+            }}
+            disabled={locked || busy || resources.length >= MAX_COMPETITION_RESOURCES}
+          >
+            <IconPlus className="admin-detail-primary-icon" />
+            <span>Thêm tài nguyên</span>
+          </button>
+        </fieldset>
+
+        {resourceError && (
+          <div className="error-box" role="alert">
+            {resourceError}
+          </div>
+        )}
+        {error !== null && <ErrorBox error={error} />}
+
+        <div className="admin-resource-actions">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={locked || busy || !dirty}
+            onClick={reset}
+          >
+            Hủy thay đổi
+          </button>
+          <button
+            type="submit"
+            className="btn admin-detail-primary-action"
+            disabled={locked || busy || !dirty}
+          >
+            {busy ? "Đang lưu..." : "Lưu thay đổi"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/** ---------- Hình ảnh ---------- */
 
 function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; maxAssetMb: number }) {
   const [assets, setAssets] = useState<AssetItem[]>([]);
@@ -1866,7 +2085,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
             </div>
             <div className="s14-card-header-text">
               <div className="s14-card-title-row">
-                <h2 className="s14-card-title">Kho lưu trữ hình ảnh (Assets)</h2>
+                <h2 className="s14-card-title">Kho lưu trữ hình ảnh</h2>
                 <span className="s14-badge-count">{assets.length} tệp</span>
               </div>
               <p className="s14-card-desc">

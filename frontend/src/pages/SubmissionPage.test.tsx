@@ -142,6 +142,19 @@ test("submit hiển thị loading rồi metrics và quota còn lại", async () 
   );
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
   expect(screen.getAllByText("0.500000")).toHaveLength(3);
+
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  const precisionCard = document.querySelector<HTMLElement>('[data-metric="precision"]');
+  const recallCard = document.querySelector<HTMLElement>('[data-metric="recall"]');
+  expect([f1Card, precisionCard, recallCard].every(Boolean)).toBe(true);
+  expect(f1Card).toHaveClass("primary");
+  expect(precisionCard).not.toHaveClass("primary");
+  expect(recallCard).not.toHaveClass("primary");
+  expect(within(f1Card as HTMLElement).getByText("F1")).toBeTruthy();
+  expect(within(precisionCard as HTMLElement).getByText("Precision")).toBeTruthy();
+  expect(within(recallCard as HTMLElement).getByText("Recall")).toBeTruthy();
+  expect(screen.getAllByText("Chỉ số chính")).toHaveLength(1);
+
   expect(screen.getByText("Còn 4 lượt nộp hôm nay.")).toBeTruthy();
 });
 

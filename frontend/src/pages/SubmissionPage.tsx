@@ -222,6 +222,7 @@ export function SubmissionPage() {
                 return (
                   <div
                     className={`metric-card sub-result-card${isPrimary ? " primary" : ""}`}
+                    data-metric={metric}
                     key={metric}
                   >
                     <div className="sub-result-card-top">
