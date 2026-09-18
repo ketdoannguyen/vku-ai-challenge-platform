@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup production VKU AI Challenge (MongoDB + app data)
+Documentation=file:/srv/vku-ai-challenge/repo/docs/DEPLOYMENT.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/vku-ai-challenge/repo/scripts/backup_prod.sh

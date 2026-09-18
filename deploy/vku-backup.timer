@@ -1,0 +1,11 @@
+[Unit]
+Description=Chạy backup production mỗi ngày một lần
+
+[Timer]
+# Giờ lệch phút để không trùng các tác vụ chạy đúng đầu giờ
+OnCalendar=*-*-* 03:17:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

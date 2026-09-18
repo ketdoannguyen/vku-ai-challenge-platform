@@ -1,0 +1,134 @@
+# Production stack (Sprint 08) — file tự đứng, KHÔNG kế thừa docker-compose.yml.
+#
+# Khác biệt có chủ ý so với bản dev:
+#   - Không publish bất kỳ port nào ra host. cloudflared đi vào `web:80` qua Docker network,
+#     nên host chỉ còn lắng nghe SSH (master context §13). Muốn soi nội bộ thì dùng SSH tunnel.
+#   - Dữ liệu bind-mount ra ngoài repo (`${PROD_DATA_ROOT}`) thay vì named volume, để backup
+#     và di chuyển sang persistent disk là thao tác copy chứ không phải migrate dữ liệu.
+#   - Env credential dùng `${VAR:?}` để thiếu .env là `up` dừng ngay, không âm thầm rơi về `changeme`.
+#   - KHÔNG dùng `env_file:` cho service `api`: Settings của backend đặt `extra="forbid"`, nên các
+#     biến chỉ phục vụ Compose (`PROD_DATA_ROOT`, `PROD_BACKUP_ROOT`) sẽ làm API chết lúc khởi động.
+#     Vì vậy `api` nhận đúng danh sách env bên dưới, không nhận cả file.
+#
+# Cách dùng (trên VM production):
+#   sudo docker compose --env-file /srv/vku-ai-challenge/.env -f docker-compose.prod.yml up -d
+#
+# TUYỆT ĐỐI KHÔNG chạy `down -v`: dữ liệu nằm ở bind mount ngoài repo, nhưng thói quen đó sẽ
+# xoá volume của stack khác trên cùng máy.
+
+name: vku-challenge
+
+services:
+  mongo:
+    image: mongo:7.0.43
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?MONGO_USER bắt buộc có trong .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD bắt buộc có trong .env}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-ai_challenge}
+    # KHÔNG publish 27017 ra host (master context §13)
+    expose:
+      - "27017"
+    volumes:
+      - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  api:
+    build:
+      context: ./backend
+    image: vku-challenge-api:prod
+    environment:
+      APP_ENV: production
+      APP_NAME: ${APP_NAME:-AI Challenge Platform}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ai_challenge}
+      MONGO_USER: ${MONGO_USER:?MONGO_USER bắt buộc có trong .env}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD bắt buộc có trong .env}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MAX_CONTENT_MB: ${MAX_CONTENT_MB:-2}
+      MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
+      DATA_DIR: /data
+      # SESSION_SECRET trong .env.example là config chết (ADR-008) — session là token ngẫu nhiên
+      # server-side, không ký cookie, nên không truyền và không sinh thêm.
+      SESSION_LIFETIME_HOURS: ${SESSION_LIFETIME_HOURS:-24}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aic_session}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
+      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
+    expose:
+      - "8000" # internal only — đi qua Nginx same-origin (ADR-002)
+    volumes:
+      - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/app:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      # python:3.12-slim không có curl; dùng stdlib, urlopen raise khi status != 200.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+
+  web:
+    build:
+      context: ./frontend
+    image: vku-challenge-web:prod
+    expose:
+      - "80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # nginx:1.27-alpine có wget của BusyBox; /healthz phục vụ tĩnh, không phụ thuộc SPA build.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    # Quick Tunnel: URL công khai ngẫu nhiên dạng *.trycloudflare.com, ĐỔI mỗi lần container
+    # restart và không có SLA (Cloudflare xếp trycloudflare là công cụ test). Khi có domain thật
+    # thì thay bằng named tunnel: `tunnel --no-autoupdate run` + CLOUDFLARE_TUNNEL_TOKEN.
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 127.0.0.1:20241
+      - --url
+      - http://web:80
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      # Image cloudflared là distroless (không có shell/curl), nhưng chính binary cloudflared
+      # gọi được /ready của metrics server — đã kiểm chứng trả exit 0 khi tunnel lên.
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
