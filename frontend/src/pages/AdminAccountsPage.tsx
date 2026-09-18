@@ -5,11 +5,21 @@ import { api, ApiClientError } from "../api/client";
 import { useOptionalAuth, type Account } from "../auth/AuthContext";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 interface AccountsResponse {
   accounts: Account[];
   total: number;
   limit: number;
+  offset: number;
+}
+
+const PAGE_SIZE = 50;
+
+/** Truy vấn đang hiệu lực. `q` và `offset` luôn đổi cùng nhau để không fetch
+ *  từ khóa mới ở offset cũ (kết quả sẽ trống oan). */
+interface AccountsQuery {
+  q: string;
   offset: number;
 }
 
@@ -21,26 +31,35 @@ export function AdminAccountsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState<AccountsQuery>({ q: "", offset: 0 });
   const [message, setMessage] = useState("");
   const [creating, setCreating] = useState(false);
   const requestSequence = useRef(0);
   const firstSearch = useRef(true);
   const hasData = useRef(false);
   const messageTimer = useRef<number | null>(null);
+  useDocumentTitle("Quản lý tài khoản");
 
-  const load = useCallback(async (q: string, keepRows = false) => {
+  const load = useCallback(async (q: string, offset: number, keepRows = false) => {
     const sequence = ++requestSequence.current;
     setError(null);
     if (keepRows) setRefreshing(true);
     else setLoading(true);
-    const params = new URLSearchParams({ limit: "200" });
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
     if (q) params.set("q", q);
     try {
       const response = await api.get<AccountsResponse>(`/admin/accounts?${params.toString()}`);
-      if (sequence === requestSequence.current) {
-        hasData.current = true;
-        setData(response);
+      if (sequence !== requestSequence.current) return;
+      hasData.current = true;
+      // Trang cuối có thể vừa rỗng đi sau khi vô hiệu hóa/xóa — lùi về trang còn dữ liệu.
+      if (response.accounts.length === 0 && response.offset > 0) {
+        const lastOffset = Math.max(0, Math.floor(Math.max(response.total - 1, 0) / PAGE_SIZE) * PAGE_SIZE);
+        if (lastOffset !== response.offset) {
+          setQuery((current) => (current.offset === response.offset ? { ...current, offset: lastOffset } : current));
+          return;
+        }
       }
+      setData(response);
     } catch (err) {
       if (sequence === requestSequence.current) setError(err);
     } finally {
@@ -64,10 +83,20 @@ export function AdminAccountsPage() {
     const delay = firstSearch.current ? 0 : 300;
     firstSearch.current = false;
     const timer = window.setTimeout(() => {
-      void load(search.trim(), hasData.current);
+      // Trả về chính object cũ khi không có gì đổi để React bỏ qua render và
+      // không phát thêm request trùng lúc mount.
+      setQuery((current) =>
+        current.q === search.trim() && current.offset === 0
+          ? current
+          : { q: search.trim(), offset: 0 },
+      );
     }, delay);
     return () => window.clearTimeout(timer);
-  }, [load, search]);
+  }, [search]);
+
+  useEffect(() => {
+    void load(query.q, query.offset, hasData.current);
+  }, [load, query]);
 
   useEffect(
     () => () => {
@@ -75,6 +104,10 @@ export function AdminAccountsPage() {
     },
     [],
   );
+
+  const shownFrom = data ? data.offset + 1 : 0;
+  const shownTo = data ? data.offset + data.accounts.length : 0;
+  const hasNext = data ? shownTo < data.total : false;
 
   return (
     <div className="page admin-accounts">
@@ -114,7 +147,13 @@ export function AdminAccountsPage() {
       )}
       {Boolean(error) && data && <ErrorBox error={error} />}
 
-      <div className="table-wrap admin-accounts-table-wrap" aria-busy={loading || refreshing}>
+      <div
+        className="table-wrap admin-accounts-table-wrap"
+        aria-busy={loading || refreshing}
+        tabIndex={0}
+        role="region"
+        aria-label="Bảng tài khoản"
+      >
         <table className="table admin-accounts-table">
           <thead>
             <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr>
@@ -127,7 +166,7 @@ export function AdminAccountsPage() {
                 <td colSpan={5} className="table-state">
                   <div className="admin-accounts-error">
                     <ErrorBox error={error} />
-                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load(search.trim())}>Thử lại</button>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load(query.q, query.offset)}>Thử lại</button>
                   </div>
                 </td>
               </tr>
@@ -137,7 +176,7 @@ export function AdminAccountsPage() {
                   key={account.id}
                   account={account}
                   isCurrent={account.id === currentAccountId}
-                  onChanged={() => void load(search.trim(), true)}
+                  onChanged={() => void load(query.q, query.offset, true)}
                   onMessage={notify}
                 />
               ))
@@ -153,14 +192,47 @@ export function AdminAccountsPage() {
             )}
           </tbody>
         </table>
-        {data && (
-          <div className="admin-accounts-total">
-            {data.accounts.length < data.total
-              ? <>Đang hiển thị <strong>{data.accounts.length}</strong> / {data.total}</>
-              : <>Tổng số: <strong>{data.total}</strong></>}
-          </div>
-        )}
       </div>
+
+      {/* Pager nằm ngoài vùng cuộn ngang để không trôi theo bảng. */}
+      {data && data.total > PAGE_SIZE && (
+        <div className="pagination pagination-controls admin-accounts-pagination">
+          <div role="status">
+            {loading || refreshing ? (
+              "Đang cập nhật…"
+            ) : (
+              <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> tài khoản</>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              aria-disabled={loading || refreshing || data.offset === 0}
+              onClick={() => {
+                if (!loading && !refreshing && data.offset > 0) {
+                  setQuery((current) => ({ ...current, offset: data.offset - PAGE_SIZE }));
+                }
+              }}
+            >
+              Trang trước
+            </button>
+            <span>{shownFrom}–{shownTo} / {data.total}</span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              aria-disabled={loading || refreshing || !hasNext}
+              onClick={() => {
+                if (!loading && !refreshing && hasNext) {
+                  setQuery((current) => ({ ...current, offset: data.offset + PAGE_SIZE }));
+                }
+              }}
+            >
+              Trang sau
+            </button>
+          </div>
+        </div>
+      )}
 
       {creating && (
         <CreateAccountModal
@@ -168,7 +240,7 @@ export function AdminAccountsPage() {
           onCreated={(email) => {
             setCreating(false);
             notify(`Đã tạo tài khoản ${email}.`);
-            void load(search.trim(), true);
+            void load(query.q, query.offset, true);
           }}
         />
       )}

@@ -1,8 +1,8 @@
 /** Competition shell: masthead (trạng thái, đếm ngược, chỉ số) + tab bar + mục lục nội dung + nested routes. */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams, useResolvedPath } from "react-router-dom";
-import { api } from "../api/client";
+import { ApiClientError, api } from "../api/client";
 import type { Competition, Membership } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
@@ -16,6 +16,14 @@ import { ErrorBox } from "../components/ui";
 import { CompetitionResources } from "../components/CompetitionResources";
 import { JoinControl } from "../components/JoinControl";
 import { useCountdown } from "../hooks/useCountdown";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
+
+/** Tiêu đề tab theo khu vực đang mở; `content/*` để panel nội dung tự đặt theo tài liệu. */
+const WORKSPACE_TITLE: { suffix: string; title: string }[] = [
+  { suffix: "/submit", title: "Nộp bài" },
+  { suffix: "/submissions", title: "Bài đã nộp" },
+  { suffix: "/leaderboard", title: "Bảng xếp hạng" },
+];
 
 export interface CompetitionContext {
   competition: Competition;
@@ -104,6 +112,33 @@ const TABS: { to: string; end: boolean; label: string; icon: React.ReactNode }[]
   },
 ];
 
+/** Slug sai (404) khác lỗi tải thật; dùng cho cả H1 lẫn tiêu đề tab. */
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 404;
+}
+
+/**
+ * Tiêu đề tab của khung cuộc thi. Trả `undefined` ở route `content/*` để panel nội
+ * dung tự đặt tiêu đề theo tài liệu thay vì bị khung ghi đè.
+ */
+function shellTitle({
+  isContentRoute,
+  pathname,
+  error,
+  competition,
+}: {
+  isContentRoute: boolean;
+  pathname: string;
+  error: unknown;
+  competition: Competition | null;
+}): string | undefined {
+  if (isContentRoute) return undefined;
+  const workspace = WORKSPACE_TITLE.find((item) => pathname.endsWith(item.suffix));
+  if (workspace) return workspace.title;
+  if (error) return isNotFound(error) ? "Không tìm thấy cuộc thi" : "Không thể tải cuộc thi";
+  return competition?.name ?? "Cuộc thi";
+}
+
 export function CompetitionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { pathname } = useLocation();
@@ -113,23 +148,30 @@ export function CompetitionDetailPage() {
   const [error, setError] = useState<unknown>(null);
   const [contentsLoading, setContentsLoading] = useState(true);
   const [contentsError, setContentsError] = useState<unknown>(null);
+  /** Slug của request mới nhất: response của slug cũ không được ghi vào state khi đổi nhanh. */
+  const requestedSlug = useRef(slug);
 
   const loadCompetition = useCallback(async () => {
+    const forSlug = slug;
+    requestedSlug.current = forSlug;
     setLoading(true);
     setError(null);
     try {
-      setCompetition(await api.get<Competition>(`/competitions/${slug}`));
+      const data = await api.get<Competition>(`/competitions/${forSlug}`);
+      if (requestedSlug.current === forSlug) setCompetition(data);
     } catch (err) {
-      setError(err);
+      if (requestedSlug.current === forSlug) setError(err);
     } finally {
-      setLoading(false);
+      if (requestedSlug.current === forSlug) setLoading(false);
     }
   }, [slug]);
 
   /** Refetch im lặng: quota là thông tin phụ, lỗi mạng không được xoá nội dung đang xem. */
   const refreshCompetition = useCallback(async () => {
+    const forSlug = slug;
     try {
-      setCompetition(await api.get<Competition>(`/competitions/${slug}`));
+      const data = await api.get<Competition>(`/competitions/${forSlug}`);
+      if (requestedSlug.current === forSlug) setCompetition(data);
     } catch {
       // Giữ nguyên dữ liệu cũ; lần nộp kế tiếp vẫn được backend kiểm tra quota thật.
     }
@@ -138,26 +180,42 @@ export function CompetitionDetailPage() {
   // Danh sách nội dung tải độc lập với cuộc thi: lỗi ở đây hiện trạng thái lỗi + "Thử lại",
   // tuyệt đối không rơi về "chưa có nội dung" vì hai tình huống này khác nhau.
   const loadContents = useCallback(async () => {
+    const forSlug = slug!;
     setContentsLoading(true);
     setContentsError(null);
     try {
-      const data = await fetchContents(slug!);
+      const data = await fetchContents(forSlug);
+      if (requestedSlug.current !== forSlug) return;
       setContents(data.contents);
     } catch (err) {
+      if (requestedSlug.current !== forSlug) return;
       setContentsError(err);
       setContents([]);
     } finally {
-      setContentsLoading(false);
+      if (requestedSlug.current === forSlug) setContentsLoading(false);
     }
   }, [slug]);
 
   useEffect(() => {
+    // Đổi slug: xoá dữ liệu cũ trước khi tải slug mới để không hiển thị nhầm cuộc thi.
+    setCompetition(null);
+    setContents([]);
+    setContentsError(null);
+    setContentsLoading(true);
     void loadCompetition();
+  }, [loadCompetition]);
+
+  useEffect(() => {
+    // Chỉ hỏi mục lục khi cuộc thi của đúng slug hiện tại đã tải xong: slug sai (404)
+    // không tốn thêm request nội dung và không hiện lỗi nội dung gây nhiễu.
+    if (competition?.slug !== slug) return;
     void loadContents();
-  }, [loadCompetition, loadContents]);
+  }, [competition?.slug, slug, loadContents]);
 
   // Gọi vô điều kiện trước mọi nhánh return; chuỗi rỗng khi chưa tải xong cũng trả null.
   const remaining = useCountdown(competition?.end_at ?? "");
+  const isContentRoute = pathname.includes("/content/");
+  useDocumentTitle(shellTitle({ isContentRoute, pathname, error, competition }));
 
   if (loading) {
     return (
@@ -194,6 +252,10 @@ export function CompetitionDetailPage() {
   if (error || !competition) {
     return (
       <div className="page comp-page">
+        {/* Trang lỗi vẫn cần một H1 mô tả trạng thái; `ErrorBox` cố ý không tự render heading. */}
+        <h1 className="comp-error-title">
+          {isNotFound(error) ? "Không tìm thấy cuộc thi" : "Không thể tải cuộc thi"}
+        </h1>
         <ErrorBox error={error} />
         <div className="comp-error-actions">
           <button type="button" className="btn btn-secondary" onClick={() => void loadCompetition()}>
@@ -301,7 +363,7 @@ export function CompetitionDetailPage() {
         </dl>
       </header>
 
-      <nav className="comp-tabs" aria-label="Mục lục cuộc thi" role="tablist">
+      <nav className="comp-tabs" aria-label="Mục lục cuộc thi">
         {TABS.map((tab) => (
           <CompTab key={tab.to} to={tab.to} end={tab.end} label={tab.label} icon={tab.icon} />
         ))}
@@ -382,7 +444,10 @@ export function CompetitionDetailPage() {
   );
 }
 
-/** Tab điều hướng dạng pill; tự tính active để đặt được aria-selected (NavLink không cho set). */
+/**
+ * Mục lục dạng pill. Đây là điều hướng route chứ không phải tab cục bộ, nên chỉ
+ * đánh dấu `aria-current="page"` — không giả lập `role="tab"`/`aria-selected`.
+ */
 function CompTab({
   to,
   end,
@@ -407,8 +472,7 @@ function CompTab({
   return (
     <Link
       to={to}
-      role="tab"
-      aria-selected={isActive}
+      aria-current={isActive ? "page" : undefined}
       className={`comp-tab${isActive ? " active" : ""}`}
     >
       <Icon>{icon}</Icon>

@@ -6,14 +6,22 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query, Request
 from bson import ObjectId
 from bson.errors import InvalidId
+from pymongo.errors import DuplicateKeyError
 
 from app.auth.dependencies import AdminAccount
 from app.competitions import service
+from app.core.config import get_settings
 from app.core.errors import api_error
+from app.core.slugs import is_valid_slug
 from app.scoring.readiness import blocked_reason, check_readiness
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
+
+_SLUG_EXISTS_MESSAGE = "Slug này đã có cuộc thi khác dùng."
+# Số ứng viên tối đa cho slug clone trước khi bỏ cuộc — chặn vòng lặp vô hạn khi slug gốc quá dài.
+_CLONE_SUFFIX = "-copy"
+_CLONE_SLUG_ATTEMPTS = 5
 
 
 async def _get_competition_or_404(db, competition_id: str) -> dict:
@@ -50,8 +58,12 @@ async def create_competition(body: service.CompetitionCreate, request: Request, 
         raise api_error(422, "VALIDATION_ERROR", str(exc))
     db = request.app.state.mongo.db
     if await service.find_competition_by_slug(db, body.slug) is not None:
-        raise api_error(409, "SLUG_EXISTS", "Slug này đã có cuộc thi khác dùng.")
-    competition = await service.insert_competition(db, body, created_by=admin["email"])
+        raise api_error(409, "SLUG_EXISTS", _SLUG_EXISTS_MESSAGE)
+    try:
+        competition = await service.insert_competition(db, body, created_by=admin["email"])
+    except DuplicateKeyError:
+        # Hai request cùng slug có thể cùng vượt bước kiểm tra trên; index unique là chốt cuối.
+        raise api_error(409, "SLUG_EXISTS", _SLUG_EXISTS_MESSAGE)
     logger.info("Admin %s created competition slug=%s", admin["email"], competition["slug"])
     return _admin_detail(competition)
 
@@ -71,10 +83,18 @@ def _admin_detail(competition: dict) -> dict:
     ground truth nên không được chạy cho từng dòng của bảng admin.
     """
     readiness = check_readiness(competition)
+    settings = get_settings()
     return {
         **service.admin_competition(competition),
         "publish_ready": readiness.ready,
         "publish_blocked_reason": blocked_reason(readiness),
+        # Trần upload là cấu hình môi trường, không lưu theo cuộc thi (ADR-011);
+        # đọc tại thời điểm request để UI hiển thị đúng giá trị đang áp dụng.
+        "upload_limits": {
+            "submission_mb": settings.max_upload_mb,
+            "content_mb": settings.max_content_mb,
+            "asset_mb": settings.max_asset_mb,
+        },
     }
 
 
@@ -179,29 +199,38 @@ async def clone_competition(competition_id: str, request: Request, admin: AdminA
     """Clone config baseline thành draft mới. KHÔNG copy status/dates/submissions/memberships (ADR-009)."""
     db = request.app.state.mongo.db
     source = await _get_competition_or_404(db, competition_id)
-    slug = await _next_clone_slug(db, source["slug"])
-    data = service.CompetitionCreate(
-        slug=slug,
-        name=f"{source['name']} (bản sao)",
-        short_description=source.get("short_description", ""),
-        start_at=datetime.now(timezone.utc),
-        end_at=datetime.now(timezone.utc).replace(year=datetime.now(timezone.utc).year + 1),
-        join_mode=source["join_mode"],
-        primary_metric=source["primary_metric"],
-        quota_per_day=source["quota_per_day"],
-        leaderboard_visible=source["leaderboard_visible"],
-        resources=service.public_resources(source),
-    )
-    clone = await service.insert_competition(db, data, created_by=admin["email"])
-    logger.info("Admin %s cloned competition %s -> %s", admin["email"], source["slug"], slug)
-    return _admin_detail(clone)
+    for attempt in range(1, _CLONE_SLUG_ATTEMPTS + 1):
+        # Ứng viên phải hợp lệ và nằm trong giới hạn trước khi tra DB; slug gốc dài có thể cắt cụt.
+        slug = _clone_slug_candidate(source["slug"], attempt)
+        if not is_valid_slug(slug) or await service.find_competition_by_slug(db, slug) is not None:
+            continue
+        data = service.CompetitionCreate(
+            slug=slug,
+            name=f"{source['name']} (bản sao)",
+            short_description=source.get("short_description", ""),
+            start_at=datetime.now(timezone.utc),
+            end_at=datetime.now(timezone.utc).replace(year=datetime.now(timezone.utc).year + 1),
+            join_mode=source["join_mode"],
+            primary_metric=source["primary_metric"],
+            quota_per_day=source["quota_per_day"],
+            leaderboard_visible=source["leaderboard_visible"],
+            resources=service.public_resources(source),
+        )
+        try:
+            clone = await service.insert_competition(db, data, created_by=admin["email"])
+        except DuplicateKeyError:
+            continue  # Request khác vừa chiếm slug — thử ứng viên kế tiếp.
+        logger.info("Admin %s cloned competition %s -> %s", admin["email"], source["slug"], slug)
+        return _admin_detail(clone)
+    raise api_error(409, "SLUG_EXISTS", _SLUG_EXISTS_MESSAGE)
 
 
-async def _next_clone_slug(db, base_slug: str) -> str:
-    suffix = "-copy"
-    slug = f"{base_slug}{suffix}"
-    n = 2
-    while await service.find_competition_by_slug(db, slug) is not None:
-        slug = f"{base_slug}{suffix}{n}"
-        n += 1
-    return slug[: service._SLUG_MAX]
+def _clone_slug_candidate(base_slug: str, attempt: int) -> str:
+    """Slug clone cho lần thử thứ `attempt` (từ 1): base + '-copy', các lần sau thêm số.
+
+    Cắt base để tổng không vượt SLUG_MAX rồi bỏ gạch ngang cuối — nếu không, base dài sát
+    giới hạn sẽ tạo ra slug kết thúc bằng '-' (không hợp lệ).
+    """
+    suffix = _CLONE_SUFFIX if attempt == 1 else f"{_CLONE_SUFFIX}{attempt}"
+    stem = base_slug[: service._SLUG_MAX - len(suffix)].rstrip("-")
+    return f"{stem}{suffix}"

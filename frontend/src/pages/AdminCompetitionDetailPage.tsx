@@ -7,12 +7,14 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { AdminCompetition, Competition } from "../api/competitions";
 import {
+  DEFAULT_UPLOAD_LIMITS,
   formatLocal,
   JOIN_MODE_LABEL,
   METRIC_LABEL,
@@ -32,9 +34,19 @@ import {
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
 import { ConfirmModal, Modal } from "../components/Modal";
-import { ErrorBox, Loading } from "../components/ui";
+import { ErrorBox, FileButton, Loading } from "../components/ui";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 type Tab = "contents" | "assets" | "scoring" | "members" | "results";
+
+/** Định nghĩa tab ở module scope để không tạo mảng mới mỗi lần render. */
+const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string }> = [
+  { key: "contents", label: "Nội dung" },
+  { key: "assets", label: "Assets" },
+  { key: "scoring", label: "Chấm điểm" },
+  { key: "results", label: "Kết quả" },
+  { key: "members", label: "Thành viên & mã tham gia" },
+];
 
 interface AdminContent extends ContentSummary {
   markdown?: string;
@@ -237,6 +249,11 @@ function formatAssetType(contentType: string): string {
   }
 }
 
+/** Chặn ở client để file quá trần không phát request; câu chữ khớp lỗi 413 của backend. */
+function tooLargeMessage(file: File, limitMb: number): string | null {
+  return file.size > limitMb * 1024 * 1024 ? `File vượt quá giới hạn ${limitMb} MiB.` : null;
+}
+
 function formatBytes(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 B";
   if (bytes < 1024) return `${bytes} B`;
@@ -256,10 +273,14 @@ export function AdminCompetitionDetailPage() {
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState<Tab>("contents");
+  const [focusedTab, setFocusedTab] = useState<Tab>("contents");
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState<CompetitionAction | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const messageTimer = useRef<number | null>(null);
+  // Tên cuộc thi chỉ biết sau khi tải xong nên tiêu đề tab bám theo dữ liệu, không theo id.
+  useDocumentTitle(competition?.name ?? (error ? "Không thể tải cuộc thi" : "Quản lý cuộc thi"));
 
   const load = useCallback(async () => {
     setError(null);
@@ -293,6 +314,44 @@ export function AdminCompetitionDetailPage() {
     }, 4500);
   }
 
+  // Manual activation: đổi tab sẽ mount panel và có thể phát API request, nên Arrow chỉ
+  // dời focus; Enter/Space/click mới thực sự đổi panel.
+  function activateTab(key: Tab) {
+    setTab(key);
+    setFocusedTab(key);
+  }
+
+  // Tablist luôn nằm ngang nên chỉ ArrowLeft/ArrowRight dời focus; ArrowUp/ArrowDown
+  // để nguyên cho trình duyệt cuộn trang.
+  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    const last = ADMIN_TABS.length - 1;
+    let next: number;
+    switch (event.key) {
+      case "ArrowRight":
+        next = index === last ? 0 : index + 1;
+        break;
+      case "ArrowLeft":
+        next = index === 0 ? last : index - 1;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = last;
+        break;
+      case "Enter":
+      case " ":
+        event.preventDefault();
+        activateTab(ADMIN_TABS[index].key);
+        return;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setFocusedTab(ADMIN_TABS[next].key);
+    tabRefs.current[next]?.focus();
+  }
+
   if (loading) {
     return (
       <div className="page">
@@ -303,6 +362,8 @@ export function AdminCompetitionDetailPage() {
   if (error || !competition) {
     return (
       <div className="page">
+        {/* Trang lỗi cần H1 mô tả trạng thái; `ErrorBox` cố ý không tự render heading. */}
+        <h1 className="page-title">Không thể tải cuộc thi</h1>
         <ErrorBox error={error} />
         <p>
           <Link to="/admin/competitions">← Về danh sách cuộc thi</Link>
@@ -313,6 +374,8 @@ export function AdminCompetitionDetailPage() {
 
   const editDisabled = competition.status === "closed";
   const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
+  // Backend cũ chưa trả `upload_limits` — rơi về mặc định thay vì ẩn hint.
+  const uploadLimits = competition.upload_limits ?? DEFAULT_UPLOAD_LIMITS;
   // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
   const publishBlocked = competition.publish_blocked_reason ?? null;
 
@@ -404,40 +467,16 @@ export function AdminCompetitionDetailPage() {
           </div>
         </div>
 
-        <section className="admin-detail-summary card admin-competition-summary" aria-label="Thông tin chung cuộc thi">
-          <dl className="admin-detail-meta comp-meta">
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Slug</dt><dd className="mono">{competition.slug}</dd></div>
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Bắt đầu</dt><dd>{formatLocal(competition.start_at)}</dd></div>
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Kết thúc</dt><dd>{formatLocal(competition.end_at)}</dd></div>
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Tham gia</dt><dd>{JOIN_MODE_LABEL[competition.join_mode] ?? competition.join_mode}</dd></div>
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Chỉ số chính</dt><dd>{METRIC_LABEL[competition.primary_metric] ?? competition.primary_metric.toUpperCase()}</dd></div>
-            <div className="admin-detail-meta-item comp-meta-item"><dt>Quota</dt><dd>{competition.quota_per_day} lượt/ngày</dd></div>
+        <section className="admin-competition-summary" aria-label="Thông tin chung cuộc thi">
+          <dl className="admin-detail-facts">
+            <div className="admin-detail-fact"><dt>Slug</dt><dd className="mono">{competition.slug}</dd></div>
+            <div className="admin-detail-fact"><dt>Bắt đầu</dt><dd>{formatLocal(competition.start_at)}</dd></div>
+            <div className="admin-detail-fact"><dt>Kết thúc</dt><dd>{formatLocal(competition.end_at)}</dd></div>
+            <div className="admin-detail-fact"><dt>Tham gia</dt><dd>{JOIN_MODE_LABEL[competition.join_mode] ?? competition.join_mode}</dd></div>
+            <div className="admin-detail-fact"><dt>Chỉ số chính</dt><dd>{METRIC_LABEL[competition.primary_metric] ?? competition.primary_metric.toUpperCase()}</dd></div>
+            <div className="admin-detail-fact"><dt>Quota</dt><dd>{competition.quota_per_day} lượt/ngày</dd></div>
           </dl>
         </section>
-
-        <nav className="tab-nav admin-detail-tabs" aria-label="Quản lý cuộc thi" role="tablist">
-          {(
-            [
-              ["contents", "Nội dung"],
-              ["assets", "Assets"],
-              ["scoring", "Chấm điểm"],
-              ["results", "Kết quả"],
-              ["members", "Thành viên & mã tham gia"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              className={`tab-link admin-detail-tab${tab === key ? " active" : ""}`}
-              onClick={() => setTab(key)}
-            >
-              <span>{label}</span>
-              {tab === key && <span className="admin-detail-tab-indicator" aria-hidden="true" />}
-            </button>
-          ))}
-        </nav>
       </header>
 
       {competition.status === "draft" && publishBlocked && (
@@ -452,7 +491,7 @@ export function AdminCompetitionDetailPage() {
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            onClick={() => setTab("scoring")}
+            onClick={() => activateTab("scoring")}
           >
             Mở tab Chấm điểm
           </button>
@@ -473,11 +512,55 @@ export function AdminCompetitionDetailPage() {
         </div>
       )}
 
-      {tab === "contents" && <ContentsPanel competitionId={competition.id} />}
-      {tab === "assets" && <AssetsPanel competitionId={competition.id} />}
-      {tab === "scoring" && <ScoringPanel competition={competition} />}
-      {tab === "results" && <ResultsPanel competition={competition} />}
-      {tab === "members" && <MembersPanel competition={competition} onCompetitionChanged={load} />}
+      <div className="admin-detail-layout">
+        {/* Một thanh tab ngang duy nhất cho các khu vực của cuộc thi. */}
+        <nav
+          className="admin-detail-rail"
+          aria-label="Quản lý cuộc thi"
+          role="tablist"
+        >
+          {ADMIN_TABS.map(({ key, label }, index) => (
+            <button
+              key={key}
+              ref={(el) => {
+                tabRefs.current[index] = el;
+              }}
+              type="button"
+              role="tab"
+              id={`admin-tab-${key}`}
+              aria-selected={tab === key}
+              // Chỉ panel của tab đang chọn tồn tại, nên tab khác không được trỏ tới id đó.
+              aria-controls={tab === key ? `admin-tabpanel-${key}` : undefined}
+              tabIndex={focusedTab === key ? 0 : -1}
+              className={`admin-detail-tab${tab === key ? " active" : ""}`}
+              onClick={() => activateTab(key)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+            >
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div
+          className="admin-detail-panel"
+          role="tabpanel"
+          id={`admin-tabpanel-${tab}`}
+          aria-labelledby={`admin-tab-${tab}`}
+          tabIndex={0}
+        >
+          {tab === "contents" && (
+            <ContentsPanel competitionId={competition.id} maxContentMb={uploadLimits.content_mb} />
+          )}
+          {tab === "assets" && (
+            <AssetsPanel competitionId={competition.id} maxAssetMb={uploadLimits.asset_mb} />
+          )}
+          {tab === "scoring" && <ScoringPanel competition={competition} />}
+          {tab === "results" && <ResultsPanel competition={competition} />}
+          {tab === "members" && (
+            <MembersPanel competition={competition} onCompetitionChanged={load} />
+          )}
+        </div>
+      </div>
 
       {editing && (
         <CompetitionFormModal
@@ -535,6 +618,33 @@ function ResultsPanel({ competition }: { competition: Competition }) {
   const [status, setStatus] = useState("");
   const [filters, setFilters] = useState({ search: "", status: "" });
   const [offset, setOffset] = useState(0);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<unknown>(null);
+
+  /** Tải qua fetch để 401/500 vẫn là SPA error thay vì trang JSON của trình duyệt. */
+  async function exportResults() {
+    if (exporting) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { blob, filename } = await api.download(
+        `/admin/competitions/${competition.id}/export.xlsx`,
+      );
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename ?? `${competition.slug}-ket-qua.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Trình duyệt đọc blob sau khi click; thu hồi ở macrotask kế tiếp mới không huỷ tải.
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+    } catch (err) {
+      setExportError(err);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   const loadLeaderboard = useCallback(async () => {
     setLeaderboardLoading(true);
@@ -592,10 +702,21 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             <h2>Bảng xếp hạng</h2>
             <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
           </div>
-          <a className="btn admin-results-export" href={`/api/admin/competitions/${competition.id}/export.xlsx`} download>
-            Xuất Excel
-          </a>
+          <button
+            className="btn admin-results-export"
+            type="button"
+            aria-busy={exporting}
+            disabled={exporting}
+            onClick={() => void exportResults()}
+          >
+            {exporting ? "Đang xuất..." : "Xuất Excel"}
+          </button>
         </div>
+        {exportError !== null && (
+          <div className="admin-section-error">
+            <ErrorBox error={exportError} />
+          </div>
+        )}
         {leaderboardError ? (
           <div className="admin-section-error">
             <ErrorBox error={leaderboardError} />
@@ -604,7 +725,12 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : leaderboardLoading ? (
           <Loading />
         ) : leaderboard?.entries.length ? (
-          <div className="table-wrap admin-results-table-wrap">
+          <div
+            className="table-wrap admin-results-table-wrap"
+            tabIndex={0}
+            role="region"
+            aria-label="Bảng xếp hạng của cuộc thi"
+          >
             <table className="table results-table">
               <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th><th scope="col" className="score-cell">Điểm chính</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
@@ -658,7 +784,12 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : submissionsLoading ? (
           <Loading />
         ) : submissions.length ? (
-          <div className="table-wrap admin-results-table-wrap">
+          <div
+            className="table-wrap admin-results-table-wrap"
+            tabIndex={0}
+            role="region"
+            aria-label="Bảng bài nộp của cuộc thi"
+          >
             <table className="table results-table admin-submissions-table">
               <thead><tr><th scope="col">Thời gian</th><th scope="col">Đội</th><th scope="col">File</th><th scope="col">Trạng thái</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="score-cell">Điểm chính</th></tr></thead>
               <tbody>
@@ -925,24 +1056,18 @@ function ScoringPanel({ competition }: { competition: Competition }) {
         ) : (
           <p className="text-muted">Chưa có ground truth.</p>
         )}
-        <label className="btn btn-secondary">
+        <FileButton
+          className="btn btn-secondary"
+          inputLabel="Upload ground truth CSV"
+          accept=".csv,text/csv"
+          disabled={busy || status?.locked || !status?.config}
+          onFile={(file) => {
+            if (status?.ground_truth) setPendingGroundTruth(file);
+            else void uploadGroundTruth(file);
+          }}
+        >
           {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
-          <input
-            aria-label="Upload ground truth CSV"
-            type="file"
-            accept=".csv,text/csv"
-            hidden
-            disabled={busy || status?.locked || !status?.config}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) {
-                if (status?.ground_truth) setPendingGroundTruth(file);
-                else void uploadGroundTruth(file);
-              }
-              event.target.value = "";
-            }}
-          />
-        </label>
+        </FileButton>
         {!status?.config && <p className="text-muted">Lưu cấu hình CSV trước khi upload.</p>}
       </div>
       {pendingGroundTruth && (
@@ -964,7 +1089,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
 
 /** ---------- Nội dung ---------- */
 
-function ContentsPanel({ competitionId }: { competitionId: string }) {
+function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string; maxContentMb: number }) {
   const [contents, setContents] = useState<AdminContent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -1038,7 +1163,13 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
           </button>
         </div>
       ) : null}
-      <div className="table-wrap" aria-busy={loading}>
+      <div
+        className="table-wrap"
+        aria-busy={loading}
+        tabIndex={0}
+        role="region"
+        aria-label="Bảng nội dung cuộc thi"
+      >
         <table className="table">
           <thead>
             <tr>
@@ -1062,6 +1193,7 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
                 <ContentRow
                   key={content.id}
                   competitionId={competitionId}
+                  maxContentMb={maxContentMb}
                   content={content}
                   first={index === 0}
                   last={index === contents.length - 1}
@@ -1122,6 +1254,7 @@ function ContentsPanel({ competitionId }: { competitionId: string }) {
 
 function ContentRow({
   competitionId,
+  maxContentMb,
   content,
   first,
   last,
@@ -1131,6 +1264,7 @@ function ContentRow({
   onChanged,
 }: {
   competitionId: string;
+  maxContentMb: number;
   content: AdminContent;
   first: boolean;
   last: boolean;
@@ -1207,26 +1341,26 @@ function ContentRow({
         </td>
         <td className="col-actions">
           <span className="action-group">
-            <label className="btn btn-secondary btn-sm upload-md-btn">
+            <FileButton
+              className="btn btn-secondary btn-sm upload-md-btn"
+              inputLabel={`Upload file Markdown cho "${content.title}"`}
+              accept=".md,text/markdown"
+              disabled={busy}
+              onFile={(file) => {
+                const tooLarge = tooLargeMessage(file, maxContentMb);
+                if (tooLarge) {
+                  setRowError(tooLarge);
+                  return;
+                }
+                void run(
+                  () => api.upload(`/admin/competitions/${competitionId}/contents/${content.id}/file`, file),
+                  `Đã upload Markdown cho "${content.title}".`,
+                );
+              }}
+            >
               {content.size_bytes !== null ? "Thay .md" : "Upload .md"}
-              <span className="upload-size-hint">≤ 2 MiB</span>
-              <input
-                type="file"
-                accept=".md,text/markdown"
-                hidden
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    void run(
-                      () => api.upload(`/admin/competitions/${competitionId}/contents/${content.id}/file`, file),
-                      `Đã upload Markdown cho "${content.title}".`,
-                    );
-                  }
-                  e.target.value = "";
-                }}
-              />
-            </label>
+              <span className="upload-size-hint">≤ {maxContentMb} MiB</span>
+            </FileButton>
             <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onEdit}>
               Sửa
             </button>
@@ -1355,7 +1489,7 @@ function ContentFormModal({
 
 /** ---------- Assets ---------- */
 
-function AssetsPanel({ competitionId }: { competitionId: string }) {
+function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; maxAssetMb: number }) {
   const [assets, setAssets] = useState<AssetItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
@@ -1381,6 +1515,11 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
   }, [load]);
 
   async function upload(file: File) {
+    const tooLarge = tooLargeMessage(file, maxAssetMb);
+    if (tooLarge) {
+      setError(new Error(tooLarge));
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -1454,23 +1593,23 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
 
           <div className="s14-upload-body">
             <div className="toolbar s14-upload-toolbar">
-              <label className="btn s14-upload-btn">
+              <FileButton
+                className="btn s14-upload-btn"
+                inputLabel="Chọn tệp ảnh"
+                accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
+                disabled={busy}
+                onFile={(file) => void upload(file)}
+              >
                 <IconUpload className="s14-btn-icon" />
-                <span>{busy ? "Đang xử lý..." : "Upload ảnh (PNG/JPEG/GIF/WebP ≤ 2 MiB)"}</span>
-                <input
-                  type="file"
-                  aria-label="Chọn tệp ảnh"
-                  accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
-                  hidden
-                  disabled={busy}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void upload(file);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
-              <span className="s14-upload-hint">Định dạng hỗ trợ: PNG, JPG, GIF, WebP (Tối đa 2 MiB / tệp)</span>
+                <span>
+                  {busy
+                    ? "Đang xử lý..."
+                    : `Upload ảnh (PNG/JPEG/GIF/WebP ≤ ${maxAssetMb} MiB)`}
+                </span>
+              </FileButton>
+              <span className="s14-upload-hint">
+                Định dạng hỗ trợ: PNG, JPG, GIF, WebP (Tối đa {maxAssetMb} MiB / tệp)
+              </span>
             </div>
           </div>
         </div>
@@ -1556,7 +1695,13 @@ function AssetsPanel({ competitionId }: { competitionId: string }) {
           </div>
         ) : null}
 
-        <div className="table-wrap s14-table-wrap" aria-busy={loading}>
+        <div
+          className="table-wrap s14-table-wrap"
+          aria-busy={loading}
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng tài nguyên cuộc thi"
+        >
           <table className="table s14-table">
             <thead>
               <tr>
@@ -1854,7 +1999,13 @@ function MembersPanel({
             <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>Thử lại</button>
           </div>
         )}
-        <div className="table-wrap admin-members-table-wrap" aria-busy={loading}>
+        <div
+          className="table-wrap admin-members-table-wrap"
+          aria-busy={loading}
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng thành viên cuộc thi"
+        >
           <table className="table admin-members-table">
             <thead>
               <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Tham gia lúc</th><th scope="col">Thao tác</th></tr>

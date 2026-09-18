@@ -1,7 +1,9 @@
 import { Link, useNavigate } from "react-router-dom";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 export function NotFoundPage() {
   const navigate = useNavigate();
+  useDocumentTitle("Không tìm thấy trang");
 
   return (
     <div className="page">

@@ -1,8 +1,8 @@
 /** App: ranh giới công khai (ADR-014) — khách đọc được danh sách/chi tiết, trang cần danh tính thì chặn. */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 
@@ -67,6 +67,8 @@ function renderAt(path: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Drawer khoá cuộn bằng inline style; reset để test sau không thừa hưởng.
+  document.body.style.overflow = "";
 });
 
 test("khách vào / thấy danh sách cuộc thi, không bị đẩy về /login", async () => {
@@ -105,4 +107,156 @@ test("đăng nhập xong quay lại đúng trang nộp bài đã bị chặn", a
   await userEvent.type(screen.getByLabelText("Mật khẩu"), "matkhau1234");
   await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
   expect(await screen.findByRole("heading", { name: "Nộp bài CSV" })).toBeTruthy();
+});
+
+/** App thật mount vào `#root`; gắn id lên container của RTL để test được `inert`. */
+function renderAtRoot(path: string) {
+  const result = render(
+    <MemoryRouter initialEntries={[path]}>
+      <App />
+    </MemoryRouter>,
+  );
+  result.container.id = "root";
+  return result;
+}
+
+function drawerNav(): HTMLElement {
+  return screen.getByRole("navigation", { name: "Điều hướng chính (menu di động)" });
+}
+
+async function openDrawer() {
+  const toggle = await screen.findByRole("button", { name: "Mở menu điều hướng" });
+  fireEvent.click(toggle);
+  return { toggle, drawer: screen.getByRole("dialog", { name: "Menu điều hướng" }) };
+}
+
+/**
+ * jsdom không thật sự chặn focus trong subtree `inert`, nên chỉ ghi lại thời điểm
+ * gọi mới bắt được lỗi "trả focus khi `#root` còn inert" (focus sẽ bị nuốt trên browser).
+ */
+function recordInertAtFocus(element: HTMLElement) {
+  const record: { inertAtFocus: boolean | null } = { inertAtFocus: null };
+  const original = element.focus.bind(element);
+  element.focus = () => {
+    record.inertAtFocus = document.getElementById("root")?.inert ?? null;
+    original();
+  };
+  return record;
+}
+
+test("drawer là dialog modal: khoá cuộn nền, đặt #root inert và focus vào trong", async () => {
+  mockGuestApi();
+  document.body.style.overflow = "scroll";
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+
+  const { drawer } = await openDrawer();
+  expect(drawer).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByRole("button", { name: "Đóng menu điều hướng" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  expect(document.getElementById("root")?.inert).toBe(true);
+  expect(document.body.style.overflow).toBe("hidden");
+  expect(within(drawer).getByRole("button", { name: "Đóng menu" })).toHaveFocus();
+});
+
+test("drawer: Tab/Shift+Tab quẩn trong drawer và Escape trả focus về nút hamburger", async () => {
+  mockGuestApi();
+  document.body.style.overflow = "scroll";
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+
+  const { toggle, drawer } = await openDrawer();
+  const close = within(drawer).getByRole("button", { name: "Đóng menu" });
+  const last = within(drawer).getByRole("link", { name: "Đăng nhập" });
+
+  last.focus();
+  fireEvent.keyDown(document, { key: "Tab" });
+  expect(close).toHaveFocus();
+
+  fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+  expect(last).toHaveFocus();
+
+  const focusRecord = recordInertAtFocus(toggle);
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Menu điều hướng" })).toBeNull());
+  expect(document.activeElement).toBe(toggle);
+  expect(document.getElementById("root")?.inert).toBe(false);
+  expect(document.body.style.overflow).toBe("scroll");
+  // Phải gỡ inert trước khi trả focus, nếu không browser sẽ bỏ qua lệnh focus.
+  expect(focusRecord.inertAtFocus).toBe(false);
+});
+
+test("drawer: bấm overlay đóng menu và trả focus về nút hamburger", async () => {
+  mockGuestApi();
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+
+  const { toggle } = await openDrawer();
+  fireEvent.click(document.querySelector(".app-drawer-overlay") as HTMLElement);
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Menu điều hướng" })).toBeNull());
+  expect(document.activeElement).toBe(toggle);
+  expect(document.getElementById("root")?.inert).toBe(false);
+});
+
+test("điều hướng từ drawer đóng menu, đổi route và đưa focus vào main", async () => {
+  mockGuestApi();
+  renderAtRoot("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { level: 1, name: "AI Challenge 2026" });
+
+  await openDrawer();
+  fireEvent.click(within(drawerNav()).getByRole("link", { name: "Cuộc thi" }));
+
+  expect(await screen.findByRole("heading", { level: 1, name: "Cuộc thi" })).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: "Menu điều hướng" })).toBeNull();
+  expect(document.activeElement).toBe(document.getElementById("main-content"));
+});
+
+test("lần render đầu không tự cướp focus về main", async () => {
+  mockGuestApi();
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+  expect(document.activeElement).not.toBe(document.getElementById("main-content"));
+});
+
+test("điều hướng bằng link trên header đưa focus vào main", async () => {
+  mockGuestApi();
+  renderAtRoot("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { level: 1, name: "AI Challenge 2026" });
+
+  const main = document.getElementById("main-content") as HTMLElement;
+  expect(document.activeElement).not.toBe(main);
+
+  const headerNav = screen.getByRole("navigation", { name: "Điều hướng chính" });
+  fireEvent.click(within(headerNav).getByRole("link", { name: "Cuộc thi" }));
+
+  expect(await screen.findByRole("heading", { level: 1, name: "Cuộc thi" })).toBeTruthy();
+  expect(document.activeElement).toBe(main);
+});
+
+test("back/forward (POP) không bị cướp focus", async () => {
+  mockGuestApi();
+  function Back() {
+    const navigate = useNavigate();
+    return <button onClick={() => navigate(-1)}>quay lại</button>;
+  }
+  render(
+    <MemoryRouter initialEntries={["/", "/competitions/ai-challenge-2026"]} initialIndex={1}>
+      <App />
+      <Back />
+    </MemoryRouter>,
+  );
+  await screen.findByRole("heading", { level: 1, name: "AI Challenge 2026" });
+
+  fireEvent.click(screen.getByRole("button", { name: "quay lại" }));
+  expect(await screen.findByRole("heading", { level: 1, name: "Cuộc thi" })).toBeTruthy();
+  expect(document.activeElement).not.toBe(document.getElementById("main-content"));
+});
+
+test("route không tồn tại: H1 404 và tiêu đề tab mô tả trạng thái", async () => {
+  mockGuestApi();
+  renderAt("/khong-co-trang-nay");
+  expect(await screen.findByRole("heading", { name: "404 — Không tìm thấy trang" })).toBeTruthy();
+  expect(document.title).toBe("Không tìm thấy trang — AI Challenge");
 });

@@ -56,7 +56,8 @@ cd backend && uv venv .venv && uv pip install -e . --group dev
 cd frontend && npm install
 npm test            # vitest + testing-library
 npm run build       # typecheck strict + production build
-npm run dev         # dev server (api gọi qua /api — cần proxy riêng khi không dùng Nginx)
+npm run dev         # dev server; /api được proxy sẵn về http://localhost:8080 (Nginx của compose)
+                    # cần stack đang chạy; đổi target bằng VITE_API_PROXY_TARGET=http://localhost:8000
 ```
 
 ## Sprint plan & canonical docs

@@ -62,6 +62,21 @@ test("hiển thị rule summary và file đã chọn", () => {
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
 });
 
+test("nút chọn file CSV là <button> thật nên Tab/Enter mở được picker", () => {
+  renderPage();
+  const button = screen.getByRole("button", { name: "Chọn file CSV" });
+  expect(button.tagName).toBe("BUTTON");
+  expect(button).not.toBeDisabled();
+  button.focus();
+  expect(button).toHaveFocus();
+
+  const input = screen.getByLabelText("Chọn file CSV") as HTMLInputElement;
+  const openPicker = vi.spyOn(input, "click").mockImplementation(() => {});
+  fireEvent.click(button);
+  expect(openPicker).toHaveBeenCalledTimes(1);
+  openPicker.mockRestore();
+});
+
 test("submit hiển thị loading rồi metrics và quota còn lại", async () => {
   let resolveRequest: ((response: Response) => void) | undefined;
   vi.stubGlobal(

@@ -79,7 +79,23 @@ export interface AdminCompetition extends Competition {
   /** Chỉ endpoint admin detail trả về — list cố ý không đọc ground truth cho từng dòng. */
   publish_ready?: boolean;
   publish_blocked_reason?: PublishBlockedReason | null;
+  /** Trần upload theo môi trường; optional để frontend mới vẫn chạy với backend cũ. */
+  upload_limits?: UploadLimits;
 }
+
+/** Trần dung lượng upload (MiB) do backend cấu hình qua env, dùng để render hint. */
+export interface UploadLimits {
+  submission_mb: number;
+  content_mb: number;
+  asset_mb: number;
+}
+
+/** Dùng khi backend cũ chưa trả `upload_limits`. */
+export const DEFAULT_UPLOAD_LIMITS: UploadLimits = {
+  submission_mb: 10,
+  content_mb: 2,
+  asset_mb: 2,
+};
 
 /** Lý do publish bị chặn, khớp mã lỗi backend trả về khi gọi publish. */
 export interface PublishBlockedReason {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { formatLocal, METRIC_LABEL } from "../api/competitions";
 import {
@@ -15,29 +15,57 @@ const PAGE_SIZE = 25;
 export function LeaderboardPage() {
   const { competition } = useOutletContext<CompetitionContext>();
   const [data, setData] = useState<ParticipantLeaderboardResponse | null>(null);
-  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(competition.leaderboard_visible);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  /** Trang đang yêu cầu; `attempt` buộc tải lại cả khi bấm lại đúng trang đó (ví dụ sau lỗi). */
+  const [query, setQuery] = useState({ offset: 0, attempt: 0 });
+  const requestSequence = useRef(0);
+  const hasData = useRef(false);
 
-  const loadData = useCallback(async () => {
-    if (!competition.leaderboard_visible) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchLeaderboard(competition.id, PAGE_SIZE, offset);
-      setData(result);
-      setLastUpdated(new Date().toLocaleTimeString("vi-VN"));
-    } catch (reason) {
-      setError(reason);
-    } finally {
-      setLoading(false);
-    }
-  }, [competition.id, competition.leaderboard_visible, offset]);
+  /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
+  const loadData = useCallback(
+    async (nextOffset: number, keepRows: boolean) => {
+      if (!competition.leaderboard_visible) return;
+      const sequence = ++requestSequence.current;
+      setError(null);
+      if (keepRows) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const result = await fetchLeaderboard(competition.id, PAGE_SIZE, nextOffset);
+        // Response cũ không được ghi đè response mới khi người dùng đổi trang liên tục.
+        if (sequence !== requestSequence.current) return;
+        hasData.current = true;
+        setData(result);
+        setLastUpdated(new Date().toLocaleTimeString("vi-VN"));
+        // total co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
+        const lastOffset = Math.max(0, Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+        if (nextOffset > lastOffset) {
+          setQuery((current) => ({ offset: lastOffset, attempt: current.attempt + 1 }));
+        }
+      } catch (reason) {
+        if (sequence === requestSequence.current) setError(reason);
+      } finally {
+        if (sequence === requestSequence.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [competition.id, competition.leaderboard_visible],
+  );
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void loadData(query.offset, hasData.current);
+  }, [loadData, query]);
+
+  /** Đổi trang/làm mới đều đi qua đây để nút đang giữ focus không bị unmount. */
+  const requestPage = useCallback((nextOffset: number) => {
+    setQuery((current) => ({ offset: Math.max(0, nextOffset), attempt: current.attempt + 1 }));
+  }, []);
+
+  const busy = loading || refreshing;
 
   // S08b: Chưa công bố bảng xếp hạng (không gọi API)
   if (!competition.leaderboard_visible) {
@@ -126,13 +154,14 @@ export function LeaderboardPage() {
     );
   }
 
-  if (loading) return <Loading label="Đang tải bảng xếp hạng..." />;
-  if (error) {
+  // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
+  if (loading && !data) return <Loading label="Đang tải bảng xếp hạng..." />;
+  if (error && !data) {
     return (
       <section className="results-page lb-page">
         <ErrorBox error={error} />
         <div style={{ marginTop: 12 }}>
-          <button type="button" className="btn btn-secondary" onClick={() => void loadData()}>
+          <button type="button" className="btn btn-secondary" onClick={() => requestPage(query.offset)}>
             Thử lại
           </button>
         </div>
@@ -167,6 +196,11 @@ export function LeaderboardPage() {
     );
   }
 
+  // Dải đang hiển thị lấy từ `data` (server echo) nên vẫn khớp với các dòng đang thấy
+  // kể cả khi request đổi trang vừa lỗi.
+  const shownFrom = data.offset + 1;
+  const shownTo = Math.min(data.offset + PAGE_SIZE, data.total);
+
   return (
     <section className="results-page lb-page">
       {/* Tiêu đề & giải thích quy tắc tie-break */}
@@ -195,7 +229,10 @@ export function LeaderboardPage() {
           <button
             type="button"
             className="btn btn-secondary btn-sm flex items-center gap-1.5"
-            onClick={() => void loadData()}
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) requestPage(data.offset);
+            }}
             title="Tải lại bảng điểm"
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
@@ -206,6 +243,20 @@ export function LeaderboardPage() {
           </button>
         </div>
       </div>
+
+      {/* Lỗi khi đổi trang: giữ nguyên các dòng cũ, chỉ báo lỗi ngay trên bảng. */}
+      {Boolean(error) && (
+        <>
+          <ErrorBox error={error} />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => requestPage(query.offset)}
+          >
+            Thử lại
+          </button>
+        </>
+      )}
 
       {/* Hạng toàn cục của người xem: backend tìm trên toàn bộ danh sách nên vẫn đúng khi ngoài trang. */}
       {data.me && (
@@ -244,7 +295,10 @@ export function LeaderboardPage() {
           <button
             type="button"
             className="btn"
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) requestPage(Math.max(0, data.offset - PAGE_SIZE));
+            }}
           >
             Về trang trước
           </button>
@@ -252,7 +306,13 @@ export function LeaderboardPage() {
       ) : (
       <>
       {/* Bảng xếp hạng 7 cột */}
-      <div className="lb-table-wrap table-wrap">
+      <div
+        className="lb-table-wrap table-wrap"
+        aria-busy={busy}
+        tabIndex={0}
+        role="region"
+        aria-label="Bảng xếp hạng"
+      >
         <table className="lb-table table results-table">
           <thead>
             <tr>
@@ -316,27 +376,34 @@ export function LeaderboardPage() {
       </div>
 
       <div className="pagination pagination-controls lb-pagination">
-        <div>
-          Hiển thị <strong>{offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)}</strong> trong số{" "}
-          <strong>{data.total}</strong> thí sinh có điểm
+        <div role="status">
+          {busy ? (
+            "Đang cập nhật…"
+          ) : (
+            <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> thí sinh có điểm</>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+            aria-disabled={busy || data.offset === 0}
+            onClick={() => {
+              if (!busy && data.offset > 0) requestPage(data.offset - PAGE_SIZE);
+            }}
           >
             Trang trước
           </button>
           <span>
-            {offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} / {data.total}
+            {shownFrom}–{shownTo} / {data.total}
           </span>
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            disabled={!data.has_more}
-            onClick={() => setOffset(offset + PAGE_SIZE)}
+            aria-disabled={busy || !data.has_more}
+            onClick={() => {
+              if (!busy && data.has_more) requestPage(data.offset + PAGE_SIZE);
+            }}
           >
             Trang sau
           </button>

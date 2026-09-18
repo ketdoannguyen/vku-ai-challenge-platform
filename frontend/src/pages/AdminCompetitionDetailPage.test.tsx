@@ -99,8 +99,61 @@ function renderPage() {
   );
 }
 
+/** Mock đủ endpoint của cả 5 panel để đổi tab không phụ thuộc shape dữ liệu. */
+async function renderRail() {
+  mockApi((url) => {
+    if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/leaderboard")) {
+      return {
+        body: { competition_id: COMPETITION.id, primary_metric: "f1", total: 0, entries: [] },
+        status: 200,
+      };
+    }
+    if (url.includes("/submissions")) {
+      return { body: { submissions: [], total: 0, limit: 50, offset: 0 }, status: 200 };
+    }
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+}
+
+function rail(): HTMLElement {
+  return screen.getByRole("tablist", { name: "Quản lý cuộc thi" });
+}
+
+function railTab(name: string): HTMLElement {
+  return within(rail()).getByRole("tab", { name });
+}
+
+function tabIndexes(): Array<string | null> {
+  return within(rail())
+    .getAllByRole("tab")
+    .map((tab) => tab.getAttribute("tabindex"));
+}
+
+/** Control chọn file phải là <button> thật (Tab/Enter dùng được) mở input ẩn. */
+function expectKeyboardFilePicker(buttonName: string | RegExp, inputLabel: string | RegExp) {
+  const button = screen.getByRole("button", { name: buttonName });
+  expect(button.tagName).toBe("BUTTON");
+  expect(button).not.toBeDisabled();
+  button.focus();
+  expect(button).toHaveFocus();
+
+  const input = screen.getByLabelText(inputLabel) as HTMLInputElement;
+  const openPicker = vi.spyOn(input, "click").mockImplementation(() => {});
+  fireEvent.click(button);
+  expect(openPicker).toHaveBeenCalledTimes(1);
+  openPicker.mockRestore();
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 test("tab Nội dung render table theo order + trạng thái file", async () => {
@@ -115,6 +168,152 @@ test("tab Nội dung render table theo order + trạng thái file", async () => 
   expect(screen.getByText("Chưa có file")).toBeTruthy();
   expect(screen.getByText("Đã upload")).toBeTruthy();
   expect(screen.getByText("Chỉ thành viên")).toBeTruthy();
+});
+
+test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter mở được picker", async () => {
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+  expectKeyboardFilePicker(/^Upload \.md/, 'Upload file Markdown cho "Rules"');
+});
+
+test("rail quản trị: đủ 5 khu vực, panel gắn đúng tab đang mở", async () => {
+  mockApi((url) => {
+    if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const rail = screen.getByRole("tablist", { name: "Quản lý cuộc thi" });
+  const tabs = within(rail).getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual([
+    "Nội dung",
+    "Assets",
+    "Chấm điểm",
+    "Kết quả",
+    "Thành viên & mã tham gia",
+  ]);
+  expect(tabs.filter((tab) => tab.getAttribute("aria-selected") === "true")).toHaveLength(1);
+
+  // React dùng lại chính nút DOM đó qua mỗi lần render nên phải chốt id trước khi bấm.
+  const contentsPanelId = screen.getByRole("tabpanel", { name: "Nội dung" }).id;
+  expect(tabs[0].getAttribute("aria-controls")).toBe(contentsPanelId);
+
+  // Chuyển khu vực: panel cũ biến mất, panel mới do đúng tab đó điều khiển.
+  const members = within(rail).getByRole("tab", { name: "Thành viên & mã tham gia" });
+  fireEvent.click(members);
+  const next = await screen.findByRole("tabpanel", { name: "Thành viên & mã tham gia" });
+  expect(next.id).not.toBe(contentsPanelId);
+  expect(members.getAttribute("aria-controls")).toBe(next.id);
+  expect(screen.queryByRole("tabpanel", { name: "Nội dung" })).toBeNull();
+});
+
+test("rail quản trị: roving tabindex — chỉ focused tab có tabIndex=0, Arrow/Home/End wrap đúng", async () => {
+  await renderRail();
+  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+
+  fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
+  expect(railTab("Assets")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1"]);
+
+  fireEvent.keyDown(railTab("Assets"), { key: "ArrowRight" });
+  expect(railTab("Chấm điểm")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1"]);
+
+  fireEvent.keyDown(railTab("Chấm điểm"), { key: "ArrowLeft" });
+  expect(railTab("Assets")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1"]);
+
+  fireEvent.keyDown(railTab("Assets"), { key: "End" });
+  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "-1", "0"]);
+
+  fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "Home" });
+  expect(railTab("Nội dung")).toHaveFocus();
+  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+
+  // Wrap ở biên: trái từ tab đầu về tab cuối, phải từ tab cuối về tab đầu.
+  fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowLeft" });
+  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
+  fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "ArrowRight" });
+  expect(railTab("Nội dung")).toHaveFocus();
+});
+
+test("rail quản trị: Arrow/Home/End dời focus nhưng chưa đổi panel đang render", async () => {
+  await renderRail();
+  const contentsPanel = screen.getByRole("tabpanel", { name: "Nội dung" });
+
+  fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
+  expect(railTab("Assets")).toHaveFocus();
+  expect(screen.getByRole("tabpanel", { name: "Nội dung" })).toBe(contentsPanel);
+  expect(screen.queryByRole("tabpanel", { name: "Assets" })).toBeNull();
+  expect(railTab("Nội dung")).toHaveAttribute("aria-selected", "true");
+  expect(railTab("Assets")).toHaveAttribute("aria-selected", "false");
+
+  fireEvent.keyDown(railTab("Assets"), { key: "End" });
+  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
+  expect(screen.getByRole("tabpanel", { name: "Nội dung" })).toBe(contentsPanel);
+});
+
+test("rail quản trị: Enter và Space activate focused tab", async () => {
+  await renderRail();
+
+  fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
+  fireEvent.keyDown(railTab("Assets"), { key: "Enter" });
+  expect(await screen.findByRole("tabpanel", { name: "Assets" })).toBeTruthy();
+  expect(railTab("Assets")).toHaveAttribute("aria-selected", "true");
+  expect(screen.queryByRole("tabpanel", { name: "Nội dung" })).toBeNull();
+
+  fireEvent.keyDown(railTab("Assets"), { key: "ArrowRight" });
+  expect(railTab("Chấm điểm")).toHaveFocus();
+  fireEvent.keyDown(railTab("Chấm điểm"), { key: " " });
+  expect(await screen.findByRole("tabpanel", { name: "Chấm điểm" })).toBeTruthy();
+  expect(railTab("Chấm điểm")).toHaveAttribute("aria-selected", "true");
+});
+
+test("rail quản trị: chỉ selected tab có aria-controls, không trỏ tới panel không tồn tại", async () => {
+  await renderRail();
+
+  // Chỉ một node tham chiếu panel và id đó phải giải được trong DOM.
+  const referencing = document.querySelectorAll("[aria-controls^='admin-tabpanel-']");
+  expect(referencing).toHaveLength(1);
+  expect(document.getElementById(referencing[0].getAttribute("aria-controls")!)).not.toBeNull();
+
+  within(rail())
+    .getAllByRole("tab")
+    .slice(1)
+    .forEach((tab) => expect(tab).not.toHaveAttribute("aria-controls"));
+
+  fireEvent.click(railTab("Kết quả"));
+  const results = await screen.findByRole("tabpanel", { name: "Kết quả" });
+
+  const after = document.querySelectorAll("[aria-controls^='admin-tabpanel-']");
+  expect(after).toHaveLength(1);
+  expect(after[0]).toBe(railTab("Kết quả"));
+  expect(after[0].getAttribute("aria-controls")).toBe(results.id);
+  expect(document.getElementById(results.id)).not.toBeNull();
+  within(rail())
+    .getAllByRole("tab")
+    .filter((tab) => tab !== after[0])
+    .forEach((tab) => expect(tab).not.toHaveAttribute("aria-controls"));
+});
+
+test("rail quản trị: tablist nằm ngang nên ArrowUp/ArrowDown để trang cuộn, không dời focus", async () => {
+  await renderRail();
+  const first = railTab("Nội dung");
+  first.focus();
+
+  for (const key of ["ArrowDown", "ArrowUp"]) {
+    fireEvent.keyDown(first, { key });
+    expect(first).toHaveFocus();
+    expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1"]);
+  }
 });
 
 test("thêm thành viên gửi email đúng endpoint", async () => {
@@ -242,6 +441,18 @@ test("upload ground truth dùng endpoint private và form data", async () => {
   });
 });
 
+test("nút upload ground truth là <button> thật nên Tab/Enter mở được picker", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  await screen.findByText("Thay ground truth CSV");
+  expectKeyboardFilePicker("Thay ground truth CSV", "Upload ground truth CSV");
+});
+
 test("scoring controls bị khóa khi backend báo locked", async () => {
   mockApi((url) => {
     if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
@@ -309,10 +520,13 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
   expect(await screen.findByText("result.csv")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Bảng xếp hạng" })).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Xuất Excel" })).toHaveAttribute(
-    "href",
-    `/api/admin/competitions/${COMPETITION.id}/export.xlsx`,
-  );
+  // Hai bảng kết quả cuộn ngang được nên phải là vùng focus được bằng bàn phím.
+  for (const name of ["Bảng xếp hạng của cuộc thi", "Bảng bài nộp của cuộc thi"]) {
+    const region = screen.getByRole("region", { name });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(within(region).getByRole("table")).toBeTruthy();
+  }
+  expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
   expect(screen.getByLabelText("Lọc theo đội")).toBeTruthy();
   expect(screen.getByLabelText("Lọc theo trạng thái")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
@@ -550,6 +764,18 @@ test("tab Assets render Bento 8/4, inventory table 5 cột, copy markdown và up
   });
 });
 
+test("nút upload ảnh trong tab Assets là <button> thật nên Tab/Enter mở được picker", async () => {
+  mockApi((url) => {
+    if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Assets" }));
+  await screen.findByText(/Upload ảnh/);
+  expectKeyboardFilePicker(/^Upload ảnh/, "Chọn tệp ảnh");
+});
+
 test("xóa thành viên: xác nhận rồi mới DELETE", async () => {
   mockApi((url, init) => {
     if (url.includes("/members/") && init?.method === "DELETE") {
@@ -673,4 +899,233 @@ test("xóa draft từ trang chi tiết: gõ đúng slug, gọi DELETE rồi về
     expect(call?.url).toContain(`confirm_slug=${COMPETITION.slug}`);
   });
   expect(await screen.findByText("DANH SÁCH CUỘC THI")).toBeTruthy();
+});
+
+/** Mock tab Kết quả; export đi qua fetch blob nên nhận handler riêng để ép status/lỗi. */
+function mockResultsWithExport(exportResponse: () => Response) {
+  calls.length = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.includes("/export.xlsx")) return exportResponse();
+      const body = url.includes("/leaderboard")
+        ? { competition_id: COMPETITION.id, primary_metric: "f1", total: 0, entries: [] }
+        : url.includes("/submissions")
+          ? { submissions: [], total: 0, limit: 50, offset: 0 }
+          : url.includes("/contents")
+            ? CONTENTS
+            : COMPETITION;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+}
+
+/** jsdom thiếu cả hai API này; đồng thời chặn anchor.click() để không thử điều hướng blob:. */
+function stubBlobDownload() {
+  const createObjectURL = vi.fn(() => "blob:mock-download");
+  const revokeObjectURL = vi.fn();
+  URL.createObjectURL = createObjectURL;
+  URL.revokeObjectURL = revokeObjectURL;
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  return { createObjectURL, revokeObjectURL, anchorClick };
+}
+
+async function openResultsTab() {
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
+  return await screen.findByRole("button", { name: "Xuất Excel" });
+}
+
+test("xuất Excel: dùng filename từ Content-Disposition rồi thu hồi object URL", async () => {
+  const { createObjectURL, revokeObjectURL, anchorClick } = stubBlobDownload();
+  mockResultsWithExport(
+    () =>
+      new Response(new Blob(["xlsx-bytes"]), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": "attachment; filename*=UTF-8''ket%20qua.xlsx",
+        },
+      }),
+  );
+
+  fireEvent.click(await openResultsTab());
+
+  await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+  expect(anchorClick).toHaveBeenCalledTimes(1);
+  const anchor = anchorClick.mock.instances[0] as unknown as HTMLAnchorElement;
+  expect(anchor.download).toBe("ket qua.xlsx");
+  expect(anchor.isConnected).toBe(false); // link tạm đã được gỡ khỏi DOM
+
+  // revoke nằm trong macrotask kế tiếp để trình duyệt kịp đọc blob.
+  await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-download"));
+  expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
+});
+
+test("xuất Excel: header vắng thì fallback tên file theo slug cuộc thi", async () => {
+  const { createObjectURL, anchorClick } = stubBlobDownload();
+  mockResultsWithExport(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+
+  fireEvent.click(await openResultsTab());
+
+  await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+  expect((anchorClick.mock.instances[0] as unknown as HTMLAnchorElement).download).toBe(
+    `${COMPETITION.slug}-ket-qua.xlsx`,
+  );
+});
+
+test("xuất Excel lỗi 401: hiện ErrorBox, không tạo object URL và bật lại nút", async () => {
+  const { createObjectURL, anchorClick } = stubBlobDownload();
+  mockResultsWithExport(
+    () =>
+      new Response(
+        JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Phiên đăng nhập đã hết hạn." } }),
+        { status: 401, headers: { "Content-Type": "application/json" } },
+      ),
+  );
+
+  fireEvent.click(await openResultsTab());
+
+  expect(await screen.findByText(/Phiên đăng nhập đã hết hạn/)).toBeTruthy();
+  expect(createObjectURL).not.toHaveBeenCalled();
+  expect(anchorClick).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
+});
+
+test("xuất Excel lỗi 500 không phải JSON vẫn ở lại SPA", async () => {
+  const { createObjectURL } = stubBlobDownload();
+  mockResultsWithExport(() => new Response("<html>boom</html>", { status: 500 }));
+
+  fireEvent.click(await openResultsTab());
+
+  expect(await screen.findByText(/Lỗi HTTP 500/)).toBeTruthy();
+  expect(createObjectURL).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
+});
+
+test("bấm Xuất Excel hai lần khi request đang chờ chỉ phát một request", async () => {
+  stubBlobDownload();
+  let releaseExport: () => void = () => {};
+  const pending = new Promise<void>((resolve) => {
+    releaseExport = resolve;
+  });
+  mockResultsWithExport(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+  // Chặn response đầu tiên để nút còn ở trạng thái pending khi bấm lần hai.
+  const originalFetch = fetch as unknown as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (!url.includes("/export.xlsx")) return originalFetch(input, init);
+      return pending.then(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+    }),
+  );
+
+  const button = await openResultsTab();
+  fireEvent.click(button);
+  expect(button).toBeDisabled();
+  expect(button).toHaveAttribute("aria-busy", "true");
+  fireEvent.click(button);
+
+  expect(calls.filter((call) => call.url.includes("/export.xlsx"))).toHaveLength(1);
+  releaseExport();
+  await waitFor(() =>
+    expect(calls.filter((call) => call.url.includes("/export.xlsx"))).toHaveLength(1),
+  );
+});
+
+test("tiêu đề tab theo tên cuộc thi, chuyển sang mô tả lỗi khi tải hỏng", async () => {
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: COMPETITION, status: 200 },
+  );
+  const first = renderPage();
+  await screen.findByRole("heading", { name: "Code Cup", level: 1 });
+  // Effect ghi title chạy sau commit, nên phải chờ thay vì đọc ngay khi heading vừa xuất hiện.
+  await waitFor(() => expect(document.title).toBe("Code Cup — AI Challenge"));
+  first.unmount();
+
+  mockApi(() => ({ body: { error: { code: "NOT_FOUND", message: "Không thấy cuộc thi." } }, status: 404 }));
+  renderPage();
+  expect(await screen.findByRole("heading", { level: 1, name: "Không thể tải cuộc thi" })).toBeTruthy();
+  await waitFor(() => expect(document.title).toBe("Không thể tải cuộc thi — AI Challenge"));
+});
+
+/** File với dung lượng định sẵn để test precheck ở client mà không tạo buffer lớn. */
+function fileOf(name: string, size: number, type = "text/markdown"): File {
+  const file = new File(["x"], name, { type });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
+}
+
+test("trần upload lấy từ backend: hint render giá trị runtime, không hardcode", async () => {
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
+    return { body: { ...COMPETITION, upload_limits: { submission_mb: 11, content_mb: 7, asset_mb: 9 } }, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 7 MiB");
+
+  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  const uploadButton = await screen.findByRole("button", { name: /Upload ảnh/ });
+  expect(uploadButton.textContent).toContain("9 MiB");
+  expect(screen.getByText(/Tối đa 9 MiB \/ tệp/)).toBeTruthy();
+});
+
+test("backend cũ chưa trả upload_limits: rơi về mặc định thay vì ẩn hint", async () => {
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 2 MiB");
+
+  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  expect(await screen.findByText(/Tối đa 2 MiB \/ tệp/)).toBeTruthy();
+});
+
+test("Markdown vượt trần bị chặn ở client, không phát request upload", async () => {
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, upload_limits: { submission_mb: 11, content_mb: 2, asset_mb: 9 } }, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const input = screen.getByLabelText('Upload file Markdown cho "Rules"') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [fileOf("rules.md", 3 * 1024 * 1024)] } });
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 2 MiB.");
+  expect(calls.some((call) => call.url.includes("/contents/c2/file"))).toBe(false);
+});
+
+test("ảnh asset vượt trần bị chặn ở client, không phát request upload", async () => {
+  mockApi((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
+    return { body: { ...COMPETITION, upload_limits: { submission_mb: 10, content_mb: 2, asset_mb: 3 } }, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+  fireEvent.click(screen.getByRole("tab", { name: "Assets" }));
+  await screen.findByRole("button", { name: /Upload ảnh/ });
+
+  const input = screen.getByLabelText("Chọn tệp ảnh") as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [fileOf("banner.png", 4 * 1024 * 1024, "image/png")] } });
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 3 MiB.");
+  expect(calls.some((call) => call.url.endsWith("/assets") && call.init?.method === "POST")).toBe(false);
 });

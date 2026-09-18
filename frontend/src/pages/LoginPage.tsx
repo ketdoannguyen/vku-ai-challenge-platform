@@ -1,6 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, loginErrorMessage } from "../auth/AuthContext";
+import { safeReturnTo } from "../auth/returnTo";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 function Emblem() {
   return (
@@ -76,6 +78,11 @@ function IconEyeOff() {
   );
 }
 
+interface FieldErrors {
+  identifier?: string;
+  password?: string;
+}
+
 export function LoginPage() {
   const { account, loading: authLoading, login } = useAuth();
   const navigate = useNavigate();
@@ -83,24 +90,58 @@ export function LoginPage() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [serverError, setServerError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const identifierRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const serverErrorRef = useRef<HTMLDivElement>(null);
+  useDocumentTitle("Đăng nhập");
+
+  // Lỗi credentials không gắn với field nào: đưa focus vào alert để screen reader đọc.
+  useEffect(() => {
+    if (serverError) serverErrorRef.current?.focus();
+  }, [serverError]);
 
   if (!authLoading && account) {
-    const from = (location.state as { from?: string } | null)?.from ?? "/";
+    const from = safeReturnTo((location.state as { from?: unknown } | null)?.from);
     return <Navigate to={from} replace />;
+  }
+
+  function changeIdentifier(value: string) {
+    setIdentifier(value);
+    setFieldErrors((prev) => (prev.identifier ? { ...prev, identifier: undefined } : prev));
+    setServerError((prev) => (prev ? "" : prev));
+  }
+
+  function changePassword(value: string) {
+    setPassword(value);
+    setFieldErrors((prev) => (prev.password ? { ...prev, password: undefined } : prev));
+    setServerError((prev) => (prev ? "" : prev));
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setError("");
+
+    const errors: FieldErrors = {};
+    if (!identifier.trim()) errors.identifier = "Vui lòng nhập email.";
+    if (!password) errors.password = "Vui lòng nhập mật khẩu.";
+    if (errors.identifier || errors.password) {
+      setFieldErrors(errors);
+      setServerError("");
+      if (errors.identifier) identifierRef.current?.focus();
+      else passwordRef.current?.focus();
+      return;
+    }
+
+    setServerError("");
     setSubmitting(true);
     try {
       await login(identifier, password);
-      const from = (location.state as { from?: string } | null)?.from ?? "/";
+      const from = safeReturnTo((location.state as { from?: unknown } | null)?.from);
       navigate(from, { replace: true });
     } catch (err) {
-      setError(loginErrorMessage(err));
+      setServerError(loginErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -138,9 +179,15 @@ export function LoginPage() {
             <p className="login-subtitle">Đăng nhập bằng tài khoản được cấp</p>
           </div>
 
-          {error && (
-            <div className="form-error login-error" role="alert">
-              <p>{error}</p>
+          {serverError && (
+            <div
+              id="login-error"
+              ref={serverErrorRef}
+              className="form-error login-error"
+              role="alert"
+              tabIndex={-1}
+            >
+              <p>{serverError}</p>
             </div>
           )}
 
@@ -151,14 +198,24 @@ export function LoginPage() {
               </label>
               <input
                 id="email"
+                ref={identifierRef}
                 className="input login-input"
                 type="email"
                 value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                onChange={(e) => changeIdentifier(e.target.value)}
                 autoComplete="username"
                 required
                 disabled={submitting}
+                aria-invalid={fieldErrors.identifier ? true : undefined}
+                aria-describedby={
+                  fieldErrors.identifier ? "email-error" : serverError ? "login-error" : undefined
+                }
               />
+              {fieldErrors.identifier && (
+                <span className="account-field-error" id="email-error">
+                  {fieldErrors.identifier}
+                </span>
+              )}
             </div>
 
             <div className="login-field">
@@ -168,13 +225,18 @@ export function LoginPage() {
               <div className="login-password-wrap">
                 <input
                   id="password"
+                  ref={passwordRef}
                   className="input login-input"
                   type={showPassword ? "text" : "password"}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => changePassword(e.target.value)}
                   autoComplete="current-password"
                   required
                   disabled={submitting}
+                  aria-invalid={fieldErrors.password ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.password ? "password-error" : serverError ? "login-error" : undefined
+                  }
                 />
                 <button
                   type="button"
@@ -186,6 +248,11 @@ export function LoginPage() {
                   {showPassword ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
+              {fieldErrors.password && (
+                <span className="account-field-error" id="password-error">
+                  {fieldErrors.password}
+                </span>
+              )}
             </div>
 
             <button className="btn login-submit" type="submit" disabled={submitting}>

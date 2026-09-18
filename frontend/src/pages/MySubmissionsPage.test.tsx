@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
@@ -10,6 +10,11 @@ const COMPETITION = {
   name: "Results Cup",
   primary_metric: "f1",
 } as Competition;
+
+/** Vùng thông báo của dải phân trang — trang còn live region riêng cho phản hồi sao chép ID. */
+function pagerStatus(): HTMLElement {
+  return within(document.querySelector(".subm-pagination-footer") as HTMLElement).getByRole("status");
+}
 
 function renderPage() {
   return render(
@@ -23,16 +28,55 @@ function renderPage() {
   );
 }
 
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function mockResponse(body: unknown, status = 200) {
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body, status)));
+}
+
+/** Một trang bài nộp có `total` dòng; tên file đánh dấu trang đang xem. */
+function submissionsPage(offset: number, total: number) {
+  return {
+    submissions: [
+      {
+        id: `s-${offset}`,
+        competition_id: COMPETITION.id,
+        filename: `page-${offset / 50 + 1}.csv`,
+        status: "completed",
+        metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+        primary_score: 0.9,
+        created_at: "2026-09-15T09:00:00Z",
+      },
+    ],
+    total,
+    limit: 50,
+    offset,
+  };
+}
+
+/** Fetch phân trang thật; `gateOffset` giữ response của một trang lại để kiểm tra lúc đang tải. */
+function mockPagedFetch({ total = 120, gateOffset }: { total?: number; gateOffset?: number } = {}) {
+  const urls: string[] = [];
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(JSON.stringify(body), {
-        status,
-        headers: { "Content-Type": "application/json" },
-      }),
-    ),
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      const offset = Number(new URL(url, "http://localhost").searchParams.get("offset") ?? 0);
+      if (offset === gateOffset) await gate;
+      return jsonResponse(submissionsPage(offset, total));
+    }),
   );
+  return { urls, release };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -82,6 +126,137 @@ test("hiển thị empty state khi chưa có submission", async () => {
   expect(await screen.findByText("Bạn chưa có bài nộp nào.")).toBeTruthy();
 });
 
+test("đổi trang vẫn giữ bảng cũ, pager và aria-busy trong lúc chờ", async () => {
+  const { release } = mockPagedFetch({ gateOffset: 50 });
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+
+  // Trang mới chưa về: bảng cũ và pager phải còn nguyên, vùng kết quả báo đang bận.
+  const wrap = document.querySelector(".subm-table-wrap") as HTMLElement;
+  expect(wrap).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Trang sau" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Trang trước" })).toBeTruthy();
+  expect(pagerStatus()).toHaveTextContent("Đang cập nhật…");
+
+  release();
+  expect(await screen.findByText("page-2.csv")).toBeTruthy();
+  expect(screen.queryByText("page-1.csv")).toBeNull();
+  expect(wrap).toHaveAttribute("aria-busy", "false");
+});
+
+test("sang trang hai gửi offset=50 và cập nhật dải đang hiển thị", async () => {
+  const { urls } = mockPagedFetch();
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+  expect(urls[0]).toContain("limit=50");
+  expect(urls[0]).toContain("offset=0");
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+
+  expect(await screen.findByText("page-2.csv")).toBeTruthy();
+  expect(urls.at(-1)).toContain("offset=50");
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 51–100 trong số 120 bài nộp");
+  expect(screen.getByRole("button", { name: "Trang sau" })).toHaveAttribute("aria-disabled", "false");
+  expect(screen.getByRole("button", { name: "Trang trước" })).toHaveAttribute("aria-disabled", "false");
+});
+
+test("bấm pager không làm focus rơi về body", async () => {
+  const { release } = mockPagedFetch({ gateOffset: 50 });
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+
+  const next = screen.getByRole("button", { name: "Trang sau" });
+  next.focus();
+  fireEvent.click(next);
+  // Nút đang giữ focus không được unmount hay bị disabled cứng.
+  expect(next).toBeInTheDocument();
+  expect(document.activeElement).toBe(next);
+  expect(next).toHaveAttribute("aria-disabled", "true");
+
+  release();
+  expect(await screen.findByText("page-2.csv")).toBeTruthy();
+  expect(document.activeElement).toBe(next);
+});
+
+test("bấm trang liên tiếp chỉ phát một request và render trang cuối", async () => {
+  const { urls, release } = mockPagedFetch({ gateOffset: 50 });
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+
+  const next = screen.getByRole("button", { name: "Trang sau" });
+  fireEvent.click(next);
+  fireEvent.click(next);
+
+  release();
+  expect(await screen.findByText("page-2.csv")).toBeTruthy();
+  expect(urls.filter((url) => url.includes("offset=50"))).toHaveLength(1);
+  expect(screen.queryByText("page-1.csv")).toBeNull();
+});
+
+test("lỗi khi sang trang hai giữ nguyên trang một và cho thử lại", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("offset=50")) {
+        return jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500);
+      }
+      return jsonResponse(submissionsPage(0, 120));
+    }),
+  );
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Lỗi hệ thống.");
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Thử lại" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Trang sau" })).toBeTruthy();
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
+});
+
+test("total co lại làm trang hiện tại vượt range thì lùi về trang cuối còn dữ liệu", async () => {
+  const urls: string[] = [];
+  let firstPageCalls = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      const offset = Number(new URL(url, "http://localhost").searchParams.get("offset") ?? 0);
+      if (offset === 50) {
+        return jsonResponse({ submissions: [], total: 30, limit: 50, offset: 50 });
+      }
+      firstPageCalls += 1;
+      return jsonResponse(submissionsPage(0, firstPageCalls === 1 ? 120 : 30));
+    }),
+  );
+
+  renderPage();
+  expect(await screen.findByText("page-1.csv")).toBeTruthy();
+  expect(screen.getByText(/Tổng cộng/)).toHaveTextContent("Tổng cộng 120 bài nộp");
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+
+  // Trang 2 giờ vượt range: phải tự tải lại trang cuối hợp lệ thay vì bỏ trắng bảng.
+  await waitFor(() => {
+    expect(screen.getByText(/Tổng cộng/)).toHaveTextContent("Tổng cộng 30 bài nộp");
+  });
+  expect(urls.filter((url) => url.includes("offset=0")).length).toBe(2);
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+  expect(screen.queryByText("page-2.csv")).toBeNull();
+});
+
 test("hiển thị backend error", async () => {
   mockResponse(
     { error: { code: "NOT_FOUND", message: "Không tìm thấy cuộc thi." } },
@@ -89,4 +264,65 @@ test("hiển thị backend error", async () => {
   );
   renderPage();
   expect(await screen.findByRole("alert")).toHaveTextContent("Không tìm thấy cuộc thi.");
+});
+
+/** Clipboard là API ngoài jsdom; mỗi test tự cài đặt để kiểm cả nhánh thành công lẫn thất bại. */
+function stubClipboard(writeText: (text: string) => Promise<void>) {
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+}
+
+test("sao chép ID: nút đổi trạng thái, live region thông báo rồi tự tắt", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  stubClipboard(writeText);
+  mockPagedFetch();
+  renderPage();
+  await screen.findByText("page-1.csv");
+
+  fireEvent.click(screen.getAllByRole("button", { name: "Sao chép ID" })[0]);
+
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("s-0"));
+  expect(await screen.findByText("Đã sao chép ID s-0.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Đã sao chép ID" })).toBeTruthy();
+  // Phản hồi sao chép không được đụng tới bảng.
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+
+  await waitFor(() => expect(screen.queryByText("Đã sao chép ID s-0.")).toBeNull(), {
+    timeout: 3000,
+  });
+  expect(screen.getByRole("button", { name: "Sao chép ID" })).toBeTruthy();
+});
+
+test("sao chép ID thất bại: báo lỗi riêng và giữ nguyên bảng", async () => {
+  stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
+  mockPagedFetch();
+  renderPage();
+  await screen.findByText("page-1.csv");
+
+  fireEvent.click(screen.getAllByRole("button", { name: "Sao chép ID" })[0]);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Không sao chép được ID");
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Sao chép ID" }).length).toBeGreaterThan(0);
+});
+
+test("trình duyệt không có Clipboard API: báo lỗi thay vì im lặng", async () => {
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+  mockPagedFetch();
+  renderPage();
+  await screen.findByText("page-1.csv");
+
+  fireEvent.click(screen.getAllByRole("button", { name: "Sao chép ID" })[0]);
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("không cho phép sao chép tự động");
+  expect(screen.getByText("page-1.csv")).toBeTruthy();
+});
+
+test("vùng cuộn ngang của bảng là region focus được bằng bàn phím", async () => {
+  mockPagedFetch();
+  renderPage();
+  await screen.findByText("page-1.csv");
+
+  const region = screen.getByRole("region", { name: "Bảng bài đã nộp" });
+  expect(region).toHaveAttribute("tabindex", "0");
+  expect(within(region).getByRole("table")).toBeTruthy();
 });

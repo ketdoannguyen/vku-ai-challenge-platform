@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
-import { ErrorBox } from "../components/ui";
+import { ErrorBox, FileButton } from "../components/ui";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 interface SubmissionResult {
@@ -288,19 +288,15 @@ export function SubmissionPage() {
                   UTF-8, dung lượng tối đa {config.max_upload_mb} MiB
                 </p>
 
-                <label className="btn btn-secondary sub-dropzone-btn">
+                <FileButton
+                  className="btn btn-secondary sub-dropzone-btn"
+                  inputLabel="Chọn file CSV"
+                  accept=".csv,text/csv"
+                  disabled={submitting || Boolean(unavailableMessage)}
+                  onFile={validateAndSelectFile}
+                >
                   Chọn file CSV
-                  <input
-                    aria-label="Chọn file CSV"
-                    type="file"
-                    accept=".csv,text/csv"
-                    hidden
-                    disabled={submitting || Boolean(unavailableMessage)}
-                    onChange={(event) => {
-                      validateAndSelectFile(event.target.files?.[0] ?? null);
-                    }}
-                  />
-                </label>
+                </FileButton>
               </div>
             ) : (
               <div className="selected-file sub-file-card" aria-live="polite">

@@ -1,6 +1,6 @@
 /** MarkdownView: render GFM representative + sanitize XSS + safe links/images. */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { expect, test } from "vitest";
 import { MarkdownView } from "./MarkdownView";
 
@@ -40,6 +40,13 @@ test("render GFM: heading, list, table, code, link, image", () => {
   expect(img).toBeTruthy();
   expect(img!.getAttribute("src")).toBe("/api/competitions/ai-cup/assets/diagram.png");
   expect(img!.getAttribute("loading")).toBe("lazy");
+});
+
+test("bảng GFM nằm trong vùng cuộn focus được và giữ nguyên ngữ nghĩa table", () => {
+  render(<MarkdownView markdown={FIXTURE} competitionSlug="ai-cup" />);
+  const region = screen.getByRole("region", { name: "Bảng dữ liệu" });
+  expect(region).toHaveAttribute("tabindex", "0");
+  expect(within(region).getByRole("table")).toBeTruthy();
 });
 
 test("XSS payload không sinh element nguy hiểm", () => {

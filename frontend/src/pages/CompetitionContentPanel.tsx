@@ -1,13 +1,18 @@
 /** Overview (index) và content page (theo contentSlug) cho competition portal. */
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
 import type { Competition, SubmissionConfig } from "../api/competitions";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
-import { MarkdownView } from "../markdown/MarkdownView";
+import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { VISIBILITY_LABEL, type CompetitionContext } from "./CompetitionDetailPage";
+
+/** react-markdown + remark-gfm + rehype-sanitize chỉ cần ở route nội dung; tách khỏi entry chunk. */
+const MarkdownView = lazy(() =>
+  import("../markdown/MarkdownView").then((module) => ({ default: module.MarkdownView })),
+);
 
 /** Mô tả cách tham gia ở phần tóm tắt — khác nhãn chip trên masthead để không lặp chữ trên cùng màn hình. */
 const JOIN_MODE_DETAIL: Record<Competition["join_mode"], string> = {
@@ -194,6 +199,13 @@ export function CompetitionContentPanel() {
     if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "start" });
   }, [contentSlug, navigationType]);
 
+  // Khung cuộc thi nhường tiêu đề cho panel này; mục lục đã có sẵn tên tài liệu nên
+  // dùng được ngay cả khi bản đầy đủ còn đang tải.
+  const summary = contents.find((item) => item.slug === contentSlug);
+  useDocumentTitle(
+    content?.title ?? (error ? "Không tìm thấy nội dung" : summary?.title ?? "Nội dung cuộc thi"),
+  );
+
   if (loading) return <Loading label="Đang tải nội dung…" />;
 
   if (error) {
@@ -228,7 +240,9 @@ export function CompetitionContentPanel() {
         <p className="article-empty">Trang nội dung này chưa có nội dung để hiển thị.</p>
       ) : (
         <div className="article-body">
-          <MarkdownView markdown={markdown} competitionSlug={competition.slug} />
+          <Suspense fallback={<Loading label="Đang tải nội dung…" />}>
+            <MarkdownView markdown={markdown} competitionSlug={competition.slug} />
+          </Suspense>
         </div>
       )}
 

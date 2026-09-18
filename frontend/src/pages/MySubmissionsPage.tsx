@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { formatLocal } from "../api/competitions";
 import {
@@ -19,43 +19,97 @@ const STATUS_LABEL: Record<string, string> = {
 export function MySubmissionsPage() {
   const { competition } = useOutletContext<CompetitionContext>();
   const [data, setData] = useState<SubmissionsResponse | null>(null);
-  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [, setCopiedId] = useState<string | null>(null);
+  /** Trang đang yêu cầu; `attempt` buộc tải lại cả khi bấm lại đúng trang đó (ví dụ sau lỗi). */
+  const [query, setQuery] = useState({ offset: 0, attempt: 0 });
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const requestSequence = useRef(0);
+  const hasData = useRef(false);
+  const copyTimer = useRef<number | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchMySubmissions(competition.id, PAGE_SIZE, offset);
-      setData(result);
-    } catch (reason) {
-      setError(reason);
-    } finally {
-      setLoading(false);
-    }
-  }, [competition.id, offset]);
+  useEffect(
+    () => () => {
+      if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
+  /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
+  const loadData = useCallback(
+    async (nextOffset: number, keepRows: boolean) => {
+      const sequence = ++requestSequence.current;
+      setError(null);
+      if (keepRows) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const result = await fetchMySubmissions(competition.id, PAGE_SIZE, nextOffset);
+        // Response cũ không được ghi đè response mới khi người dùng đổi trang liên tục.
+        if (sequence !== requestSequence.current) return;
+        hasData.current = true;
+        setData(result);
+        // total co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
+        const lastOffset = Math.max(0, Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE);
+        if (nextOffset > lastOffset) {
+          setQuery((current) => ({ offset: lastOffset, attempt: current.attempt + 1 }));
+        }
+      } catch (reason) {
+        if (sequence === requestSequence.current) setError(reason);
+      } finally {
+        if (sequence === requestSequence.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [competition.id],
+  );
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void loadData(query.offset, hasData.current);
+  }, [loadData, query]);
 
+  /** Đổi trang/làm mới đều đi qua đây để nút đang giữ focus không bị unmount. */
+  const requestPage = useCallback((nextOffset: number) => {
+    setQuery((current) => ({ offset: Math.max(0, nextOffset), attempt: current.attempt + 1 }));
+  }, []);
+
+  /** Lỗi sao chép là chuyện riêng của nút: không được thay bằng lỗi tải dữ liệu hay unmount bảng. */
   function copyId(id: string) {
-    if (navigator.clipboard) {
-      void navigator.clipboard.writeText(id);
-      setCopiedId(id);
-      setTimeout(() => setCopiedId(null), 2000);
+    if (!navigator.clipboard) {
+      setCopiedId(null);
+      setCopyError("Trình duyệt không cho phép sao chép tự động — hãy chọn ID và sao chép thủ công.");
+      return;
     }
+    navigator.clipboard.writeText(id).then(
+      () => {
+        setCopyError(null);
+        setCopiedId(id);
+        if (copyTimer.current !== null) window.clearTimeout(copyTimer.current);
+        copyTimer.current = window.setTimeout(() => {
+          setCopiedId(null);
+          copyTimer.current = null;
+        }, 2000);
+      },
+      () => {
+        setCopiedId(null);
+        setCopyError("Không sao chép được ID — hãy chọn ID và sao chép thủ công.");
+      },
+    );
   }
 
-  if (loading) return <Loading label="Đang tải lịch sử bài nộp..." />;
-  if (error) {
+  const busy = loading || refreshing;
+
+  // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
+  if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
+  if (error && !data) {
     return (
       <section className="results-page subm-page">
         <ErrorBox error={error} />
         <div style={{ marginTop: 12 }}>
-          <button type="button" className="btn btn-secondary" onClick={() => void loadData()}>
+          <button type="button" className="btn btn-secondary" onClick={() => requestPage(query.offset)}>
             Thử lại
           </button>
         </div>
@@ -87,6 +141,12 @@ export function MySubmissionsPage() {
       </section>
     );
   }
+
+  // Dải đang hiển thị lấy từ `data` (server echo) nên vẫn khớp với các dòng đang thấy
+  // kể cả khi request đổi trang vừa lỗi.
+  const shownFrom = data.offset + 1;
+  const shownTo = Math.min(data.offset + PAGE_SIZE, data.total);
+  const hasNext = data.offset + PAGE_SIZE < data.total;
 
   // Xác định submission có primary_score cao nhất trong trang hiện tại
   const bestSubmissionId = data.submissions.reduce<string | null>((bestId, current) => {
@@ -159,7 +219,10 @@ export function MySubmissionsPage() {
           <button
             type="button"
             className="btn btn-secondary btn-sm flex items-center gap-1.5"
-            onClick={() => void loadData()}
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) requestPage(data.offset);
+            }}
             title="Tải lại danh sách bài nộp"
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
@@ -178,8 +241,38 @@ export function MySubmissionsPage() {
         </div>
       </div>
 
+      {/* Phản hồi sao chép ID sống riêng: không thay lỗi tải dữ liệu và không unmount bảng. */}
+      <p className="sr-only" role="status">
+        {copiedId ? `Đã sao chép ID ${copiedId}.` : ""}
+      </p>
+      {copyError && (
+        <div className="status-banner warning" role="alert">
+          <span>{copyError}</span>
+        </div>
+      )}
+
+      {/* Lỗi khi đổi trang: giữ nguyên các dòng cũ, chỉ báo lỗi ngay trên bảng. */}
+      {Boolean(error) && (
+        <>
+          <ErrorBox error={error} />
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => requestPage(query.offset)}
+          >
+            Thử lại
+          </button>
+        </>
+      )}
+
       {/* Bảng 7 cột kết quả */}
-      <div className="subm-table-wrap table-wrap">
+      <div
+        className="subm-table-wrap table-wrap"
+        aria-busy={busy}
+        tabIndex={0}
+        role="region"
+        aria-label="Bảng bài đã nộp"
+      >
         <table className="subm-table table results-table">
           <thead>
             <tr>
@@ -203,15 +296,21 @@ export function MySubmissionsPage() {
                         #{submission.id.slice(-8)}
                         <button
                           type="button"
-                          className="subm-id-copy-btn"
-                          title="Sao chép ID"
-                          aria-label="Sao chép ID"
+                          className={`subm-id-copy-btn${copiedId === submission.id ? " copied" : ""}`}
+                          title={copiedId === submission.id ? "Đã sao chép" : "Sao chép ID"}
+                          aria-label={copiedId === submission.id ? "Đã sao chép ID" : "Sao chép ID"}
                           onClick={() => copyId(submission.id)}
                         >
-                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                          </svg>
+                          {copiedId === submission.id ? (
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          ) : (
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                            </svg>
+                          )}
                         </button>
                       </span>
                       {isBest && (
@@ -268,22 +367,32 @@ export function MySubmissionsPage() {
       {/* Phân trang */}
       {data.total > PAGE_SIZE && (
         <div className="subm-pagination-footer pagination pagination-controls">
-          <div>
-            Hiển thị <strong>{offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)}</strong> trong số <strong>{data.total}</strong> bài nộp
+          <div role="status">
+            {busy ? (
+              "Đang cập nhật…"
+            ) : (
+              <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> bài nộp</>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
-              disabled={offset === 0}
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              aria-disabled={busy || data.offset === 0}
+              onClick={() => {
+                if (!busy && data.offset > 0) requestPage(data.offset - PAGE_SIZE);
+              }}
             >
               Trang trước
             </button>
-            <span>{offset + 1}–{Math.min(offset + PAGE_SIZE, data.total)} / {data.total}</span>
+            <span>{shownFrom}–{shownTo} / {data.total}</span>
             <button
+              type="button"
               className="btn btn-secondary btn-sm"
-              disabled={offset + PAGE_SIZE >= data.total}
-              onClick={() => setOffset(offset + PAGE_SIZE)}
+              aria-disabled={busy || !hasNext}
+              onClick={() => {
+                if (!busy && hasNext) requestPage(data.offset + PAGE_SIZE);
+              }}
             >
               Trang sau
             </button>

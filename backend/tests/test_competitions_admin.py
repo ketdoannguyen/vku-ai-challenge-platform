@@ -5,7 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 
+from app.competitions import service
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.core.config import Settings, get_settings
+from app.core.slugs import SLUG_MAX, is_valid_slug
 from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.helpers import SCORING_CONFIG, configure_scoring, publish_competition
 
@@ -200,6 +203,87 @@ def test_clone_copies_resources(client):
     cid = client.post("/api/admin/competitions", json=_body(resources=resources)).json()["id"]
     clone = client.post(f"/api/admin/competitions/{cid}/clone").json()
     assert clone["resources"] == resources
+
+
+def _insert_raw_competition(client, slug: str) -> None:
+    async def run():
+        await client.app.state.mongo.db[COMPETITIONS_COLLECTION].insert_one({"slug": slug})
+
+    asyncio.run(run())
+
+
+async def _no_competition(db, slug):
+    return None
+
+
+def test_clone_slug_stays_valid_and_within_max_length(client):
+    """Slug gốc dài sát giới hạn: cắt cụt phải bỏ gạch ngang cuối, không tạo slug không hợp lệ."""
+    _login(client)
+    long_bases = [
+        "a" * 63,
+        "a" * 58 + "-" + "b" * 5,
+        "b" * SLUG_MAX,
+    ]
+    for index, base in enumerate(long_bases):
+        cid = client.post(
+            "/api/admin/competitions", json=_body(slug=base, name=f"Bản dài {index}")
+        ).json()["id"]
+        resp = client.post(f"/api/admin/competitions/{cid}/clone")
+        assert resp.status_code == 201, base
+        slug = resp.json()["slug"]
+        assert is_valid_slug(slug), slug
+        assert len(slug) <= SLUG_MAX
+        assert slug.endswith("-copy")
+
+
+def test_clone_second_copy_gets_numbered_slug(client):
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    client.post("/api/admin/competitions", json=_body(slug="ai-challenge-2026-copy", name="Bản sao cũ"))
+    resp = client.post(f"/api/admin/competitions/{cid}/clone")
+    assert resp.status_code == 201
+    assert resp.json()["slug"] == "ai-challenge-2026-copy2"
+
+
+def test_clone_retries_when_candidate_slug_is_taken_at_insert_time(client, monkeypatch):
+    """Đối thủ chen vào giữa bước tra và bước ghi: DuplicateKeyError phải được thử lại, không 500."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    _insert_raw_competition(client, "ai-challenge-2026-copy")
+    # Giả lập khe race: bước tra không thấy slug đã bị request khác chiếm.
+    monkeypatch.setattr(service, "find_competition_by_slug", _no_competition)
+
+    resp = client.post(f"/api/admin/competitions/{cid}/clone")
+    assert resp.status_code == 201
+    assert resp.json()["slug"] == "ai-challenge-2026-copy2"
+
+
+def test_clone_gives_409_when_every_candidate_is_taken(client, monkeypatch):
+    """Hết ứng viên sau số lần thử có hạn → 409 SLUG_EXISTS, không lặp vô hạn."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    lookups = []
+
+    async def always_taken(db, slug):
+        lookups.append(slug)
+        return {"slug": slug}
+
+    monkeypatch.setattr(service, "find_competition_by_slug", always_taken)
+    resp = client.post(f"/api/admin/competitions/{cid}/clone")
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "SLUG_EXISTS"
+    assert 1 <= len(lookups) <= 10
+
+
+def test_create_maps_duplicate_key_race_to_409(client, monkeypatch):
+    """Hai request cùng slug cùng vượt bước kiểm tra trước → index unique chốt lại bằng 409."""
+    _login(client)
+    _insert_raw_competition(client, "ai-challenge-2026")
+    monkeypatch.setattr(service, "find_competition_by_slug", _no_competition)
+
+    resp = client.post("/api/admin/competitions", json=_body())
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "SLUG_EXISTS"
 
 
 def test_admin_get_detail_by_id(client):
@@ -439,3 +523,57 @@ def test_published_competition_accepts_a_real_submission(client):
     )
     assert submitted.status_code == 201
     assert submitted.json()["status"] == "completed"
+
+
+def test_admin_detail_exposes_env_upload_limits(client, monkeypatch):
+    """Trần upload là cấu hình môi trường — backend trả về để UI render hint thay vì hardcode."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    monkeypatch.setattr(
+        "app.competitions.admin_router.get_settings",
+        lambda: Settings(max_upload_mb=11, max_content_mb=7, max_asset_mb=9),
+    )
+
+    resp = client.get(f"/api/admin/competitions/{cid}")
+
+    assert resp.status_code == 200
+    assert resp.json()["upload_limits"] == {
+        "submission_mb": 11,
+        "content_mb": 7,
+        "asset_mb": 9,
+    }
+
+
+def test_admin_mutate_response_keeps_upload_limits(client, monkeypatch):
+    """UI ghi thẳng response mutate vào state nên field này phải có ở mọi response detail."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    monkeypatch.setattr(
+        "app.competitions.admin_router.get_settings",
+        lambda: Settings(max_content_mb=5),
+    )
+
+    resp = client.patch(f"/api/admin/competitions/{cid}", json={"name": "Đổi tên"})
+
+    assert resp.status_code == 200
+    assert resp.json()["upload_limits"]["content_mb"] == 5
+
+
+def test_upload_limits_only_on_admin_detail(client):
+    """List admin và payload công khai cố ý không mang field detail-only này."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    assert publish_competition(client, cid).status_code == 200
+
+    listed = client.get("/api/admin/competitions").json()["competitions"][0]
+    detail = client.get(f"/api/admin/competitions/{cid}").json()
+    public = client.get("/api/competitions/ai-challenge-2026").json()
+
+    assert "upload_limits" not in listed
+    assert "upload_limits" not in public
+    settings = get_settings()
+    assert detail["upload_limits"] == {
+        "submission_mb": settings.max_upload_mb,
+        "content_mb": settings.max_content_mb,
+        "asset_mb": settings.max_asset_mb,
+    }

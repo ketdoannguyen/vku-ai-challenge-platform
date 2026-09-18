@@ -55,7 +55,7 @@ async def _get_account_or_404(db, account_id: str) -> dict:
 
 
 @router.get("")
-async def list_accounts(request: Request, admin: AdminAccount, q: str = "", limit: int = Query(50, le=200), offset: int = 0) -> dict:
+async def list_accounts(request: Request, admin: AdminAccount, q: str = "", limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)) -> dict:
     db = request.app.state.mongo.db
     query = {}
     if q.strip():

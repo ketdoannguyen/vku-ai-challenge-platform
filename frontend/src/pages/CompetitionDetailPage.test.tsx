@@ -1,6 +1,6 @@
 /** Competition layout: load theo slug, header + sidebar content, submit enabled, Sprint 06 tabs disabled. */
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
@@ -85,7 +85,9 @@ test("load competition + sidebar sắp theo order, dừng ở Tổng quan và ta
   expect(screen.getByText("Cần mã tham gia")).toBeTruthy();
   expect(screen.getByText("7 lượt/ngày")).toBeTruthy();
   expect(screen.getByText("Đã tham gia")).toBeTruthy(); // JoinControl đã join
-  const nav = screen.getByRole("navigation", { name: "Nội dung cuộc thi" });
+  // Danh sách đã bỏ nút rời (showLeave=false); trang chi tiết vẫn phải giữ thao tác này.
+  expect(screen.getByRole("button", { name: "Rời cuộc thi" })).toBeTruthy();
+  const nav = await screen.findByRole("navigation", { name: "Nội dung cuộc thi" });
   const items = nav.querySelectorAll(".content-nav-item");
   // Frontend render theo thứ tự API trả về; backend đã sort theo order (Rules 10 trước Đề bài 20)
   expect(items[0].textContent).toContain("Đề bài");
@@ -126,21 +128,79 @@ test("slug sai → 404 error box + link về danh sách", async () => {
   expect(screen.getByRole("link", { name: /Về danh sách cuộc thi/ })).toBeTruthy();
 });
 
-test("các tab Nộp bài, Bài đã nộp và Bảng xếp hạng đều enabled", async () => {
+test("các mục Nộp bài, Bài đã nộp và Bảng xếp hạng đều là link điều hướng dùng được", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
-  const submitTab = screen.getByRole("tab", { name: "Nộp bài" });
-  expect(submitTab.tagName).toBe("A");
-  expect(submitTab.getAttribute("aria-disabled")).toBeNull();
-  for (const label of ["Bài đã nộp", "Bảng xếp hạng"]) {
-    const tab = screen.getByRole("tab", { name: label });
+  // "Nộp bài" còn xuất hiện ở CTA trong Tổng quan nên phải khoanh vùng đúng mục lục.
+  const tabs = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
+  for (const label of ["Nộp bài", "Bài đã nộp", "Bảng xếp hạng"]) {
+    const tab = within(tabs).getByRole("link", { name: label });
     expect(tab.getAttribute("aria-disabled")).toBeNull();
-    expect(tab.tagName).toBe("A");
   }
+});
+
+test("mục lục cuộc thi là điều hướng route, không giả lập tab", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  const overview = renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+
+  const nav = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
+  expect(nav.getAttribute("role")).toBeNull();
+  expect(screen.queryByRole("tablist")).toBeNull();
+  expect(screen.queryAllByRole("tab")).toHaveLength(0);
+
+  // Chỉ mục đang mở có aria-current; đổi route thì dấu chuyển theo.
+  expect(within(nav).getByRole("link", { name: "Tổng quan" }).getAttribute("aria-current")).toBe("page");
+  expect(within(nav).getByRole("link", { name: "Nộp bài" }).getAttribute("aria-current")).toBeNull();
+  overview.unmount();
+
+  renderAt("/competitions/ai-challenge-2026/leaderboard");
+  await screen.findByTestId("workspace-leaderboard");
+  const leaderboardNav = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
+  expect(within(leaderboardNav).getByRole("link", { name: "Bảng xếp hạng" }).getAttribute("aria-current")).toBe("page");
+  expect(within(leaderboardNav).getByRole("link", { name: "Tổng quan" }).getAttribute("aria-current")).toBeNull();
+});
+
+test("slug sai: chỉ gọi chi tiết cuộc thi, không gọi mục lục nội dung", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(
+        JSON.stringify({ error: { code: "NOT_FOUND", message: "Không tìm thấy cuộc thi." } }),
+        { status: 404, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+  renderAt("/competitions/khong-ton-tai");
+  await screen.findByRole("heading", { level: 1, name: "Không tìm thấy cuộc thi" });
+
+  expect(urls.some((url) => url.includes("/competitions/khong-ton-tai"))).toBe(true);
+  expect(urls.some((url) => url.includes("/contents"))).toBe(false);
+});
+
+test("slug đúng: mục lục nội dung vẫn được tải sau khi cuộc thi xong", async () => {
+  const urls: string[] = [];
+  apiMock((url) => {
+    urls.push(url);
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("navigation", { name: "Nội dung cuộc thi" });
+
+  const detailAt = urls.findIndex((url) => url.endsWith("/api/competitions/ai-challenge-2026"));
+  const contentsAt = urls.findIndex((url) => url.includes("/contents"));
+  expect(detailAt).toBeGreaterThanOrEqual(0);
+  expect(contentsAt).toBeGreaterThan(detailAt);
 });
 
 test("deep-link content/:contentSlug render markdown panel", async () => {
@@ -155,8 +215,10 @@ test("deep-link content/:contentSlug render markdown panel", async () => {
     return { body: COMPETITION, status: 200 };
   });
   renderAt("/competitions/ai-challenge-2026/content/problem");
-  expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 1 })).toBeTruthy();
+  // Heading do tác giả viết bị hạ một bậc: H1 của trang là tên cuộc thi trên masthead.
+  expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 2 })).toBeTruthy();
   expect(screen.getByText("quan trọng")).toBeTruthy();
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 });
 
 test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link không an toàn", async () => {
@@ -250,4 +312,49 @@ test("không có tài nguyên hợp lệ thì không render block tài nguyên",
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
   expect(screen.queryByText("Tài nguyên tải về")).toBeNull();
+});
+
+test("tiêu đề tab theo khu vực đang mở và giữ đúng khi đổi route", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+
+  const overview = renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+  // Title do cuộc thi đã fetch quyết định; effect ghi title chạy sau commit nên phải chờ.
+  await waitFor(() => expect(document.title).toBe("AI Challenge 2026 — AI Challenge"));
+  overview.unmount();
+
+  renderAt("/competitions/ai-challenge-2026/leaderboard");
+  await screen.findByTestId("workspace-leaderboard");
+  expect(document.title).toBe("Bảng xếp hạng — AI Challenge");
+});
+
+test("route nội dung tự đặt tiêu đề theo tài liệu, khung cuộc thi không ghi đè", async () => {
+  apiMock((url) => {
+    if (url.endsWith("/contents/problem")) {
+      return { body: { ...CONTENTS.contents[0], markdown: "# Đề bài chi tiết" }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+
+  renderAt("/competitions/ai-challenge-2026/content/problem");
+  await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 2 });
+  await waitFor(() => expect(document.title).toBe("Đề bài — AI Challenge"));
+  // H1 duy nhất trên trang là tên cuộc thi, không phải heading do tác giả viết.
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+});
+
+test("trang lỗi có H1 mô tả trạng thái và tiêu đề tab tương ứng", async () => {
+  apiMock(() => ({
+    body: { error: { code: "NOT_FOUND", message: "Không tìm thấy cuộc thi." } },
+    status: 404,
+  }));
+  renderAt("/competitions/khong-ton-tai");
+
+  expect(await screen.findByRole("heading", { level: 1, name: "Không tìm thấy cuộc thi" })).toBeTruthy();
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  await waitFor(() => expect(document.title).toBe("Không tìm thấy cuộc thi — AI Challenge"));
 });

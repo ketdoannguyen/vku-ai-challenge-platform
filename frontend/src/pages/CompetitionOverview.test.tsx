@@ -94,6 +94,8 @@ test("/competitions/:slug dừng ở Tổng quan, không tự chuyển sang tài
   expect(await screen.findByRole("heading", { name: "Tổng quan", level: 2 })).toBeTruthy();
   // Markdown của tài liệu đầu tiên không được render — trang tổng quan là đích dừng thật.
   expect(screen.queryByRole("heading", { name: "Đề bài chi tiết" })).toBeNull();
+  // Mục lục chỉ được tải sau khi chi tiết cuộc thi xong, nên phải chờ nó xuất hiện.
+  await screen.findByRole("navigation", { name: "Tài liệu cuộc thi" });
   expect(docList().getByRole("link", { name: /^Đề bài/ })).toBeTruthy();
   expect(docList().getByRole("link", { name: /^Rules/ })).toBeTruthy();
 });
@@ -192,8 +194,9 @@ test("chưa tham gia và cuộc thi còn nhận bài thì Tổng quan nói rõ v
   );
   renderAt("/competitions/ai-challenge-2026");
 
-  await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
-  expect(screen.queryByRole("link", { name: "Nộp bài" })).toBeNull();
+  const overview = (await screen.findByRole("heading", { name: "Tổng quan", level: 2 })).closest("section")!;
+  // Mục lục cuộc thi luôn có link điều hướng "Nộp bài"; ý của test là CTA trong Tổng quan không render.
+  expect(within(overview).queryByRole("link", { name: "Nộp bài" })).toBeNull();
   expect(
     screen.getByText("Nhập mã do Ban Tổ chức cấp ở khối tham gia phía trên để bắt đầu nộp bài."),
   ).toBeTruthy();

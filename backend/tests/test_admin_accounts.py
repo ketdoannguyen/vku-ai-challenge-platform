@@ -50,6 +50,17 @@ def test_admin_list_search_by_name(client):
     assert [a["email"] for a in resp.json()["accounts"]] == ["thi.sinh@vku.vn"]
 
 
+def test_admin_list_rejects_out_of_range_pagination(client):
+    _login(client)
+    for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}):
+        resp = client.get("/api/admin/accounts", params=params)
+        assert resp.status_code == 422, params
+        assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+    ok = client.get("/api/admin/accounts", params={"limit": 1, "offset": 0})
+    assert ok.status_code == 200
+    assert len(ok.json()["accounts"]) == 1
+
+
 def test_admin_create_account_and_login_with_it(client):
     _login(client)
     resp = client.post(
