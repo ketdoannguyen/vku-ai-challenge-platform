@@ -240,16 +240,6 @@ export function SubmissionPage() {
                     <div className="sub-result-score">
                       <strong>{result.metrics[metric].toFixed(6)}</strong>
                     </div>
-                    <div className="sub-result-metric-name">
-                      {metric === "f1" ? "F1 Score" : metric === "precision" ? "Precision" : "Recall"}
-                    </div>
-                    <p className="sub-result-metric-desc">
-                      {metric === "f1"
-                        ? `Trung bình điều hòa (${averageLabel(config.average)}) giữa Precision và Recall.`
-                        : metric === "precision"
-                        ? "Độ chính xác các ca dự đoán dương tính."
-                        : "Độ nhạy phát hiện thành công các ca dương tính."}
-                    </p>
                   </div>
                 );
               })}

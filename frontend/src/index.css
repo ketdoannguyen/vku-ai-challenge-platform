@@ -1764,11 +1764,13 @@ select.input {
 
 /* Theme của thẻ lấy từ VỊ TRÍ trong lưới (`data-theme`), không lấy từ trạng thái cuộc
    thi: cột 1 xanh, cột 2 đỏ, cột 3 vàng. Vài biến cục bộ điều khiển header, viền và
-   nút; `--accent*` được ghi đè tại đây nên nút và vòng focus trong thẻ ăn theo màu cột. */
+   nút; `--accent*` được ghi đè tại đây nên nút và vòng focus trong thẻ ăn theo màu cột.
+   Dải header cố ý chỉ là nền tint rất nhạt + mực chữ đậm cùng tông: giữ được nhận diện
+   ba cột mà không có mảng màu bão hoà nào chói mắt. */
 .comp-card {
-  --card-header-from: var(--vku-blue-700);
-  --card-header-to: var(--vku-blue-600);
-  --card-header-ink: #fff;
+  --card-header-from: var(--vku-blue-100);
+  --card-header-to: var(--vku-blue-50);
+  --card-header-ink: var(--vku-blue-800);
   --card-tint: var(--vku-blue-50);
   --card-border: #bfdbfe;
   --card-outline-ink: var(--vku-blue-800);
@@ -1791,8 +1793,9 @@ select.input {
 }
 
 .comp-card[data-theme="red"] {
-  --card-header-from: var(--vku-red-700);
-  --card-header-to: var(--vku-red-600);
+  --card-header-from: var(--vku-red-100);
+  --card-header-to: var(--vku-red-50);
+  --card-header-ink: var(--vku-red-800);
   --card-tint: var(--vku-red-50);
   --card-border: #fecdd3;
   --card-outline-ink: var(--vku-red-800);
@@ -1800,11 +1803,12 @@ select.input {
   --accent-strong: var(--vku-red-800);
 }
 
-/* Header vàng quá sáng để mang chữ trắng — dùng mực đậm của bảng màu VKU. */
+/* Vàng chỉ đạt tương phản khi làm nền, nên mực chữ lấy yellow-800 (tông chữ chuẩn của
+   bảng màu VKU) chứ không dùng vàng 500/400. */
 .comp-card[data-theme="yellow"] {
-  --card-header-from: var(--vku-yellow-400);
-  --card-header-to: var(--vku-yellow-500);
-  --card-header-ink: var(--vku-ink);
+  --card-header-from: var(--vku-yellow-100);
+  --card-header-to: var(--vku-yellow-50);
+  --card-header-ink: var(--vku-yellow-800);
   --card-tint: var(--vku-yellow-50);
   --card-border: #fde68a;
   --card-outline-ink: var(--vku-yellow-800);
@@ -1885,26 +1889,7 @@ select.input {
   height: 6px;
 }
 
-/* Badge nằm trên dải header màu nên phải đục hoàn toàn mới đủ tương phản. Màu badge
-   vẫn theo trạng thái cuộc thi, tuyệt đối không theo theme của cột. */
-.comp-card-head .status-badge {
-  border-color: transparent;
-}
-
-.comp-card-head .status-badge.success {
-  background: #d1fae5;
-  color: #047857;
-}
-
-.comp-card-head .status-badge.closed {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.comp-card-head .status-badge.warning {
-  background: var(--warning-soft);
-  color: var(--warning);
-}
+/* Badge trong .comp-card-head dùng style chung: header chỉ còn là nền tint nhạt. */
 
 .comp-card-desc {
   display: -webkit-box;
@@ -2796,6 +2781,101 @@ select.input {
   color: var(--text-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
+}
+
+/* --- Block "Mục lục nội dung" (sidebar trang chi tiết cuộc thi) ---
+   Nhận diện VKU: vạch ba màu ở mép trên, dải tiêu đề nền xanh nhạt, mỗi đầu mục có số
+   thứ tự để quét mắt nhanh. Số chèn bằng pseudo-element nên không lọt vào `textContent`
+   của link (điều hướng vẫn đọc đúng tên tài liệu). */
+.content-card-toc {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.content-card-toc::before {
+  content: "";
+  flex: none;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--vku-blue-600) 0 33.34%,
+    var(--vku-red-600) 33.34% 66.67%,
+    var(--vku-yellow-600) 66.67% 100%
+  );
+}
+
+.content-card-toc .content-card-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--vku-blue-100);
+  border-radius: 0;
+  background: var(--vku-blue-50);
+}
+
+.content-card-toc .content-card-title {
+  color: var(--vku-blue-800);
+  font-size: var(--text-label-md);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.content-card-toc .content-card-title svg {
+  color: var(--vku-blue-700);
+}
+
+.content-card-toc .content-card-count {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-800);
+  font-weight: 600;
+}
+
+.content-card-toc .content-nav {
+  counter-reset: toc-item;
+  padding: 10px;
+}
+
+.content-card-toc .content-nav-item {
+  position: relative;
+  counter-increment: toc-item;
+  padding: 9px 12px 9px 46px;
+}
+
+.content-card-toc .content-nav-item::before {
+  content: counter(toc-item, decimal-leading-zero);
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  transform: translateY(-50%);
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-sm);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.content-card-toc .content-nav-item.active {
+  box-shadow: inset 3px 0 0 var(--vku-blue-600);
+}
+
+.content-card-toc .content-nav-item.active::before {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-600);
+  color: #fff;
+}
+
+.content-card-toc .content-nav-state {
+  padding: 12px 16px;
 }
 
 .resource-list {
@@ -4395,20 +4475,6 @@ select.input {
   white-space: nowrap;
 }
 
-.sub-result-metric-name {
-  font-size: var(--text-heading-sm);
-  font-weight: 600;
-  color: var(--text);
-  margin: 0 0 4px;
-}
-
-.sub-result-metric-desc {
-  font-size: var(--text-body-sm);
-  color: var(--text-muted);
-  margin: 0;
-  line-height: 1.45;
-}
-
 .sub-result-quota-card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -5576,26 +5642,45 @@ select.input {
 }
 
 .admin-members {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 24px;
-  align-items: start;
 }
 
+/* Card mã tham gia là MỘT hàng ngang chạy hết bề rộng: tiêu đề, ô nhập và nút đổi mã
+   nằm cạnh nhau; tiêu đề `flex: none` để ô nhập luôn chiếm phần rộng còn lại. */
 .admin-members-code-card {
-  padding: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 20px;
+}
+
+.admin-members-code-card .admin-detail-section-heading {
+  align-items: center;
+  flex: none;
 }
 
 .admin-members-note {
-  margin: 12px 0 0;
+  flex: 1 1 260px;
+  margin: 0;
   font-size: 13px;
   line-height: 1.5;
 }
 
 .admin-members-code-form {
-  display: grid;
-  gap: 12px;
-  margin-top: 16px;
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+}
+
+.admin-members-code-form .input {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .admin-members-code-form .input,
@@ -5669,13 +5754,6 @@ select.input {
   background: var(--surface-subtle);
   color: var(--text-muted);
   font-size: 13px;
-}
-
-@media (min-width: 64rem) {
-  .admin-members {
-    grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
-    gap: 32px;
-  }
 }
 
 /* =============================================================================
@@ -8699,6 +8777,20 @@ button:focus-visible {
   }
   .content-card-toc .content-card-head {
     display: none;
+  }
+  /* Mobile: mục lục là dải pill cuộn ngang nên bỏ số thứ tự và trả padding về như cũ;
+     giữ `padding: 0` để vạch ba màu chạy sát mép thẻ. */
+  .content-card-toc {
+    padding: 0;
+  }
+  .content-card-toc .content-nav-item {
+    padding: 9px 12px;
+  }
+  .content-card-toc .content-nav-item::before {
+    display: none;
+  }
+  .content-card-toc .content-nav-item.active {
+    box-shadow: none;
   }
   .content-nav {
     flex-direction: row;
