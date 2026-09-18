@@ -13,6 +13,13 @@ const ACCOUNT = {
 
 const calls: Array<{ url: string; init?: RequestInit }> = [];
 
+/** Tài khoản đang đăng nhập, do test điều khiển; mặc định chưa đăng nhập như không có provider. */
+let mockCurrentAccountId: string | null = null;
+
+vi.mock("../auth/AuthContext", () => ({
+  useOptionalAuth: () => (mockCurrentAccountId === null ? null : { account: { id: mockCurrentAccountId } }),
+}));
+
 /** Danh sách lớn để chứng minh phân trang chạm tới được tài khoản thứ 201+. */
 function manyAccounts(total: number) {
   return Array.from({ length: total }, (_, i) => ({
@@ -25,6 +32,16 @@ function manyAccounts(total: number) {
 
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+
+/** Thống kê toàn hệ thống: tính trên TOÀN BỘ dataset, không phụ thuộc q/limit/offset. */
+function statsOf(accounts: Array<Record<string, unknown>>) {
+  return {
+    total: accounts.length,
+    admin: accounts.filter((a) => a.role === "admin").length,
+    participant: accounts.filter((a) => a.role === "participant").length,
+    active: accounts.filter((a) => a.active !== false).length,
+  };
+}
 
 /** Giả lập `offset`/`q`/`limit` như backend thật để test được chuyển trang và tìm kiếm. */
 function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
@@ -45,12 +62,21 @@ function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
               String(a.email).toLowerCase().includes(q) || String(a.name).toLowerCase().includes(q),
           )
         : accounts;
-      return json({ accounts: matched.slice(offset, offset + limit), total: matched.length, limit, offset });
+      return json({
+        accounts: matched.slice(offset, offset + limit),
+        total: matched.length,
+        limit,
+        offset,
+        stats: statsOf(accounts),
+      });
     }),
   );
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  mockCurrentAccountId = null;
+});
 
 test("loads the first page of accounts and protects passwords", async () => {
   mockApi();
@@ -196,7 +222,13 @@ test("phản hồi của trang cũ không ghi đè kết quả tìm kiếm mới
         : accounts;
       const gate = q ? "search" : `offset-${offset}`;
       if (gate !== "offset-0") await new Promise<void>((resolve) => pending.set(gate, resolve));
-      return json({ accounts: matched.slice(offset, offset + 50), total: matched.length, limit: 50, offset });
+      return json({
+        accounts: matched.slice(offset, offset + 50),
+        total: matched.length,
+        limit: 50,
+        offset,
+        stats: statsOf(accounts),
+      });
     }),
   );
   renderPage();
@@ -228,7 +260,7 @@ test("trang cuối rỗng đi thì lùi về trang còn dữ liệu", async () =
       // Giữa hai lần tải, dữ liệu co lại còn 40 dòng nên trang 2 thành rỗng.
       const total = offset === 0 ? 60 : 40;
       const rows = offset === 0 ? accounts.slice(0, 50) : [];
-      return json({ accounts: rows, total, limit: 50, offset });
+      return json({ accounts: rows, total, limit: 50, offset, stats: statsOf(accounts) });
     }),
   );
   renderPage();
@@ -238,6 +270,86 @@ test("trang cuối rỗng đi thì lùi về trang còn dữ liệu", async () =
   expect(await screen.findByText("team0@vku.vn")).toBeTruthy();
   await waitFor(() => expect(calls.at(-1)?.url).toContain("offset=0"));
   expect(screen.queryByText("Không tìm thấy tài khoản nào.")).toBeNull();
+});
+
+/** Dataset 230 dòng trộn vai trò/trạng thái: page đầu chỉ có 50 dòng nên nếu KPI
+ *  đọc từ page thay vì aggregate thì các số dưới đây sẽ sai. */
+function mixedAccounts() {
+  return manyAccounts(230).map((account, i) => ({
+    ...account,
+    role: i % 25 === 0 ? "admin" : "participant",
+    active: i % 10 !== 0,
+  }));
+}
+
+function statsRegion() {
+  return within(screen.getByRole("region", { name: "Tổng quan tài khoản" }));
+}
+
+test("bốn ô thống kê đọc aggregate toàn hệ thống, không phải 50 dòng của page đầu", async () => {
+  mockApi(mixedAccounts());
+  renderPage();
+  await screen.findByText("team0@vku.vn");
+
+  // 230 dòng: 10 admin (i chia hết cho 25), 220 thí sinh, 23 dòng bị vô hiệu.
+  expect(statsRegion().getByText("230")).toBeTruthy();
+  expect(statsRegion().getByText("10")).toBeTruthy();
+  expect(statsRegion().getByText("220")).toBeTruthy();
+  expect(statsRegion().getByText("207")).toBeTruthy();
+});
+
+test("tìm kiếm không làm đổi thống kê toàn hệ thống", async () => {
+  mockApi(mixedAccounts());
+  renderPage();
+  await screen.findByText("team0@vku.vn");
+
+  fireEvent.change(screen.getByLabelText("Tìm tài khoản"), { target: { value: "team12@" } });
+  expect(await screen.findByText("team12@vku.vn")).toBeTruthy();
+
+  expect(statsRegion().getByText("230")).toBeTruthy();
+  expect(statsRegion().getByText("207")).toBeTruthy();
+});
+
+test("bảng giữ đủ năm cột trong vùng cuộn focus được", async () => {
+  mockApi();
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  const region = screen.getByRole("region", { name: "Bảng tài khoản" });
+  expect(within(region).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Email",
+    "Tên",
+    "Vai trò",
+    "Trạng thái",
+    "Thao tác",
+  ]);
+});
+
+test("vai trò và trạng thái luôn có nhãn chữ, không chỉ dựa vào màu", async () => {
+  mockApi([{ ...ACCOUNT, role: "admin", active: true }]);
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  const region = screen.getByRole("region", { name: "Bảng tài khoản" });
+  expect(within(region).getByText("Admin")).toBeTruthy();
+  expect(within(region).getByText("Hoạt động")).toBeTruthy();
+});
+
+test("admin không thể tự vô hiệu hóa: nút bị khóa kèm lý do và không phát PATCH", async () => {
+  mockCurrentAccountId = ACCOUNT.id;
+  mockApi();
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  expect(screen.getByText("Bạn")).toBeTruthy();
+  const disable = screen.getByRole("button", { name: "Vô hiệu hóa" });
+  expect(disable).toBeDisabled();
+  expect(disable.getAttribute("aria-describedby")).toBe(`self-disable-reason-${ACCOUNT.id}`);
+  expect(screen.getByText("Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập.")).toBeTruthy();
+
+  fireEvent.click(disable);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
 });
 
 test("tiêu đề tab đặt theo tên trang", async () => {

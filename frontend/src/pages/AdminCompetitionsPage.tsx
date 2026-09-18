@@ -250,7 +250,7 @@ export function AdminCompetitionsPage() {
   return (
     <div className="page ac-page">
       <header className="ac-page-head">
-        <div className="ac-page-head-copy">
+        <div>
           <h1 className="ac-title">Quản lý cuộc thi</h1>
           <p className="ac-subtitle">Tạo, chỉnh sửa, publish/close và clone cuộc thi</p>
           <span className="ac-brand-accent" aria-hidden="true">

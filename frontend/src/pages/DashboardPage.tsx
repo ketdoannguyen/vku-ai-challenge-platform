@@ -314,7 +314,7 @@ export function DashboardPage() {
             <p className="dash-subtitle">Các cuộc thi bạn có thể tham gia</p>
           </div>
           <section className="dash-stats" aria-label="Thống kê cuộc thi">
-            <dl className="dash-stat dash-stat-published">
+            <dl className="dash-stat">
               <dt className="dash-stat-label">
                 <IconPulse />
                 Đang diễn ra

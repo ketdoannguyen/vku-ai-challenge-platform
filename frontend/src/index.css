@@ -69,35 +69,38 @@
   /* Stitch chỉ có một chế độ sáng; khoá color-scheme để OS dark không đổi UI native. */
   color-scheme: light;
 
-  /* --- Palette (giá trị nguyên văn từ code.html của screens) --- */
-  --palette-background: #f9f9f8;
+  /* --- Nền trung tính VKU (navy/slate) ---
+     Thang xám ấm của Stitch được thay bằng thang slate lạnh của VKU. Tên `--palette-*`
+     được giữ lại để phần code cũ không phải đổi hàng loạt, nhưng từ đây chúng chỉ là
+     alias trỏ về token canonical, không còn là một bảng màu độc lập. */
+  --slate-950: #0b1f44;
+  --slate-900: #102446;
+  --slate-600: #526078;
+  --slate-400: #8491a5;
+  --slate-300: #cbd5e1;
+  --slate-200: #dfe5ec;
+  --slate-100: #eef2f6;
+  --slate-50: #f8fafc;
+
+  --palette-background: #f7f9fc;
   --palette-surface: #ffffff;
-  --palette-surface-subtle: #f7f7f5;
-  --palette-surface-container-low: #f3f4f3;
-  --palette-surface-container: #eeeeed;
-  --palette-surface-container-high: #e8e8e7;
-  --palette-on-surface: #1a1c1c;
-  --palette-on-surface-variant: #444748;
-  --palette-secondary: #5e5e5e;
-  --palette-primary: #000000;
-  --palette-on-primary: #ffffff;
-  --palette-border: #e7e7e3;
-  --palette-border-strong: #d8d8d3;
-  --palette-outline: #747878;
-  --palette-outline-variant: #c4c7c7;
-  --palette-error: #ba1a1a;
-  --palette-error-container: #ffdad6;
-  --palette-on-error-container: #93000a;
-  --palette-data-blue: #2f80ed;
-  --palette-data-cyan: #25b8c7;
-  --palette-data-green: #42c89a;
-  --palette-data-pink: #f064a8;
-  --palette-data-yellow: #e9b949;
-  --palette-data-purple: #8b5cf6;
+  --palette-surface-subtle: var(--slate-50);
+  --palette-surface-container-low: #f1f5f9;
+  --palette-surface-container: var(--slate-100);
+  --palette-surface-container-high: #e2e8f0;
+  --palette-on-surface: var(--slate-950);
+  --palette-on-surface-variant: var(--slate-600);
+  --palette-secondary: var(--slate-600);
+  --palette-border: var(--slate-200);
+  --palette-border-strong: var(--slate-300);
+  --palette-outline: var(--slate-400);
+  --palette-error: #d30b23;
+  --palette-error-container: #ffecef;
+  --palette-data-blue: #0969e8;
+  --palette-data-green: #10b981;
 
   /* --- VKU brand ---
-     Namespace `--vku-*` vì các tên trần như `--text-secondary`/`--border` đã thuộc
-     bảng màu Stitch đơn sắc; dashboard cần bộ xanh–đỏ–vàng tách bạch khỏi scale cũ. */
+     Namespace `--vku-*` cho bộ xanh–đỏ–vàng thương hiệu, tách bạch khỏi thang trung tính. */
   --vku-blue-900: #082b73;
   --vku-blue-800: #073b9a;
   --vku-blue-700: #064fc4;
@@ -123,10 +126,10 @@
   --vku-yellow-100: #fff5cc;
   --vku-yellow-50: #fffbeb;
 
-  --vku-ink: #0b1f44;
-  --vku-ink-muted: #526078;
-  --vku-border: #e5e7eb;
-  --vku-border-soft: #eef1f5;
+  --vku-ink: var(--slate-950);
+  --vku-ink-muted: var(--slate-600);
+  --vku-border: var(--slate-200);
+  --vku-border-soft: #edf1f5;
 
   /* --- Semantic --- */
   --bg: var(--palette-background);
@@ -138,32 +141,52 @@
   --border: var(--palette-border);
   --border-strong: var(--palette-border-strong);
   --outline: var(--palette-outline);
-  --outline-variant: var(--palette-outline-variant);
   --text: var(--palette-on-surface);
   --text-muted: var(--palette-on-surface-variant);
   --text-secondary: var(--palette-secondary);
-  --accent: var(--palette-primary);
-  --accent-strong: var(--palette-on-surface);
-  --accent-soft: var(--palette-surface-container);
-  --on-accent: var(--palette-on-primary);
+  /* Màu hành động mặc định là VKU Blue; các card/row decorative theme override lại
+     `--accent` trong scope hẹp của chúng. Đen không còn là màu CTA. */
+  --accent: var(--vku-blue-700);
+  --accent-strong: var(--vku-blue-800);
+  --accent-soft: var(--vku-blue-100);
+  --on-accent: #ffffff;
+
+  /* Nền tối cho code/khối kỹ thuật — tách hẳn khỏi token màu hành động để CTA không
+     bị kéo về màu mực. */
+  --code-surface: var(--slate-900);
+  --code-surface-text: #e2e8f0;
 
   /* Trạng thái: chip/banner dùng nền tinted + chữ ink đậm, không dùng màu bão hoà làm chữ */
-  --success: #0f5a3e;
-  --success-soft: rgba(66, 200, 154, 0.15);
-  --success-border: rgba(66, 200, 154, 0.4);
-  /* Xanh tươi chỉ dùng cho dấu hiệu (dot/icon), lấy đúng "data-green" của Stitch */
+  --success: #047857;
+  --success-soft: rgba(16, 185, 129, 0.14);
+  --success-border: rgba(16, 185, 129, 0.38);
+  /* Xanh tươi chỉ dùng cho dấu hiệu (dot/icon) */
   --success-bright: var(--palette-data-green);
-  /* amber-800 / amber-50 / amber-200-70 — đúng giá trị Stitch dùng cho chip đếm ngược */
-  --warning: #92400e;
-  --warning-soft: #fffbeb;
-  --warning-border: rgba(253, 230, 138, 0.7);
+  --warning: var(--vku-yellow-800);
+  --warning-soft: var(--vku-yellow-50);
+  --warning-border: rgba(245, 184, 0, 0.4);
   --danger: var(--palette-error);
   --danger-soft: var(--palette-error-container);
-  --danger-soft-30: rgba(255, 218, 214, 0.3);
-  --danger-border: rgba(186, 26, 26, 0.3);
+  --danger-soft-30: rgba(211, 11, 35, 0.07);
+  --danger-border: rgba(211, 11, 35, 0.25);
   --info: var(--palette-data-blue);
-  --info-soft: rgba(47, 128, 237, 0.15);
-  --info-border: rgba(47, 128, 237, 0.35);
+
+  /* Bảng token của khu quản trị cuộc thi (ADMIN_COMPETITIONS_DESIGN.md). Khai báo ở `:root`
+     chứ không phải `.ac-page`: menu ba chấm và modal tạo/sửa cuộc thi đều portal ra
+     `document.body`, nằm ngoài cây `.ac-page`. Ở scope hẹp thì token không giải được, nút
+     chính rơi về nền trong suốt và mục menu bị vô hiệu hoá mất màu mờ. */
+  --ac-ink: var(--vku-ink);
+  --ac-secondary: var(--vku-ink-muted);
+  --ac-outline: #94a3b8;
+  --ac-chip: #f3f5f7;
+  --ac-live: #047857;
+  --ac-live-dot: #047857;
+  --ac-live-bg: #d1fae5;
+  --ac-draft-dot: #b45309;
+  --ac-draft-bg: #fef3c7;
+  --ac-closed: #475569;
+  --ac-closed-dot: #94a3b8;
+  --ac-closed-bg: #f1f5f9;
 
   /* --- Typography: Inter cho UI/prose; JetBrains Mono chỉ cho dữ liệu kỹ thuật --- */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial,
@@ -189,9 +212,9 @@
   --text-body: 1rem;
   --leading-body: 1.65;
   --tracking-body: -0.01em;
-  --text-secondary: 0.875rem;
-  --leading-secondary: 1.5;
-  --tracking-secondary: -0.005em;
+  --text-body-sm: 0.875rem;
+  --leading-body-sm: 1.5;
+  --tracking-body-sm: -0.005em;
   --text-control: 0.875rem;
   --leading-control: 1.4;
   --text-label: 0.75rem;
@@ -201,15 +224,9 @@
   --leading-code: 1.5;
 
   /* Alias cũ giữ tạm để các component dùng chung scale mới, không còn raw size rời rạc. */
-  --text-display-lg: var(--text-h1-desktop);
-  --leading-display-lg: var(--leading-h1);
-  --text-display-lg-mobile: var(--text-h1);
-  --text-display-md: var(--text-h1);
-  --text-heading-lg: var(--text-h2);
   --text-heading-sm: var(--text-h3);
   --text-body-lg: var(--text-body);
   --text-body-md: var(--text-body);
-  --text-body-sm: var(--text-secondary);
   --text-label-md: var(--text-control);
   --text-label-xs: var(--text-label);
   --text-mono-sm: var(--text-code);
@@ -226,7 +243,8 @@
 
   /* --- Layout --- */
   --container: 1280px;
-  /* Trần rộng của dashboard (3 cột + hero có stat card) — chỉ áp cho route "/" */
+  /* Trần rộng cho các màn cần nhiều chỗ ngang: dashboard 3 cột, bảng quản trị
+     và lưới hai cột của trang Hỗ trợ. Navbar cũng căn theo trần này. */
   --container-wide: 1440px;
   --page-padding-inline: 1.125rem;
   /* Navbar là thanh ngang full-bleed, nội dung bên trong căn giữa theo trần rộng */
@@ -246,20 +264,19 @@
   --radius-xl: 12px;
   --radius-2xl: 14px;
   --radius-pill: 999px;
-  --radius: var(--radius-lg);
 
-  /* --- Elevation --- */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.02);
-  --shadow-modal: 0 20px 50px rgba(0, 0, 0, 0.12);
+  /* --- Elevation ---
+     Cùng công thức bóng với họ card VKU đã triển khai (`.admin-accounts-card`,
+     `.ac-table-card`): bóng mờ tông slate, không dùng bóng đen đậm. */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.02), 0 6px 22px rgba(15, 23, 42, 0.035);
+  --shadow-modal: 0 20px 50px rgba(15, 23, 42, 0.16);
   --shadow: var(--shadow-card);
 
   /* --- Motion --- */
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-out: cubic-bezier(0, 0, 0.2, 1);
   --duration-fast: 150ms;
   --duration-base: 200ms;
-  --duration-slow: 300ms;
 
   /* --- Shell --- */
   --overlay-bg: rgba(0, 0, 0, 0.45);
@@ -727,13 +744,13 @@ samp {
   align-items: center;
 }
 .app-drawer-nav a:hover {
-  background: var(--surface-subtle);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
   text-decoration: none;
 }
 .app-drawer-nav a.active {
-  background: var(--vku-blue-100);
-  color: var(--vku-blue-700);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .app-drawer-foot {
@@ -768,28 +785,22 @@ samp {
   max-width: var(--container-wide);
 }
 
+/* Trang Hỗ trợ có lưới hai cột (hướng dẫn + liên hệ) nên cũng dùng trần rộng. */
+.app-main-support {
+  max-width: var(--container-wide);
+}
+
+/* Trang Giới thiệu cũng hai cột ở desktop nên dùng chung trần rộng; chỉ áp cho
+   đúng `/gioi-thieu`, không đổi trần mặc định của các màn còn lại. */
+.app-main-about {
+  max-width: var(--container-wide);
+}
+
 /* =============================================================================
    Page
    ============================================================================= */
 .page {
   width: 100%;
-}
-
-.page-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--space-md);
-  padding-bottom: var(--space-lg);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-lg);
-}
-
-.page-head > div:first-child,
-.ac-page-head > div:first-child,
-.subm-head-copy,
-.lb-head-copy {
-  min-width: 0;
 }
 
 .page-title,
@@ -834,22 +845,42 @@ samp {
   color: var(--text);
 }
 
-.page-subtitle {
-  margin: var(--space-sm) 0 0;
-  max-width: 42rem;
-  color: var(--text-muted);
-  font-size: var(--text-body-md);
-}
-
 /* =============================================================================
    Primitives
    ============================================================================= */
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  /* Cùng bán kính với họ card VKU đã triển khai (`.admin-accounts-card`, `.ac-table-card`,
+     `.content-card`) để trang cũ và trang mới không còn lệch nhau 8px vs 12px. */
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-card);
   padding: var(--space-lg);
+}
+
+/* Ba vạch xanh–đỏ–vàng của VKU. Thuần trang trí nên dùng vừa phải, không lặp ở mọi card. */
+.vku-accent {
+  display: flex;
+  gap: 5px;
+}
+
+.vku-accent span {
+  display: block;
+  width: 26px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.vku-accent .blue {
+  background: var(--vku-blue-600);
+}
+
+.vku-accent .red {
+  background: var(--vku-red-600);
+}
+
+.vku-accent .yellow {
+  background: var(--vku-yellow-500);
 }
 
 /* --- Buttons --- */
@@ -858,10 +889,10 @@ samp {
   align-items: center;
   justify-content: center;
   gap: var(--space-sm);
-  height: 36px;
+  height: 40px;
   padding: 0 var(--space-md);
   border: 1px solid var(--accent);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   background: var(--accent);
   color: var(--on-accent);
   font-family: var(--font-sans);
@@ -955,10 +986,10 @@ samp {
 /* --- Form controls --- */
 .input {
   width: 100%;
-  height: 40px;
+  height: 44px;
   padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: var(--surface);
   color: var(--text);
   font-family: inherit;
@@ -974,7 +1005,7 @@ samp {
 .input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .input:disabled {
   background: var(--surface-container-low);
@@ -1005,10 +1036,6 @@ select.input {
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: var(--space-md);
-}
-
-.form-field-wide {
-  grid-column: 1 / -1;
 }
 
 /* --- Status badge: pill, nền tinted, chữ ink --- */
@@ -1079,17 +1106,37 @@ select.input {
   animation: spin 0.8s linear infinite;
 }
 
-.spinner-light {
-  width: 14px;
-  height: 14px;
-  border-color: rgba(255, 255, 255, 0.4);
-  border-top-color: var(--on-accent);
-}
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Khởi động phiên (route guard): màn đầu tiên của phiên đăng nhập nên mang nhận diện VKU.
+   Căn giữa theo chiều dọc nhưng vẫn chừa chỗ cho header khi guard chạy trong shell. */
+.boot-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  min-height: 60vh;
+  padding: var(--space-xl) var(--space-lg);
+  background: linear-gradient(180deg, var(--vku-blue-50) 0, transparent 280px);
+}
+
+.boot-state .boot-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+}
+
+.boot-state .loading {
+  padding: 0;
+}
+
+.boot-state .vku-accent {
+  margin-top: var(--space-xs);
 }
 
 .error-box {
@@ -1169,15 +1216,6 @@ select.input {
   color: var(--warning);
 }
 
-.placeholder-note {
-  padding: 12px var(--space-md);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
-  background: var(--surface-subtle);
-  color: var(--text-muted);
-  font-size: var(--text-body-sm);
-}
-
 .empty-state {
   padding: 48px var(--space-lg);
   text-align: center;
@@ -1205,6 +1243,29 @@ select.input {
   font-size: var(--text-body-sm);
 }
 
+/* Trang hệ thống (404): tối giản, VKU Blue chủ đạo, accent xanh–đỏ–vàng chỉ điểm nhẹ. */
+.sys-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px var(--space-lg);
+}
+
+.sys-state .vku-accent {
+  margin-bottom: var(--space-md);
+}
+
+.sys-state .empty-state-icon {
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: var(--space-md);
+  border-radius: var(--radius-2xl);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
 /* --- Toolbar --- */
 .toolbar {
   display: flex;
@@ -1228,7 +1289,7 @@ select.input {
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow);
 }
@@ -1316,6 +1377,13 @@ select.input {
   gap: 12px;
 }
 
+/* Cụm nút điều hướng trang; `pagination-controls` đã canh phải nên ở đây chỉ cần hàng ngang. */
+.pagination-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 /* --- Modal --- */
 .modal-overlay {
   position: fixed;
@@ -1383,7 +1451,7 @@ select.input {
   height: 32px;
   flex: none;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--text-muted);
   font-size: 22px;
@@ -1407,12 +1475,6 @@ select.input {
   margin-top: var(--space-lg);
 }
 
-/* S03: nút trong modal cao 40px, radius 2px (Tailwind `rounded` của Stitch) */
-.modal-actions .btn {
-  height: 40px;
-  border-radius: var(--radius-xs);
-}
-
 .modal-note {
   margin: 0 0 var(--space-sm);
   color: var(--text-muted);
@@ -1429,8 +1491,8 @@ select.input {
   align-items: flex-start;
   gap: 12px;
   padding: 16px;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
   background: var(--surface-subtle);
 }
 
@@ -1449,14 +1511,14 @@ select.input {
   height: 36px;
   flex: none;
   border: 1px solid var(--border);
-  border-radius: 2px;
+  border-radius: 10px;
   background: var(--surface-container);
   color: var(--text);
 }
 
 .confirm-modal-danger .confirm-modal-icon {
-  border-color: rgba(186, 26, 26, 0.2);
-  background: rgba(255, 218, 214, 0.5);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
   color: var(--danger);
 }
 
@@ -1467,8 +1529,8 @@ select.input {
   margin-top: 12px;
   padding: 12px;
   border: 1px solid var(--danger-border);
-  border-radius: 2px;
-  background: rgba(255, 218, 214, 0.4);
+  border-radius: var(--radius-lg);
+  background: var(--danger-soft-30);
   color: var(--danger);
   font-size: 13px;
   line-height: 1.4;
@@ -1481,11 +1543,6 @@ select.input {
 
 .confirm-modal-actions {
   margin-top: 16px;
-}
-
-.confirm-modal-actions .btn {
-  height: 36px;
-  border-radius: 2px;
 }
 
 /* --- Helpers --- */
@@ -1514,6 +1571,7 @@ select.input {
   justify-content: center;
   min-height: 100vh;
   padding: var(--space-xl) var(--space-md);
+  background: linear-gradient(180deg, var(--vku-blue-50) 0, var(--bg) 360px);
 }
 
 /* Lối thoát duy nhất khỏi trang login: luôn về dashboard */
@@ -1538,20 +1596,21 @@ select.input {
     color var(--duration-fast) var(--ease-standard);
 }
 .login-back:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-subtle);
-  color: var(--text);
+  border-color: var(--vku-blue-700);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
 }
 
-/* Nền lưới chấm 32px, opacity 0.035 */
+/* Ba khối chéo rất nhạt ở ba góc — hình học thương hiệu VKU thay cho lưới chấm đen. */
 .login-page::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  opacity: 0.035;
-  background-image: radial-gradient(#000 1px, transparent 1px);
-  background-size: 32px 32px;
+  background-image:
+    linear-gradient(120deg, rgba(6, 79, 196, 0.055) 0 20%, transparent 20%),
+    linear-gradient(300deg, rgba(236, 22, 49, 0.04) 0 11%, transparent 11%),
+    linear-gradient(60deg, rgba(245, 184, 0, 0.075) 0 9%, transparent 9%);
 }
 
 .login-capsule {
@@ -1564,36 +1623,13 @@ select.input {
 .login-card {
   position: relative;
   padding: var(--space-xl);
+  border-top: 3px solid var(--vku-blue-600);
+  border-radius: var(--radius-2xl);
 }
 
-/* Dấu căn chỉnh "+" ở 4 góc panel (Stitch kế thừa cỡ chữ gốc 16px, leading-none) */
-.login-crosshair {
-  position: absolute;
-  color: var(--border-strong);
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  line-height: 1;
-  user-select: none;
-}
-
-.login-crosshair.top-left {
-  top: var(--space-sm);
-  left: 10px;
-}
-
-.login-crosshair.top-right {
-  top: var(--space-sm);
-  right: 10px;
-}
-
-.login-crosshair.bottom-left {
-  bottom: var(--space-sm);
-  left: 10px;
-}
-
-.login-crosshair.bottom-right {
-  bottom: var(--space-sm);
-  right: 10px;
+/* Vạch ba màu nằm dưới phụ đề; thay cho bốn dấu "+" đơn sắc của Stitch. */
+.login-head .vku-accent {
+  margin: var(--space-md) 0 var(--space-xl);
 }
 
 /* Stitch: khối tiêu đề không có margin riêng, khoảng cách 32px nằm ở mb của phụ đề */
@@ -1617,10 +1653,10 @@ select.input {
 }
 
 .login-subtitle {
-  margin: var(--space-sm) 0 var(--space-xl);
+  margin: var(--space-sm) 0 0;
   color: var(--text-muted);
-  font-size: var(--text-secondary);
-  line-height: var(--leading-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
 }
 
 .login-error {
@@ -1645,17 +1681,17 @@ select.input {
   font-size: var(--text-body-md);
 }
 
-/* Ô nhập cao 56px, radius 2px, nền background (không phải surface) */
+/* Ô nhập theo đúng hệ form chung: 46px, radius 8px, nền trắng */
 .login-field .input {
-  height: 56px;
-  border-radius: var(--radius-xs);
+  height: 46px;
+  border-radius: 8px;
   font-size: var(--text-body);
   line-height: var(--leading-body);
   letter-spacing: var(--tracking-body);
 }
 
 .login-input {
-  background: var(--bg);
+  background: var(--surface);
 }
 
 .login-password-wrap {
@@ -1665,13 +1701,11 @@ select.input {
 }
 
 .login-password-wrap .input {
-  padding-right: 64px;
-  font-family: var(--font-mono);
-  font-size: var(--text-body-md);
+  padding-right: 52px;
   letter-spacing: 0.025em;
 }
 
-/* Nút hiện/ẩn mật khẩu: khớp chiều cao ô nhập 56px; padding-right 64px ở trên
+/* Nút hiện/ẩn mật khẩu: khớp chiều cao ô nhập 46px; padding-right 52px ở trên
    giữ chữ không chui xuống dưới icon 18px. */
 .login-toggle {
   position: absolute;
@@ -1679,11 +1713,11 @@ select.input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1696,9 +1730,9 @@ select.input {
 
 .login-submit {
   width: 100%;
-  height: 56px;
+  height: 46px;
   margin-top: var(--space-sm);
-  border-radius: var(--radius-xs);
+  border-radius: 8px;
   font-family: var(--font-sans);
   font-size: var(--text-body-md);
 }
@@ -1903,8 +1937,8 @@ select.input {
 
 .comp-card .comp-meta dd {
   font-family: var(--font-sans);
-  font-size: var(--text-secondary);
-  line-height: var(--leading-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.005em;
 }
@@ -2027,20 +2061,26 @@ select.input {
   font-style: italic;
 }
 
+/* "Đã tham gia" là trạng thái thành công thật, nên dùng badge xanh semantic có chữ —
+   màu không phải là kênh thông tin duy nhất. */
 .join-state-status {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  color: var(--text);
+  padding: 4px 10px;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-pill);
+  background: var(--success-soft);
+  color: var(--success);
   font-size: var(--text-label-xs);
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 
 .join-state-icon {
   display: inline-flex;
   flex: none;
-  color: var(--success-bright);
+  color: var(--success);
 }
 
 .join-error {
@@ -2060,8 +2100,8 @@ select.input {
 .join-form-competition {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--text-secondary);
-  line-height: var(--leading-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
 }
 
 .join-form-competition strong {
@@ -2091,7 +2131,9 @@ select.input {
 }
 
 .join-code-input {
-  border-radius: var(--radius-xs);
+  /* Mã tham gia là dữ liệu kỹ thuật nên giữ monospace, nhưng hình dạng control phải
+     khớp `.input` còn lại (8px, không phải 2px của Stitch). */
+  border-radius: var(--radius-lg);
   font-family: var(--font-mono);
   font-size: var(--text-mono-sm);
   letter-spacing: 0.05em;
@@ -2103,8 +2145,8 @@ select.input {
   gap: 6px;
   margin: 0;
   color: var(--text-secondary);
-  font-size: var(--text-secondary);
-  line-height: var(--leading-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
 }
 
 .join-note-dot {
@@ -2362,12 +2404,6 @@ select.input {
   gap: var(--space-sm);
 }
 
-.comp-header-join {
-  margin-top: var(--space-md);
-  padding-top: var(--space-md);
-  border-top: 1px solid var(--border);
-}
-
 /* --- Competition meta --- */
 .comp-meta {
   display: flex;
@@ -2430,10 +2466,13 @@ select.input {
 }
 
 .comp-crumb-back:hover {
-  color: var(--text);
+  color: var(--accent);
 }
 
-/* Masthead editorial: thẻ bề mặt lớn p-space-lg..xl */
+/* Masthead editorial: thẻ bề mặt lớn p-space-lg..xl.
+   Nền là surface VKU sáng (xanh rất nhạt chuyển dần sang trắng) cộng ba khối chéo
+   thương hiệu ở góc — cùng công thức hình học với `.login-page`, không dùng pseudo-element
+   nên không ảnh hưởng flex layout hay thứ tự vẽ của nội dung bên trong. */
 .comp-masthead {
   position: relative;
   display: flex;
@@ -2441,9 +2480,14 @@ select.input {
   gap: var(--space-lg);
   padding: var(--space-lg);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--vku-blue-600);
   border-radius: var(--radius-xl);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(135deg, rgba(6, 79, 196, 0.05) 0 18%, transparent 18%),
+    linear-gradient(315deg, rgba(236, 22, 49, 0.035) 0 10%, transparent 10%),
+    linear-gradient(180deg, var(--vku-blue-50) 0, transparent 240px);
+  box-shadow: var(--shadow-card);
   margin-bottom: var(--space-lg);
 }
 
@@ -2552,16 +2596,16 @@ select.input {
 
 .comp-fact dt svg {
   flex: none;
-  color: var(--text-secondary);
+  color: var(--accent);
 }
 
 .comp-fact-value {
   margin: 0;
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--text-secondary);
+  font-size: var(--text-body-sm);
   font-weight: 500;
-  line-height: var(--leading-secondary);
+  line-height: var(--leading-body-sm);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2597,17 +2641,19 @@ select.input {
 }
 
 .comp-tab:hover {
-  color: var(--text);
-  background: var(--surface-subtle);
+  color: var(--accent);
+  background: var(--accent-soft);
   text-decoration: none;
 }
 
+/* Tab đang mở là điều hướng, không phải hành động — vẫn dùng VKU Blue để nhất quán
+   với nav active của header, chỉ khác là nằm trong capsule sáng. */
 .comp-tab.active {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
-  border-color: var(--border);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--vku-blue-100);
+  box-shadow: inset 0 -2px 0 var(--vku-blue-600);
 }
 
 .comp-tab svg {
@@ -2649,7 +2695,7 @@ select.input {
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
 }
 
 .content-card-resources {
@@ -2762,14 +2808,15 @@ select.input {
 }
 
 .content-nav-item:hover {
-  background: var(--surface-subtle);
+  background: var(--accent-soft);
+  color: var(--accent);
   text-decoration: none;
 }
 
 .content-nav-item.active {
-  background: var(--surface-subtle);
-  border-color: var(--border);
-  color: var(--text);
+  background: var(--accent-soft);
+  border-color: var(--vku-blue-100);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -2801,7 +2848,7 @@ select.input {
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
   min-height: 240px;
 }
 
@@ -2852,12 +2899,26 @@ select.input {
   font-weight: 600;
 }
 
+/* Nhịp màu theo thứ tự khối — thuần trang trí, luôn kèm tiêu đề chữ nên không mang
+   thông tin. Semantic state (nếu có) vẫn thắng nhịp này. */
 .ov-block {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   padding-top: var(--space-md);
-  border-top: 1px solid var(--border);
+  border-top: 3px solid var(--vku-blue-600);
+}
+
+.ov-block:nth-of-type(2) {
+  border-top-color: var(--vku-red-600);
+}
+
+.ov-block:nth-of-type(3) {
+  border-top-color: var(--vku-yellow-600);
+}
+
+.ov-block:nth-of-type(n + 4) {
+  border-top-color: var(--border-strong);
 }
 
 .ov-block-title {
@@ -2892,8 +2953,8 @@ select.input {
 }
 
 .ov-doc:hover {
-  background: var(--surface-container);
-  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
   text-decoration: none;
 }
 
@@ -2989,8 +3050,8 @@ select.input {
 }
 
 .article-nav-link:hover {
-  background: var(--surface-container);
-  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  border-color: var(--accent);
   text-decoration: none;
 }
 
@@ -3019,7 +3080,7 @@ select.input {
   max-width: 100%;
   margin: 1em 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -3193,8 +3254,8 @@ select.input {
   overflow-x: auto;
   padding: 14px var(--space-md);
   border-radius: var(--radius-lg);
-  background: var(--palette-primary);
-  color: var(--palette-surface);
+  background: var(--code-surface);
+  color: var(--code-surface-text);
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: var(--leading-code);
@@ -3274,8 +3335,8 @@ select.input {
 .admin-summary-desc {
   margin: 0 0 var(--space-md);
   color: var(--text-secondary);
-  font-size: var(--text-secondary);
-  line-height: var(--leading-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
 }
 
 /* S13: Contents */
@@ -3456,12 +3517,12 @@ select.input {
 
 .sub-title {
   margin: 0;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .sub-lead {
   margin: 0;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   font-size: var(--text-body-md);
   line-height: 1.6;
 }
@@ -3472,8 +3533,8 @@ select.input {
   grid-template-columns: repeat(2, 1fr);
   gap: 8px;
   padding: 12px;
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-sm);
 }
@@ -3500,7 +3561,7 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   letter-spacing: 0.02em;
 }
 
@@ -3508,7 +3569,7 @@ select.input {
   font-family: var(--font-mono);
   font-size: var(--text-mono-sm);
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
   margin-top: 2px;
   word-break: break-word;
 }
@@ -3520,16 +3581,16 @@ select.input {
   gap: 12px;
   padding: 16px;
   border-radius: var(--radius-xl);
-  border: 1px solid rgba(233, 185, 73, 0.4);
-  background: rgba(233, 185, 73, 0.1);
+  border: 1px solid var(--warning-border);
+  background: var(--warning-soft);
 }
 
 .sub-blocked-icon {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: rgba(233, 185, 73, 0.2);
-  color: var(--palette-on-surface);
+  background: var(--vku-yellow-100);
+  color: var(--warning);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3552,21 +3613,23 @@ select.input {
 .sub-blocked-title {
   font-size: var(--text-label-md);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .sub-blocked-badge {
   padding: 1px 8px;
+  border: 1px solid var(--vku-yellow-500);
   border-radius: var(--radius-pill);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  background: rgba(233, 185, 73, 0.25);
-  color: var(--palette-on-surface);
+  font-weight: 600;
+  background: var(--vku-yellow-100);
+  color: var(--warning);
 }
 
 .sub-blocked-text {
   font-size: var(--text-body-sm);
-  color: var(--palette-on-surface);
+  color: var(--text);
   margin: 4px 0 0;
   line-height: 1.5;
 }
@@ -3577,9 +3640,9 @@ select.input {
   display: flex !important;
   flex-direction: column !important;
   gap: 20px;
-  border: 1px solid var(--palette-border) !important;
+  border: 1px solid var(--border) !important;
   border-radius: var(--radius-xl) !important;
-  background: var(--palette-surface) !important;
+  background: var(--surface) !important;
   padding: 24px !important;
   box-shadow: var(--shadow-sm);
   width: 100%;
@@ -3589,7 +3652,7 @@ select.input {
 .sub-upload-label {
   font-size: var(--text-label-md);
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3599,7 +3662,7 @@ select.input {
 .sub-upload-hint {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   font-weight: 400;
 }
 
@@ -3612,37 +3675,38 @@ select.input {
   justify-content: center;
   text-align: center;
   padding: 32px 20px;
-  border: 2px dashed var(--palette-border-strong);
+  border: 2px dashed var(--border-strong);
   border-radius: var(--radius-lg);
-  background: var(--palette-surface-subtle);
+  background: var(--surface-subtle);
   cursor: pointer;
   transition: all var(--duration-fast) var(--ease-standard);
   user-select: none;
 }
 
+/* Vùng thả dùng xanh hành động khi hover/kéo file: đây là lời mời thao tác, không phải mực. */
 .sub-dropzone:hover,
 .sub-dropzone.drag-over {
-  background: var(--palette-surface);
-  border-color: var(--palette-primary);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .sub-dropzone.disabled {
-  background: var(--palette-surface-container-low);
+  background: var(--surface-container-low);
   cursor: not-allowed;
   opacity: 0.7;
-  border-color: var(--palette-border);
+  border-color: var(--border);
 }
 
 .sub-dropzone-icon {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin-bottom: 12px;
   box-shadow: var(--shadow-sm);
 }
@@ -3650,14 +3714,14 @@ select.input {
 .sub-dropzone-prompt {
   font-size: var(--text-label-md);
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 0;
 }
 
 .sub-dropzone-subtext {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 4px 0 0;
 }
 
@@ -3665,16 +3729,16 @@ select.input {
   margin-top: 14px;
   padding: 8px 16px;
   border-radius: var(--radius-sm);
-  background: var(--palette-surface-container);
-  color: var(--palette-secondary);
+  background: var(--surface-container);
+  color: var(--text-muted);
   font-size: var(--text-label-md);
-  border: 1px solid var(--palette-border);
+  border: 1px solid var(--border);
 }
 
 /* Selected File Card */
 .sub-file-card {
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 16px;
   display: flex;
@@ -3690,12 +3754,13 @@ select.input {
   gap: 12px;
 }
 
+/* Khối icon file: nền xanh nhạt + icon xanh như mọi icon block khác của hệ. */
 .sub-file-icon {
   width: 40px;
   height: 40px;
-  border-radius: var(--radius-sm);
-  background: var(--palette-primary);
-  color: var(--palette-on-primary);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3720,7 +3785,7 @@ select.input {
   font-family: var(--font-mono);
   font-size: var(--text-mono-sm);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
   word-break: break-all;
 }
 
@@ -3729,8 +3794,8 @@ select.input {
   border-radius: var(--radius-pill);
   font-family: var(--font-mono);
   font-size: var(--text-mono-xs);
-  background: var(--palette-surface-container);
-  color: var(--palette-secondary);
+  background: var(--surface-container);
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
@@ -3740,7 +3805,8 @@ select.input {
   gap: 4px;
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: #15803d;
+  font-weight: 600;
+  color: var(--success);
   margin-top: 4px;
 }
 
@@ -3749,30 +3815,33 @@ select.input {
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--duration-fast) var(--ease-standard);
+  transition: color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
 }
 
+/* Bỏ chọn file là hành động huỷ nên hover mang sắc đỏ, không phải mực. */
 .sub-file-remove:hover {
-  background: var(--palette-surface-container);
-  color: var(--palette-primary);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .sub-file-bar {
   width: 100%;
   height: 6px;
-  background: var(--palette-surface);
+  background: var(--surface);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
+/* Thanh tiến trình đầy 100% khi file đã sẵn sàng nộp: xanh tươi chỉ dành cho dấu hiệu. */
 .sub-file-bar-fill {
   height: 100%;
-  background: #22c55e;
+  background: var(--success-bright);
   border-radius: var(--radius-pill);
   width: 100%;
 }
@@ -3783,7 +3852,7 @@ select.input {
   flex-direction: column;
   gap: 12px;
   padding-top: 16px;
-  border-top: 1px solid var(--palette-border);
+  border-top: 1px solid var(--border);
 }
 
 .sub-trigger-row {
@@ -3805,43 +3874,25 @@ select.input {
   align-items: center;
   gap: 8px;
   font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .sub-quota-box strong {
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
 .sub-quota-box svg {
   flex-shrink: 0;
-  color: var(--palette-data-blue);
-}
-
-.sub-blocked-warning-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  background: rgba(233, 185, 73, 0.15);
-  border: 1px solid rgba(233, 185, 73, 0.3);
-  font-size: var(--text-body-sm);
-  color: var(--palette-on-surface);
-  font-weight: 500;
-}
-
-.sub-blocked-warning-badge svg {
-  color: var(--palette-on-surface);
-  flex-shrink: 0;
+  color: var(--info);
 }
 
 .sub-notice-footnote {
   font-size: var(--text-label-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   line-height: 1.5;
-  background: var(--palette-surface-subtle);
+  background: var(--surface-subtle);
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   margin: 0;
@@ -3856,8 +3907,8 @@ select.input {
 }
 
 .sub-guide-card {
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: 24px;
   box-shadow: var(--shadow-sm);
@@ -3876,36 +3927,47 @@ select.input {
 .sub-guide-title {
   font-size: var(--text-heading-sm);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
+/* Icon dẫn của panel hướng dẫn: xanh cho cấu trúc dữ liệu, đỏ cho danh sách lỗi. */
+.sub-guide-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.sub-guide-icon-warning {
+  flex: none;
+  color: var(--danger);
+}
+
 .sub-guide-tag {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .sub-guide-desc {
   font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.5;
 }
 
 .sub-code-preview {
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 12px 14px;
   font-family: var(--font-mono);
   font-size: var(--text-mono-sm);
-  color: var(--palette-on-surface);
+  color: var(--text);
   overflow-x: auto;
   user-select: all;
 }
@@ -3914,10 +3976,10 @@ select.input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   padding-bottom: 8px;
   margin-bottom: 8px;
-  border-bottom: 1px solid var(--palette-border);
+  border-bottom: 1px solid var(--border);
   font-size: var(--text-mono-xs);
 }
 
@@ -3935,7 +3997,7 @@ select.input {
 
 .sub-pitfall-item {
   padding: 12px;
-  background: var(--palette-surface-subtle);
+  background: var(--surface-subtle);
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
@@ -3953,23 +4015,23 @@ select.input {
   font-family: var(--font-mono);
   font-size: var(--text-mono-xs);
   font-weight: 600;
-  color: var(--palette-error);
+  color: var(--danger);
   text-transform: uppercase;
 }
 
 .sub-pitfall-code.warning {
-  color: #b45309;
+  color: var(--warning);
 }
 
 .sub-pitfall-label {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .sub-pitfall-desc {
   font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.45;
 }
@@ -3993,13 +4055,13 @@ select.input {
   font-weight: 600;
   line-height: var(--leading-h1);
   letter-spacing: var(--tracking-h1);
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 0;
 }
 
 .sub-result-lead {
   font-size: var(--text-body-md);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 0;
 }
 
@@ -4017,8 +4079,8 @@ select.input {
 
 .sub-result-card {
   position: relative;
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: 16px 14px;
   box-shadow: var(--shadow-sm);
@@ -4028,8 +4090,9 @@ select.input {
   overflow: hidden;
 }
 
+/* Card mang chỉ số chính được nhấn bằng xanh hành động, không phải mực đậm. */
 .sub-result-card.primary {
-  border-color: var(--palette-primary);
+  border-color: var(--accent);
   border-width: 2px;
 }
 
@@ -4044,20 +4107,22 @@ select.input {
 .sub-result-metric-label {
   font-family: var(--font-sans);
   font-size: 0.75rem;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 500;
 }
 
+/* "Chỉ số chính" là tên gọi chỉ định chứ không phải trạng thái thành công: dùng badge xanh hệ thống. */
 .sub-result-metric-badge {
   padding: 1px 6px;
+  border: 1px solid var(--vku-blue-500);
   border-radius: var(--radius-pill);
   font-family: var(--font-sans);
   font-size: 0.625rem;
-  background: rgba(34, 197, 94, 0.15);
-  color: #15803d;
-  font-weight: 500;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -4070,7 +4135,7 @@ select.input {
   font-weight: 600;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 6px 0;
   white-space: nowrap;
 }
@@ -4078,20 +4143,20 @@ select.input {
 .sub-result-metric-name {
   font-size: var(--text-heading-sm);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 0 0 4px;
 }
 
 .sub-result-metric-desc {
   font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.45;
 }
 
 .sub-result-quota-card {
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: 20px 24px;
   box-shadow: var(--shadow-sm);
@@ -4111,19 +4176,19 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   letter-spacing: 0.05em;
 }
 
 .sub-result-quota-val {
   font-size: var(--text-heading-sm);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .sub-result-actions-bar {
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: 20px 24px;
   box-shadow: var(--shadow-sm);
@@ -4145,7 +4210,7 @@ select.input {
   align-items: center;
   gap: 8px;
   font-size: var(--text-body-sm);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .sub-result-action-btns {
@@ -4153,6 +4218,13 @@ select.input {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
+}
+
+/* Cụm nút hành động của form nộp bài, đứng cạnh hộp hạn mức trong `.sub-trigger-row`. */
+.sub-trigger-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 /* =============================================================================
@@ -4168,6 +4240,7 @@ select.input {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-bottom: var(--space-md);
 }
 
 @media (min-width: 48rem) {
@@ -4191,17 +4264,17 @@ select.input {
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .subm-title {
   margin: 0 0 8px;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .subm-lead {
   margin: 0;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   font-size: var(--text-body-md);
   line-height: 1.6;
 }
@@ -4212,8 +4285,8 @@ select.input {
   gap: 16px;
   padding: 8px 14px;
   border-radius: var(--radius-xl);
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   align-self: flex-start;
 }
@@ -4234,20 +4307,26 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .subm-telemetry-val {
   font-family: var(--font-sans);
   font-size: var(--text-mono-sm);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
+}
+
+/* "Tự động chấm điểm" là trạng thái vận hành đang bật nên dùng xanh semantic, không
+   phải màu xanh lá trang trí. */
+.subm-telemetry-ok {
+  color: var(--success);
 }
 
 .subm-telemetry-divider {
   width: 1px;
   height: 28px;
-  background: var(--palette-border);
+  background: var(--border);
 }
 
 .subm-toolbar {
@@ -4255,8 +4334,8 @@ select.input {
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px;
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
 }
 
@@ -4276,13 +4355,21 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-label);
   line-height: var(--leading-label);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .subm-summary-pills strong {
-  color: var(--palette-primary);
+  color: var(--text);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* "Điểm cao nhất trong trang" là một mệnh đề trọn vẹn, không được tách dòng giữa nhãn
+   và số liệu. */
+.subm-summary-best {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .subm-summary-score {
@@ -4305,11 +4392,11 @@ select.input {
 }
 
 .subm-table-wrap {
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   overflow-x: auto;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -4321,30 +4408,61 @@ select.input {
   font-size: var(--text-body-sm);
 }
 
+/* Bề rộng/căn lề cột đặt theo tên cột để thay cho inline style trong JSX. */
+.subm-table .subm-col-id {
+  width: 24%;
+}
+
+.subm-table .subm-col-file {
+  width: 22%;
+}
+
+.subm-table .subm-col-status {
+  width: 16%;
+}
+
+.subm-table .subm-col-num {
+  width: 10%;
+  text-align: right;
+}
+
+.subm-table .subm-col-primary {
+  width: 14%;
+  text-align: right;
+}
+
 .subm-table th {
   padding: 12px 16px;
-  background: var(--palette-surface-subtle);
-  border-bottom: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
   font-size: var(--text-label-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .subm-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid var(--palette-border);
+  border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
 
 .subm-table tbody tr:hover {
-  background: var(--palette-surface-subtle);
+  background: var(--surface-subtle);
 }
 
+/* Bài điểm cao nhất trong trang chỉ được nhuộm nền rất nhạt: thông tin thật nằm ở
+   badge "Tốt nhất" cạnh ID. */
 .subm-table tr.best-submission-row {
-  background: rgba(249, 249, 248, 0.7);
+  background: var(--vku-yellow-50);
+}
+
+.subm-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .subm-id-pill {
@@ -4352,13 +4470,13 @@ select.input {
   align-items: center;
   gap: 4px;
   padding: 2px 6px;
-  border: 1px solid var(--palette-border);
-  border-radius: var(--radius-xs);
-  background: var(--palette-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   font-family: var(--font-mono);
   font-size: var(--text-mono-xs);
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .subm-id-copy-btn {
@@ -4368,36 +4486,51 @@ select.input {
   min-height: 24px;
   border: none;
   background: transparent;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 2px;
+  border-radius: var(--radius-sm);
   transition: color var(--duration-fast) var(--ease-standard);
 }
 
 .subm-id-copy-btn:hover {
-  color: var(--palette-primary);
-  background: var(--palette-surface-container);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .subm-id-copy-btn.copied {
   color: var(--success);
 }
 
+.subm-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.subm-file-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* "Tốt nhất" là điểm nhấn, không phải trạng thái thành công: dùng vàng highlight kèm
+   chữ và icon ngôi sao nên màu không phải kênh thông tin duy nhất. */
 .subm-badge-best {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
-  border-radius: var(--radius-xs);
-  background: var(--palette-primary);
-  color: var(--palette-on-primary);
+  padding: 2px 7px;
+  border: 1px solid var(--vku-yellow-500);
+  border-radius: var(--radius-pill);
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   font-weight: 600;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .subm-score-cell {
@@ -4412,8 +4545,8 @@ select.input {
   font-size: var(--text-mono-sm);
   font-weight: 700;
   text-align: right;
-  background: rgba(247, 247, 245, 0.8);
-  border-left: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border-left: 1px solid var(--border);
   white-space: nowrap;
 }
 
@@ -4422,11 +4555,11 @@ select.input {
   flex-direction: column;
   gap: 12px;
   padding: 12px 16px;
-  background: var(--palette-surface-subtle);
-  border-top: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border-top: 1px solid var(--border);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 @media (min-width: 40rem) {
@@ -4450,6 +4583,7 @@ select.input {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-bottom: var(--space-md);
 }
 
 @media (min-width: 64rem) {
@@ -4464,6 +4598,13 @@ select.input {
   max-width: 44rem;
 }
 
+.lb-head-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 .lb-eyebrow {
   display: flex;
   align-items: center;
@@ -4473,17 +4614,17 @@ select.input {
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .lb-title {
   margin: 0 0 8px;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .lb-lead {
   margin: 0;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   font-size: var(--text-body-md);
   line-height: 1.6;
 }
@@ -4493,55 +4634,48 @@ select.input {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  border-radius: var(--radius-xl);
-  background: var(--palette-surface-container-low);
+  border-radius: var(--radius-pill);
+  background: var(--surface-container-low);
   font-family: var(--font-sans);
   font-size: var(--text-label);
   line-height: var(--leading-label);
-  color: var(--palette-secondary);
-  align-self: flex-start;
+  color: var(--text-muted);
 }
 
 .lb-sync-bar strong {
   font-weight: 500;
-  color: var(--palette-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
 .lb-participant-name {
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
 .lb-time-cell {
   text-align: right;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   font-size: var(--text-label);
   line-height: var(--leading-label);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-@media (min-width: 64rem) {
-  .lb-sync-bar {
-    align-self: auto;
-  }
-}
-
 .lb-sync-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--success-bright);
   flex-shrink: 0;
 }
 
 .lb-table-wrap {
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   overflow-x: auto;
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-card);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -4553,28 +4687,50 @@ select.input {
   font-size: var(--text-body-sm);
 }
 
+/* Bề rộng/căn lề cột đặt theo tên cột để thay cho inline style trong JSX. */
+.lb-table .lb-col-rank {
+  width: 88px;
+  text-align: center;
+}
+
+.lb-table .lb-col-num {
+  width: 104px;
+  text-align: right;
+}
+
+.lb-table .lb-col-time {
+  width: 180px;
+  text-align: right;
+}
+
 .lb-table th {
   padding: 12px 16px;
-  background: var(--palette-surface-subtle);
-  border-bottom: 1px solid var(--palette-border);
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border);
   font-size: var(--text-label-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
 .lb-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid var(--palette-border);
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 
 .lb-table tbody tr:hover {
-  background: var(--palette-surface-subtle);
+  background: var(--surface-subtle);
 }
 
+.lb-cell-rank {
+  text-align: center;
+}
+
+/* Huy chương hạng là trang trí theo thứ tự bục (vàng–xanh–đỏ trong bộ màu VKU); con số
+   hạng vẫn là kênh thông tin chính nên màu không bao giờ đứng một mình. */
 .lb-rank-badge {
   display: inline-flex;
   align-items: center;
@@ -4584,40 +4740,44 @@ select.input {
   border-radius: 50%;
   font-family: var(--font-mono);
   font-size: var(--text-mono-sm);
-  font-weight: 600;
+  font-weight: 700;
   flex-shrink: 0;
 }
 
 .lb-rank-badge.top-1 {
-  background: var(--palette-primary);
-  color: var(--palette-on-primary);
+  background: var(--vku-yellow-100);
+  border: 1px solid var(--vku-yellow-500);
+  color: var(--vku-yellow-800);
 }
 
 .lb-rank-badge.top-2 {
-  background: var(--palette-surface-container-highest);
-  color: var(--palette-primary);
+  background: var(--vku-blue-100);
+  border: 1px solid var(--vku-blue-500);
+  color: var(--vku-blue-700);
 }
 
 .lb-rank-badge.top-3 {
-  background: var(--palette-surface-container-high);
-  color: var(--palette-primary);
+  background: var(--vku-red-100);
+  border: 1px solid var(--vku-red-500);
+  color: var(--vku-red-800);
 }
 
 .lb-rank-badge.standard {
-  font-weight: 700;
-  color: var(--palette-primary);
+  color: var(--text);
 }
 
+/* Nhãn "Bạn" là thông tin định danh, không phải trạng thái: dùng badge xanh hệ thống. */
 .lb-user-badge {
   display: inline-flex;
   align-items: center;
   padding: 2px 8px;
+  border: 1px solid var(--vku-blue-500);
   border-radius: var(--radius-pill);
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
-  font-weight: 500;
-  background: var(--palette-primary);
-  color: var(--palette-on-primary);
+  font-weight: 600;
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
   margin-left: 8px;
 }
 
@@ -4629,9 +4789,10 @@ select.input {
   gap: var(--space-md);
   margin-bottom: 1rem;
   padding: 12px 18px;
-  border: 1px solid var(--palette-border);
+  border: 1px solid var(--vku-blue-100);
+  border-left: 3px solid var(--vku-blue-600);
   border-radius: var(--radius-xl);
-  background: var(--palette-surface-container-low);
+  background: var(--accent-soft);
 }
 
 .lb-me-rank-block {
@@ -4639,12 +4800,12 @@ select.input {
   flex-direction: column;
   gap: 2px;
   padding-right: var(--space-md);
-  border-right: 1px solid var(--palette-border);
+  border-right: 1px solid var(--vku-blue-100);
 }
 
 .lb-me-label {
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -4654,7 +4815,7 @@ select.input {
   font-size: 1.5rem;
   font-weight: 700;
   line-height: 1.2;
-  color: var(--palette-primary);
+  color: var(--accent-strong);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4662,7 +4823,7 @@ select.input {
   margin-left: 2px;
   font-size: var(--text-body-md);
   font-weight: 500;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .lb-me-facts {
@@ -4674,7 +4835,7 @@ select.input {
 
 .lb-me-facts dt {
   font-size: var(--text-mono-xs);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .lb-me-facts dd {
@@ -4682,7 +4843,7 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-body-md);
   font-weight: 600;
-  color: var(--palette-primary);
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -4690,21 +4851,21 @@ select.input {
   flex: 1 0 100%;
   margin: 0;
   font-size: var(--text-label);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
 }
 
 .lb-pagination {
   margin-top: 16px;
 }
 
-/* S08b Chưa công bố Locked Card */
+/* S08b Chưa công bố Locked Card — VKU Blue chủ đạo, đỏ/vàng chỉ là nhịp trang trí. */
 .lb-locked-card {
-  position: relative;
   width: 100%;
   border-radius: var(--radius-2xl);
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
-  box-shadow: var(--shadow-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--vku-blue-600);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
   padding: 40px 24px;
 }
@@ -4715,19 +4876,6 @@ select.input {
   }
 }
 
-.lb-locked-cross {
-  position: absolute;
-  font-family: var(--font-mono);
-  font-size: var(--text-mono-xs);
-  color: var(--palette-border-strong);
-  user-select: none;
-}
-
-.lb-locked-cross.top-left { top: 16px; left: 16px; }
-.lb-locked-cross.top-right { top: 16px; right: 16px; }
-.lb-locked-cross.bottom-left { bottom: 16px; left: 16px; }
-.lb-locked-cross.bottom-right { bottom: 16px; right: 16px; }
-
 .lb-locked-content {
   max-width: 48rem;
   margin: 0 auto;
@@ -4737,18 +4885,22 @@ select.input {
   text-align: center;
 }
 
+.lb-locked-content .vku-accent {
+  margin-bottom: var(--space-lg);
+}
+
+/* Khoá = trạng thái hạn chế, nên khối icon dùng vàng highlight thay vì xanh hành động. */
 .lb-locked-emblem {
   width: 72px;
   height: 72px;
   border-radius: var(--radius-2xl);
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
+  background: var(--vku-yellow-100);
+  border: 1px solid var(--vku-yellow-500);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 24px;
-  color: var(--palette-primary);
-  box-shadow: var(--shadow-sm);
+  color: var(--vku-yellow-800);
 }
 
 .lb-locked-title {
@@ -4757,14 +4909,14 @@ select.input {
   font-weight: 600;
   line-height: var(--leading-h2);
   letter-spacing: var(--tracking-h2);
-  color: var(--palette-primary);
+  color: var(--text);
   margin: 0;
   max-width: 36rem;
 }
 
 .lb-locked-lead {
   font-size: var(--text-body-lg);
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   margin: 14px 0 0;
   max-width: 32rem;
   line-height: 1.6;
@@ -4773,7 +4925,7 @@ select.input {
 .lb-locked-divider {
   width: 64px;
   height: 1px;
-  background: var(--palette-border);
+  background: var(--border);
   margin: 28px 0;
 }
 
@@ -4795,24 +4947,32 @@ select.input {
 .lb-locked-tile {
   padding: 20px;
   border-radius: var(--radius-xl);
-  background: var(--palette-surface-subtle);
-  border: 1px solid var(--palette-border);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--vku-blue-600);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   gap: 12px;
 }
 
+.lb-locked-tile:nth-child(2) {
+  border-top-color: var(--vku-red-600);
+}
+
+.lb-locked-tile:nth-child(3) {
+  border-top-color: var(--vku-yellow-600);
+}
+
 .lb-locked-tile-icon {
   width: 32px;
   height: 32px;
   border-radius: var(--radius-md);
-  background: var(--palette-surface);
-  border: 1px solid var(--palette-border);
+  background: var(--accent-soft);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--palette-primary);
+  color: var(--accent);
   margin-bottom: 12px;
 }
 
@@ -4820,23 +4980,16 @@ select.input {
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
-  color: var(--palette-secondary);
+  color: var(--text-muted);
   letter-spacing: 0.05em;
   margin-bottom: 4px;
 }
 
 .lb-locked-tile-text {
   font-size: var(--text-body-sm);
-  color: var(--palette-on-surface);
+  color: var(--text);
   margin: 0;
   line-height: 1.5;
-}
-
-.lb-locked-tile-footer {
-  padding-top: 12px;
-  border-top: 1px solid rgba(231, 231, 227, 0.6);
-  font-family: var(--font-sans);
-  font-size: var(--text-mono-xs);
 }
 
 .lb-locked-actions {
@@ -5057,6 +5210,18 @@ select.input {
 
 .results-count-cell {
   text-align: center;
+}
+
+/* Slug cuộc thi trong eyebrow là dữ liệu kỹ thuật: monospace nhưng mang màu thông tin
+   VKU thay vì màu mực, để không bị đọc thành tiêu đề. */
+.results-slug {
+  font-family: var(--font-mono);
+  color: var(--info);
+}
+
+/* Nút thử lại khi lần tải đầu thất bại, đứng ngay dưới ErrorBox. */
+.results-retry {
+  display: flex;
 }
 
 .primary-score {
@@ -6057,33 +6222,9 @@ select.input {
   border-radius: 9px;
 }
 
-/* Primary của modal tài khoản là xanh VKU. `.btn` mặc định lấy `--accent` toàn cục
-   (#000000) nên phải ghi đè trong đúng scope này, không sửa token dùng chung. */
-.modal-account-form .account-form-actions .btn:not(.btn-secondary) {
-  border-color: var(--vku-blue-700);
-  background: var(--vku-blue-700);
-  color: #ffffff;
-}
-
-.modal-account-form .account-form-actions .btn:not(.btn-secondary):hover:not(:disabled) {
-  border-color: var(--vku-blue-800);
-  background: var(--vku-blue-800);
-}
-
 .current-user-row,
 .current-user-row:hover {
   background: var(--accent-soft);
-}
-
-.current-user-label {
-  display: inline-block;
-  margin-left: var(--space-sm);
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: var(--text-mono-xs);
-  font-weight: 600;
 }
 
 /* =============================================================================
@@ -6091,19 +6232,7 @@ select.input {
    Cùng ngôn ngữ token với DashboardPage; thuần trình bày, không đổi nghiệp vụ.
    ============================================================================= */
 .ac-page {
-  --ac-bg: #f8fafc;
-  --ac-ink: var(--vku-ink);
-  --ac-secondary: var(--vku-ink-muted);
-  --ac-outline: #94a3b8;
-  --ac-chip: #f3f5f7;
-  --ac-live: #047857;
-  --ac-live-dot: #047857;
-  --ac-live-bg: #d1fae5;
-  --ac-draft-dot: #b45309;
-  --ac-draft-bg: #fef3c7;
-  --ac-closed: #475569;
-  --ac-closed-dot: #94a3b8;
-  --ac-closed-bg: #f1f5f9;
+  /* Token `--ac-*` khai báo ở `:root` để modal/menu portal ra `document.body` vẫn giải được. */
   /* Trần rộng do `.app-main-admin-list` quyết định; ở đây chỉ căn giữa. */
   width: 100%;
   margin-inline: auto;
@@ -7533,13 +7662,22 @@ select.input {
   color: var(--text);
 }
 
+/* Nút chính của modal tạo/sửa cuộc thi. Modal portal ra `document.body`, ra ngoài cây
+   `.ac-page`, nên tuyệt đối không dùng token scope theo page ở đây: `var(--ac-ink)` khi đó
+   không giải được và nút rơi về nền trong suốt, chữ trắng trên nền trắng. Dùng token gốc
+   `--accent` để giữ đúng một màu CTA chủ đạo của toàn hệ. */
 .ac-form-button.primary {
   min-width: 76px;
   padding-right: 20px;
   padding-left: 20px;
-  border-color: var(--ac-ink);
-  background: var(--ac-ink);
-  color: var(--surface);
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.ac-form-button.primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
 .ac-form-button:disabled {
@@ -8019,11 +8157,7 @@ button:focus-visible {
     text-align: left;
     align-items: flex-start;
   }
-  .page-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .toolbar {
+.toolbar {
     flex-direction: column;
     align-items: stretch;
   }
@@ -8243,23 +8377,7 @@ button:focus-visible {
   }
 }
 
-/* --- CTA của module --------------------------------------------------------
-   Gắn class trực tiếp lên nút thay vì override `.btn` toàn cục, để nút ở trang
-   khác không đổi màu. Hai class liền nhau để thắng cả `.btn:disabled:hover`
-   (nút primary bị khoá sẽ không rơi về nền đen của `.btn`). */
-.btn.admin-detail-primary-action,
-.btn.admin-detail-primary-action:hover,
-.btn.admin-detail-primary-action:disabled:hover {
-  background: var(--vku-blue-700);
-  border-color: var(--vku-blue-700);
-  color: #fff;
-}
-
-.btn.admin-detail-primary-action:hover:not(:disabled) {
-  background: var(--vku-blue-800);
-  border-color: var(--vku-blue-800);
-}
-
+/* --- CTA của module --- */
 .admin-detail-primary-icon {
   width: 1rem;
   height: 1rem;
@@ -8371,30 +8489,9 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
-/* Ba vạch ngắn xanh–đỏ–vàng dưới mô tả; thuần decorative. */
+/* Khoảng hở riêng của module chi tiết; hình thức ba vạch nằm ở primitive dùng chung. */
 .admin-detail-page .vku-accent {
-  display: flex;
-  gap: 5px;
   margin-top: 0.625rem;
-}
-
-.admin-detail-page .vku-accent span {
-  display: block;
-  width: 26px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-}
-
-.admin-detail-page .vku-accent .blue {
-  background: var(--vku-blue-600);
-}
-
-.admin-detail-page .vku-accent .red {
-  background: var(--vku-red-600);
-}
-
-.admin-detail-page .vku-accent .yellow {
-  background: var(--vku-yellow-500);
 }
 
 .admin-detail-breadcrumb-wrap {
@@ -9284,7 +9381,7 @@ button:focus-visible {
   color: var(--text);
   font-size: var(--text-body-sm);
   font-weight: 500;
-  line-height: var(--leading-secondary);
+  line-height: var(--leading-body-sm);
   font-variant-numeric: tabular-nums;
   /* Slug dài không được đẩy dải rộng ra ngoài khung. */
   overflow-wrap: anywhere;
@@ -9373,4 +9470,970 @@ button:focus-visible {
     top: var(--header-band);
     z-index: 3;
   }
+}
+
+/* =============================================================================
+   Trang Hỗ trợ & Liên hệ (SUPPORT_PAGE_DESIGN.md)
+   Cùng ngôn ngữ token với DashboardPage/AdminCompetitionsPage; thuần trình bày,
+   không đổi dữ liệu hay nghiệp vụ. Trần rộng 1440px do `.app-main-support`
+   quyết định; ở đây chỉ căn giữa.
+   ============================================================================= */
+.support-page {
+  width: 100%;
+  margin-inline: auto;
+  color: var(--vku-ink);
+}
+
+/* --- Hero --- */
+.support-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. `pointer-events: none` để không chắn thao tác. */
+.support-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.support-hero > * {
+  position: relative;
+}
+
+.support-hero-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 60px;
+  height: 60px;
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-2xl);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-600);
+}
+
+.support-hero-copy {
+  min-width: 0;
+}
+
+.support-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
+}
+
+@media (min-width: 48rem) {
+  .support-hero {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-lg);
+    min-height: 148px;
+    padding: var(--space-lg);
+  }
+
+  .support-title {
+    font-size: clamp(30px, 2.5vw, 38px);
+  }
+}
+
+.support-subtitle {
+  margin: var(--space-sm) 0 0;
+  max-width: 42rem;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+}
+
+/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
+.support-accent {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--space-md);
+}
+
+.support-accent > span {
+  width: 32px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.support-accent > span:nth-child(1) {
+  background: var(--vku-blue-600);
+}
+
+.support-accent > span:nth-child(2) {
+  background: var(--vku-red-600);
+}
+
+.support-accent > span:nth-child(3) {
+  background: var(--vku-yellow-600);
+}
+
+/* --- Lưới nội dung --- */
+.support-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "guide"
+    "contact"
+    "faq";
+  gap: var(--space-md);
+  align-items: start;
+}
+
+/* `grid-template-areas` đặt Liên hệ sang cột phải ở desktop mà vẫn giữ nguyên thứ
+   tự DOM (Hướng dẫn → Liên hệ → FAQ) — nhờ vậy tab order khớp thứ tự thị giác. */
+@media (min-width: 75rem) {
+  .support-grid {
+    grid-template-columns: minmax(0, 1.8fr) minmax(340px, 0.8fr);
+    grid-template-areas:
+      "guide contact"
+      "faq contact";
+    gap: var(--space-lg);
+  }
+}
+
+/* --- Card --- */
+.support-card {
+  min-width: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+@media (min-width: 48rem) {
+  .support-card {
+    padding: var(--space-lg);
+  }
+}
+
+.support-guide {
+  grid-area: guide;
+  border-top: 3px solid var(--vku-blue-600);
+}
+
+.support-contact {
+  grid-area: contact;
+  border-top: 3px solid var(--vku-yellow-600);
+}
+
+.support-faq {
+  grid-area: faq;
+  border-top: 3px solid var(--vku-red-600);
+}
+
+.support-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--vku-border-soft);
+}
+
+.support-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-xl);
+}
+
+.support-card-icon-blue {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-600);
+}
+
+.support-card-icon-red {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.support-card-copy {
+  min-width: 0;
+}
+
+.support-card-title {
+  margin: 0;
+  color: var(--vku-ink);
+  font-size: var(--text-h3);
+  font-weight: 700;
+  line-height: var(--leading-h3);
+  letter-spacing: var(--tracking-h3);
+}
+
+.support-card-sub {
+  margin: 2px 0 0;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+/* --- Timeline 6 bước --- */
+.support-timeline {
+  display: grid;
+  gap: 18px;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.support-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.support-step-marker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-pill);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.support-step[data-tone="blue"] .support-step-marker {
+  background: var(--vku-blue-600);
+}
+
+.support-step[data-tone="red"] .support-step-marker {
+  background: var(--vku-red-700);
+}
+
+/* Chữ trên nền vàng phải là màu tối mới đủ tương phản. */
+.support-step[data-tone="yellow"] .support-step-marker {
+  background: var(--vku-yellow-600);
+  color: #4a3400;
+}
+
+/* Đường nối mảnh giữa các marker; chỉ trang trí nên aria-hidden ở markup. */
+.support-step:not(:last-child) .support-step-marker::after {
+  content: "";
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 50%;
+  width: 1px;
+  height: 16px;
+  transform: translateX(-50%);
+  background: var(--vku-border);
+}
+
+.support-step-body {
+  min-width: 0;
+}
+
+.support-step-title {
+  margin: 6px 0 0;
+  color: var(--vku-ink);
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  line-height: var(--leading-body-sm);
+}
+
+.support-step-text {
+  margin: 4px 0 0;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+.support-step-text a {
+  color: var(--vku-blue-700);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --- Ba tầng liên hệ --- */
+.support-contact-list {
+  display: grid;
+  gap: 12px;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.support-contact-item {
+  padding: var(--space-md);
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-xl);
+}
+
+.support-contact-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-size: var(--text-body-sm);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.support-contact-text {
+  margin: 4px 0 0;
+  color: var(--vku-ink-muted);
+  font-size: 0.78125rem;
+  line-height: 1.55;
+}
+
+.support-contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: 12px;
+}
+
+/* Chip là vùng chạm nên cao tối thiểu 44px; ở màn hẹp chip chiếm trọn chiều
+   ngang để địa chỉ email dài không bị bóp méo. */
+.support-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  padding-inline: 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid #d8e1ec;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--vku-blue-800);
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+  letter-spacing: var(--tracking-body-sm);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.support-chip:hover {
+  border-color: #b9d5ff;
+  background: #f4f8ff;
+  text-decoration: none;
+}
+
+@media (min-width: 30rem) {
+  .support-chip {
+    width: auto;
+  }
+}
+
+/* Nhắc rằng nền tảng không có biểu mẫu — vàng cảnh báo nhẹ, không phải lỗi đỏ. */
+.support-contact-note {
+  margin: var(--space-md) 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-left: 4px solid var(--vku-yellow-600);
+  border-radius: var(--radius-lg);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+/* --- FAQ accordion --- */
+.support-faq-list {
+  display: grid;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Không `overflow: hidden` để outline focus của trigger không bị cắt. */
+.support-faq-item {
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.support-faq-item:hover {
+  border-color: #bcd7ff;
+  background: #fafcff;
+}
+
+.support-faq-item[data-open="true"] {
+  border-color: var(--vku-blue-100);
+  background: var(--vku-blue-50);
+}
+
+.support-faq-question {
+  margin: 0;
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+}
+
+.support-faq-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: none;
+  color: var(--vku-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.support-faq-trigger:hover {
+  color: var(--vku-blue-700);
+}
+
+/* Chevron + trạng thái expanded cùng thể hiện đang mở, không chỉ dựa vào màu. */
+.support-faq-chevron {
+  flex: 0 0 auto;
+  color: var(--vku-ink-muted);
+  transition: transform var(--duration-base) var(--ease-standard);
+}
+
+.support-faq-trigger[aria-expanded="true"] .support-faq-chevron {
+  transform: rotate(180deg);
+  color: var(--vku-blue-600);
+}
+
+/* KHÔNG khai báo `display` ở đây: panel đóng bằng thuộc tính `hidden` và UA
+   stylesheet đã đặt `display: none` cho nó. */
+.support-faq-answer {
+  margin: 0;
+  padding: 0 12px 12px;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: 1.65;
+}
+
+/* =============================================================================
+   Trang Giới thiệu (ABOUT_PAGE_DESIGN.md)
+   Cùng ngôn ngữ token với DashboardPage/SupportPage; thuần trình bày, không đổi
+   dữ liệu hay nghiệp vụ. Trần rộng 1440px do `.app-main-about` quyết định; ở đây
+   chỉ căn giữa.
+   ============================================================================= */
+.about-page {
+  width: 100%;
+  margin-inline: auto;
+  color: var(--vku-ink);
+}
+
+/* --- Hero --- */
+.about-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding: var(--space-md);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. `pointer-events: none` để không chắn thao tác. */
+.about-hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(420px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 42%,
+    var(--vku-blue-100) 42% 58%,
+    var(--vku-red-50) 58% 72%,
+    var(--vku-yellow-50) 72% 86%,
+    transparent 86%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.about-hero > * {
+  position: relative;
+}
+
+.about-hero-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 60px;
+  height: 60px;
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-2xl);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.about-hero-copy {
+  min-width: 0;
+}
+
+.about-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
+}
+
+.about-subtitle {
+  margin: var(--space-sm) 0 0;
+  max-width: 42rem;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  letter-spacing: var(--tracking-body);
+}
+
+.about-hero-copy > .vku-accent {
+  margin-top: var(--space-md);
+}
+
+@media (min-width: 48rem) {
+  .about-hero {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-lg);
+    min-height: 160px;
+    padding: var(--space-lg);
+  }
+
+  .about-title {
+    font-size: clamp(32px, 2.7vw, 40px);
+  }
+}
+
+/* --- Lưới nội dung --- */
+.about-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: start;
+}
+
+/* Wrapper cột không tạo hộp ở màn hẹp, nhờ vậy năm card vẫn là item trực tiếp
+   của lưới và giữ đúng thứ tự DOM: Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn. */
+.about-col {
+  display: contents;
+}
+
+/* Từ 1200px mỗi cột là một chồng dọc độc lập: card dưới bám ngay đuôi card trên,
+   không để lại khoảng trống theo hàng của lưới khi hai cột lệch chiều cao. */
+@media (min-width: 75rem) {
+  .about-grid {
+    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.95fr);
+    grid-template-areas:
+      "left    right"
+      "sources sources";
+    gap: var(--space-lg);
+  }
+
+  .about-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    min-width: 0;
+  }
+
+  .about-col-left {
+    grid-area: left;
+  }
+
+  .about-col-right {
+    grid-area: right;
+  }
+
+  .about-sources {
+    grid-area: sources;
+  }
+}
+
+/* --- Card --- */
+.about-card {
+  min-width: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+@media (min-width: 48rem) {
+  .about-card {
+    padding: var(--space-lg);
+  }
+}
+
+/* Chỉ viền trên mang màu thương hiệu; thân card luôn nền trắng. */
+.about-platform {
+  border-top: 3px solid var(--vku-blue-600);
+}
+
+.about-vku {
+  border-top: 3px solid var(--vku-red-600);
+}
+
+.about-support {
+  border-top: 3px solid var(--vku-yellow-600);
+}
+
+.about-cta {
+  border-top: 3px solid var(--vku-blue-600);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+.about-sources {
+  border-top: 3px solid var(--vku-border);
+}
+
+.about-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--vku-border-soft);
+}
+
+.about-card-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-xl);
+}
+
+.about-card-icon-blue {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-600);
+}
+
+.about-card-icon-red {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.about-card-icon-yellow {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.about-card-icon-neutral {
+  background: var(--vku-border-soft);
+  color: var(--vku-ink-muted);
+}
+
+.about-card-copy {
+  min-width: 0;
+}
+
+.about-card-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-size: var(--text-h3);
+  font-weight: 700;
+  line-height: var(--leading-h3);
+  letter-spacing: var(--tracking-h3);
+}
+
+/* --- Khối 1: bốn đặc điểm nền tảng --- */
+.about-feature-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 48rem) {
+  .about-feature-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px 24px;
+  }
+}
+
+.about-feature {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.about-feature-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-lg);
+}
+
+/* Nhịp màu xanh–đỏ–vàng thuần trang trí; ý nghĩa nằm ở tiêu đề chữ bên cạnh. */
+.about-feature-icon-blue {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-600);
+}
+
+.about-feature-icon-red {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.about-feature-icon-yellow {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.about-feature-body,
+.about-fact-body,
+.about-unit-body {
+  min-width: 0;
+}
+
+.about-feature-title {
+  margin: 6px 0 0;
+  color: var(--vku-ink);
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  line-height: var(--leading-body-sm);
+}
+
+.about-feature-text {
+  margin: 4px 0 0;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: 1.6;
+}
+
+/* --- Khối 2: thông tin VKU --- */
+.about-fact-list {
+  display: grid;
+  gap: 14px;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Icon ở đây chỉ để dò nhanh, không tô nền: màu mạnh đã dành cho viền card. */
+.about-fact-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: var(--vku-ink-muted);
+}
+
+/* Khối VKU nằm ở cột trái rộng nên phải tự giới hạn bề ngang đọc. */
+.about-fact-text,
+.about-unit-text {
+  max-width: 62ch;
+}
+
+.about-fact-title {
+  margin: 2px 0 0;
+  color: var(--vku-ink);
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  line-height: var(--leading-body-sm);
+}
+
+.about-fact-text {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: 1.6;
+}
+
+/* --- Khối 3: đơn vị và đầu mối hỗ trợ --- */
+.about-unit-list {
+  display: grid;
+  gap: 12px;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-unit {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.about-unit-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-lg);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.about-unit-title {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--vku-ink);
+  font-size: var(--text-body-sm);
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.about-unit-text {
+  margin: 4px 0 0;
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+  line-height: 1.6;
+}
+
+/* Nhắc sang trang Hỗ trợ — vàng nhấn nhẹ, không phải cảnh báo lỗi. */
+.about-note {
+  margin: var(--space-md) 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-left: 4px solid var(--vku-yellow-600);
+  border-radius: var(--radius-lg);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+.about-note a {
+  color: var(--vku-blue-800);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --- Khối 4: bắt đầu --- */
+.about-cta-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+/* `.btn` cao 40px; CTA cuối trang là đích chạm chính nên nâng lên 46px theo
+   `ABOUT_PAGE_DESIGN.md` §52. `min-height` thắng `height` của `.btn` nên không
+   phải phụ thuộc thứ tự khai báo. */
+.about-cta-link {
+  min-height: 46px;
+}
+
+/* Trang trí đỏ–vàng nhỏ; CTA chính vẫn là xanh VKU, không dùng nút đen. */
+.about-cta-accent {
+  display: flex;
+  gap: 6px;
+}
+
+.about-cta-accent > span {
+  width: 30px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.about-cta-accent > span:nth-child(1) {
+  background: var(--vku-red-600);
+}
+
+.about-cta-accent > span:nth-child(2) {
+  background: var(--vku-yellow-600);
+}
+
+/* --- Khối 5: nguồn thông tin --- */
+.about-sources .resource-list {
+  margin-top: var(--space-md);
+}
+
+/* Card nguồn full-width; ở desktop trải hai cột để nhãn ngắn không bị kéo căng
+   hết một hàng rộng cả nghìn pixel. */
+@media (min-width: 48rem) {
+  .about-sources .resource-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 24px;
+  }
+}
+
+/* Link nguồn là vùng chạm nên cao tối thiểu 44px. */
+.about-sources .resource-link {
+  min-height: 44px;
+  border-color: var(--vku-border-soft);
+  border-radius: var(--radius-xl);
+}
+
+/* Nhãn nguồn nhiều chữ hơn `.resource-label` mặc định, cho xuống dòng thay vì cắt
+   bằng dấu ba chấm. */
+.about-sources .resource-label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
 }

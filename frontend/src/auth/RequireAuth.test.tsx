@@ -70,6 +70,36 @@ describe("RequireAuth", () => {
   });
 });
 
+describe("AuthBoot", () => {
+  it("đang kiểm tra phiên thì hiện boot state VKU và chưa điều hướng", () => {
+    // `/auth/me` treo vô hạn: mô phỏng đúng khoảng thời gian bootstrap chưa có kết luận.
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    const first = renderAt(
+      "/admin/accounts",
+      <RequireAuth>
+        <div>NỘI DUNG BẢO VỆ</div>
+      </RequireAuth>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Đang kiểm tra phiên đăng nhập...");
+    expect(screen.getByAltText("VKU")).toHaveAttribute("src", "/vku-logo.png");
+    // Chưa biết phiên hợp lệ hay không thì không được đẩy đi đâu cả.
+    expect(screen.queryByText(/LOGIN FROM/)).not.toBeInTheDocument();
+    expect(screen.queryByText("NỘI DUNG BẢO VỆ")).not.toBeInTheDocument();
+    first.unmount();
+
+    // RequireAdmin dùng chung boot state nên cũng không được đuổi participant về trang chính sớm.
+    renderAt(
+      "/admin/accounts",
+      <RequireAdmin>
+        <div>CHỈ ADMIN</div>
+      </RequireAdmin>,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Đang kiểm tra phiên đăng nhập...");
+    expect(screen.queryByText("TRANG CHÍNH")).not.toBeInTheDocument();
+    expect(screen.queryByText("CHỈ ADMIN")).not.toBeInTheDocument();
+  });
+});
+
 describe("RequireAdmin", () => {
   it("khách được đưa tới login cùng full admin return-to", async () => {
     stubMe(null);

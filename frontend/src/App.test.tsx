@@ -77,6 +77,11 @@ test("khách vào / thấy danh sách cuộc thi, không bị đẩy về /login
   expect(await screen.findByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
   expect(screen.getByRole("heading", { level: 1, name: "Cuộc thi" })).toBeTruthy();
   expect(screen.queryByLabelText("Mật khẩu")).toBeNull();
+  // Shell rộng 1440px là ngoại lệ riêng của `/ho-tro` và `/gioi-thieu`, không được
+  // rò sang route khác.
+  const main = document.getElementById("main-content");
+  expect(main).not.toHaveClass("app-main-support");
+  expect(main).not.toHaveClass("app-main-about");
 });
 
 test("khách vào chi tiết cuộc thi thấy nội dung công khai và lời mời đăng nhập", async () => {
@@ -259,4 +264,80 @@ test("route không tồn tại: H1 404 và tiêu đề tab mô tả trạng thá
   renderAt("/khong-co-trang-nay");
   expect(await screen.findByRole("heading", { name: "404 — Không tìm thấy trang" })).toBeTruthy();
   expect(document.title).toBe("Không tìm thấy trang — AI Challenge");
+  // Hai lối thoát: link về dashboard đúng route và nút quay lại lịch sử.
+  expect(screen.getByRole("link", { name: "Về trang chính" })).toHaveAttribute("href", "/");
+  expect(screen.getByRole("button", { name: "Quay lại" })).toBeTruthy();
+  // Trang lỗi dùng icon SVG trang trí đã ẩn khỏi AT, không dùng emoji production.
+  const main = document.getElementById("main-content") as HTMLElement;
+  expect(main.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+  expect(main.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
+});
+
+// ADR-021: hai trang tĩnh công khai, không đòi đăng nhập và không gọi API nghiệp vụ.
+test("khách mở /gioi-thieu không bị đẩy về /login", async () => {
+  mockGuestApi();
+  renderAt("/gioi-thieu");
+  expect(await screen.findByRole("heading", { level: 1, name: "Giới thiệu" })).toBeTruthy();
+  expect(screen.queryByLabelText("Mật khẩu")).toBeNull();
+  expect(document.title).toBe("Giới thiệu — AI Challenge");
+  // Lưới hai cột của trang giới thiệu cũng cần trần rộng 1440px, nhưng chỉ riêng route này.
+  const main = document.getElementById("main-content");
+  expect(main).toHaveClass("app-main-about");
+  expect(main).not.toHaveClass("app-main-support");
+});
+
+test("khách mở /ho-tro không bị đẩy về /login", async () => {
+  mockGuestApi();
+  renderAt("/ho-tro");
+  expect(await screen.findByRole("heading", { level: 1, name: "Hỗ trợ & Liên hệ" })).toBeTruthy();
+  expect(screen.queryByLabelText("Mật khẩu")).toBeNull();
+  expect(document.title).toBe("Hỗ trợ & Liên hệ — AI Challenge");
+  // Trang hỗ trợ có lưới hai cột nên dùng trần rộng 1440px; các route khác giữ 1280px.
+  const main = document.getElementById("main-content");
+  expect(main).toHaveClass("app-main-support");
+  expect(main).not.toHaveClass("app-main-about");
+});
+
+test("điều hướng bằng link trên header tới hai trang tĩnh mới", async () => {
+  mockGuestApi();
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+
+  const main = document.getElementById("main-content") as HTMLElement;
+  const headerNav = screen.getByRole("navigation", { name: "Điều hướng chính" });
+
+  fireEvent.click(within(headerNav).getByRole("link", { name: "Giới thiệu" }));
+  expect(await screen.findByRole("heading", { level: 1, name: "Giới thiệu" })).toBeTruthy();
+  expect(document.activeElement).toBe(main);
+
+  fireEvent.click(within(headerNav).getByRole("link", { name: "Hỗ trợ" }));
+  expect(await screen.findByRole("heading", { level: 1, name: "Hỗ trợ & Liên hệ" })).toBeTruthy();
+  expect(document.activeElement).toBe(main);
+});
+
+test("drawer có hai mục tĩnh mới và vẫn để Đăng nhập là mục cuối", async () => {
+  mockGuestApi();
+  renderAtRoot("/");
+  await screen.findByRole("heading", { level: 1, name: "Cuộc thi" });
+
+  const { drawer } = await openDrawer();
+  expect(within(drawerNav()).getByRole("link", { name: "Giới thiệu" })).toHaveAttribute(
+    "href",
+    "/gioi-thieu",
+  );
+  expect(within(drawerNav()).getByRole("link", { name: "Hỗ trợ" })).toHaveAttribute("href", "/ho-tro");
+
+  // Thứ tự này giữ "Đăng nhập" là link cuối trong drawer — điều kiện của focus trap.
+  expect(within(drawer).getAllByRole("link").map((link) => link.textContent)).toEqual([
+    "Cuộc thi",
+    "Giới thiệu",
+    "Hỗ trợ",
+    "Đăng nhập",
+  ]);
+});
+
+test("đường dẫn con của trang tĩnh vẫn vào 404", async () => {
+  mockGuestApi();
+  renderAt("/ho-tro/khong-co");
+  expect(await screen.findByRole("heading", { name: "404 — Không tìm thấy trang" })).toBeTruthy();
 });

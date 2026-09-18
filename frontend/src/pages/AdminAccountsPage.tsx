@@ -1,17 +1,26 @@
 /** Admin accounts: list/search, tạo, reset password, enable/disable. Role check thật ở backend. */
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { api, ApiClientError } from "../api/client";
 import { useOptionalAuth, type Account } from "../auth/AuthContext";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
+/** `total` là số khớp từ khóa tìm kiếm; `stats` là tổng quan toàn hệ thống cho các thẻ KPI. */
 interface AccountsResponse {
   accounts: Account[];
   total: number;
   limit: number;
   offset: number;
+  stats: AccountStats;
+}
+
+interface AccountStats {
+  total: number;
+  admin: number;
+  participant: number;
+  active: number;
 }
 
 const PAGE_SIZE = 50;
@@ -108,24 +117,67 @@ export function AdminAccountsPage() {
   const shownFrom = data ? data.offset + 1 : 0;
   const shownTo = data ? data.offset + data.accounts.length : 0;
   const hasNext = data ? shownTo < data.total : false;
+  const stats = data?.stats ?? null;
 
   return (
     <div className="page admin-accounts">
-      <div className="page-head admin-accounts-head">
-        <div>
-          <h1 className="page-title">Quản lý tài khoản</h1>
-          <p className="page-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa tài khoản thí sinh/admin</p>
+      <header className="admin-accounts-head">
+        <span className="admin-accounts-head-icon" aria-hidden="true">
+          <IconUsers className="admin-accounts-head-glyph" />
+        </span>
+        <div className="admin-accounts-head-copy">
+          <h1 className="admin-accounts-title">Quản lý tài khoản</h1>
+          <p className="admin-accounts-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa tài khoản thí sinh/admin</p>
+          <div className="admin-accounts-accent" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </div>
         </div>
-      </div>
+      </header>
+
+      <section className="admin-accounts-stats" aria-label="Tổng quan tài khoản">
+        <AccountStatCard
+          tone="blue"
+          label="Tổng tài khoản"
+          detail="Toàn hệ thống"
+          value={stats?.total ?? null}
+          pending={!data && !error}
+          glyph={<IconUsers />}
+        />
+        <AccountStatCard
+          tone="red"
+          label="Tài khoản Admin"
+          detail="Có quyền quản trị"
+          value={stats?.admin ?? null}
+          pending={!data && !error}
+          glyph={<IconShield />}
+        />
+        <AccountStatCard
+          tone="yellow"
+          label="Tài khoản Thí sinh"
+          detail="Tài khoản dự thi"
+          value={stats?.participant ?? null}
+          pending={!data && !error}
+          glyph={<IconGraduationCap />}
+        />
+        <AccountStatCard
+          tone="green"
+          label="Đang hoạt động"
+          detail="Có thể đăng nhập"
+          value={stats?.active ?? null}
+          pending={!data && !error}
+          glyph={<IconUserCheck />}
+        />
+      </section>
 
       <div className="admin-accounts-toolbar">
         <label className="admin-accounts-search">
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" aria-hidden="true" focusable="false">
             <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
             <path d="m16 16 4 4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
           </svg>
           <input
-            className="input"
             type="search"
             aria-label="Tìm tài khoản"
             placeholder="Tìm theo email hoặc tên..."
@@ -134,7 +186,8 @@ export function AdminAccountsPage() {
           />
           {refreshing && <span className="admin-accounts-sync" role="status">Đang cập nhật…</span>}
         </label>
-        <button className="btn admin-accounts-create" type="button" onClick={() => setCreating(true)}>
+        <button className="admin-accounts-create" type="button" onClick={() => setCreating(true)}>
+          <span aria-hidden="true">+</span>
           Tạo tài khoản
         </button>
       </div>
@@ -147,92 +200,100 @@ export function AdminAccountsPage() {
       )}
       {Boolean(error) && data && <ErrorBox error={error} />}
 
-      <div
-        className="table-wrap admin-accounts-table-wrap"
-        aria-busy={loading || refreshing}
-        tabIndex={0}
-        role="region"
-        aria-label="Bảng tài khoản"
-      >
-        <table className="table admin-accounts-table">
-          <thead>
-            <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr>
-          </thead>
-          <tbody>
-            {loading && !data ? (
-              <tr><td colSpan={5} className="table-state"><Loading /></td></tr>
-            ) : error && !data ? (
-              <tr>
-                <td colSpan={5} className="table-state">
-                  <div className="admin-accounts-error">
-                    <ErrorBox error={error} />
-                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load(query.q, query.offset)}>Thử lại</button>
-                  </div>
-                </td>
-              </tr>
-            ) : data && data.accounts.length > 0 ? (
-              data.accounts.map((account) => (
-                <AccountRow
-                  key={account.id}
-                  account={account}
-                  isCurrent={account.id === currentAccountId}
-                  onChanged={() => void load(query.q, query.offset, true)}
-                  onMessage={notify}
-                />
-              ))
-            ) : (
-              <tr>
-                <td colSpan={5} className="table-state">
-                  <div className="admin-accounts-empty">
-                    <span>Không tìm thấy tài khoản nào.</span>
-                    {search && <button className="btn btn-secondary btn-sm" type="button" onClick={() => setSearch("")}>Xóa bộ lọc</button>}
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pager nằm ngoài vùng cuộn ngang để không trôi theo bảng. */}
-      {data && data.total > PAGE_SIZE && (
-        <div className="pagination pagination-controls admin-accounts-pagination">
-          <div role="status">
-            {loading || refreshing ? (
-              "Đang cập nhật…"
-            ) : (
-              <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> tài khoản</>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-disabled={loading || refreshing || data.offset === 0}
-              onClick={() => {
-                if (!loading && !refreshing && data.offset > 0) {
-                  setQuery((current) => ({ ...current, offset: data.offset - PAGE_SIZE }));
-                }
-              }}
-            >
-              Trang trước
-            </button>
-            <span>{shownFrom}–{shownTo} / {data.total}</span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              aria-disabled={loading || refreshing || !hasNext}
-              onClick={() => {
-                if (!loading && !refreshing && hasNext) {
-                  setQuery((current) => ({ ...current, offset: data.offset + PAGE_SIZE }));
-                }
-              }}
-            >
-              Trang sau
-            </button>
-          </div>
+      <div className="admin-accounts-card">
+        <div className="admin-accounts-card-head">
+          <span className="admin-accounts-card-accent" aria-hidden="true" />
+          <h2 className="admin-accounts-card-title">Danh sách tài khoản</h2>
+          {data && <span className="admin-accounts-card-count">{data.total} tài khoản</span>}
         </div>
-      )}
+
+        <div
+          className="admin-accounts-table-scroll"
+          aria-busy={loading || refreshing}
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng tài khoản"
+        >
+          <table className="admin-accounts-table">
+            <thead>
+              <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr>
+            </thead>
+            <tbody>
+              {loading && !data ? (
+                <tr><td colSpan={5} className="table-state"><Loading /></td></tr>
+              ) : error && !data ? (
+                <tr>
+                  <td colSpan={5} className="table-state">
+                    <div className="admin-accounts-error">
+                      <ErrorBox error={error} />
+                      <button className="admin-accounts-secondary" type="button" onClick={() => void load(query.q, query.offset)}>Thử lại</button>
+                    </div>
+                  </td>
+                </tr>
+              ) : data && data.accounts.length > 0 ? (
+                data.accounts.map((account) => (
+                  <AccountRow
+                    key={account.id}
+                    account={account}
+                    isCurrent={account.id === currentAccountId}
+                    onChanged={() => void load(query.q, query.offset, true)}
+                    onMessage={notify}
+                  />
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="table-state">
+                    <div className="admin-accounts-empty">
+                      <span>Không tìm thấy tài khoản nào.</span>
+                      {search && <button className="admin-accounts-secondary" type="button" onClick={() => setSearch("")}>Xóa bộ lọc</button>}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pager nằm ngoài vùng cuộn ngang để không trôi theo bảng. */}
+        {data && data.total > PAGE_SIZE && (
+          <div className="admin-accounts-pagination">
+            <div role="status">
+              {loading || refreshing ? (
+                "Đang cập nhật…"
+              ) : (
+                <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> tài khoản</>
+              )}
+            </div>
+            <div className="admin-accounts-pager">
+              <button
+                type="button"
+                className="admin-accounts-secondary"
+                aria-disabled={loading || refreshing || data.offset === 0}
+                onClick={() => {
+                  if (!loading && !refreshing && data.offset > 0) {
+                    setQuery((current) => ({ ...current, offset: data.offset - PAGE_SIZE }));
+                  }
+                }}
+              >
+                Trang trước
+              </button>
+              <span>{shownFrom}–{shownTo} / {data.total}</span>
+              <button
+                type="button"
+                className="admin-accounts-secondary"
+                aria-disabled={loading || refreshing || !hasNext}
+                onClick={() => {
+                  if (!loading && !refreshing && hasNext) {
+                    setQuery((current) => ({ ...current, offset: data.offset + PAGE_SIZE }));
+                  }
+                }}
+              >
+                Trang sau
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {creating && (
         <CreateAccountModal
@@ -245,6 +306,102 @@ export function AdminAccountsPage() {
         />
       )}
     </div>
+  );
+}
+
+const STAT_TONES = ["blue", "red", "yellow", "green"] as const;
+
+/** Một ô KPI. `value` null nghĩa là chưa có dữ liệu — không được hiện số giả. */
+function AccountStatCard({
+  tone,
+  label,
+  detail,
+  value,
+  pending,
+  glyph,
+}: {
+  tone: (typeof STAT_TONES)[number];
+  label: string;
+  detail: string;
+  value: number | null;
+  pending: boolean;
+  glyph: ReactNode;
+}) {
+  return (
+    <article className="admin-account-stat" data-tone={tone}>
+      <span className="admin-account-stat-icon" aria-hidden="true">{glyph}</span>
+      <div className="admin-account-stat-body">
+        <p className="admin-account-stat-label">{label}</p>
+        {value === null ? (
+          <>
+            <span className="admin-account-stat-placeholder" aria-hidden="true" />
+            <span className="sr-only">{pending ? "Đang tải thống kê" : "Chưa tải được thống kê"}</span>
+          </>
+        ) : (
+          <span className="admin-account-stat-value">{value}</span>
+        )}
+        <p className="admin-account-stat-detail">{detail}</p>
+      </div>
+    </article>
+  );
+}
+
+/** Icon dùng chung khung SVG; mọi glyph đều decorative nên ẩn khỏi cây accessibility. */
+function Glyph({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      width="20"
+      height="20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
+    </svg>
+  );
+}
+
+function IconUsers({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="9" cy="8" r="3.4" />
+      <path d="M3.5 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.4a4.3 4.3 0 0 1 4.3 4.3v1" />
+      <path d="M16.4 4.9a3.4 3.4 0 0 1 0 6.2M17.6 14.4a4.3 4.3 0 0 1 3.1 4.1v1" />
+    </Glyph>
+  );
+}
+
+function IconShield({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <path d="M12 3.2 5.4 6v5.3c0 4.1 2.7 7.6 6.6 9.1 3.9-1.5 6.6-5 6.6-9.1V6L12 3.2Z" />
+      <path d="m9.2 11.9 2 2 3.6-3.8" />
+    </Glyph>
+  );
+}
+
+function IconGraduationCap({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <path d="M2.8 9.4 12 5l9.2 4.4L12 13.8 2.8 9.4Z" />
+      <path d="M6.8 11.5v4.2c0 1.2 2.3 2.4 5.2 2.4s5.2-1.2 5.2-2.4v-4.2" />
+    </Glyph>
+  );
+}
+
+function IconUserCheck({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="10" cy="8" r="3.4" />
+      <path d="M3.8 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.6" />
+      <path d="m14.8 16.9 2.1 2.1 3.6-4.2" />
+    </Glyph>
   );
 }
 
@@ -278,18 +435,27 @@ function AccountRow({
   return (
     <>
       <tr>
-        <td className="email-cell admin-account-email">
+        <td className="admin-account-email">
           <span>{account.email}</span>
           {isCurrent && <span className="admin-you-badge">Bạn</span>}
         </td>
-        <td className="name-cell">{account.name}</td>
-        <td><span className={`role-badge${account.role === "admin" ? "" : " badge-muted"}`}>{account.role === "admin" ? "Admin" : "Thí sinh"}</span></td>
-        <td><span className={`status-badge ${account.active ? "success" : "danger"}`}>{account.active ? "Hoạt động" : "Vô hiệu"}</span></td>
+        <td className="admin-account-name">{account.name}</td>
+        <td>
+          <span className="admin-role-badge" data-role={account.role}>
+            {account.role === "admin" ? "Admin" : "Thí sinh"}
+          </span>
+        </td>
+        <td>
+          <span className="admin-status-badge" data-active={account.active}>
+            <span className="admin-status-dot" aria-hidden="true" />
+            {account.active ? "Hoạt động" : "Vô hiệu"}
+          </span>
+        </td>
         <td className="col-actions">
-          <span className="action-group admin-account-actions">
-            <button className="btn btn-secondary btn-sm" type="button" disabled={busy} onClick={() => setResetting(true)}>Đặt lại MK</button>
+          <span className="admin-account-actions">
+            <button className="admin-account-action" type="button" disabled={busy} onClick={() => setResetting(true)}>Đặt lại MK</button>
             <button
-              className="btn btn-ghost btn-sm"
+              className={`admin-account-action${account.active ? " admin-account-action-danger" : ""}`}
               type="button"
               disabled={busy || cannotDisableSelf}
               aria-describedby={cannotDisableSelf ? `self-disable-reason-${account.id}` : undefined}
@@ -345,7 +511,7 @@ function PasswordToggle({ visible, onToggle }: { visible: boolean; onToggle: () 
       aria-label={visible ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
       onClick={onToggle}
     >
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true" focusable="false">
         {visible ? (
           <>
             <path d="M3 3 21 21" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />

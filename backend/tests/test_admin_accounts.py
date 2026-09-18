@@ -43,6 +43,44 @@ def test_admin_list_accounts_no_password_hash(client):
         assert account["email"] in ("admin@vku.vn", "thi.sinh@vku.vn")
 
 
+def test_admin_list_returns_global_stats(client):
+    _login(client)
+    body = client.get("/api/admin/accounts").json()
+    assert body["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+
+
+def test_admin_list_stats_ignore_search_and_pagination(client):
+    _login(client)
+    searched = client.get("/api/admin/accounts", params={"q": "Thí Sinh"}).json()
+    assert searched["total"] == 1
+    assert searched["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+
+    paged = client.get("/api/admin/accounts", params={"limit": 1, "offset": 0}).json()
+    assert len(paged["accounts"]) == 1
+    assert paged["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+
+
+def test_admin_list_stats_follow_create_and_disable(client):
+    _login(client)
+    created = client.post(
+        "/api/admin/accounts",
+        json={"email": "thong.ke@vku.vn", "name": "Thống Kê", "password": "matkhau-thong-ke", "role": "participant"},
+    ).json()
+    after_create = client.get("/api/admin/accounts").json()["stats"]
+    assert after_create == {"total": 3, "admin": 1, "participant": 2, "active": 3}
+
+    client.patch(f"/api/admin/accounts/{created['id']}", json={"active": False})
+    after_disable = client.get("/api/admin/accounts").json()["stats"]
+    assert after_disable == {"total": 3, "admin": 1, "participant": 2, "active": 2}
+
+
+def test_admin_list_stats_count_legacy_account_without_active_field(client, mock_db):
+    _login(client)
+    asyncio.run(mock_db[ACCOUNTS_COLLECTION].insert_one({"email": "legacy@vku.vn", "name": "Legacy", "role": "participant"}))
+    body = client.get("/api/admin/accounts").json()
+    assert body["stats"] == {"total": 3, "admin": 1, "participant": 2, "active": 3}
+
+
 def test_admin_list_search_by_name(client):
     _login(client)
     resp = client.get("/api/admin/accounts", params={"q": "Thí Sinh"})

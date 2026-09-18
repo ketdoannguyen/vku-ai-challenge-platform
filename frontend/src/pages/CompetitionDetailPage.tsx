@@ -253,7 +253,7 @@ export function CompetitionDetailPage() {
     return (
       <div className="page comp-page">
         {/* Trang lỗi vẫn cần một H1 mô tả trạng thái; `ErrorBox` cố ý không tự render heading. */}
-        <h1 className="comp-error-title">
+        <h1>
           {isNotFound(error) ? "Không tìm thấy cuộc thi" : "Không thể tải cuộc thi"}
         </h1>
         <ErrorBox error={error} />

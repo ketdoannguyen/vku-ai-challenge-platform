@@ -106,9 +106,9 @@ export function MySubmissionsPage() {
   if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
   if (error && !data) {
     return (
-      <section className="results-page subm-page">
+      <section className="subm-page">
         <ErrorBox error={error} />
-        <div style={{ marginTop: 12 }}>
+        <div className="results-retry">
           <button type="button" className="btn btn-secondary" onClick={() => requestPage(query.offset)}>
             Thử lại
           </button>
@@ -118,8 +118,8 @@ export function MySubmissionsPage() {
   }
   if (!data?.submissions.length) {
     return (
-      <section className="results-page subm-page">
-        <div className="subm-head results-head">
+      <section className="subm-page">
+        <div className="subm-head">
           <div className="subm-head-copy">
             <h2 className="subm-title">Bài đã nộp</h2>
             <p className="subm-lead text-muted">Lịch sử của riêng bạn, mới nhất hiển thị trước.</p>
@@ -164,16 +164,14 @@ export function MySubmissionsPage() {
     : null;
 
   return (
-    <section className="results-page subm-page">
+    <section className="subm-page">
       {/* Tiêu đề trang và tóm tắt */}
-      <div className="subm-head results-head">
+      <div className="subm-head">
         <div className="subm-head-copy">
           <div className="subm-eyebrow">
             <span>Lịch sử đánh giá</span>
             <span>•</span>
-            <span style={{ color: "var(--palette-data-blue)" }}>
-              {competition.slug}
-            </span>
+            <span className="results-slug">{competition.slug}</span>
           </div>
           <h2 className="subm-title">Bài đã nộp</h2>
           <p className="subm-lead text-muted">
@@ -189,7 +187,7 @@ export function MySubmissionsPage() {
           <div className="subm-telemetry-divider" />
           <div className="subm-telemetry-item">
             <span className="subm-telemetry-label">Trạng thái</span>
-            <span className="subm-telemetry-val" style={{ color: "#15803d" }}>
+            <span className="subm-telemetry-val subm-telemetry-ok">
               Tự động chấm điểm
             </span>
           </div>
@@ -205,7 +203,7 @@ export function MySubmissionsPage() {
           {bestScoreVal != null && (
             <>
               <span>•</span>
-              <span className="flex items-center gap-1">
+              <span className="subm-summary-best">
                 <span>Điểm cao nhất trong trang:</span>
                 <strong className="subm-summary-score">
                   {formatScore(bestScoreVal)}
@@ -218,7 +216,7 @@ export function MySubmissionsPage() {
         <div className="subm-toolbar-actions">
           <button
             type="button"
-            className="btn btn-secondary btn-sm flex items-center gap-1.5"
+            className="btn btn-secondary btn-sm"
             aria-disabled={busy}
             onClick={() => {
               if (!busy) requestPage(data.offset);
@@ -231,7 +229,7 @@ export function MySubmissionsPage() {
             </svg>
             <span>Làm mới</span>
           </button>
-          <Link to="../submit" className="btn btn-sm flex items-center gap-1.5">
+          <Link to="../submit" className="btn btn-sm">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -276,13 +274,13 @@ export function MySubmissionsPage() {
         <table className="subm-table table results-table">
           <thead>
             <tr>
-              <th scope="col" style={{ width: "24%" }}>Submission / thời gian</th>
-              <th scope="col" style={{ width: "22%" }}>File</th>
-              <th scope="col" style={{ width: "16%" }}>Trạng thái</th>
-              <th scope="col" style={{ width: "10%", textAlign: "right" }}>F1</th>
-              <th scope="col" style={{ width: "10%", textAlign: "right" }}>Precision</th>
-              <th scope="col" style={{ width: "10%", textAlign: "right" }}>Recall</th>
-              <th scope="col" style={{ width: "14%", textAlign: "right" }}>Điểm chính</th>
+              <th scope="col" className="subm-col-id">Submission / thời gian</th>
+              <th scope="col" className="subm-col-file">File</th>
+              <th scope="col" className="subm-col-status">Trạng thái</th>
+              <th scope="col" className="subm-col-num">F1</th>
+              <th scope="col" className="subm-col-num">Precision</th>
+              <th scope="col" className="subm-col-num">Recall</th>
+              <th scope="col" className="subm-col-primary">Điểm chính</th>
             </tr>
           </thead>
           <tbody>
@@ -291,7 +289,7 @@ export function MySubmissionsPage() {
               return (
                 <tr key={submission.id} className={isBest ? "best-submission-row" : undefined}>
                   <td>
-                    <div className="flex items-center gap-2">
+                    <div className="subm-id-row">
                       <span className="subm-id-pill submission-id">
                         #{submission.id.slice(-8)}
                         <button
@@ -325,8 +323,8 @@ export function MySubmissionsPage() {
                     <span className="cell-secondary">{formatLocal(submission.created_at)}</span>
                   </td>
                   <td className="filename-cell">
-                    <div className="flex items-center gap-1.5">
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0, color: "var(--palette-secondary)" }}>
+                    <div className="subm-file-row">
+                      <svg className="subm-file-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                       </svg>
@@ -374,7 +372,7 @@ export function MySubmissionsPage() {
               <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> bài nộp</>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="pagination-actions">
             <button
               type="button"
               className="btn btn-secondary btn-sm"

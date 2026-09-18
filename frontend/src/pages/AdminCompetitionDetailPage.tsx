@@ -1271,7 +1271,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
               </p>
             </div>
           </div>
-          <dl className="scoring-metadata admin-detail-guide-list">
+          <dl className="scoring-metadata">
             <div className="scoring-meta-item">
               <dt>Cột ID</dt>
               <dd><code>{idColumn}</code></dd>
@@ -1989,10 +1989,10 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
           <table className="table s14-table">
             <thead>
               <tr>
-                <th scope="col" className="s14-th-name">Tên file</th>
-                <th scope="col" className="s14-th-type">Loại</th>
+                <th scope="col">Tên file</th>
+                <th scope="col">Loại</th>
                 <th scope="col" className="s14-th-size">Dung lượng</th>
-                <th scope="col" className="s14-th-md">Dùng trong Markdown</th>
+                <th scope="col">Dùng trong Markdown</th>
                 <th scope="col" className="s14-th-actions">Thao tác</th>
               </tr>
             </thead>
@@ -2006,7 +2006,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
               ) : filteredAssets.length > 0 ? (
                 filteredAssets.map((asset) => (
                   <tr key={asset.name}>
-                    <td className="asset-name-cell s14-td-name">
+                    <td className="asset-name-cell">
                       <div className="s14-file-row">
                         <IconImage className="s14-file-icon" />
                         <code className="asset-name s14-filename">{asset.name}</code>
@@ -2020,7 +2020,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
                     <td className="s14-td-size">
                       <span className="s14-mono-size">{formatBytes(asset.size_bytes)}</span>
                     </td>
-                    <td className="s14-td-md">
+                    <td>
                       <div className="s14-md-group">
                         <img
                           className="asset-preview s14-preview-thumb"
@@ -2063,7 +2063,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
                 </tr>
               ) : error ? null : (
                 <tr>
-                  <td colSpan={5} className="table-state s14-empty-state">
+                  <td colSpan={5} className="table-state">
                     Chưa có ảnh nào. Trong Markdown dùng đường dẫn tương đối <code>assets/ten-file.png</code>.
                   </td>
                 </tr>

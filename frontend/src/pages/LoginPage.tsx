@@ -160,23 +160,15 @@ export function LoginPage() {
 
       <div className="login-capsule">
         <form className="card login-card" onSubmit={onSubmit} noValidate>
-          <span className="login-crosshair top-left" aria-hidden="true">
-            +
-          </span>
-          <span className="login-crosshair top-right" aria-hidden="true">
-            +
-          </span>
-          <span className="login-crosshair bottom-left" aria-hidden="true">
-            +
-          </span>
-          <span className="login-crosshair bottom-right" aria-hidden="true">
-            +
-          </span>
-
           <div className="login-head">
             <Emblem />
             <h1 className="login-title">VKU AI Challenge Platform</h1>
             <p className="login-subtitle">Đăng nhập bằng tài khoản được cấp</p>
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
           </div>
 
           {serverError && (

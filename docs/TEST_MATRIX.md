@@ -42,6 +42,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin reset password: mật khẩu cũ hết dùng, mới login được | passing | `backend/tests/test_admin_accounts.py` |
 | Admin disable: session chết ngay + login bị chặn; không tự disable chính mình | passing | `backend/tests/test_admin_accounts.py` |
 | Admin accounts query bounds: `limit` 0/-1/201 và `offset` -1 → 422; `limit` 1/200 + offset hợp lệ → 200 | passing | `backend/tests/test_admin_accounts.py` |
+| Admin accounts global stats: `stats.total/admin/participant/active` đúng, không đổi theo `q`/`limit`, cập nhật sau create/disable, account thiếu `active` tính là hoạt động | passing | `backend/tests/test_admin_accounts.py` |
 | Password policy (≥10 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
 | Login form: error message, loading state, không có link đăng ký | passing | `frontend/src/pages/LoginPage.test.tsx` (vitest) |
 | Protected routes: chưa login → /login; participant → không vào admin | passing | `frontend/src/auth/RequireAuth.test.tsx` |
@@ -141,6 +142,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin members tải đến 200 dòng (limit=200) + thông tin chung cuộc thi ở detail | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Password admin UI: type=password, minLength 10, autoComplete new-password (create + reset) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Admin accounts phân trang thật: mock >200 dòng, Trang sau/trước đổi `offset` và chặn ở biên, tài khoản thứ 201+ tới được bằng UI, đổi từ khóa reset `offset=0`, response trang cũ không ghi đè kết quả mới, trang cuối rỗng thì lùi về trang còn dữ liệu | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
+| Admin accounts UI: bốn ô thống kê đọc `stats` toàn hệ thống (không lấy 50 dòng của page đầu) và không đổi khi tìm kiếm; bảng giữ đủ 5 cột trong vùng cuộn focus được; vai trò/trạng thái luôn có nhãn chữ; admin không tự vô hiệu hóa được (nút khóa, `aria-describedby` tới lý do, không phát PATCH) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Trần upload động: admin detail + mọi response mutate trả `upload_limits`, list/public không có; env override phản ánh trong response; UI thiếu field thì rơi về `DEFAULT_UPLOAD_LIMITS`; file quá trần bị chặn ở client và không phát request | passing | `backend/tests/test_competitions_admin.py`, `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 
 ## 8. Hardening (Sprint 07) — passing
@@ -230,6 +232,95 @@ sửa, kèm cả test tự động và (khi hành vi chỉ chứng minh được
 | Touch target đo được: `.app-menu-toggle` 44×44, `.app-brand` 58×44 ở 375; không chồng lấn, header không đổi chiều cao | passing | Chromium headless 375/768/1280 `/tmp/uiverify/w4-targets.mjs` |
 | Admin detail ở ≤767px: khối tiêu đề bám nội dung thay vì độn theo flex-basis 24rem (khoảng trống ~384px trước nhóm nút đã hết) | passing | Chromium headless 375/414/640/767/768/1280/1440 `/tmp/uiverify/w7-heading-gap.mjs` |
 | Tách `react-markdown`/`remark-gfm`/`rehype-sanitize` khỏi entry bundle: entry 597 kB → 437 kB, chunk `MarkdownView` riêng, nội dung vẫn render đúng sau Suspense | passing | `npm run build` + Chromium headless 375/1440 `/tmp/uiverify/w6-shots.mjs` |
+
+## 9d. Trang Hỗ trợ & Liên hệ (ADR-022)
+
+Contract trình bày ở `SUPPORT_PAGE_DESIGN.md`; quyết định ở ADR-022 (`docs/DECISIONS.md`). Nguồn sự thật
+cho wording và dữ liệu liên hệ vẫn là `frontend/src/pages/SupportPage.tsx` và `frontend/src/lib/vkuInfo.ts`.
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Outline: đúng một `h1`, ba `h2` theo thứ tự `Các bước tham gia` → `Liên hệ` → `Câu hỏi thường gặp`; bước và FAQ dùng `h3` | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| Timeline đủ 6 bước đúng thứ tự (`Đăng nhập`, `Chọn cuộc thi`, `Tham gia cuộc thi`, `Đọc đề bài`, `Nộp bài`, `Theo dõi kết quả`); bước 2 vẫn là link nội bộ về `/` | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| Nhịp màu marker `data-tone` xoay vòng `blue,red,yellow` ×2 và chỉ mang tính trang trí, không suy ra trạng thái nghiệp vụ | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` (`rgb(9,105,232)｜rgb(211,11,35)｜rgb(245,184,0)`) |
+| FAQ đủ 9 câu hỏi nguyên văn; panel cuối vẫn nội suy tên đơn vị từ `vkuInfo.ts` | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| Accordion: 9 trigger là `button` native, mặc định `aria-expanded="false"`, `aria-controls` trỏ tới panel tồn tại, panel có `aria-labelledby` ngược lại và mang thuộc tính `hidden` | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| Accordion single-open: mở mục khác thì mục cũ đóng, bấm lại thì đóng hết; Enter/Space hoạt động; đóng/mở lại đúng trên trình duyệt thật | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Ba tầng liên hệ đúng thứ tự VKU → Phòng KHCN-HTQT → Hỗ trợ kỹ thuật, đúng `mailto:`/`tel:` và công khai đầu mối được uỷ quyền (Nguyễn Kết Đoàn) | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| `mailto:`/`tel:` không mở tab mới; hai link website giữ `target="_blank"` + `rel="noopener noreferrer nofollow"` | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Không còn block `Nguồn thông tin`, `Danh mục hỗ trợ`, `Cần hỗ trợ thêm?`; không `form`/`input`/`textarea`/`aside`/`nav` phụ; trang tĩnh không gọi API | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Shell 1440px `.app-main-support` chỉ gắn cho đúng route `/ho-tro`; route khác không thừa hưởng | passing | `frontend/src/App.test.tsx` |
+| `/ho-tro/khong-co` vẫn rơi vào 404 (không có route con) | passing | `frontend/src/App.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Thứ tự responsive: dưới 1200px một cột Hướng dẫn → Liên hệ → FAQ; từ 1200px Hướng dẫn và Liên hệ cùng hàng, FAQ nằm dưới Hướng dẫn; không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Desktop gần 70/30: rail liên hệ 342px@1200 và 416px@1440, tỉ lệ hướng dẫn 0.678/0.680 (ngưỡng 0.65–0.75) | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Hero không bị fixed header che ở mọi breakpoint (đỉnh hero 84px > đáy header 64px) | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Focus ring 2px `solid` khi điều hướng bằng bàn phím; vùng chạm trigger FAQ và chip liên hệ ≥44px | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Regression: `/gioi-thieu` vẫn giữ khối `Nguồn thông tin`; `/`, `/admin/competitions`, `/admin/accounts` giữ nguyên hero/card và không có phần tử `.support-*` rò sang | passing | `frontend/src/pages/AboutPage.test.tsx`, `frontend/src/pages/{AdminCompetitionsPage,AdminAccountsPage,DashboardPage}.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` + `/tmp/uiverify/support-admin-regression.mjs` |
+
+## 9e. Trang Giới thiệu (ADR-023)
+
+Contract trình bày ở `ABOUT_PAGE_DESIGN.md`; quyết định ở ADR-023 (`docs/DECISIONS.md`). Nguồn sự thật
+cho wording, dữ kiện và nguồn vẫn là `frontend/src/lib/vkuInfo.ts` (page không hardcode dữ kiện).
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Outline: đúng một `h1` `Giới thiệu` và năm `h2` theo thứ tự `Về nền tảng AI Challenge` → `VKU — đơn vị chủ trì` → `Đơn vị và đầu mối hỗ trợ` → `Bắt đầu` → `Nguồn thông tin` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Platform card tách thành bốn feature item (`h3` + mô tả nguyên văn), giữ đủ bốn mô tả cũ | passing | `frontend/src/pages/AboutPage.test.tsx` |
+| VKU card giữ nguyên list có accessible name `Thông tin VKU` với đúng năm dữ kiện theo thứ tự; câu Quyết định 15/QĐ-TTg ngày 03/01/2020 còn nguyên một text node | passing | `frontend/src/pages/AboutPage.test.tsx` |
+| Ba đầu mối hỗ trợ đúng thứ tự VKU → Phòng KHCN-HTQT → Nguyễn Kết Đoàn; không lặp `mailto:`/`tel:` của `/ho-tro` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Không thêm slogan/CTA phụ/khối bịa: đúng sáu link (một nội bộ `/ho-tro`, một CTA `/`, bốn nguồn ngoài), không `form`/`input`/`textarea`/`aside`/`nav`, trang tĩnh không gọi API | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Không còn markup giao diện cũ (`.page`/`.card`/`.ov-*`) lẫn phần tử `.support-*` của trang Hỗ trợ | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Nhịp màu viền trên `blue｜red｜yellow｜blue` (`rgb(9,105,232)｜rgb(236,22,49)｜rgb(245,184,0)｜rgb(9,105,232)`); thân card nền trắng; icon feature `blue,blue,red,yellow`; icon đầu mối hỗ trợ blue | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| `Nguồn thông tin` là card thứ năm, accent neutral bằng đúng viền card (không thêm màu thương hiệu thứ tư), full-width ở cuối lưới | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| CTA chính duy nhất dùng `.btn` VKU Blue 700 (`rgb(6,79,196)`), chữ trắng, tới `/`, cao 46px ≥44px; không có nút đen | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Bốn nguồn chính thức đúng URL/thứ tự (Giới thiệu Trường → Liên hệ → Phòng KHCN-HTQT → Đại học Đà Nẵng), giữ `target="_blank"` + `rel="noopener noreferrer nofollow"`, vùng chạm ≥44px | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Nhãn nguồn là tên ngắn ≤6 chữ, không dán URL; câu dẫn `tổng hợp từ các nguồn chính thức… truy cập ngày` đã bỏ hẳn khỏi trang | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Toàn bộ 18 SVG đều `aria-hidden="true"` + `focusable="false"`; tab order khớp thứ tự DOM; focus ring 2px `solid` | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Thứ tự responsive: dưới 1200px một cột `Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn`; từ 1200px hai cột (`Nền tảng`+`VKU` ｜ `Hỗ trợ`+`Bắt đầu`) và `Nguồn` nằm full-width cuối lưới; không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Mỗi cột xếp dọc độc lập ở desktop: khe giữa hai card cùng cột đúng 24px (16px ở màn hẹp), không phình theo hàng của lưới — chặn tái xuất khoảng trống lớn ở rail phải | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Hero không bị fixed header che ở mọi breakpoint (đỉnh hero 84px > đáy header 64px) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Shell 1440px `.app-main-about` chỉ gắn cho đúng route `/gioi-thieu`; `/ho-tro` và `/` không thừa hưởng, và không rò `about-*` sang route khác | passing | `frontend/src/App.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| `/gioi-thieu/khong-co` vẫn rơi vào 404 (không có route con) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Regression: `/ho-tro` giữ nguyên cấu trúc/FAQ/chip, `/` và hai màn quản trị giữ hero/card, không tràn ngang | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` + `/tmp/uiverify/support-admin-regression.mjs` |
+
+## 9f. Migrate VKU toàn frontend (một hệ thiết kế duy nhất)
+
+Master spec ở `VKU_GLOBAL_DESIGN.md` (root), đứng trên `DESIGN.md`, `ADMIN_COMPETITIONS_DESIGN.md`,
+`COMPETITION_DETAIL_DESIGN.md`, `ACCOUNT_MANAGEMENT_DESIGN.md` và source code khi mâu thuẫn visual;
+source/API hiện tại vẫn thắng khi mâu thuẫn dữ liệu/nghiệp vụ. Bảng dưới map 14 route pattern
+(13 pattern có tên + wildcard) × 6 breakpoint, kèm các bất biến chống tái xuất hiện UI cũ.
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Guard cấp nguồn: không còn utility token Tailwind chết (`flex`, `inline-flex`, `items-*`, `justify-*`, `gap-*`) trong `className` của mọi TSX, ở cả chuỗi tĩnh, template literal và nhánh điều kiện | passing | `frontend/src/test/designSystemGuard.test.ts` |
+| Guard tự kiểm: glob quét được >20 file TSX (không pass rỗng nếu cú pháp glob đổi) và không gắn cờ nhầm class thật của ứng dụng (`text-muted`, `sr-only`, `btn-sm`) hay class no-op có chủ đích | passing | `frontend/src/test/designSystemGuard.test.ts` |
+| Route gate: khi `/auth/me` chưa kết luận, `RequireAuth` và `RequireAdmin` cùng render boot state VKU (`role="status"` `Đang kiểm tra phiên đăng nhập...` + logo `/vku-logo.png`) và **không** điều hướng đi đâu cả | passing | `frontend/src/auth/RequireAuth.test.tsx` |
+| 404: hai lối thoát đúng route (link `Về trang chính` → `href="/"`, nút `Quay lại`); icon là SVG trang trí `aria-hidden="true"`, không có emoji production | passing | `frontend/src/App.test.tsx` |
+| 14 route × 6 width (375/640/768/1024/1200/1440) không route nào gây tràn ngang body | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` (335 check đạt, 0 fail; 3 lần chạy liên tiếp cho cùng kết quả) |
+| Light-only trên toàn bộ 84 tổ hợp route × width: `color-scheme` không chứa `dark` | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Một màu CTA chủ đạo duy nhất `rgb(6, 79, 196)` (`--accent`) trên 60 tổ hợp có `.btn` primary; **0** `.btn` mang nền mực `rgb(11, 31, 68)`; 24 tổ hợp còn lại (trang quản trị dùng class riêng) cũng không có `.btn` nền mực | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Không phần tử tương tác nào (`button`, `a`, `[role=button]`, `input[type=submit]`, `.btn`) mang nền mực trên cả 14 route; nền tối chỉ còn ở `pre`/`code` Markdown (`rgb(16, 36, 70)`) đúng chủ ý của spec | passing | Chromium headless `/tmp/uiverify/probe-ink.mjs` |
+| Token `--ac-*` của khu quản trị khai báo ở `:root`, không phải `.ac-page`: modal và menu ba chấm đều portal ra `document.body`, nằm ngoài cây `.ac-page`, nên token scope hẹp không giải được ở đó | passing | Chromium headless `/tmp/uiverify/probe-modals2.mjs`, `/tmp/uiverify/probe-menu-disabled.mjs` |
+| Modal tạo/sửa cuộc thi (`.modal-competition-form`, portal → `body`): nút chính `Tạo`/`Lưu` nền `--accent` `rgb(6, 79, 196)` + chữ trắng, hover `--accent-strong`; không còn nền trong suốt do `var(--ac-ink)` không giải được | passing | Chromium headless `/tmp/uiverify/probe-modals2.mjs` |
+| Menu ba chấm (`.ac-menu`, portal → `body`): mục bị vô hiệu hoá dùng `--ac-outline` `rgb(148, 163, 184)`, phân biệt được với mục đang bật `rgb(11, 31, 68)`; mục nguy hiểm vẫn `--danger` | passing | Chromium headless `/tmp/uiverify/probe-menu-disabled.mjs` |
+| Leaderboard bị khoá: **không phát request `/leaderboard` nào**; card trắng viền trên `--vku-blue-600`, 3 sọc `vku-accent`, emblem `--vku-yellow-100`, 3 tile viền trên xanh/đỏ/vàng | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Leaderboard mở: đủ 7 cột, region cuộn được và focus được có `aria-label="Bảng xếp hạng"`; huy hiệu hạng `--vku-yellow-100`/`--vku-blue-100`/`--vku-red-100` kèm nhãn; hàng của người đang xem nền `--vku-blue-100` + badge `Bạn` | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Bài đã nộp: đủ 7 cột, `.subm-badge-best` và hàng bài tốt nhất `--vku-yellow-100`/`--vku-yellow-50`, telemetry thành công dùng `--success`, region focus được | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Nộp bài: icon hướng dẫn `--accent`, icon cảnh báo `--danger`; không còn `#15803d`/`#22c55e` trong DOM; dropzone và thanh hành động hiện đúng | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| `/login`: CTA không phải mực đậm, card trắng, 3 sọc accent, logo `/vku-logo.png`; slug kỹ thuật dùng `"JetBrains Mono"` + `--info` | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| 375px: bảng leaderboard và bài đã nộp cuộn **trong region** (`overflow-x: auto`, `overscroll-behavior-x: contain`), body không tràn | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Focus ring `:focus-visible` 2px `solid`; CTA chính cao 46px ≥44px | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
+| Không còn hex màu hardcode trong TSX, không còn `var(--palette*)` trong TSX, không còn emoji trong `src`; chỉ còn **một** inline `style` — vị trí menu portal ở `AdminCompetitionsPage.tsx:750`, đúng ngoại lệ spec cho phép | passing | `rg` toàn `frontend/src` |
+| Dọn CSS chết: 10 rule không còn consumer nào (`.page-head` + bản trong media query, `.page-subtitle`, `.form-field-wide`, `.spinner-light`, `.placeholder-note`, `.comp-header-join`, `.sub-blocked-warning-badge` + rule `svg`) và 16 custom property không ai đọc — đã xoá khỏi `index.css`; ngoặc `{}` cân bằng, không còn `var()` trỏ tới tên đã xoá, không file TSX/test nào nhắc tên đó | passing | `rg` toàn `frontend/src` (chỉ còn `.ac-page-head*` trùng chuỗi, là class sống) |
+| Sau khi dọn CSS: 14 route × 6 width vẫn 335 check đạt / 0 fail; nút chính modal cuộc thi vẫn `rgb(6, 79, 196)` nền + chữ trắng; mục menu disabled vẫn `rgb(148, 163, 184)`; 0 phần tử tương tác nền mực trên 14 route | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs`, `/tmp/uiverify/probe-modals2.mjs`, `/tmp/uiverify/probe-menu-disabled.mjs`, `/tmp/uiverify/probe-ink.mjs` |
+| Kích thước CSS sau dọn (bundle production) | passing | `npm run build` → `dist/assets/index-*.css` 157.59 kB (trước dọn 159.24 kB) |
+| Toàn bộ test frontend, lint và production build | passing | `npx vitest run --maxWorkers 1` → 277 passed (22 file, tất định); `npm run lint` → 0 error; `npm run build` → `tsc -b` + Vite build OK |
+| Flake liên file đã biết: `CompetitionDetailPage.test.tsx > deep-link content/:contentSlug render markdown panel` — chạy song song nhiều worker thì lúc đạt lúc không (cùng một mã nguồn: đạt → fail → đạt), chạy một mình 14/14 đạt và `--maxWorkers 1` 277/277 đạt. Không liên quan tới thay đổi CSS/TSX (test này đi nhánh render markdown, không tới nhánh lỗi) | flaky, chưa sửa | `npx vitest run src/pages/CompetitionDetailPage.test.tsx`; 3 lần `npm test` liên tiếp |
+
+Ghi chú quyết định (không suy ra được từ master spec): dự án **không cài Tailwind**, nên utility kiểu
+Tailwind viết trong TSX không khớp selector nào trong `index.css` và là class chết. Guard vì vậy chặn ở
+tầng nguồn TSX với allowlist hẹp 15 token đã biết, chứ không cài Tailwind, không thêm CSS linter và
+không gắn cờ các class no-op có chủ đích hay class thật của ứng dụng.
 
 ## 10. Production deploy (Sprint 08) — planned
 

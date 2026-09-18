@@ -70,14 +70,15 @@ export function LeaderboardPage() {
   // S08b: Chưa công bố bảng xếp hạng (không gọi API)
   if (!competition.leaderboard_visible) {
     return (
-      <section className="results-page lb-page">
-        <div className="lb-locked-card status-banner warning">
-          <div className="lb-locked-cross top-left" aria-hidden="true">+</div>
-          <div className="lb-locked-cross top-right" aria-hidden="true">+</div>
-          <div className="lb-locked-cross bottom-left" aria-hidden="true">+</div>
-          <div className="lb-locked-cross bottom-right" aria-hidden="true">+</div>
-
+      <section className="lb-page">
+        <div className="lb-locked-card">
           <div className="lb-locked-content">
+            <span className="vku-accent" aria-hidden="true">
+              <span className="blue" />
+              <span className="red" />
+              <span className="yellow" />
+            </span>
+
             <div className="lb-locked-emblem" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.75">
                 <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -158,9 +159,9 @@ export function LeaderboardPage() {
   if (loading && !data) return <Loading label="Đang tải bảng xếp hạng..." />;
   if (error && !data) {
     return (
-      <section className="results-page lb-page">
+      <section className="lb-page">
         <ErrorBox error={error} />
-        <div style={{ marginTop: 12 }}>
+        <div className="results-retry">
           <button type="button" className="btn btn-secondary" onClick={() => requestPage(query.offset)}>
             Thử lại
           </button>
@@ -171,8 +172,8 @@ export function LeaderboardPage() {
   // Chỉ total = 0 mới thật sự là "chưa có kết quả"; trang rỗng vì offset quá xa là chuyện khác.
   if (!data || data.total === 0) {
     return (
-      <section className="results-page lb-page">
-        <div className="lb-head results-head">
+      <section className="lb-page">
+        <div className="lb-head">
           <div className="lb-head-copy">
             <h2 className="lb-title">Bảng xếp hạng</h2>
             <p className="lb-lead text-muted">
@@ -202,16 +203,14 @@ export function LeaderboardPage() {
   const shownTo = Math.min(data.offset + PAGE_SIZE, data.total);
 
   return (
-    <section className="results-page lb-page">
+    <section className="lb-page">
       {/* Tiêu đề & giải thích quy tắc tie-break */}
-      <div className="lb-head results-head">
+      <div className="lb-head">
         <div className="lb-head-copy">
           <div className="lb-eyebrow">
             <span>Bảng xếp hạng công bố</span>
             <span>/</span>
-            <span style={{ color: "var(--palette-data-blue)" }}>
-              {competition.slug}
-            </span>
+            <span className="results-slug">{competition.slug}</span>
           </div>
           <h2 className="lb-title">Bảng xếp hạng</h2>
           <p className="lb-lead text-muted">
@@ -219,7 +218,7 @@ export function LeaderboardPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="lb-head-tools">
           {lastUpdated && (
             <div className="lb-sync-bar">
               <div className="lb-sync-dot" />
@@ -228,7 +227,7 @@ export function LeaderboardPage() {
           )}
           <button
             type="button"
-            className="btn btn-secondary btn-sm flex items-center gap-1.5"
+            className="btn btn-secondary btn-sm"
             aria-disabled={busy}
             onClick={() => {
               if (!busy) requestPage(data.offset);
@@ -316,13 +315,13 @@ export function LeaderboardPage() {
         <table className="lb-table table results-table">
           <thead>
             <tr>
-              <th scope="col" style={{ width: "80px", textAlign: "center" }}>Hạng</th>
+              <th scope="col" className="lb-col-rank">Hạng</th>
               <th scope="col">Đội / tài khoản</th>
-              <th scope="col" style={{ textAlign: "right" }}>Điểm chính</th>
-              <th scope="col" style={{ textAlign: "right" }}>F1</th>
-              <th scope="col" style={{ textAlign: "right" }}>Precision</th>
-              <th scope="col" style={{ textAlign: "right" }}>Recall</th>
-              <th scope="col" style={{ textAlign: "right", width: "180px" }}>Đạt lúc</th>
+              <th scope="col" className="lb-col-num">Điểm chính</th>
+              <th scope="col" className="lb-col-num">F1</th>
+              <th scope="col" className="lb-col-num">Precision</th>
+              <th scope="col" className="lb-col-num">Recall</th>
+              <th scope="col" className="lb-col-time">Đạt lúc</th>
             </tr>
           </thead>
           <tbody>
@@ -331,7 +330,7 @@ export function LeaderboardPage() {
                 key={entry.best_submission_id}
                 className={entry.is_current_user ? "current-user-row" : undefined}
               >
-                <td style={{ textAlign: "center" }}>
+                <td className="lb-cell-rank">
                   <div
                     className={`lb-rank-badge ${
                       entry.rank === 1
@@ -351,19 +350,19 @@ export function LeaderboardPage() {
                     {entry.display_name}
                   </span>
                   {entry.is_current_user && (
-                    <span className="lb-user-badge current-user-label">Bạn</span>
+                    <span className="lb-user-badge">Bạn</span>
                   )}
                 </td>
-                <td className="score-cell primary-score" style={{ textAlign: "right" }}>
+                <td className="score-cell primary-score">
                   {formatScore(entry.primary_score)}
                 </td>
-                <td className="score-cell" style={{ textAlign: "right" }}>
+                <td className="score-cell">
                   {formatScore(entry.metrics.f1)}
                 </td>
-                <td className="score-cell" style={{ textAlign: "right" }}>
+                <td className="score-cell">
                   {formatScore(entry.metrics.precision)}
                 </td>
-                <td className="score-cell" style={{ textAlign: "right" }}>
+                <td className="score-cell">
                   {formatScore(entry.metrics.recall)}
                 </td>
                 <td className="lb-time-cell">
@@ -383,7 +382,7 @@ export function LeaderboardPage() {
             <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> thí sinh có điểm</>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="pagination-actions">
           <button
             type="button"
             className="btn btn-secondary btn-sm"

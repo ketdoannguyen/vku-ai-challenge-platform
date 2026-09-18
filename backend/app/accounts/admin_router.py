@@ -9,7 +9,14 @@ from pydantic import BaseModel
 from bson import ObjectId
 from bson.errors import InvalidId
 
-from app.accounts.service import ACCOUNTS_COLLECTION, AccountCreate, create_account, find_account_by_email, public_account
+from app.accounts.service import (
+    ACCOUNTS_COLLECTION,
+    AccountCreate,
+    account_stats,
+    create_account,
+    find_account_by_email,
+    public_account,
+)
 from app.auth.dependencies import AdminAccount
 from app.auth.passwords import hash_password, password_policy_error
 from app.core.errors import api_error
@@ -67,7 +74,8 @@ async def list_accounts(request: Request, admin: AdminAccount, q: str = "", limi
     cursor = db[ACCOUNTS_COLLECTION].find(query).sort("email", 1).skip(offset).limit(limit)
     accounts = [public_account(a) async for a in cursor]
     total = await db[ACCOUNTS_COLLECTION].count_documents(query)
-    return {"accounts": accounts, "total": total, "limit": limit, "offset": offset}
+    # `total` là số khớp `q`; `stats` là tổng quan toàn hệ thống cho các thẻ KPI.
+    return {"accounts": accounts, "total": total, "limit": limit, "offset": offset, "stats": await account_stats(db)}
 
 
 @router.post("", status_code=201)

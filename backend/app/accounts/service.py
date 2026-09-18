@@ -42,6 +42,28 @@ async def find_account_by_email(db: AsyncIOMotorDatabase, email: str) -> dict | 
     return await db[ACCOUNTS_COLLECTION].find_one({"email": email.strip().lower()})
 
 
+async def account_stats(db: AsyncIOMotorDatabase) -> dict[str, int]:
+    """Đếm toàn hệ thống theo role/active. Tài khoản legacy thiếu `active` tính là đang hoạt động."""
+    stats = {"total": 0, "admin": 0, "participant": 0, "active": 0}
+    pipeline = [
+        {
+            "$group": {
+                "_id": {"role": "$role", "active": {"$ifNull": ["$active", True]}},
+                "count": {"$sum": 1},
+            }
+        }
+    ]
+    async for group in db[ACCOUNTS_COLLECTION].aggregate(pipeline):
+        count = group["count"]
+        stats["total"] += count
+        role = group["_id"]["role"]
+        if role in ("admin", "participant"):
+            stats[role] += count
+        if group["_id"]["active"]:
+            stats["active"] += count
+    return stats
+
+
 def public_account(account: dict) -> dict:
     return {
         "id": str(account["_id"]),

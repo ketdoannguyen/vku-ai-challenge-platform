@@ -5,6 +5,8 @@ import { AuthProvider, useAuth, type Account } from "./auth/AuthContext";
 import { RequireAdmin, RequireAuth } from "./auth/RequireAuth";
 import { FOCUSABLE } from "./components/Modal";
 import { useRouteFocus } from "./hooks/useRouteFocus";
+import { AboutPage } from "./pages/AboutPage";
+import { SupportPage } from "./pages/SupportPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
 import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
@@ -111,6 +113,10 @@ function useNavItems(): NavItem[] {
   const { account } = useAuth();
   // "Cuộc thi" đọc công khai (ADR-014) nên khách cũng thấy; mục quản trị thì không.
   const items: NavItem[] = [{ to: "/", label: "Cuộc thi", end: true }];
+  // Hai trang tĩnh công khai (ADR-021). Nhãn ngắn để navbar không chật ở 768–1023px;
+  // tiêu đề trang vẫn đầy đủ ("Hỗ trợ & Liên hệ").
+  items.push({ to: "/gioi-thieu", label: "Giới thiệu", end: true });
+  items.push({ to: "/ho-tro", label: "Hỗ trợ", end: true });
   if (account?.role === "admin") {
     items.push({ to: "/admin/competitions", label: "Quản trị" });
     items.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
@@ -372,6 +378,10 @@ export function App() {
   // Danh sách quản trị có bảng 8 cột nên cũng cần trần rộng; màn chi tiết cuộc thi
   // (`/admin/competitions/:id`) vẫn giữ 1280px, nên so khớp đúng hai đường dẫn này.
   const adminList = pathname === "/admin/competitions" || pathname === "/admin";
+  // Trang hỗ trợ có lưới hai cột (hướng dẫn + liên hệ) nên cần trần rộng hơn 1280px.
+  const support = pathname === "/ho-tro";
+  // Trang giới thiệu cũng hai cột ở desktop nên dùng chung trần rộng với hỗ trợ.
+  const about = pathname === "/gioi-thieu";
   useRouteFocus();
   return (
     <AuthProvider>
@@ -379,7 +389,7 @@ export function App() {
       <main
         className={`app-main${bare ? " app-main-bare" : ""}${dashboard ? " app-main-dashboard" : ""}${
           adminList ? " app-main-admin-list" : ""
-        }`}
+        }${support ? " app-main-support" : ""}${about ? " app-main-about" : ""}`}
         id="main-content"
         tabIndex={-1}
       >
@@ -448,6 +458,9 @@ export function App() {
               </RequireAdmin>
             }
           />
+          {/* Hai trang tĩnh công khai (ADR-021): không cần đăng nhập, không gọi API. */}
+          <Route path="/gioi-thieu" element={<AboutPage />} />
+          <Route path="/ho-tro" element={<SupportPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>

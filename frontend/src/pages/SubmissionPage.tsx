@@ -360,7 +360,7 @@ export function SubmissionPage() {
                   </span>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="sub-trigger-actions">
                   <button
                     className="btn"
                     type="submit"
@@ -385,7 +385,7 @@ export function SubmissionPage() {
         <div className="sub-guide-card">
           <div className="sub-guide-head">
             <h3 className="sub-guide-title">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg className="sub-guide-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
               </svg>
@@ -399,7 +399,7 @@ export function SubmissionPage() {
           <div className="sub-code-preview">
             <div className="sub-code-head">
               <span>{config.id_column ?? "id"},{config.prediction_column ?? "prediction"}</span>
-              <span style={{ color: "#15803d" }}>Mẫu dữ liệu</span>
+              <span>Mẫu dữ liệu</span>
             </div>
             <div className="sub-code-sample">
               <div><strong>{config.id_column ?? "id"}</strong>,<strong>{config.prediction_column ?? "prediction"}</strong></div>
@@ -415,7 +415,7 @@ export function SubmissionPage() {
         <div className="sub-guide-card">
           <div className="sub-guide-head">
             <h3 className="sub-guide-title">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#ba1a1a" strokeWidth="2">
+              <svg className="sub-guide-icon-warning" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
