@@ -1,4 +1,4 @@
-/** Block "Tài nguyên tải về": link dataset/sample do BTC khai báo, nằm dưới Mục lục nội dung. */
+/** Block "Tài nguyên": link dataset/sample do BTC khai báo, nằm dưới Mục lục nội dung. */
 
 import { isSafeResourceUrl, type CompetitionResource } from "../api/competitions";
 
@@ -41,9 +41,9 @@ export function CompetitionResources({
             <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" />
             <path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" />
           </Icon>
-          Tài nguyên tải về
+          Tài nguyên
         </span>
-        <span className="content-card-count">{safe.length} tài nguyên</span>
+        <span className="content-card-count">{safe.length}</span>
       </div>
       <ul className="resource-list">
         {safe.map((item, index) => (

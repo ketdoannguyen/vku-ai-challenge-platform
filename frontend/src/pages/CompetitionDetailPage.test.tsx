@@ -221,7 +221,7 @@ test("deep-link content/:contentSlug render markdown panel", async () => {
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 });
 
-test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link không an toàn", async () => {
+test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an toàn", async () => {
   apiMock((url) => {
     if (url.endsWith("/contents/problem")) {
       return { body: { ...CONTENTS.contents[0], markdown: "# Đề bài chi tiết" }, status: 200 };
@@ -242,7 +242,7 @@ test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
 
-  const resources = await screen.findByText("Tài nguyên tải về");
+  const resources = await screen.findByText("Tài nguyên");
   const toc = screen.getByText("Mục lục nội dung");
   const following = toc.compareDocumentPosition(resources) & Node.DOCUMENT_POSITION_FOLLOWING;
   expect(following).toBeTruthy();
@@ -251,7 +251,7 @@ test("block Tài nguyên tải về nằm sau Mục lục nội dung, lọc link
   expect(resourceSection).toHaveClass("content-card-vku", "content-card-resources");
   expect(resourceSection).toHaveAttribute("aria-labelledby", "competition-resources-title");
   expect(resources).toHaveAttribute("id", "competition-resources-title");
-  expect(screen.getByText("2 tài nguyên")).toBeTruthy();
+  expect(screen.getByText("2", { selector: ".content-card-count" })).toBeTruthy();
 
   const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
@@ -317,7 +317,7 @@ test("không có tài nguyên hợp lệ thì không render block tài nguyên",
   });
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
-  expect(screen.queryByText("Tài nguyên tải về")).toBeNull();
+  expect(screen.queryByText("Tài nguyên")).toBeNull();
 });
 
 test("tiêu đề tab theo khu vực đang mở và giữ đúng khi đổi route", async () => {
