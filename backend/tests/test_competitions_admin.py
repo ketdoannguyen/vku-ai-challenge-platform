@@ -109,7 +109,7 @@ def test_admin_list_includes_drafts(client):
 
 
 def test_admin_list_counts_members_and_submissions_per_competition(client):
-    """Bảng admin hiển thị số thành viên/bài nộp — phải tách đúng theo từng cuộc thi."""
+    """Bảng admin hiển thị số thành viên/bài nộp - phải tách đúng theo từng cuộc thi."""
     _login(client)
     tracked = client.post("/api/admin/competitions", json=_body()).json()["id"]
     other = client.post("/api/admin/competitions", json=_body(slug="other-cup", name="Other Cup")).json()["id"]
@@ -197,7 +197,7 @@ def test_resources_reject_bad_label_and_too_many_items(client):
 
 
 def test_clone_copies_resources(client):
-    """Clone liệt kê tay từng field — resources phải được truyền để không bị rơi im lặng."""
+    """Clone liệt kê tay từng field - resources phải được truyền để không bị rơi im lặng."""
     _login(client)
     resources = [{"label": "Dataset", "url": "https://drive.google.com/drive/folders/abc"}]
     cid = client.post("/api/admin/competitions", json=_body(resources=resources)).json()["id"]
@@ -300,11 +300,11 @@ def test_edit_draft_changes_fields_but_not_slug_or_status(client):
     cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
     resp = client.patch(
         f"/api/admin/competitions/{cid}",
-        json={"name": "AI Challenge 2026 — Vòng 1", "quota_per_day": 10, "slug": "other-slug", "status": "published"},
+        json={"name": "AI Challenge 2026 - Vòng 1", "quota_per_day": 10, "slug": "other-slug", "status": "published"},
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["name"] == "AI Challenge 2026 — Vòng 1"
+    assert body["name"] == "AI Challenge 2026 - Vòng 1"
     assert body["quota_per_day"] == 10
     assert body["slug"] == "ai-challenge-2026"  # slug immutable
     assert body["status"] == "draft"  # status chỉ đổi qua publish/close
@@ -429,7 +429,7 @@ def test_publish_blocked_without_ground_truth(client):
 
 
 def test_publish_blocked_when_ground_truth_file_is_missing(client, isolated_data_dir):
-    """Publish từng cho qua khi chỉ kiểm tra is_file() — metadata còn nhưng file đã bị xoá."""
+    """Publish từng cho qua khi chỉ kiểm tra is_file() - metadata còn nhưng file đã bị xoá."""
     _login(client)
     cid = _draft(client)
     configure_scoring(client, cid)
@@ -497,7 +497,7 @@ def test_admin_mutations_return_readiness_so_ui_state_stays_correct(client):
 
 
 def test_admin_list_does_not_carry_readiness(client):
-    """List không được đọc ground truth cho từng dòng — field chỉ có ở detail."""
+    """List không được đọc ground truth cho từng dòng - field chỉ có ở detail."""
     _login(client)
     _draft(client)
     rows = client.get("/api/admin/competitions").json()["competitions"]
@@ -505,7 +505,7 @@ def test_admin_list_does_not_carry_readiness(client):
 
 
 def test_published_competition_accepts_a_real_submission(client):
-    """Publish chỉ thành công khi đã chấm được — kiểm chứng bằng một bài nộp thật."""
+    """Publish chỉ thành công khi đã chấm được - kiểm chứng bằng một bài nộp thật."""
     now = datetime.now(timezone.utc)
     _login(client)
     cid = _draft(
@@ -526,7 +526,7 @@ def test_published_competition_accepts_a_real_submission(client):
 
 
 def test_admin_detail_exposes_env_upload_limits(client, monkeypatch):
-    """Trần upload là cấu hình môi trường — backend trả về để UI render hint thay vì hardcode."""
+    """Trần upload là cấu hình môi trường - backend trả về để UI render hint thay vì hardcode."""
     _login(client)
     cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
     monkeypatch.setattr(

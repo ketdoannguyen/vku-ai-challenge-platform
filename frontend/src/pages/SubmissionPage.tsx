@@ -36,7 +36,7 @@ export function SubmissionPage() {
   const quotaLabel = quota
     ? `Còn ${quota.remaining}/${quota.per_day} lượt hôm nay`
     : `${competition.quota_per_day} lượt/ngày`;
-  // Không có số liệu thì không vẽ thanh — một thanh rỗng sẽ bị đọc thành "hết lượt".
+  // Không có số liệu thì không vẽ thanh - một thanh rỗng sẽ bị đọc thành "hết lượt".
   const quotaPercent =
     quota && quota.per_day > 0 ? Math.round((quota.remaining / quota.per_day) * 100) : 0;
   // Mức còn lại chỉ chọn màu cho thanh; con số bên cạnh mới là kênh thông tin chính.

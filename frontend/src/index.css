@@ -1,5 +1,5 @@
 /* =============================================================================
-   AI Challenge Platform — visual foundation
+   AI Challenge Platform - visual foundation
    Token + primitive chuyển từ Google Stitch product screens:
    stitch_vku_ai_challenge_platform/<screen>/code.html
    Screen đã sinh là visual authority; DESIGN.md chỉ lấp phần screens không có.
@@ -151,7 +151,7 @@
   --accent-soft: var(--vku-blue-100);
   --on-accent: #ffffff;
 
-  /* Nền tối cho code/khối kỹ thuật — tách hẳn khỏi token màu hành động để CTA không
+  /* Nền tối cho code/khối kỹ thuật - tách hẳn khỏi token màu hành động để CTA không
      bị kéo về màu mực. */
   --code-surface: var(--slate-900);
   --code-surface-text: #e2e8f0;
@@ -461,7 +461,7 @@ samp {
   pointer-events: none;
 }
 
-/* Ba cột: brand — nav — lối tắt tài khoản. `minmax(0, 1fr)` chứ không phải `1fr`
+/* Ba cột: brand - nav - lối tắt tài khoản. `minmax(0, 1fr)` chứ không phải `1fr`
    vì `1fr` có min là auto: khi min-content một bên lớn hơn phần chia, track đó thành
    inflexible và hai cột bên lệch nhau, kéo nav ra khỏi tâm đảo. */
 .app-header-inner {
@@ -510,7 +510,7 @@ samp {
   border: 0;
 }
 
-/* Logo VKU là dấu nhận diện chính trên thanh 64px — đủ lớn để đọc nhưng vẫn thấp
+/* Logo VKU là dấu nhận diện chính trên thanh 64px - đủ lớn để đọc nhưng vẫn thấp
    hơn chiều cao thanh. `width: auto` giữ đúng tỉ lệ ảnh gốc. */
 .app-brand-logo {
   height: 30px;
@@ -519,7 +519,7 @@ samp {
   flex: none;
 }
 
-/* Liên kết chữ gọn, không khay/viền — DESIGN.md "low-profile text links" */
+/* Liên kết chữ gọn, không khay/viền - DESIGN.md "low-profile text links" */
 .app-nav {
   grid-column: 2;
   display: none;
@@ -584,7 +584,7 @@ samp {
   text-decoration: none;
 }
 
-/* Đăng xuất chỉ còn icon — tên nút nằm ở aria-label */
+/* Đăng xuất chỉ còn icon - tên nút nằm ở aria-label */
 .app-logout {
   display: none;
   align-items: center;
@@ -759,7 +759,7 @@ samp {
   border-top: 1px solid var(--border);
 }
 
-/* `main` — offset cho header fixed */
+/* `main` - offset cho header fixed */
 .app-main {
   width: 100%;
   max-width: var(--container);
@@ -880,7 +880,7 @@ samp {
 }
 
 /* =============================================================================
-   Page hero — panel tiêu đề đầu trang dùng chung
+   Page hero - panel tiêu đề đầu trang dùng chung
    Một cấu trúc duy nhất cho năm màn (Cuộc thi, Giới thiệu, Hỗ trợ & Liên hệ,
    Quản lý cuộc thi, Quản lý tài khoản): icon trang trí → tiêu đề → mô tả ngắn →
    ba vạch VKU. Nội dung riêng của từng màn (thống kê, CTA) nằm trong
@@ -920,7 +920,7 @@ samp {
 }
 
 /* Màn hẹp: phần chữ chiếm trọn bề ngang panel nên vệt màu chỉ trang trí góc trên bên
-   phải — khoảng trống cạnh icon — rồi mờ dần trước khi tới tiêu đề. Nếu để nguyên
+   phải - khoảng trống cạnh icon - rồi mờ dần trước khi tới tiêu đề. Nếu để nguyên
    như màn rộng, đuôi các tiêu đề dài (`Hỗ trợ & Liên hệ`, `Quản lý tài khoản`) chạy
    vào vệt màu. */
 @media (max-width: 47.99rem) {
@@ -988,7 +988,7 @@ samp {
   letter-spacing: var(--tracking-body);
 }
 
-/* Ba vạch VKU dưới mô tả ngắn — thuần trang trí, không mang nghĩa nghiệp vụ. */
+/* Ba vạch VKU dưới mô tả ngắn - thuần trang trí, không mang nghĩa nghiệp vụ. */
 .page-hero-copy > .vku-accent {
   margin-top: var(--space-md);
 }
@@ -1073,7 +1073,7 @@ samp {
   color: var(--text);
 }
 
-/* Outline theo accent (S03: nút "Nhập mã tham gia" — border-primary trên nền surface) */
+/* Outline theo accent (S03: nút "Nhập mã tham gia" - border-primary trên nền surface) */
 .btn-outline {
   border-color: var(--accent);
   background: var(--surface);
@@ -1742,7 +1742,7 @@ select.input {
   color: var(--vku-blue-700);
 }
 
-/* Ba khối chéo rất nhạt ở ba góc — hình học thương hiệu VKU thay cho lưới chấm đen. */
+/* Ba khối chéo rất nhạt ở ba góc - hình học thương hiệu VKU thay cho lưới chấm đen. */
 .login-page::before {
   content: "";
   position: absolute;
@@ -2018,7 +2018,7 @@ select.input {
   text-underline-offset: 4px;
 }
 
-/* Chip trạng thái cỡ lớn của thẻ — gọn gàng, tương phản cao */
+/* Chip trạng thái cỡ lớn của thẻ - gọn gàng, tương phản cao */
 .status-badge-lg {
   gap: 6px;
   padding: 3px 8px;
@@ -2187,7 +2187,7 @@ select.input {
   font-style: italic;
 }
 
-/* "Đã tham gia" là trạng thái thành công thật, nên dùng badge xanh semantic có chữ —
+/* "Đã tham gia" là trạng thái thành công thật, nên dùng badge xanh semantic có chữ -
    màu không phải là kênh thông tin duy nhất. */
 .join-state-status {
   display: inline-flex;
@@ -2302,19 +2302,28 @@ select.input {
 
 /* Panel đầu trang dùng `.page-hero`; dưới đây chỉ là phần riêng của màn. */
 
-/* Ô thống kê: ba thẻ tint xanh–đỏ–vàng, hiển thị ở mọi bề rộng màn hình. */
+/* Ô thống kê: ba thẻ tint xanh–đỏ–vàng, hiển thị ở mọi bề rộng màn hình.
+   Không đặt `margin` ở đây: khối này cũng mang class `.page-hero-aside`, mà reset
+   margin sẽ đè mất `margin-inline-start: auto` - thứ dồn cả khối sang mép phải
+   panel (hai rule cùng độ ưu tiên nên rule đứng sau thắng). */
 .dash-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
   gap: var(--space-sm);
-  margin: 0;
 }
 
-/* Từ md panel xếp ngang nên cột phải hẹp hơn: hai ô một hàng thay vì ba. */
+/* Từ md panel xếp ngang nên cột phải hẹp hơn: hai ô một hàng thay vì ba. Ở mốc này
+   cột phải khai báo tường minh: panel chật nên khung bị co lại, mà `auto-fit` đếm
+   số cột theo bề rộng đang dùng nên sẽ tụt xuống một cột. */
 @media (min-width: 48rem) {
   .dash-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 24rem;
+    grid-template-columns: repeat(2, minmax(0, 11.75rem));
+  }
+
+  /* Ô thứ ba rơi xuống hàng dưới một mình; ghim vào cột phải để hàng lẻ cũng
+     thẳng mép thay vì nằm lệch vào trong. */
+  .dash-stat:nth-child(3) {
+    grid-column: -2 / -1;
   }
 }
 
@@ -2508,8 +2517,8 @@ select.input {
    ============================================================================= */
 
 /* Khung trang chi tiết cuộc thi: tối đa 68rem (1088px), khớp .dash-page.
-   Bốn tab dùng chung đúng một khung này — breadcrumb, masthead, tab bar, lưới có
-   sidebar và cả ba workspace dữ liệu — nên chuyển tab không làm nội dung nhảy ra
+   Bốn tab dùng chung đúng một khung này - breadcrumb, masthead, tab bar, lưới có
+   sidebar và cả ba workspace dữ liệu - nên chuyển tab không làm nội dung nhảy ra
    ngoài lề. */
 .comp-page {
   max-width: 68rem;
@@ -2592,7 +2601,7 @@ select.input {
   }
 }
 
-/* Ba vạch màu VKU dưới mô tả ngắn — cùng chi tiết nhận diện với `.vku-accent`.
+/* Ba vạch màu VKU dưới mô tả ngắn - cùng chi tiết nhận diện với `.vku-accent`.
    Không mang thông tin nghiệp vụ nào. */
 .comp-brand-accent {
   display: flex;
@@ -2715,7 +2724,7 @@ select.input {
   text-transform: uppercase;
 }
 
-/* Icon dữ kiện xoay vòng xanh–đỏ–vàng theo vị trí render — cùng quy tắc với thẻ cuộc
+/* Icon dữ kiện xoay vòng xanh–đỏ–vàng theo vị trí render - cùng quy tắc với thẻ cuộc
    thi ở dashboard và dòng bảng quản trị. Vàng dùng tông 800 vì 500/700 quá sáng cho
    nét mảnh 16px. Đây thuần trang trí: chữ nhãn bên cạnh mới mang thông tin. */
 .comp-fact:nth-child(3n + 1) dt svg {
@@ -2777,7 +2786,7 @@ select.input {
   text-decoration: none;
 }
 
-/* Tab đang mở là điều hướng, không phải hành động — vẫn dùng VKU Blue để nhất quán
+/* Tab đang mở là điều hướng, không phải hành động - vẫn dùng VKU Blue để nhất quán
    với nav active của header, chỉ khác là nằm trong capsule sáng. */
 .comp-tab.active {
   background: var(--accent-soft);
@@ -3154,7 +3163,7 @@ select.input {
   font-weight: 600;
 }
 
-/* Nhịp màu theo thứ tự khối — thuần trang trí, luôn kèm tiêu đề chữ nên không mang
+/* Nhịp màu theo thứ tự khối - thuần trang trí, luôn kèm tiêu đề chữ nên không mang
    thông tin. Semantic state (nếu có) vẫn thắng nhịp này. */
 .ov-block {
   display: flex;
@@ -3329,12 +3338,14 @@ select.input {
   font-weight: 500;
 }
 
-/* Table wrapper trong markdown để bảng rộng cuộn ngang an toàn */
+/* Table wrapper trong markdown để bảng rộng cuộn ngang an toàn. Vạch xanh trên đỉnh nối bảng
+   vào ngôn ngữ VKU mà không đổi cấu trúc row/cell. */
 .md-table-wrap {
   overflow-x: auto;
   max-width: 100%;
-  margin: 1em 0;
+  margin: 1.5rem 0;
   border: 1px solid var(--border);
+  border-top: 2px solid var(--vku-blue-600);
   border-radius: var(--radius-lg);
   -webkit-overflow-scrolling: touch;
 }
@@ -3431,14 +3442,14 @@ select.input {
 }
 
 /* =============================================================================
-   Markdown prose — lớp trình bày VKU dùng chung cho MỌI nội dung Markdown.
+   Markdown prose - lớp trình bày VKU dùng chung cho MỌI nội dung Markdown.
 
    Nguồn `.md`, parser, sanitizer và asset policy không đổi; chỉ HTML do
    `MarkdownView` render ra được tạo dáng ở đây. Nhờ vậy tài liệu thêm sau này tự
    mang đúng ngôn ngữ VKU mà không phải sửa từng file `.md` hay viết TSX riêng.
 
    Lưu ý về bậc heading: `MarkdownView` hạ một bậc mọi heading của tác giả (trang đã
-   có H1 riêng), nên `#` của tác giả render thành `h2` — đó là mốc mục cấp cao nhất
+   có H1 riêng), nên `#` của tác giả render thành `h2` - đó là mốc mục cấp cao nhất
    trong bài và là chỗ đặt vạch xanh bên trái.
    ============================================================================= */
 .markdown-body {
@@ -3451,95 +3462,139 @@ select.input {
   overflow-wrap: anywhere;
 }
 
-.markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
 .markdown-body h4,
 .markdown-body h5,
 .markdown-body h6 {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text);
   /* Fixed header không che tiêu đề khi nhảy tới bằng anchor. */
   scroll-margin-top: var(--header-offset);
 }
 
-.markdown-body h1 {
-  font-size: var(--text-h1);
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-  margin: 1.5em 0 0.5em;
-}
-
-.markdown-body h2 {
-  font-size: var(--text-h2);
-  line-height: var(--leading-h2);
-  letter-spacing: var(--tracking-h2);
-  margin: 1.4em 0 0.5em;
-}
-
-.markdown-body h3 {
-  font-size: var(--text-h3);
-  line-height: var(--leading-h3);
-  letter-spacing: var(--tracking-h3);
-  margin: 1.3em 0 0.4em;
-}
-
-.markdown-body h4,
-.markdown-body h5,
-.markdown-body h6 {
-  font-size: var(--text-h4);
-  line-height: var(--leading-h4);
-  letter-spacing: var(--tracking-h4);
-  margin: 1.2em 0 0.4em;
-}
-
-.markdown-body h1:first-child,
-.markdown-body h2:first-child,
-.markdown-body h3:first-child {
-  margin-top: 0;
-}
-
-/* Mục cấp cao nhất của tài liệu (author `#` đã hạ thành h2): vạch xanh VKU bên trái.
-   Dùng border-left thay pseudo-element cho gọn và không phụ thuộc containing block. */
+/* Bốn cấp heading tác giả (`#`, `##`, `###`, `####`) lần lượt render thành h2..h5. Mỗi cấp có
+   một dấu hiệu thị giác riêng để hierarchy đọc được ngay: h2 vạch xanh đặc, h3 vạch ngăn chân
+   mục, h4 gạch đỏ ngắn, h5/h6 nhỏ và dịu hơn. Đây thuần là trình bày - renderer không đánh số,
+   không chèn chữ hay nhãn vào heading. */
 .markdown-body h2 {
   padding-left: 14px;
   border-left: 4px solid var(--vku-blue-600);
   border-radius: var(--radius-xs);
+  font-size: var(--text-h2);
+  line-height: var(--leading-h2);
+  letter-spacing: var(--tracking-h2);
+  margin: 2.5rem 0 1rem;
 }
 
-/* Mục cấp hai chỉ cần vạch ngăn mảnh, không thêm màu để không cạnh tranh với vạch
-   xanh phía trên; màu vẫn không phải kênh thông tin duy nhất. */
 .markdown-body h3 {
   padding-bottom: 6px;
   border-bottom: 1px solid var(--border-soft);
+  font-size: var(--text-h3);
+  line-height: var(--leading-h3);
+  letter-spacing: var(--tracking-h3);
+  margin: 1.75rem 0 0.75rem;
+}
+
+.markdown-body h4 {
+  font-size: var(--text-h4);
+  line-height: var(--leading-h4);
+  letter-spacing: var(--tracking-h4);
+  margin: 1.5rem 0 0.5rem;
+}
+
+/* Gạch đỏ ngắn là dấu hiệu của cấp bốn, dùng inline-block nên heading vẫn wrap bình thường
+   khi bên trong có bold/italic/code. */
+.markdown-body h4::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  margin-right: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--vku-red-600);
+  vertical-align: middle;
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+  letter-spacing: var(--tracking-body-sm);
+  color: var(--text-secondary);
+  margin: 1.25rem 0 0.5rem;
 }
 
 .markdown-body p {
-  margin: 0.8em 0;
+  margin: 1rem 0;
+}
+
+/* Tài liệu bắt đầu/kết thúc sát surface, không để margin của block đầu/cuối tạo khoảng trống thừa. */
+.markdown-body > :first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
 }
 
 .markdown-body ul,
 .markdown-body ol {
-  margin: 0.8em 0;
+  margin: 1rem 0;
   padding-left: 1.6em;
 }
 
+/* Khai báo kiểu marker tường minh để list lồng bên trong task item vẫn có bullet riêng. */
+.markdown-body ul {
+  list-style-type: disc;
+}
+
+.markdown-body ol {
+  list-style-type: decimal;
+}
+
 .markdown-body li + li {
-  margin-top: 0.3em;
+  margin-top: 0.35em;
+}
+
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: 0.35em 0 0;
 }
 
 .markdown-body li::marker {
   color: var(--accent);
 }
 
+/* Danh sách có thứ tự dùng marker đỏ: khác `ul` về cả hình thức lẫn màu. */
 .markdown-body ol li::marker {
-  font-weight: 600;
+  color: var(--vku-red-700);
+  font-weight: 700;
+}
+
+/* Task list của GFM: checkbox thật do trình duyệt vẽ, chỉ item đó bỏ marker. */
+.markdown-body .task-list-item {
+  list-style: none;
+}
+
+.markdown-body .task-list-item > input[type="checkbox"] {
+  margin: 0 6px 0 0;
+  vertical-align: -1px;
+  accent-color: var(--vku-blue-600);
 }
 
 .markdown-body strong {
   color: var(--text);
   font-weight: 600;
+}
+
+.markdown-body em {
+  color: var(--text-secondary);
+}
+
+.markdown-body del {
+  color: var(--text-muted);
 }
 
 .markdown-body a {
@@ -3556,10 +3611,10 @@ select.input {
 }
 
 /* Trích dẫn là nhịp VKU rõ nhất trong bài viết: nền xanh rất nhạt chuyển dần sang
-   vàng rất nhạt, viền trái xanh. Đây thuần trình bày — không suy ra trạng thái nào. */
+   vàng rất nhạt, viền trái xanh. Đây thuần trình bày - không suy ra trạng thái nào. */
 .markdown-body blockquote {
-  margin: 1.2em 0;
-  padding: var(--space-sm) var(--space-md);
+  margin: 1.5rem 0;
+  padding: var(--space-md);
   border-left: 4px solid var(--vku-blue-600);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   background: linear-gradient(90deg, var(--vku-blue-50), var(--vku-yellow-50));
@@ -3574,15 +3629,94 @@ select.input {
   margin-bottom: 0;
 }
 
-/* Khối code giữ nguyên nội dung; chỉ thêm vạch vàng VKU phía trên và cuộn nội bộ. */
-.markdown-body pre {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  padding: 14px var(--space-md);
+/* Khối code: surface navy + vạch vàng VKU do `.md-code-block` giữ; `<pre>` chỉ còn phần cuộn
+   ngang để nội dung kỹ thuật không bị wrap. Toolbar nằm ngoài `<pre>` nên nút copy đứng yên khi
+   cuộn code và focus ring của nó không bị `overflow` cắt. */
+.markdown-body .md-code-block {
+  margin: 1.5rem 0;
   border-top: 3px solid var(--vku-yellow-500);
   border-radius: var(--radius-lg);
   background: var(--code-surface);
   color: var(--code-surface-text);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-code);
+}
+
+.markdown-body .md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.16);
+}
+
+.markdown-body .md-code-lang {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--code-surface-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: var(--tracking-label);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.72;
+}
+
+.markdown-body .md-code-copy {
+  display: inline-flex;
+  flex: none;
+  gap: 6px;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid rgba(226, 232, 240, 0.28);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--code-surface-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  font-weight: 500;
+  line-height: var(--leading-label);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.markdown-body .md-code-copy:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(226, 232, 240, 0.48);
+}
+
+/* Trạng thái "đã sao chép" dùng vàng VKU: đỏ trên nền navy chỉ đạt ~4:1 nên không đủ tương phản. */
+.markdown-body .md-code-copy[data-copied="true"],
+.markdown-body .md-code-error {
+  color: var(--vku-yellow-400);
+}
+
+.markdown-body .md-code-copy[data-copied="true"] {
+  border-color: var(--vku-yellow-500);
+}
+
+.markdown-body .md-code-error {
+  margin: 0;
+  padding: 0 var(--space-md) var(--space-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+}
+
+.markdown-body pre {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  margin: 0;
+  padding: 14px var(--space-md);
+  background: transparent;
+  color: inherit;
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: var(--leading-code);
@@ -3613,14 +3747,14 @@ select.input {
 
 .markdown-body th,
 .markdown-body td {
-  padding: 10px 14px;
+  padding: 12px var(--space-md);
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
 }
 
 .markdown-body th {
-  background: var(--surface-subtle);
+  background: var(--vku-blue-50);
   color: var(--text-secondary);
   font-family: var(--font-sans);
   font-size: var(--text-label);
@@ -3645,13 +3779,34 @@ select.input {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 1.2em auto;
+  margin: 1.5rem auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
 
-/* Vạch ngăn ba màu VKU — chi tiết nhận diện, không mang thông tin. */
+/* Placeholder khi `src` bị từ chối hoặc ảnh tải lỗi: viền đứt nét để đọc là "thiếu ảnh" chứ
+   không phải một khối nội dung; mô tả alt của tác giả được giữ nguyên trong text. */
+.markdown-body .md-image-fallback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 1.5rem 0;
+  padding: 14px var(--space-md);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+.markdown-body .md-image-fallback svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+/* Vạch ngăn ba màu VKU - chi tiết nhận diện, không mang thông tin. */
 .markdown-body hr {
   height: 4px;
   margin: 2em 0;
@@ -3674,16 +3829,20 @@ select.input {
 }
 
 @media (min-width: 48rem) {
-  .markdown-body h1 {
-    font-size: var(--text-h1-desktop);
-  }
-
   .markdown-body h2 {
     font-size: var(--text-h2-desktop);
   }
 
   .markdown-body h3 {
     font-size: var(--text-h3-desktop);
+  }
+}
+
+/* Touch target của nút copy đạt 44px trên màn nhỏ; desktop giữ control compact. */
+@media (max-width: 47.99rem) {
+  .markdown-body .md-code-copy {
+    min-height: 44px;
+    padding-inline: 14px;
   }
 }
 
@@ -3810,7 +3969,7 @@ select.input {
   color: var(--text-secondary);
 }
 
-/* S15: Scoring admin — bảng metadata dùng chung cho ground truth và hướng dẫn định dạng. */
+/* S15: Scoring admin - bảng metadata dùng chung cho ground truth và hướng dẫn định dạng. */
 .scoring-metadata {
   margin: var(--space-md) 0;
   border: 1px solid var(--border);
@@ -5250,7 +5409,7 @@ select.input {
   margin-left: 8px;
 }
 
-/* Hạng toàn cục của người xem — hiện cả khi hạng đó nằm ngoài trang đang xem. */
+/* Hạng toàn cục của người xem - hiện cả khi hạng đó nằm ngoài trang đang xem. */
 .lb-me-strip {
   display: flex;
   flex-wrap: wrap;
@@ -5327,7 +5486,7 @@ select.input {
   margin-top: 16px;
 }
 
-/* S08b Chưa công bố Locked Card — VKU Blue chủ đạo, đỏ/vàng chỉ là nhịp trang trí. */
+/* S08b Chưa công bố Locked Card - VKU Blue chủ đạo, đỏ/vàng chỉ là nhịp trang trí. */
 .lb-locked-card {
   width: 100%;
   border-radius: var(--radius-2xl);
@@ -5563,7 +5722,7 @@ select.input {
 }
 
 /* =============================================================================
-   Results, members & admin accounts — Stitch S16–S19
+   Results, members & admin accounts - Stitch S16–S19
    ============================================================================= */
 .admin-results {
   display: grid;
@@ -6590,7 +6749,7 @@ select.input {
 }
 
 /* =============================================================================
-   Admin competitions — Quản lý cuộc thi (ADMIN_COMPETITIONS_DESIGN.md)
+   Admin competitions - Quản lý cuộc thi (ADMIN_COMPETITIONS_DESIGN.md)
    Cùng ngôn ngữ token với DashboardPage; thuần trình bày, không đổi nghiệp vụ.
    ============================================================================= */
 .ac-page {
@@ -6969,7 +7128,7 @@ select.input {
 
 .ac-table-scroll {
   /* Neo containing block vào khung cuộn để .sr-only (position: absolute) trong ô hành động
-     không thoát ra ngoài và kéo cả trang cuộn ngang ở màn hẹp — cùng cách chữa với
+     không thoát ra ngoài và kéo cả trang cuộn ngang ở màn hẹp - cùng cách chữa với
      .admin-accounts-table-wrap. Menu thao tác không bị ảnh hưởng vì nó là portal position: fixed. */
   position: relative;
   overflow-x: auto;
@@ -7255,7 +7414,7 @@ select.input {
   line-height: var(--leading-label);
 }
 
-/* Cột số chỉ chứa vài ký tự — gutter 16px chỉ làm header "THÀNH VIÊN" tràn ra.
+/* Cột số chỉ chứa vài ký tự - gutter 16px chỉ làm header "THÀNH VIÊN" tràn ra.
    Phải ghép `.ac-table th/td` mới thắng được rule padding chung ở trên. */
 .ac-table th.ac-count-head,
 .ac-table td.ac-count-cell {
@@ -8217,7 +8376,7 @@ select.input {
 }
 
 /* 48–74.99rem: toolbar còn là hàng ngang nên tách filter và search/refresh thành hai
-   hàng. Dưới 48rem toolbar đã là cột — `flex-wrap` ở đó sẽ biến trục ngang thành trục
+   hàng. Dưới 48rem toolbar đã là cột - `flex-wrap` ở đó sẽ biến trục ngang thành trục
    wrap và khoá bề rộng toolbar theo nội dung, đẩy tràn cả trang. */
 @media (min-width: 48rem) and (max-width: 74.99rem) {
   .ac-toolbar {
@@ -8612,7 +8771,7 @@ button:focus-visible {
     align-items: center;
   }
 
-  /* Ô search giãn hết phần trống nên hàng toolbar chạm đúng mép phải panel — trùng
+  /* Ô search giãn hết phần trống nên hàng toolbar chạm đúng mép phải panel - trùng
      mép phải của ô thống kê "Đã tham gia" ở khối trên. */
   .dash-toolbar-left {
     flex: 1 1 auto;
@@ -8653,10 +8812,13 @@ button:focus-visible {
     display: block;
   }
 
-  /* Đủ chỗ cho ba ô thống kê trên một hàng ở cột phải của panel. */
+  /* Đủ chỗ cho ba ô thống kê trên một hàng ở cột phải của panel. Trả lại `auto-fit`
+     cho cột: cột thừa bị gom về 0 kèm cả khe hở, nên khách thiếu ô "Đã tham gia"
+     vẫn thẳng mép phải panel thay vì hụt vào trong một cột. */
   .dash-stats {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
     width: 34rem;
+    grid-template-columns: repeat(auto-fit, minmax(0, 11rem));
+    justify-content: end;
   }
 }
 
@@ -8668,6 +8830,7 @@ button:focus-visible {
 
   .dash-stats {
     width: 38rem;
+    grid-template-columns: repeat(auto-fit, minmax(0, 12.33rem));
   }
 }
 
@@ -9140,7 +9303,7 @@ button:focus-visible {
   position: relative;
 }
 
-/* Khối icon cạnh tên cuộc thi — decorative, không suy diễn loại cuộc thi. */
+/* Khối icon cạnh tên cuộc thi - decorative, không suy diễn loại cuộc thi. */
 .admin-detail-mark {
   display: inline-flex;
   align-items: center;
@@ -9963,7 +10126,7 @@ button:focus-visible {
 }
 
 /* =============================================================================
-   S04 — Trải nghiệm cuộc thi: đầu khối danh sách, dải facts, rail quản trị
+   S04 - Trải nghiệm cuộc thi: đầu khối danh sách, dải facts, rail quản trị
    ============================================================================= */
 
 /* --- Đầu khối danh sách: một dòng, tên khối bên trái, số lượng bên phải.
@@ -10180,7 +10343,7 @@ button:focus-visible {
 }
 
 /* `grid-template-areas` đặt Liên hệ sang cột phải ở desktop mà vẫn giữ nguyên thứ
-   tự DOM (Hướng dẫn → Liên hệ → FAQ) — nhờ vậy tab order khớp thứ tự thị giác. */
+   tự DOM (Hướng dẫn → Liên hệ → FAQ) - nhờ vậy tab order khớp thứ tự thị giác. */
 @media (min-width: 75rem) {
   .support-grid {
     grid-template-columns: minmax(0, 1.8fr) minmax(340px, 0.8fr);
@@ -10423,7 +10586,7 @@ button:focus-visible {
   }
 }
 
-/* Nhắc rằng nền tảng không có biểu mẫu — vàng cảnh báo nhẹ, không phải lỗi đỏ. */
+/* Nhắc rằng nền tảng không có biểu mẫu - vàng cảnh báo nhẹ, không phải lỗi đỏ. */
 .support-contact-note {
   margin: var(--space-md) 0 0;
   padding: 10px 12px;
@@ -10828,7 +10991,7 @@ button:focus-visible {
   line-height: 1.6;
 }
 
-/* Nhắc sang trang Hỗ trợ — vàng nhấn nhẹ, không phải cảnh báo lỗi. */
+/* Nhắc sang trang Hỗ trợ - vàng nhấn nhẹ, không phải cảnh báo lỗi. */
 .about-note {
   margin: var(--space-md) 0 0;
   padding: 10px 12px;

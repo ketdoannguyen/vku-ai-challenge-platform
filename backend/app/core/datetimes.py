@@ -16,11 +16,11 @@ def as_utc(value: datetime) -> datetime:
 
 
 def utc_day_bounds(now: datetime) -> tuple[datetime, datetime]:
-    """Trả [đầu ngày UTC, đầu ngày kế tiếp) chứa `now` — dùng cho quota theo ngày."""
+    """Trả [đầu ngày UTC, đầu ngày kế tiếp) chứa `now` - dùng cho quota theo ngày."""
     start = as_utc(now).replace(hour=0, minute=0, second=0, microsecond=0)
     return start, start + timedelta(days=1)
 
 
 def iso_z(value: datetime) -> str:
-    """ISO 8601 UTC với hậu tố `Z` — định dạng mọi timestamp trả ra API."""
+    """ISO 8601 UTC với hậu tố `Z` - định dạng mọi timestamp trả ra API."""
     return as_utc(value).isoformat().replace("+00:00", "Z")

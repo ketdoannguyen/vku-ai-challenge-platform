@@ -1,6 +1,6 @@
 # ABOUT_PAGE_DESIGN.md
 
-# VKU AI Challenge — Trang Giới thiệu
+# VKU AI Challenge - Trang Giới thiệu
 
 > Design specification cho trang:
 >
@@ -148,7 +148,7 @@ Desktop:
 │ │                               │ │                      │ │
 │ ├───────────────────────────────┤ │ info note            │ │
 │ │                               │ └──────────────────────┘ │
-│ │ VKU — ĐƠN VỊ CHỦ TRÌ         │                        │
+│ │ VKU - ĐƠN VỊ CHỦ TRÌ         │                        │
 │ │                               │ ┌──────────────────────┐ │
 │ │ Full name                     │ │ BẮT ĐẦU KHÁM PHÁ    │ │
 │ │ University system             │ │                      │ │
@@ -180,7 +180,7 @@ Left:
 
 ```txt
 Về nền tảng AI Challenge
-VKU — đơn vị chủ trì
+VKU - đơn vị chủ trì
 ```
 
 Right:
@@ -477,7 +477,7 @@ Không để yellow trở thành background toàn hero.
 
 ```text
 Về nền tảng AI Challenge   → BLUE
-VKU — đơn vị chủ trì       → RED
+VKU - đơn vị chủ trì       → RED
 Đơn vị & đầu mối hỗ trợ    → YELLOW
 Bắt đầu khám phá           → BLUE + RED/YELLOW decoration
 ```
@@ -508,7 +508,7 @@ WHITE
 
 # ============================================================
 
-# BLOCK 1 — VỀ NỀN TẢNG AI CHALLENGE
+# BLOCK 1 - VỀ NỀN TẢNG AI CHALLENGE
 
 # ============================================================
 
@@ -675,7 +675,7 @@ nếu source không có.
 
 # ============================================================
 
-# BLOCK 2 — VKU ĐƠN VỊ CHỦ TRÌ
+# BLOCK 2 - VKU ĐƠN VỊ CHỦ TRÌ
 
 # ============================================================
 
@@ -700,7 +700,7 @@ giúp page có nhịp màu rõ thay vì toàn blue.
 # 35. VKU HOST HEADER
 
 ```txt
-[University icon] VKU — đơn vị chủ trì
+[University icon] VKU - đơn vị chủ trì
                   full institution name
 ```
 
@@ -804,7 +804,7 @@ color: #53627A;
 
 # ============================================================
 
-# BLOCK 3 — ĐƠN VỊ VÀ ĐẦU MỐI HỖ TRỢ
+# BLOCK 3 - ĐƠN VỊ VÀ ĐẦU MỐI HỖ TRỢ
 
 # ============================================================
 
@@ -941,7 +941,7 @@ Không duplicate toàn bộ email/phone tại đây nếu trang Hỗ trợ đã 
 
 # ============================================================
 
-# BLOCK 4 — BẮT ĐẦU KHÁM PHÁ
+# BLOCK 4 - BẮT ĐẦU KHÁM PHÁ
 
 # ============================================================
 
@@ -1162,7 +1162,7 @@ Body:
 
 ---
 
-# 60. RESPONSIVE — LARGE DESKTOP
+# 60. RESPONSIVE - LARGE DESKTOP
 
 >= 1200px
 
@@ -1174,7 +1174,7 @@ Feature grid 2 columns
 
 ---
 
-# 61. RESPONSIVE — TABLET
+# 61. RESPONSIVE - TABLET
 
 768–1199px
 
@@ -1201,7 +1201,7 @@ stack theo logical reading order.
 
 ---
 
-# 62. RESPONSIVE — MOBILE
+# 62. RESPONSIVE - MOBILE
 
 <768px:
 
@@ -1648,7 +1648,7 @@ Modern Technology Platform
 
 ---
 
-# PHỤ LỤC A — ĐIỀU CHỈNH CHO REPOSITORY NÀY
+# PHỤ LỤC A - ĐIỀU CHỈNH CHO REPOSITORY NÀY
 
 Phần trên là đặc tả thiết kế. Phụ lục này ghi lại hai điểm mà bản đặc tả phải điều chỉnh cho khớp với source code thật và các quyết định đã có của repo. Hai điểm này không nới lỏng bất kỳ mục FORBIDDEN nào.
 
@@ -1684,13 +1684,13 @@ Không đặt `max-width` lần thứ hai bên trong trang, và không đổi `-
 Vì đặc tả §56 yêu cầu "không làm mất content" và §81 cấm bỏ sót nguồn, khối này được render thành **card thứ năm, full-width, nằm cuối grid**:
 
 - giữ heading cùng bốn link nguồn với `rel="noopener noreferrer nofollow"`;
-- dùng accent neutral (`--vku-border`), không gán màu thương hiệu thứ tư — bốn màu xanh/đỏ/vàng/xanh của bốn block chính đã khoá nhịp màu;
+- dùng accent neutral (`--vku-border`), không gán màu thương hiệu thứ tư - bốn màu xanh/đỏ/vàng/xanh của bốn block chính đã khoá nhịp màu;
 - danh sách trải hai cột ở desktop để nhãn ngắn không bị kéo căng hết chiều rộng card.
 
 **Điều chỉnh ngày 2026-09-18 (theo yêu cầu trực tiếp của user):**
 
 - Bỏ câu dẫn "Thông tin về VKU được tổng hợp từ các nguồn chính thức dưới đây, truy cập ngày…". Hằng `SOURCE_ACCESSED` không còn nơi dùng nên đã xoá khỏi `frontend/src/lib/vkuInfo.ts`.
-- Thêm nguồn thứ tư: trang **Phòng KHCN - HTQT** (`https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/`, nhãn `Phòng KHCN - Hợp tác Quốc tế`). Đây **không phải** nguồn bịa thêm — `VKU_SOURCES.department` đã có sẵn và đang dùng ở `/ho-tro`; URL đổi sang biến thể `/vi/` do user cung cấp nên `/ho-tro` cũng dùng URL mới.
+- Thêm nguồn thứ tư: trang **Phòng KHCN - HTQT** (`https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/`, nhãn `Phòng KHCN - Hợp tác Quốc tế`). Đây **không phải** nguồn bịa thêm - `VKU_SOURCES.department` đã có sẵn và đang dùng ở `/ho-tro`; URL đổi sang biến thể `/vi/` do user cung cấp nên `/ho-tro` cũng dùng URL mới.
 - Cả bốn nhãn rút về tên ngắn 2–6 chữ (`Giới thiệu Trường`, `Liên hệ`, `Phòng KHCN - Hợp tác Quốc tế`, `Đại học Đà Nẵng`) thay vì dán tiền tố domain. Hệ quả đã chấp nhận: mất tín hiệu cho biết link ra `vku.udn.vn` hay `udn.vn`; bù lại bằng `target="_blank"` và heading `Nguồn thông tin`.
 
 Bố cục desktop đầy đủ:
@@ -1700,7 +1700,7 @@ Bố cục desktop đầy đủ:
 │ VỀ NỀN TẢNG AI CHALLENGE   (BLUE)       │ ĐƠN VỊ & ĐẦU MỐI    │
 │                                         │ HỖ TRỢ      (YELLOW) │
 ├─────────────────────────────────────────┤                      │
-│ VKU — ĐƠN VỊ CHỦ TRÌ        (RED)        ├──────────────────────┤
+│ VKU - ĐƠN VỊ CHỦ TRÌ        (RED)        ├──────────────────────┤
 │                                         │ BẮT ĐẦU      (BLUE)  │
 │                                         │                      │
 └─────────────────────────────────────────┴──────────────────────┘

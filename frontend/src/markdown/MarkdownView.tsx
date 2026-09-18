@@ -1,11 +1,12 @@
 /** Render Markdown GFM an toàn: sanitize AST, không raw HTML, asset chỉ từ competition assets. */
 
 import type { ComponentProps } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
-
-const ASSET_PREFIX = "assets/";
+import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
+import { MarkdownImage } from "./MarkdownImage";
+import { resolveMarkdownAssetUrl } from "./resolveMarkdownAssetUrl";
 
 /**
  * Hạ một bậc mọi heading do tác giả viết: trang đã có H1 riêng (tên cuộc thi) nên
@@ -13,18 +14,44 @@ const ASSET_PREFIX = "assets/";
  */
 function demoteHeading(level: number) {
   const Tag = `h${Math.min(level + 1, 6)}` as "h2" | "h3" | "h4" | "h5" | "h6";
-  return function Heading({ children, ...props }: ComponentProps<"h2">) {
-    return <Tag {...props}>{children}</Tag>;
+  return function Heading({ children }: ComponentProps<"h2">) {
+    return <Tag>{children}</Tag>;
   };
 }
 
-const HEADING_COMPONENTS = {
+function MarkdownLink({ href, title, children }: ComponentProps<"a">) {
+  const isExternal = typeof href === "string" && /^https?:\/\//i.test(href);
+  return (
+    <a
+      href={href}
+      title={title}
+      {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Bảng rộng cuộn trong wrapper để giữ nguyên ngữ nghĩa table (không đổi display). */
+function MarkdownTable({ children }: ComponentProps<"table">) {
+  return (
+    <div className="md-table-wrap" tabIndex={0} role="region" aria-label="Bảng dữ liệu">
+      <table>{children}</table>
+    </div>
+  );
+}
+
+const COMPONENTS = {
   h1: demoteHeading(1),
   h2: demoteHeading(2),
   h3: demoteHeading(3),
   h4: demoteHeading(4),
   h5: demoteHeading(5),
   h6: demoteHeading(6),
+  a: MarkdownLink,
+  img: MarkdownImage,
+  pre: MarkdownCodeBlock,
+  table: MarkdownTable,
 };
 
 export function MarkdownView({
@@ -39,48 +66,12 @@ export function MarkdownView({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize]}
-        urlTransform={(url, key) => {
-          if (key === "src") {
-            // Ảnh chỉ cho phép relative asset của competition — đổi sang endpoint API có authz.
-            if (url.startsWith(ASSET_PREFIX) && !url.includes("..")) {
-              return `/api/competitions/${competitionSlug}/assets/${url.slice(ASSET_PREFIX.length)}`;
-            }
-            return "";
-          }
-          return url;
-        }}
-        components={{
-          ...HEADING_COMPONENTS,
-          a({ href, children, ...props }) {
-            const isExternal = typeof href === "string" && /^https?:\/\//i.test(href);
-            return (
-              <a
-                href={href}
-                {...(isExternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
-                {...props}
-              >
-                {children}
-              </a>
-            );
-          },
-          img({ src, alt, ...props }) {
-            if (!src) return null;
-            return <img src={src} alt={alt ?? ""} loading="lazy" {...props} />;
-          },
-          // Bảng rộng cuộn trong wrapper để giữ nguyên ngữ nghĩa table (không đổi display).
-          table({ children, ...props }) {
-            return (
-              <div
-                className="md-table-wrap"
-                tabIndex={0}
-                role="region"
-                aria-label="Bảng dữ liệu"
-              >
-                <table {...props}>{children}</table>
-              </div>
-            );
-          },
-        }}
+        urlTransform={(url, key) =>
+          // Ảnh chỉ được trỏ về asset của chính cuộc thi; URL khác vẫn qua allowlist của
+          // react-markdown để giữ defense-in-depth, rồi rehype-sanitize là lớp chặn cuối.
+          key === "src" ? (resolveMarkdownAssetUrl(url, competitionSlug) ?? "") : defaultUrlTransform(url)
+        }
+        components={COMPONENTS}
       >
         {markdown}
       </ReactMarkdown>

@@ -1,18 +1,18 @@
 # AI Challenge Platform
 
-Nền tảng AI Challenge dùng chung cho nhiều cuộc thi trên cùng một website. Ban Tổ chức (BTC) tạo competition và cấp tài khoản cho thí sinh; thí sinh đăng nhập, đọc đề bài render từ Markdown, nộp file CSV và nhận điểm F1/Precision/Recall, xem My Submissions và Leaderboard. Server không chạy model của thí sinh — chỉ chấm file kết quả.
+Nền tảng AI Challenge dùng chung cho nhiều cuộc thi trên cùng một website. Ban Tổ chức (BTC) tạo competition và cấp tài khoản cho thí sinh; thí sinh đăng nhập, đọc đề bài render từ Markdown, nộp file CSV và nhận điểm F1/Precision/Recall, xem My Submissions và Leaderboard. Server không chạy model của thí sinh - chỉ chấm file kết quả.
 
 ## Architecture (một dòng)
 
-React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx same-origin (`/` SPA, `/api` backend) — tất cả trong Docker Compose trên 01 Google Compute Engine VM, public qua Cloudflare Tunnel.
+React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx same-origin (`/` SPA, `/api` backend) - tất cả trong Docker Compose trên 01 Google Compute Engine VM, public qua Cloudflare Tunnel.
 
 ## Current status
 
-**Release candidate** — Sprint 07 hoàn thành: toàn bộ MVP flow (login → competition → join → Markdown → submit → scoring → history → leaderboard → export) chạy được, kèm hardening: login rate limiting, error contract ổn định, audit log an toàn, security headers + CSP Report-Only, admin UX hoàn thiện. Production deploy thuộc Sprint 08. Xem `docs/PROJECT_STATE.md`.
+**Release candidate** - Sprint 07 hoàn thành: toàn bộ MVP flow (login → competition → join → Markdown → submit → scoring → history → leaderboard → export) chạy được, kèm hardening: login rate limiting, error contract ổn định, audit log an toàn, security headers + CSP Report-Only, admin UX hoàn thiện. Production deploy thuộc Sprint 08. Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 
-Một lệnh duy nhất để test thủ công — tự tạo `.env`, up stack, chờ healthy, seed admin + 2 participant mẫu (idempotent), smoke test login qua Nginx, in tài khoản test:
+Một lệnh duy nhất để test thủ công - tự tạo `.env`, up stack, chờ healthy, seed admin + 2 participant mẫu (idempotent), smoke test login qua Nginx, in tài khoản test:
 
 ```bash
 ./scripts/dev_up.sh           # up + seed + smoke test → http://localhost:8080
@@ -42,7 +42,7 @@ cd backend
 .venv/bin/python scripts/import_accounts.py <file.csv>                    # participant hàng loạt
 ```
 
-CSV format: header `email,name,password` — mỗi dòng một account. Duplicate email được báo rõ và bỏ qua (không ghi đè).
+CSV format: header `email,name,password` - mỗi dòng một account. Duplicate email được báo rõ và bỏ qua (không ghi đè).
 
 ## Dev không Docker
 
@@ -70,5 +70,5 @@ npm run dev         # dev server; /api được proxy sẵn về http://localhos
 
 ## Lưu ý
 
-- **Không commit `.env`** — repo chỉ chứa `.env.example` với placeholder. Production secret nằm trên server.
+- **Không commit `.env`** - repo chỉ chứa `.env.example` với placeholder. Production secret nằm trên server.
 - Thư mục `data/` (Markdown, assets, ground truth, submissions, backups) bị gitignore và không bao giờ được serve trực tiếp qua Nginx.

@@ -363,7 +363,7 @@ export function AboutPage() {
               </span>
               <div className="about-card-copy">
                 <h2 className="about-card-title" id="about-vku-title">
-                  VKU — đơn vị chủ trì
+                  VKU - đơn vị chủ trì
                 </h2>
               </div>
             </div>

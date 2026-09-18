@@ -22,7 +22,7 @@ def _mk(email, name, password, role):
 
 @pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path, monkeypatch):
-    """Mọi test ghi file vào tmp_path — publish giờ cần ground truth nên không được rơi vào data/ thật."""
+    """Mọi test ghi file vào tmp_path - publish giờ cần ground truth nên không được rơi vào data/ thật."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     get_settings.cache_clear()
     yield tmp_path

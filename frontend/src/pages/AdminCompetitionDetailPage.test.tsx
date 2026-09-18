@@ -84,7 +84,7 @@ function mockApi(handler: (url: string, init?: RequestInit) => { body: unknown; 
   );
 }
 
-/** Nhóm action ở header trang chi tiết — tách khỏi nút "Xóa" của từng dòng nội dung. */
+/** Nhóm action ở header trang chi tiết - tách khỏi nút "Xóa" của từng dòng nội dung. */
 function headerActions(): HTMLElement {
   return document.querySelector(".admin-detail-actions") as HTMLElement;
 }
@@ -94,7 +94,7 @@ function summaryFacts(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(".admin-detail-fact"));
 }
 
-/** Chuỗi `data-tone` của các block trong một panel — kiểm tra nhịp màu, không kiểm tra CSS. */
+/** Chuỗi `data-tone` của các block trong một panel - kiểm tra nhịp màu, không kiểm tra CSS. */
 function cardTones(panel: HTMLElement): Array<string | null> {
   return Array.from(panel.querySelectorAll<HTMLElement>("[data-tone]")).map((el) =>
     el.getAttribute("data-tone"),
@@ -227,7 +227,7 @@ test("rail quản trị: đủ 6 khu vực, panel gắn đúng tab đang mở", 
   expect(screen.queryByRole("tabpanel", { name: "Nội dung" })).toBeNull();
 });
 
-test("rail quản trị: roving tabindex — chỉ focused tab có tabIndex=0, Arrow/Home/End wrap đúng", async () => {
+test("rail quản trị: roving tabindex - chỉ focused tab có tabIndex=0, Arrow/Home/End wrap đúng", async () => {
   await renderRail();
   expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
 
@@ -447,7 +447,7 @@ test("tab Tài nguyên giới hạn 10 dòng và khóa chỉnh sửa khi cuộc 
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
 
-  expect(screen.getByText("Cuộc thi đã kết thúc — không thể sửa tài nguyên.")).toBeTruthy();
+  expect(screen.getByText("Cuộc thi đã kết thúc - không thể sửa tài nguyên.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Thêm tài nguyên" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
 });
@@ -1226,13 +1226,13 @@ test("tiêu đề tab theo tên cuộc thi, chuyển sang mô tả lỗi khi t�
   const first = renderPage();
   await screen.findByRole("heading", { name: "Code Cup", level: 1 });
   // Effect ghi title chạy sau commit, nên phải chờ thay vì đọc ngay khi heading vừa xuất hiện.
-  await waitFor(() => expect(document.title).toBe("Code Cup — AI Challenge"));
+  await waitFor(() => expect(document.title).toBe("Code Cup - AI Challenge"));
   first.unmount();
 
   mockApi(() => ({ body: { error: { code: "NOT_FOUND", message: "Không thấy cuộc thi." } }, status: 404 }));
   renderPage();
   expect(await screen.findByRole("heading", { level: 1, name: "Không thể tải cuộc thi" })).toBeTruthy();
-  await waitFor(() => expect(document.title).toBe("Không thể tải cuộc thi — AI Challenge"));
+  await waitFor(() => expect(document.title).toBe("Không thể tải cuộc thi - AI Challenge"));
 });
 
 /** File với dung lượng định sẵn để test precheck ở client mà không tạo buffer lớn. */
@@ -1280,7 +1280,7 @@ test("nút upload tách nhãn khỏi giới hạn dung lượng trong tên truy 
   await screen.findByText("Đề bài");
 
   // Khoảng cách thị giác giữa nhãn và hint đến từ `gap` của flex, không phải từ
-  // ký tự trắng — thiếu dấu cách thì trình đọc màn hình đọc liền "Upload .md≤ 2 MiB".
+  // ký tự trắng - thiếu dấu cách thì trình đọc màn hình đọc liền "Upload .md≤ 2 MiB".
   expect(screen.getByRole("button", { name: "Upload .md ≤ 2 MiB" }).textContent).toBe("Upload .md ≤ 2 MiB");
 });
 

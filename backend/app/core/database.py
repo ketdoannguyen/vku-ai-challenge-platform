@@ -28,7 +28,7 @@ class MongoContext:
     @property
     def db(self) -> AsyncIOMotorDatabase:
         if self.client is None:
-            raise RuntimeError("Mongo client not initialized — app lifecycle error")
+            raise RuntimeError("Mongo client not initialized - app lifecycle error")
         return self.client[self._settings.mongo_database]
 
     async def ping(self) -> bool:

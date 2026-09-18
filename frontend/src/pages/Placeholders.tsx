@@ -36,7 +36,7 @@ export function NotFoundPage() {
         <div className="empty-state-icon" aria-hidden="true">
           <IconCompass />
         </div>
-        <h1>404 — Không tìm thấy trang</h1>
+        <h1>404 - Không tìm thấy trang</h1>
         <p>Trang bạn tìm không tồn tại.</p>
         <div className="empty-actions">
           <Link className="btn" to="/">

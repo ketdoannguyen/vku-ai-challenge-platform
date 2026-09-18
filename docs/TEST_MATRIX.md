@@ -106,7 +106,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin content/member UI: table, actions, join code không hiện trong DOM | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Upload/render E2E qua Nginx với file thật | passing | User verify thủ công: upload ảnh + `.md`, tham chiếu `assets/<name>` render thành ảnh trên participant UI |
 
-## 6. Submission & scoring (Sprint 05) — passing
+## 6. Submission & scoring (Sprint 05) - passing
 
 | Check | Status | Cách verify |
 |---|---|---|
@@ -123,7 +123,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Participant UI file/rules/loading/result/error/member/readiness | passing | `frontend/src/pages/SubmissionPage.test.tsx` |
 | Live API flow qua Nginx + Mongo + filesystem thật | passing | Isolated smoke: admin config/upload/publish; participant join; invalid không persist; valid reordered score 1.0; config lock; public ground truth 404; cleanup artifacts |
 
-## 7. Leaderboard/history/export (Sprint 06) — passing
+## 7. Leaderboard/history/export (Sprint 06) - passing
 
 | Check | Status | Cách verify |
 |---|---|---|
@@ -145,7 +145,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin accounts UI: bốn ô thống kê đọc `stats` toàn hệ thống (không lấy 50 dòng của page đầu) và không đổi khi tìm kiếm; bảng giữ đủ 5 cột trong vùng cuộn focus được; vai trò/trạng thái luôn có nhãn chữ; admin không tự vô hiệu hóa được (nút khóa, `aria-describedby` tới lý do, không phát PATCH) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Trần upload động: admin detail + mọi response mutate trả `upload_limits`, list/public không có; env override phản ánh trong response; UI thiếu field thì rơi về `DEFAULT_UPLOAD_LIMITS`; file quá trần bị chặn ở client và không phát request | passing | `backend/tests/test_competitions_admin.py`, `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 
-## 8. Hardening (Sprint 07) — passing
+## 8. Hardening (Sprint 07) - passing
 
 | Check | Status | Cách verify |
 |---|---|---|
@@ -265,7 +265,7 @@ cho wording, dữ kiện và nguồn vẫn là `frontend/src/lib/vkuInfo.ts` (pa
 
 | Check | Status | Nguồn |
 |---|---|---|
-| Outline: đúng một `h1` `Giới thiệu` và năm `h2` theo thứ tự `Về nền tảng AI Challenge` → `VKU — đơn vị chủ trì` → `Đơn vị và đầu mối hỗ trợ` → `Bắt đầu` → `Nguồn thông tin` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Outline: đúng một `h1` `Giới thiệu` và năm `h2` theo thứ tự `Về nền tảng AI Challenge` → `VKU - đơn vị chủ trì` → `Đơn vị và đầu mối hỗ trợ` → `Bắt đầu` → `Nguồn thông tin` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Platform card tách thành bốn feature item (`h3` + mô tả nguyên văn), giữ đủ bốn mô tả cũ | passing | `frontend/src/pages/AboutPage.test.tsx` |
 | VKU card giữ nguyên list có accessible name `Thông tin VKU` với đúng năm dữ kiện theo thứ tự; câu Quyết định 15/QĐ-TTg ngày 03/01/2020 còn nguyên một text node | passing | `frontend/src/pages/AboutPage.test.tsx` |
 | Ba đầu mối hỗ trợ đúng thứ tự VKU → Phòng KHCN-HTQT → Nguyễn Kết Đoàn; không lặp `mailto:`/`tel:` của `/ho-tro` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
@@ -278,7 +278,7 @@ cho wording, dữ kiện và nguồn vẫn là `frontend/src/lib/vkuInfo.ts` (pa
 | Nhãn nguồn là tên ngắn ≤6 chữ, không dán URL; câu dẫn `tổng hợp từ các nguồn chính thức… truy cập ngày` đã bỏ hẳn khỏi trang | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Toàn bộ 18 SVG đều `aria-hidden="true"` + `focusable="false"`; tab order khớp thứ tự DOM; focus ring 2px `solid` | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Thứ tự responsive: dưới 1200px một cột `Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn`; từ 1200px hai cột (`Nền tảng`+`VKU` ｜ `Hỗ trợ`+`Bắt đầu`) và `Nguồn` nằm full-width cuối lưới; không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Mỗi cột xếp dọc độc lập ở desktop: khe giữa hai card cùng cột đúng 24px (16px ở màn hẹp), không phình theo hàng của lưới — chặn tái xuất khoảng trống lớn ở rail phải | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Mỗi cột xếp dọc độc lập ở desktop: khe giữa hai card cùng cột đúng 24px (16px ở màn hẹp), không phình theo hàng của lưới - chặn tái xuất khoảng trống lớn ở rail phải | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Hero không bị fixed header che ở mọi breakpoint (đỉnh hero 84px > đáy header 64px) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Shell 1440px `.app-main-about` chỉ gắn cho đúng route `/gioi-thieu`; `/ho-tro` và `/` không thừa hưởng, và không rò `about-*` sang route khác | passing | `frontend/src/App.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | `/gioi-thieu/khong-co` vẫn rơi vào 404 (không có route con) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
@@ -311,12 +311,12 @@ source/API hiện tại vẫn thắng khi mâu thuẫn dữ liệu/nghiệp vụ
 | `/login`: CTA không phải mực đậm, card trắng, 3 sọc accent, logo `/vku-logo.png`; slug kỹ thuật dùng `"JetBrains Mono"` + `--info` | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
 | 375px: bảng leaderboard và bài đã nộp cuộn **trong region** (`overflow-x: auto`, `overscroll-behavior-x: contain`), body không tràn | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
 | Focus ring `:focus-visible` 2px `solid`; CTA chính cao 46px ≥44px | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs` |
-| Không còn hex màu hardcode trong TSX, không còn `var(--palette*)` trong TSX, không còn emoji trong `src`; chỉ còn **một** inline `style` — vị trí menu portal ở `AdminCompetitionsPage.tsx:750`, đúng ngoại lệ spec cho phép | passing | `rg` toàn `frontend/src` |
-| Dọn CSS chết: 10 rule không còn consumer nào (`.page-head` + bản trong media query, `.page-subtitle`, `.form-field-wide`, `.spinner-light`, `.placeholder-note`, `.comp-header-join`, `.sub-blocked-warning-badge` + rule `svg`) và 16 custom property không ai đọc — đã xoá khỏi `index.css`; ngoặc `{}` cân bằng, không còn `var()` trỏ tới tên đã xoá, không file TSX/test nào nhắc tên đó | passing | `rg` toàn `frontend/src` (chỉ còn `.ac-page-head*` trùng chuỗi, là class sống) |
+| Không còn hex màu hardcode trong TSX, không còn `var(--palette*)` trong TSX, không còn emoji trong `src`; chỉ còn **một** inline `style` - vị trí menu portal ở `AdminCompetitionsPage.tsx:750`, đúng ngoại lệ spec cho phép | passing | `rg` toàn `frontend/src` |
+| Dọn CSS chết: 10 rule không còn consumer nào (`.page-head` + bản trong media query, `.page-subtitle`, `.form-field-wide`, `.spinner-light`, `.placeholder-note`, `.comp-header-join`, `.sub-blocked-warning-badge` + rule `svg`) và 16 custom property không ai đọc - đã xoá khỏi `index.css`; ngoặc `{}` cân bằng, không còn `var()` trỏ tới tên đã xoá, không file TSX/test nào nhắc tên đó | passing | `rg` toàn `frontend/src` (chỉ còn `.ac-page-head*` trùng chuỗi, là class sống) |
 | Sau khi dọn CSS: 14 route × 6 width vẫn 335 check đạt / 0 fail; nút chính modal cuộc thi vẫn `rgb(6, 79, 196)` nền + chữ trắng; mục menu disabled vẫn `rgb(148, 163, 184)`; 0 phần tử tương tác nền mực trên 14 route | passing | Chromium headless `/tmp/uiverify/vku-global-verify.mjs`, `/tmp/uiverify/probe-modals2.mjs`, `/tmp/uiverify/probe-menu-disabled.mjs`, `/tmp/uiverify/probe-ink.mjs` |
 | Kích thước CSS sau dọn (bundle production) | passing | `npm run build` → `dist/assets/index-*.css` 157.59 kB (trước dọn 159.24 kB) |
 | Toàn bộ test frontend, lint và production build | passing | `npx vitest run --maxWorkers 1` → 277 passed (22 file, tất định); `npm run lint` → 0 error; `npm run build` → `tsc -b` + Vite build OK |
-| Flake liên file đã biết: `CompetitionDetailPage.test.tsx > deep-link content/:contentSlug render markdown panel` — chạy song song nhiều worker thì lúc đạt lúc không (cùng một mã nguồn: đạt → fail → đạt), chạy một mình 14/14 đạt và `--maxWorkers 1` 277/277 đạt. Không liên quan tới thay đổi CSS/TSX (test này đi nhánh render markdown, không tới nhánh lỗi) | flaky, chưa sửa | `npx vitest run src/pages/CompetitionDetailPage.test.tsx`; 3 lần `npm test` liên tiếp |
+| Flake liên file đã biết: `CompetitionDetailPage.test.tsx > deep-link content/:contentSlug render markdown panel` - chạy song song nhiều worker thì lúc đạt lúc không (cùng một mã nguồn: đạt → fail → đạt), chạy một mình 14/14 đạt và `--maxWorkers 1` 277/277 đạt. Không liên quan tới thay đổi CSS/TSX (test này đi nhánh render markdown, không tới nhánh lỗi) | flaky, chưa sửa | `npx vitest run src/pages/CompetitionDetailPage.test.tsx`; 3 lần `npm test` liên tiếp |
 
 Ghi chú quyết định (không suy ra được từ master spec): dự án **không cài Tailwind**, nên utility kiểu
 Tailwind viết trong TSX không khớp selector nào trong `index.css` và là class chết. Guard vì vậy chặn ở
@@ -336,21 +336,21 @@ guest = 37 lượt đo, `FAILED: none`) và từ test tự động.
 | Tab navigation là `<nav>` (`tabNavTag=NAV` ở mọi lượt), không có `role="tablist"`/`role="tab"` nào (`tablistCount=0`) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | `aria-current="page"` có mặt đúng chỗ: 1 ở ba workspace (tab đang mở), 2 ở route nội dung (tab **và** mục lục `Mục lục nội dung`) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Một khung duy nhất `68rem` (1088px) cho cả bốn tab: `.comp-page` rộng 339/354/604/704/960/**1088/1088** tương ứng 375/390/640/768/1024/1200/1440; breadcrumb, masthead và tab bar (`chrome`) luôn **bằng đúng** chiều rộng khung ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
-| Không phần tử nào thoát khỏi khung: `outsideFrame` rỗng ở cả 35 lượt đo có `.comp-page` (chỉ bỏ qua vùng cuộn ngang có chủ đích) — đây là phép đo trực tiếp lỗi "chữ tràn ra ngoài lề" | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Không phần tử nào thoát khỏi khung: `outsideFrame` rỗng ở cả 35 lượt đo có `.comp-page` (chỉ bỏ qua vùng cuộn ngang có chủ đích) - đây là phép đo trực tiếp lỗi "chữ tràn ra ngoài lề" | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Trần rộng không rò sang route khác: `.app-main` đo được **1280px** ở 1440 trên cả bốn tab, và `App.tsx` không còn class shell rộng nào cho `/competitions/*` (`rg app-main-participant` → 0 kết quả) | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`mainWidth`), `rg` toàn `frontend/src` |
 | Không tràn ngang body ở cả 37 lượt: `documentElement.scrollWidth == viewport`, danh sách phần tử tràn rỗng, không page error | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
-| Chiều rộng bảng dữ liệu trong khung 1088px: `Bảng bài đã nộp` cuộn trong ở 375/390/640/768/1024 (`scrollsX=true`), vừa khung từ 1200; `Bảng xếp hạng` cuộn trong ở 375/390/640/768; `Bảng dữ liệu` (Markdown) vừa khung ở mọi width — body vẫn không tràn | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Chiều rộng bảng dữ liệu trong khung 1088px: `Bảng bài đã nộp` cuộn trong ở 375/390/640/768/1024 (`scrollsX=true`), vừa khung từ 1200; `Bảng xếp hạng` cuộn trong ở 375/390/640/768; `Bảng dữ liệu` (Markdown) vừa khung ở mọi width - body vẫn không tràn | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Masthead dùng đúng công thức mặt `.ac-page-head` của trang quản trị cuộc thi: gradient `135deg` trắng → `--vku-blue-50`, ribbon `::before` chéo lam/đỏ/vàng góc phải, kèm `.comp-brand-accent` ba sọc lam–đỏ–vàng dưới mô tả | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` + ảnh `/tmp/uiverify/shots-participant/` |
-| Dải quy định Nộp bài: **4** thẻ `.sub-spec-item` với icon trang trí `aria-hidden`, màu icon xoay lam/đỏ/vàng theo vị trí (`rgb(9,105,232)` / `rgb(236,22,49)` / `rgb(180,83,9)` / `rgb(9,105,232)`) — đo giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
-| Thanh hạn mức full-width dưới 4 thẻ: với `quota = 4/5` đo được `width: 80%`, `data-level="ok"`, nền `rgb(16, 185, 129)` (`--success-bright`), nhãn `Còn 4/5 lượt hôm nay`; track thật sự trải hết hàng (536/596/461/247 px ở 1440/768/1024/375 = bề ngang ribbon trừ padding) và fill bằng đúng 80% track — giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Dải quy định Nộp bài: **4** thẻ `.sub-spec-item` với icon trang trí `aria-hidden`, màu icon xoay lam/đỏ/vàng theo vị trí (`rgb(9,105,232)` / `rgb(236,22,49)` / `rgb(180,83,9)` / `rgb(9,105,232)`) - đo giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Thanh hạn mức full-width dưới 4 thẻ: với `quota = 4/5` đo được `width: 80%`, `data-level="ok"`, nền `rgb(16, 185, 129)` (`--success-bright`), nhãn `Còn 4/5 lượt hôm nay`; track thật sự trải hết hàng (536/596/461/247 px ở 1440/768/1024/375 = bề ngang ribbon trừ padding) và fill bằng đúng 80% track - giống nhau ở cả 7 width | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Bốn thẻ quy định chia đúng 4 cột bằng nhau (`grid-template-columns` tính ra `131.875px × 4` ở 1440, `127.5px × 2` ở 375), đủ chỗ để `Binary` và `positive label: 1` xuống hai tầng theo thiết kế thay vì ngắt dòng giữa câu | passing | Chromium headless `/tmp/uiverify/measure-strip.mjs` |
 | Ngưỡng màu thanh hạn mức: `4/5` → `ok`; `1/5` → `low`; `0/5` → `empty` + rộng `0%`; khi backend không trả `quota` thì **không vẽ thanh** (`.sub-quota-track` là `null`) và chỉ còn câu `5 lượt/ngày` | passing | `frontend/src/pages/SubmissionPage.test.tsx` (10 test) |
 | `color-scheme: light` trên cả 37 lượt (kể cả guest và leaderboard ẩn); không có dark mode | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Guest (401 ở `/auth/me`) vẫn vào được `/competitions/:slug`, render đúng 1 `h1`, không tràn ngang | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
-| Ba region bảng có tên và focus được: `Bảng dữ liệu`, `Bảng bài đã nộp`, `Bảng xếp hạng` — đều `tabindex=0` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
+| Ba region bảng có tên và focus được: `Bảng dữ liệu`, `Bảng bài đã nộp`, `Bảng xếp hạng` - đều `tabindex=0` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Keyboard đi được tới region bảng Markdown kèm focus ring thật `2px solid rgb(6, 79, 196)`; `subm-id-copy-btn` (Sao chép ID), `Chọn file CSV`, tab links và nút pager đều nhận focus và có outline hiển thị | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`probeKeyboard`, 45 lần Tab ở 1440) |
 | Thứ tự tab khớp DOM: skip link → brand → nav → đăng xuất → breadcrumb → vào/rời cuộc thi → bốn tab → nội dung workspace | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
-| Chiều cao control đo được ở 1440: `.btn` chính/phụ 40–41px (spec toàn cục "control thường 40–42px"), nút toolbar/pager 32px, nút copy icon 24px — đúng như baseline các trang khác, không phát sinh control cao bất thường | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`btnHeights`) |
+| Chiều cao control đo được ở 1440: `.btn` chính/phụ 40–41px (spec toàn cục "control thường 40–42px"), nút toolbar/pager 32px, nút copy icon 24px - đúng như baseline các trang khác, không phát sinh control cao bất thường | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` (`btnHeights`) |
 | Leaderboard ẩn: **không request `/leaderboard` nào** phát ra (log chỉ có competition, `/auth/me`, `/contents`); card khoá render thay bảng | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Leaderboard mở: có request `/leaderboard`, bảng 7 cột nằm trong region `Bảng xếp hạng`; `Trang trước`/`Trang sau` nằm **ngoài** region cuộn | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
 | Markdown runtime: `h2` có vạch trái `4px rgb(9, 105, 232)`; blockquote gradient `rgb(245,249,255) → rgb(255,251,235)`; inline code `rgb(211, 11, 35)`; `hr` là gradient; `script`/`iframe` trong nội dung = 0; link ngoài `rel="noopener noreferrer"` | passing | Chromium headless `/tmp/uiverify/participant-redesign-verify.mjs` |
@@ -362,19 +362,19 @@ guest = 37 lượt đo, `FAILED: none`) và từ test tự động.
 | Ảnh external/`data:`/traversal bị loại, chỉ `assets/...` same-competition được transform | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
 | Full frontend gate sau thay đổi khung, masthead và dải quy định | passing | `npx vitest run --maxWorkers 1` → **291 passed (23 file)**; `npm test` (song song) dao động 289–291 do flake ở ghi chú dưới; `npx tsc -b --force` → exit 0; `npm run lint` → 0 error (22 warning có sẵn, không phát sinh mới); `npm run build` → OK, chunk `MarkdownView-CE0sU9dR.js` 159.71 kB vẫn tách riêng khỏi entry `index-CSYoikAK.js` |
 | Dọn CSS chết: `.submission-rules` + `.submission-rules > span` (rule cũ ép dải quy định thành flex-wrap và ghi đè `display: grid` của `.sub-specs-strip`, khiến bốn thẻ co theo nội dung) đã xoá khỏi `index.css`; `rg` xác nhận không còn file nào nhắc tên | passing | `rg submission-rules frontend/src` (0 kết quả) |
-| Dọn dead code: `.comp-body.comp-body-workspace { width: 100% }` là rule no-op sau khi khôi phục card — đã xoá cùng class `comp-body-workspace` khỏi `CompetitionDetailPage.tsx` (`.content-layout.is-workspace` vẫn giữ vì nó thật sự bỏ cột sidebar) | passing | `rg comp-body-workspace frontend/src` (0 kết quả); `npx tsc -b --force` exit 0 |
+| Dọn dead code: `.comp-body.comp-body-workspace { width: 100% }` là rule no-op sau khi khôi phục card - đã xoá cùng class `comp-body-workspace` khỏi `CompetitionDetailPage.tsx` (`.content-layout.is-workspace` vẫn giữ vì nó thật sự bỏ cột sidebar) | passing | `rg comp-body-workspace frontend/src` (0 kết quả); `npx tsc -b --force` exit 0 |
 | Backend regression (UI migration không kéo theo contract break) | passing | `uv run pytest -q` → 190 passed |
 | Repo hygiene | passing | `git diff --check` → exit 0 |
 
 Ghi chú: `npm test` chạy mặc định song song vẫn còn flake liên file đã ghi ở mục 9f
 (`CompetitionDetailPage.test.tsx > deep-link content/:contentSlug render markdown panel`, dòng 219),
-thỉnh thoảng lan sang `AdminCompetitionDetailPage.test.tsx > findByText("Đề bài")` — cùng một họ test
+thỉnh thoảng lan sang `AdminCompetitionDetailPage.test.tsx > findByText("Đề bài")` - cùng một họ test
 (panel Markdown lazy render: `findBy*` hết thời gian chờ khi 23 worker tranh nhau). Cùng một mã nguồn
 cho ra 291/291 rồi 290/291 rồi 289/291 ở ba lần chạy liên tiếp, trong khi `--maxWorkers 1` luôn
 291/291 và chạy riêng file đó luôn 14/14. Không phải lỗi do thay đổi CSS/TSX trong mục này.
 
 Nút copy ID cao 24px và nút toolbar/pager 32px là kích thước có sẵn của design system, không thay
-đổi trong lần redesign này — ghi đúng số đo, không suy diễn thành ≥44px.
+đổi trong lần redesign này - ghi đúng số đo, không suy diễn thành ≥44px.
 
 ## 9h. Dialog Tạo/Sửa cuộc thi (redesign VKU)
 
@@ -421,15 +421,15 @@ Không đổi API, payload, validation, enum, default, route hay quyền.
 1. **Focus khi mở dialog rơi vào nút đóng, không phải `Tên cuộc thi`.** Chuỗi `focusin` thật:
    `.ac-create-button` → `#comp-name` (React `autoFocus`) → `.ac-create-button` → `.modal-close`.
    `Modal.tsx:41-42` chỉ can thiệp khi focus đang ở ngoài dialog, rồi lấy
-   `querySelector(FOCUSABLE)` — mà phần tử khớp đầu tiên theo thứ tự DOM là `button.modal-close`
+   `querySelector(FOCUSABLE)` - mà phần tử khớp đầu tiên theo thứ tự DOM là `button.modal-close`
    trong `.modal-head`. **Có từ trước, không phải hồi quy**: modal tài khoản (không thuộc task này)
-   cho kết quả y hệt. Sửa được chỉ bằng cách đụng `Modal.tsx`, mà kế hoạch cấm — nên giữ nguyên và
+   cho kết quả y hệt. Sửa được chỉ bằng cách đụng `Modal.tsx`, mà kế hoạch cấm - nên giữ nguyên và
    ghi lại. Test jsdom khẳng định focus ở `#comp-name` vì jsdom không mô phỏng `autofocus` như trình duyệt.
 2. **`datetime-local` tốn 7 lần Tab mỗi ô** (từng phân đoạn ngày/giờ là một điểm dừng). Hành vi gốc
    của trình duyệt với input native, không phải do redesign.
 3. **Menu thao tác hàng trong danh sách tự đóng khi trang cuộn** (neo theo toạ độ viewport). Ở 375px
    Playwright tự cuộn trigger vào tầm nhìn nên menu đóng ngay; cuộn trước rồi mới click thì mở bình
-   thường — đúng thiết kế hiện có của `AdminCompetitionsPage.tsx`, không liên quan dialog.
+   thường - đúng thiết kế hiện có của `AdminCompetitionsPage.tsx`, không liên quan dialog.
 
 ### Sai lệch có chủ ý so với đặc tả
 
@@ -442,7 +442,64 @@ Không đổi API, payload, validation, enum, default, route hay quyền.
 | Helper footer ẩn dưới 640px | ẩn dưới 768px | cùng ý định, gộp vào nhánh tablet |
 | `position: sticky` header/footer | bỏ | ở shell này chúng là flex item `flex: none` ngoài vùng cuộn, sticky là no-op |
 
-## 10. Production deploy (Sprint 08) — planned
+## 9i. Markdown Document Renderer (VKU)
+
+Hợp đồng: `MARKDOWN_RENDERER_DESIGN.md` (root). Một renderer dùng chung cho mọi nội dung cuộc thi, giữ
+`react-markdown` + `remark-gfm` + `rehype-sanitize` (không `rehype-raw`, không highlighter, không
+dependency mới). Không đổi API, asset endpoint, auth hay business logic; không hardcode tên file,
+dataset hay heading của bất kỳ cuộc thi nào.
+
+### Bằng chứng tự động
+
+| Check | Kết quả | Nguồn |
+|---|---|---|
+| Resolver asset: 3 alias (`assets/`, `./assets/`, `../assets/`) normalize về cùng endpoint phẳng; ma trận reject đầy đủ (traversal, subpath, absolute, scheme, query/fragment, percent-encoding, backslash, control char, hidden name, extension ngoài allowlist) | passing (11 test) | `frontend/src/markdown/resolveMarkdownAssetUrl.test.ts` |
+| GFM/CommonMark: 4 cấp heading sau demotion (h2..h5, không tự đánh số), `strong`/`em`/`del`, list lồng `ul > li > ul` và `ol > li > ol`, task list (`disabled`, đúng checked, 2 `li.task-list-item`), autolink trần, table region, code, link, image | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Ảnh: 3 alias render đúng `src` + `loading="lazy"`; external/`data:`/traversal/SVG tạo 0 `<img>` và 4 placeholder giữ alt; `fireEvent.error` chuyển ảnh lỗi sang placeholder | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Code block: nhãn theo info string (`text`, `python`) và nhãn chung `Code`; `pre > code` giữ nguyên từng ký tự (`├── train.csv\n└── sample_submission.csv\n`); toolbar nằm ngoài `pre`; copy đúng text đã parse sau khi bỏ newline cuối; `role="status"` khi thành công, `role="alert"` + hướng dẫn sao chép thủ công khi clipboard reject/không tồn tại; state hai block độc lập; inline code không có toolbar | passing (6 test) | `frontend/src/markdown/MarkdownCodeBlock.test.tsx` |
+| Security: `script`/`iframe`/`onerror`/`javascript:` không sống sót; link ngoài `target="_blank" rel="noopener noreferrer"`, link nội bộ không bị ép mở tab; prop nội bộ `node` của react-markdown không rơi xuống DOM (`[node]` = null, không có `[object Object]`) | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| Full frontend gate | passing | `npx vitest run --maxWorkers 1` → **332 passed (26 file)**; `npx vitest run src/markdown` → 33 passed (3 file); `npx tsc -b --force` → exit 0; `npm run lint` → 0 error, 22 warning có sẵn và **0** ở `src/markdown/`; `npm run build` → OK, chunk `MarkdownView-Dy0jAy_f.js` 162.87 kB vẫn tách riêng khỏi entry `index-DTs_LmLJ.js` 484.09 kB, CSS 167.23 kB |
+| Backend contract không đổi (asset allowlist/traversal/nosniff vẫn nguyên) | passing | `uv run pytest -q tests/test_content_storage.py tests/test_contents_public.py` → 13 passed |
+| Repo hygiene | passing | `git diff --check` → sạch |
+
+### Bằng chứng browser (Chromium headless, mock `/api`, 7 bề rộng)
+
+Script: `/tmp/uiverify/markdown-verify.mjs` → **110 check, 0 fail**; số đo ghi ở
+`/tmp/uiverify/markdown-verify.json`; ảnh `/tmp/uiverify/shots-markdown/article-{375,768,1440}.png`.
+Fixture Markdown generic: 4 cấp heading, nested/task list, `del`, autolink, 5 ảnh (3 hợp lệ, 1 trả 404,
+1 external), 2 fenced block (`text`, `python`), bảng 3 cột, blockquote, `---`.
+
+| Oracle | Số đo tại 375 / 390 / 640 / 768 / 1024 / 1200 / 1440 |
+|---|---|
+| `documentElement.scrollWidth === clientWidth` | đúng ở cả 7 bề rộng; danh sách phần tử tràn ngoài vùng cuộn rỗng |
+| Đúng một `h1` của trang | `h1=1 "AI Challenge 2026"`; heading tài liệu bắt đầu từ `H2` |
+| Thang heading nhìn khác rõ | desktop `H2:24px H3:20px H4:16px H5:14px`; mobile `H2:22px H3:18px H4:16px H5:14px` |
+| Ba ảnh asset hợp lệ | `src` = `/api/competitions/ai-challenge-2026/assets/{ok,ok-2,ok-3}.png`, `loading="lazy"`, `naturalWidth=484` |
+| Ảnh 404 và ảnh external | 2 `.md-image-fallback`, text `Không tải được hình ảnh: Ảnh thiếu` / `Ảnh ngoài`; **không** request nào ra host lạ |
+| Hai code block | nội dung y nguyên `├── du-lieu.csv\n└── mau-nop-bai.csv\n` và `cot = mau_nop_bai["id"]\n` |
+| Inline code ngoài code block | `id,prediction`, `rgb(211, 11, 35)`, `inBlock=false` |
+| Task list | 2 checkbox thật, `{checked:true,disabled:true}` và `{checked:false,disabled:true}`; `ul=disc`, `ol=decimal`, `.task-list-item` = `none` |
+| Table | region `Bảng dữ liệu`, `tabindex=0`; wrap `border-top: 2px rgb(9,105,232)`, `th` nền `rgb(245,249,255)` |
+| Code panel | nền `rgb(16,36,70)`, `border-top: 3px rgb(255,197,27)`, radius 8px; `code-lang` 12px/600 |
+| Blockquote / `hr` / `h4::before` | gradient `rgb(245,249,255) → rgb(255,251,235)` + vạch trái `4px rgb(9,105,232)`; `hr` radius 999px; `h4::before` pill đỏ `rgb(236,22,49)` |
+| Placeholder ảnh | nền `rgb(248,250,252)`, viền `1px rgb(203,213,225)` |
+| Tương tác copy (1440) | click block 2 → nhãn `Đã sao chép`, `role="status"` có nội dung, clipboard đọc lại đúng `cot = mau_nop_bai["id"]`; block 1 vẫn `Sao chép`; nhãn tự về sau ~2s |
+| Keyboard | 20 lần Tab tới được nút copy; outline `solid 2px`, `overflow: visible` và nằm trọn trong khối code (`inside=true`) |
+| Touch target | 375px: nút copy cao **44px**, toolbar không tràn khối (`btn=103 < block=289`); 1440: giữ control compact **28px** |
+| Clipboard thất bại | `role="alert"` "Không sao chép được nội dung - hãy chọn và sao chép thủ công.", code còn nguyên, nhãn không đổi, vẫn đủ 2 block |
+| Console | sạch; chỉ loại trừ 401 `/api/auth/me` (khách) và 404 `/api/competitions/.../assets/missing.png` là hai case có chủ đích của fixture |
+
+Ghi chú: browser evidence chạy trên `vite preview` với `/api/**` được mock, nên **không** phải live-asset
+E2E; contract asset phía server được chứng minh riêng bằng test backend ở bảng trên.
+
+### Sai lệch có chủ ý so với kế hoạch
+
+| Kế hoạch | Thực tế | Lý do |
+|---|---|---|
+| `h2` 28-32px, `h3` 22-24px | `h2` 22/24px, `h3` 18/20px | dùng lại token `--text-h2`, `--text-h2-desktop`, `--text-h3`, `--text-h4`; `DESIGN.md` §4 định nghĩa section title 22-24px nên cỡ mới sẽ phá thang bậc chung. Phân cấp được giữ bằng accent theo từng cấp (vạch lam / divider dưới / gạch đỏ / chữ nhỏ muted) |
+| paragraph `line-height: 1.7` | `var(--leading-body)` = 1.65 | token có sẵn của hệ, không tạo giá trị thứ hai |
+
+## 10. Production deploy (Sprint 08) - planned
 
 | Check | Status |
 |---|---|
@@ -450,7 +507,7 @@ Không đổi API, payload, validation, enum, default, route hay quyền.
 | Cloudflare Tunnel serve HTTPS | planned |
 | Smoke test production | planned |
 
-## 11. Backup/restore & pilot (Sprint 09) — planned
+## 11. Backup/restore & pilot (Sprint 09) - planned
 
 | Check | Status |
 |---|---|

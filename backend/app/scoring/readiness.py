@@ -1,4 +1,4 @@
-"""Trạng thái sẵn sàng chấm điểm — một nguồn sự thật cho publish và cho UI admin.
+"""Trạng thái sẵn sàng chấm điểm - một nguồn sự thật cho publish và cho UI admin.
 
 Publish, banner ở trang admin và endpoint scoring đều đi qua đây. Readiness phải đọc và
 parse lại ground truth thật (không chỉ `is_file()`), vì một file hỏng vẫn làm mọi bài

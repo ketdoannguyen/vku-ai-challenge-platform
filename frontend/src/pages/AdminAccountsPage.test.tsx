@@ -240,7 +240,7 @@ test("phản hồi của trang cũ không ghi đè kết quả tìm kiếm mới
   fireEvent.change(screen.getByLabelText("Tìm tài khoản"), { target: { value: "team12@" } });
   await waitFor(() => expect(pending.has("search")).toBe(true));
 
-  // Trang 2 về muộn hơn nhưng đã cũ — không được ghi đè kết quả tìm kiếm.
+  // Trang 2 về muộn hơn nhưng đã cũ - không được ghi đè kết quả tìm kiếm.
   pending.get("offset-50")?.();
   await waitFor(() => expect(screen.queryByText("team50@vku.vn")).toBeNull());
   pending.get("search")?.();
@@ -360,5 +360,5 @@ test("tiêu đề tab đặt theo tên trang", async () => {
     </MemoryRouter>,
   );
   await screen.findByText("team@vku.vn");
-  expect(document.title).toBe("Quản lý tài khoản — AI Challenge");
+  expect(document.title).toBe("Quản lý tài khoản - AI Challenge");
 });

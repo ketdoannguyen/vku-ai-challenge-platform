@@ -1,4 +1,4 @@
-# ADMIN_COMPETITIONS_DESIGN.md — Quản trị → Quản lý cuộc thi
+# ADMIN_COMPETITIONS_DESIGN.md - Quản trị → Quản lý cuộc thi
 
 Tài liệu này mở rộng `DESIGN.md` cho đúng một màn: `/admin/competitions`
 (alias cũ `/admin`). Token, typography, spacing, radius, icon, light-mode và
@@ -24,7 +24,7 @@ Không hardcode số liệu. Bốn ô thống kê lấy từ chính mảng `comp
 `GET /admin/competitions` trả về, không có endpoint thống kê nào được thêm.
 
 Không bịa dữ liệu: không competition giả, không member giả, không metric giả,
-không nhãn nghiệp vụ mới. Mockup chỉ là tham chiếu bố cục — text trong mockup
+không nhãn nghiệp vụ mới. Mockup chỉ là tham chiếu bố cục - text trong mockup
 không phải dữ liệu thật.
 
 Không thêm dependency, không Tailwind, không CSS Module, không icon package.
@@ -53,7 +53,7 @@ Không sidebar phải, không marketing block, không slogan, không ảnh giả
 ## 3. Trần rộng
 
 Màn danh sách quản trị cần đủ chỗ cho bảng 8 cột nên dùng trần 1440px, áp bằng
-một class shell riêng cho đúng hai route `/admin/competitions` và `/admin` —
+một class shell riêng cho đúng hai route `/admin/competitions` và `/admin` -
 cùng cách `DESIGN.md` §15 đã làm cho `/` bằng `.app-main-dashboard`.
 
 `/admin/competitions/:id` và các màn admin khác vẫn giữ `--container` 1280px.
@@ -62,7 +62,7 @@ cùng cách `DESIGN.md` §15 đã làm cho `/` bằng `.app-main-dashboard`.
 
 Panel sáng, viền mảnh, bo 14px, nền `white → --vku-blue-50`, ba vệt chéo
 xanh–đỏ–vàng ở góc phải vẽ bằng CSS (`::before` + `linear-gradient`,
-`pointer-events: none`, không animation) — cùng công thức với `.dash-hero`.
+`pointer-events: none`, không animation) - cùng công thức với `.dash-hero`.
 
 Khác dashboard công khai ở chỗ: header quản trị **thấp và gọn**, không phải
 hero. Nội dung giữ đúng text hiện có, không thêm câu mô tả mới.
@@ -101,7 +101,7 @@ Một surface trắng, viền nhẹ, bo 14px, padding 12–16px.
   - chưa chọn: `--surface-container-low` + `--vku-border`, chữ `--text`.
   - hover: tint xanh nhạt.
   - `aria-pressed="true"`: nền `--vku-blue-700`, chữ trắng. **Không dùng đen.**
-- Search cao 44px, bo 9–10px, focus có border xanh + ring — không bỏ outline
+- Search cao 44px, bo 9–10px, focus có border xanh + ring - không bỏ outline
   mà không có thay thế.
 - Refresh là nút secondary, giữ spinner và nhãn `Đang tải... / Làm mới`.
 

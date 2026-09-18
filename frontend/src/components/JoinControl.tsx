@@ -134,7 +134,7 @@ export function JoinControl({
     return (
       <span className="join-state">
         <span className="join-state-note">
-          Membership đã bị vô hiệu hóa — liên hệ Ban Tổ chức.
+          Membership đã bị vô hiệu hóa - liên hệ Ban Tổ chức.
         </span>
       </span>
     );

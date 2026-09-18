@@ -17,7 +17,7 @@ export const KHCN_HTQT_EMAIL = "khcn_htqt@vku.udn.vn";
 export const KHCN_HTQT_PHONE = "0236.3.962.972";
 export const KHCN_HTQT_PHONE_HREF = "tel:+842363962972";
 
-/** Đầu mối hỗ trợ kỹ thuật nền tảng — thông tin do người dùng trực tiếp uỷ quyền công bố. */
+/** Đầu mối hỗ trợ kỹ thuật nền tảng - thông tin do người dùng trực tiếp uỷ quyền công bố. */
 export const PLATFORM_SUPPORT_NAME = "Nguyễn Kết Đoàn";
 export const PLATFORM_SUPPORT_EMAIL = "nkdoan@vku.udn.vn";
 export const PLATFORM_SUPPORT_PHONE = "0396090576";

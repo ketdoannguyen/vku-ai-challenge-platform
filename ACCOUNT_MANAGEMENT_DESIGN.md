@@ -1,4 +1,4 @@
-# ACCOUNT_MANAGEMENT_DESIGN.md — Quản trị → Quản lý tài khoản
+# ACCOUNT_MANAGEMENT_DESIGN.md - Quản trị → Quản lý tài khoản
 
 Tài liệu này mở rộng `DESIGN.md` cho đúng một màn: `/admin/accounts`.
 Token, typography, spacing, radius, icon, light-mode và các quy tắc bất biến về
@@ -49,7 +49,7 @@ là SVG inline theo convention `aria-hidden="true" focusable="false"`.
 
 Không bịa nội dung: không slogan, quote, footer, ảnh trường, account demo, email
 demo, chart, KPI, "đăng nhập gần nhất" hay "hoạt động gần đây". Mockup chỉ là
-tham chiếu bố cục — text và số trong mockup không phải dữ liệu thật.
+tham chiếu bố cục - text và số trong mockup không phải dữ liệu thật.
 
 ## 3. Nguồn số liệu thống kê
 
@@ -83,7 +83,7 @@ Ràng buộc phía UI:
   tổng số.
 - Không hardcode số, không tạo account giả để "cho đủ số".
 - Khi chưa có dữ liệu (đang tải hoặc lỗi hẳn), hiển thị placeholder
-  `aria-hidden` kèm text `sr-only` cho trình đọc màn hình — không hiện số giả.
+  `aria-hidden` kèm text `sr-only` cho trình đọc màn hình - không hiện số giả.
 
 ## 4. Cấu trúc trang
 
@@ -168,7 +168,7 @@ EMAIL | TÊN | VAI TRÒ | TRẠNG THÁI | THAO TÁC
 ```
 
 Không thêm ngày tạo, đăng nhập gần nhất, số cuộc thi đã tham gia hay hoạt động.
-Không ẩn cột ở bất kỳ breakpoint nào — mobile cuộn ngang trong vùng cuộn.
+Không ẩn cột ở bất kỳ breakpoint nào - mobile cuộn ngang trong vùng cuộn.
 
 Vùng cuộn giữ nguyên `role="region"`, `aria-label="Bảng tài khoản"`,
 `tabIndex={0}`, `aria-busy`, và `position: relative` để phần tử `.sr-only` trong

@@ -319,7 +319,7 @@ function Header() {
           {loading ? null : account ? (
             <>
               {/* Ảnh mẫu chỉ để 2 control ở cột phải: capsule tài khoản + nút icon.
-                  Vai trò rời khỏi navbar nên giữ lại ở dạng sr-only — ở desktop
+                  Vai trò rời khỏi navbar nên giữ lại ở dạng sr-only - ở desktop
                   drawer không mở được (.app-menu-toggle ẩn từ md). */}
               <span className="user-pill">
                 <span className="app-avatar" aria-hidden="true">

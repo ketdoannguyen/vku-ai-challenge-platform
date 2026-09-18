@@ -1,4 +1,4 @@
-"""Giao diện dòng lệnh của scripts/create_admin.py — không cần MongoDB."""
+"""Giao diện dòng lệnh của scripts/create_admin.py - không cần MongoDB."""
 
 import io
 import sys

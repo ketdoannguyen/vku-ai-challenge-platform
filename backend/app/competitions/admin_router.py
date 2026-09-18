@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
 
 _SLUG_EXISTS_MESSAGE = "Slug này đã có cuộc thi khác dùng."
-# Số ứng viên tối đa cho slug clone trước khi bỏ cuộc — chặn vòng lặp vô hạn khi slug gốc quá dài.
+# Số ứng viên tối đa cho slug clone trước khi bỏ cuộc - chặn vòng lặp vô hạn khi slug gốc quá dài.
 _CLONE_SUFFIX = "-copy"
 _CLONE_SLUG_ATTEMPTS = 5
 
@@ -40,7 +40,7 @@ async def list_competitions(request: Request, admin: AdminAccount) -> dict:
     db = request.app.state.mongo.db
     cursor = db[service.COMPETITIONS_COLLECTION].find().sort("name", 1)
     documents = [competition async for competition in cursor]
-    # Chỉ bảng admin cần số thành viên/bài nộp — endpoint public giữ nguyên payload.
+    # Chỉ bảng admin cần số thành viên/bài nộp - endpoint public giữ nguyên payload.
     counts = await service.activity_counts(db, [document["_id"] for document in documents])
     return {
         "competitions": [
@@ -76,7 +76,7 @@ async def get_competition(competition_id: str, request: Request, admin: AdminAcc
 
 
 def _admin_detail(competition: dict) -> dict:
-    """Detail kèm trạng thái publish-readiness — dùng cho detail VÀ mọi response mutate.
+    """Detail kèm trạng thái publish-readiness - dùng cho detail VÀ mọi response mutate.
 
     UI sửa/clone/publish xong ghi thẳng response vào state, nên response mutate thiếu readiness
     sẽ làm banner publish biến mất sai. List cố ý không gọi hàm này: readiness phải đọc file
@@ -104,7 +104,7 @@ async def edit_competition(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
-    # slug/status/created_by không nhận từ body — model không có field đó nên bỏ qua an toàn
+    # slug/status/created_by không nhận từ body - model không có field đó nên bỏ qua an toàn
     try:
         updates = service.validate_update(competition, body.model_dump(exclude_unset=True))
     except ValueError as exc:
@@ -129,7 +129,7 @@ async def delete_competition(
     """Xoá cuộc thi nháp kèm toàn bộ dữ liệu con.
 
     Chỉ draft: published/closed phải giữ lịch sử thi, muốn kết thúc thì Đóng cuộc thi.
-    `confirm_slug` buộc admin gõ đúng slug — thao tác này không hoàn tác được.
+    `confirm_slug` buộc admin gõ đúng slug - thao tác này không hoàn tác được.
     """
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
@@ -219,7 +219,7 @@ async def clone_competition(competition_id: str, request: Request, admin: AdminA
         try:
             clone = await service.insert_competition(db, data, created_by=admin["email"])
         except DuplicateKeyError:
-            continue  # Request khác vừa chiếm slug — thử ứng viên kế tiếp.
+            continue  # Request khác vừa chiếm slug - thử ứng viên kế tiếp.
         logger.info("Admin %s cloned competition %s -> %s", admin["email"], source["slug"], slug)
         return _admin_detail(clone)
     raise api_error(409, "SLUG_EXISTS", _SLUG_EXISTS_MESSAGE)
@@ -228,7 +228,7 @@ async def clone_competition(competition_id: str, request: Request, admin: AdminA
 def _clone_slug_candidate(base_slug: str, attempt: int) -> str:
     """Slug clone cho lần thử thứ `attempt` (từ 1): base + '-copy', các lần sau thêm số.
 
-    Cắt base để tổng không vượt SLUG_MAX rồi bỏ gạch ngang cuối — nếu không, base dài sát
+    Cắt base để tổng không vượt SLUG_MAX rồi bỏ gạch ngang cuối - nếu không, base dài sát
     giới hạn sẽ tạo ra slug kết thúc bằng '-' (không hợp lệ).
     """
     suffix = _CLONE_SUFFIX if attempt == 1 else f"{_CLONE_SUFFIX}{attempt}"

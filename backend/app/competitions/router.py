@@ -27,7 +27,7 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         .find({"status": {"$in": ["published", "closed"]}})
         .sort("name", 1)
     ]
-    # Khách không có phiên thì không cần truy vấn membership — public_membership(None) đã đủ.
+    # Khách không có phiên thì không cần truy vấn membership - public_membership(None) đã đủ.
     memberships = (
         await memberships_by_competition(db, [c["_id"] for c in competitions], account["_id"])
         if account

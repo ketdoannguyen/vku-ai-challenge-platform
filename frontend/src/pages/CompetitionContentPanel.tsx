@@ -14,21 +14,21 @@ const MarkdownView = lazy(() =>
   import("../markdown/MarkdownView").then((module) => ({ default: module.MarkdownView })),
 );
 
-/** Mô tả cách tham gia ở phần tóm tắt — khác nhãn chip trên masthead để không lặp chữ trên cùng màn hình. */
+/** Mô tả cách tham gia ở phần tóm tắt - khác nhãn chip trên masthead để không lặp chữ trên cùng màn hình. */
 const JOIN_MODE_DETAIL: Record<Competition["join_mode"], string> = {
   open: "Mở tự do cho mọi thí sinh",
   code: "Cần mã do Ban Tổ chức cấp",
   invite_only: "Chỉ dành cho thí sinh được mời",
 };
 
-/** Nhãn `average` của sklearn — API trả khoá thô, UI cần chữ đọc được. */
+/** Nhãn `average` của sklearn - API trả khoá thô, UI cần chữ đọc được. */
 const AVERAGE_LABEL: Record<NonNullable<SubmissionConfig["average"]>, string> = {
   binary: "Binary",
   macro: "Macro",
   weighted: "Weighted",
 };
 
-/** Giá trị cấu hình chưa được BTC thiết lập — hiển thị chữ thay vì `null`. */
+/** Giá trị cấu hình chưa được BTC thiết lập - hiển thị chữ thay vì `null`. */
 const NOT_CONFIGURED = "Chưa cấu hình";
 
 /** `pos_label` chỉ có với admin/thành viên đang hoạt động; undefined nghĩa là không được phép biết. */
@@ -36,12 +36,12 @@ function configValue(value: string | null): string {
   return value === null || value === "" ? NOT_CONFIGURED : value;
 }
 
-/** Vì sao chưa nộp được bài — chỉ gọi khi canSubmit sai, tức chưa tham gia và cuộc thi còn nhận bài. */
+/** Vì sao chưa nộp được bài - chỉ gọi khi canSubmit sai, tức chưa tham gia và cuộc thi còn nhận bài. */
 function submitBlockedReason(c: Competition): string {
   if (c.status === "closed") return "Cuộc thi đã kết thúc nên không nhận thêm bài nộp.";
   if (c.quota_per_day === 0) return "Cuộc thi hiện không nhận bài nộp.";
   if (c.join_mode === "invite_only")
-    return "Cuộc thi chỉ dành cho thí sinh được mời — liên hệ Ban Tổ chức để được cấp quyền tham gia.";
+    return "Cuộc thi chỉ dành cho thí sinh được mời - liên hệ Ban Tổ chức để được cấp quyền tham gia.";
   if (c.join_mode === "code")
     return "Nhập mã do Ban Tổ chức cấp ở khối tham gia phía trên để bắt đầu nộp bài.";
   return "Bấm “Tham gia cuộc thi” ở khối phía trên để bắt đầu nộp bài.";

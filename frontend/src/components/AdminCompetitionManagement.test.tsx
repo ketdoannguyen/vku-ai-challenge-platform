@@ -74,7 +74,7 @@ function sections(): HTMLElement[] {
   return Array.from(dialog().querySelectorAll<HTMLElement>("section.ac-form-section"));
 }
 
-/** Section chứa control — dùng để chốt control nào thuộc nhóm nào. */
+/** Section chứa control - dùng để chốt control nào thuộc nhóm nào. */
 function sectionOf(control: HTMLElement): HTMLElement {
   const section = control.closest<HTMLElement>("section.ac-form-section");
   if (!section) throw new Error("Control không nằm trong section nào.");

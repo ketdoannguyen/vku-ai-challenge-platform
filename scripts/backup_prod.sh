@@ -4,12 +4,12 @@
 #   sudo /srv/vku-ai-challenge/repo/scripts/backup_prod.sh
 #
 # Mỗi lần chạy tạo một thư mục timestamp trong $BACKUP_DIR chứa:
-#   mongo.archive.gz  — toàn bộ database (mongodump --archive --gzip)
-#   app-data.tar.gz   — thư mục upload của app ($DATA_DIR/app)
-#   MANIFEST.txt      — kích thước và sha256 để đối chiếu lại sau
+#   mongo.archive.gz  - toàn bộ database (mongodump --archive --gzip)
+#   app-data.tar.gz   - thư mục upload của app ($DATA_DIR/app)
+#   MANIFEST.txt      - kích thước và sha256 để đối chiếu lại sau
 #
 # Chỉ áp dụng retention SAU KHI backup mới đã tạo xong và qua kiểm tra.
-# CẢNH BÁO: backup nằm cùng boot disk với dữ liệu — chỉ cứu được lỗi thao tác,
+# CẢNH BÁO: backup nằm cùng boot disk với dữ liệu - chỉ cứu được lỗi thao tác,
 # KHÔNG cứu được khi mất disk/VM. Cần snapshot GCE hoặc bản sao ngoài máy.
 
 set -euo pipefail
@@ -36,7 +36,7 @@ chmod 700 "$BACKUP_DIR"
 
 # Khóa chống chạy chồng lấn (timer trùng với một lần chạy tay).
 exec 9>"$BACKUP_DIR/.lock"
-flock -n 9 || { log "Đã có tiến trình backup khác đang chạy — bỏ qua lần này."; exit 0; }
+flock -n 9 || { log "Đã có tiến trình backup khác đang chạy - bỏ qua lần này."; exit 0; }
 
 TS="$(date -u +%Y%m%dT%H%M%SZ)"
 DEST="$BACKUP_DIR/$TS"

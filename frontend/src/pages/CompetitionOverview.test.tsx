@@ -76,7 +76,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Khối tài liệu của Tổng quan — tách khỏi mục lục cùng tên ở rail trái. */
+/** Khối tài liệu của Tổng quan - tách khỏi mục lục cùng tên ở rail trái. */
 function docList() {
   return within(screen.getByRole("navigation", { name: "Tài liệu cuộc thi" }));
 }
@@ -92,7 +92,7 @@ test("/competitions/:slug dừng ở Tổng quan, không tự chuyển sang tài
   renderAt("/competitions/ai-challenge-2026");
 
   expect(await screen.findByRole("heading", { name: "Tổng quan", level: 2 })).toBeTruthy();
-  // Markdown của tài liệu đầu tiên không được render — trang tổng quan là đích dừng thật.
+  // Markdown của tài liệu đầu tiên không được render - trang tổng quan là đích dừng thật.
   expect(screen.queryByRole("heading", { name: "Đề bài chi tiết" })).toBeNull();
   // Mục lục chỉ được tải sau khi chi tiết cuộc thi xong, nên phải chờ nó xuất hiện.
   await screen.findByRole("navigation", { name: "Tài liệu cuộc thi" });
@@ -139,7 +139,7 @@ test("cấu hình chưa thiết lập hiển thị “Chưa cấu hình”, khô
   renderAt("/competitions/ai-challenge-2026");
 
   await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
-  // Cột ID, cột dự đoán, cách tính điểm, nhãn dương — cả bốn đều chưa được đặt.
+  // Cột ID, cột dự đoán, cách tính điểm, nhãn dương - cả bốn đều chưa được đặt.
   await waitFor(() => expect(screen.getAllByText("Chưa cấu hình")).toHaveLength(4));
   expect(document.body.textContent).not.toContain("null");
   expect(document.body.textContent).not.toContain("undefined");

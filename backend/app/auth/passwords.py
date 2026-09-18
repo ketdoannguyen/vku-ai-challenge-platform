@@ -1,4 +1,4 @@
-"""Argon2id password hashing — locked behavior (ADR-004, Sprint 02)."""
+"""Argon2id password hashing - locked behavior (ADR-004, Sprint 02)."""
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -16,7 +16,7 @@ def verify_password(password_hash: str, password: str) -> bool:
     except VerifyMismatchError:
         return False
     except Exception:
-        # hash malformed/unsupported — coi như sai, không crash luồng login
+        # hash malformed/unsupported - coi như sai, không crash luồng login
         return False
 
 

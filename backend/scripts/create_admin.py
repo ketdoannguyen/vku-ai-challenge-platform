@@ -1,4 +1,4 @@
-"""Tạo admin đầu tiên — chạy: python scripts/create_admin.py <email> <name>
+"""Tạo admin đầu tiên - chạy: python scripts/create_admin.py <email> <name>
 
 Mật khẩu KHÔNG truyền qua tham số dòng lệnh (sẽ lộ trong `ps` và shell history):
 script hỏi ẩn khi có TTY, hoặc đọc một dòng từ stdin khi được pipe.

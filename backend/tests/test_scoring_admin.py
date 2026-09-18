@@ -157,7 +157,7 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
 
 
 def test_pos_label_revealed_only_to_active_member(client, isolated_data_dir):
-    """pos_label là nhãn dương thật — chỉ thành viên đang hoạt động được thấy."""
+    """pos_label là nhãn dương thật - chỉ thành viên đang hoạt động được thấy."""
     competition = _competition(client)
     cid = competition["id"]
     assert _put_config(client, cid).status_code == 200

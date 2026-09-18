@@ -42,7 +42,7 @@ def _db(client):
 
 
 def _seed_children(client, competition_id: str, account_id: ObjectId) -> None:
-    """Nhét sẵn dữ liệu con trực tiếp vào DB — DELETE phải dọn hết, không phụ thuộc luồng API."""
+    """Nhét sẵn dữ liệu con trực tiếp vào DB - DELETE phải dọn hết, không phụ thuộc luồng API."""
     db = _db(client)
     cid = ObjectId(competition_id)
     asyncio.run(

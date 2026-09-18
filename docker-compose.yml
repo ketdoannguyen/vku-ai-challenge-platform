@@ -22,7 +22,7 @@ services:
       MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
       DATA_DIR: /data
     expose:
-      - "8000" # internal only — truy cập qua Nginx same-origin
+      - "8000" # internal only - truy cập qua Nginx same-origin
     depends_on:
       mongo:
         condition: service_healthy

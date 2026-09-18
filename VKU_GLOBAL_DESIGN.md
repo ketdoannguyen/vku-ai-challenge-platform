@@ -1,4 +1,4 @@
-# VKU_GLOBAL_DESIGN.md — VKU AI Challenge Global UI/UX System
+# VKU_GLOBAL_DESIGN.md - VKU AI Challenge Global UI/UX System
 
 Version: 1.0  
 Scope: entire frontend

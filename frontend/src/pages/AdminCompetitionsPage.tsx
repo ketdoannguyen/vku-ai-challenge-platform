@@ -28,7 +28,7 @@ const FILTERS: { value: StatusFilter; label: string }[] = [
 /**
  * Accent đầu mỗi hàng lặp theo VỊ TRÍ trong trang đang render, không theo trạng thái:
  * hàng 1 xanh, hàng 2 đỏ, hàng 3 vàng rồi lặp lại. Cuộc thi đã kết thúc nằm ở hàng 2
- * vẫn giữ accent đỏ — status vẫn là nguồn semantic duy nhất qua badge chữ.
+ * vẫn giữ accent đỏ - status vẫn là nguồn semantic duy nhất qua badge chữ.
  */
 const ROW_ACCENTS = ["blue", "red", "yellow"] as const;
 
@@ -155,7 +155,7 @@ export function AdminCompetitionsPage() {
   const [confirming, setConfirming] = useState<{ action: CompetitionAction; competition: Competition } | null>(null);
   const [deleting, setDeleting] = useState<Competition | null>(null);
   // Modal mở từ menu ba chấm: menu unmount ngay khi chọn item nên Modal không thấy
-  // được nút trigger là "focus trước đó" — nhớ ref của row để trả focus về đúng chỗ.
+  // được nút trigger là "focus trước đó" - nhớ ref của row để trả focus về đúng chỗ.
   const editReturnFocus = useRef<HTMLButtonElement | null>(null);
   const confirmReturnFocus = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocus = useRef<HTMLButtonElement | null>(null);
@@ -531,7 +531,7 @@ export function AdminCompetitionsPage() {
   );
 }
 
-/** Màu card chỉ để nhận diện thương hiệu — không suy ra trạng thái hay quyền thao tác. */
+/** Màu card chỉ để nhận diện thương hiệu - không suy ra trạng thái hay quyền thao tác. */
 type StatTone = "blue" | "red" | "yellow" | "neutral";
 
 function StatCard({
@@ -567,7 +567,7 @@ function CompetitionRow({
   onDelete,
 }: {
   competition: AdminCompetition;
-  /** Accent decorative theo vị trí trong trang — không phải trạng thái cuộc thi. */
+  /** Accent decorative theo vị trí trong trang - không phải trạng thái cuộc thi. */
   accent: (typeof ROW_ACCENTS)[number];
   onEdit: (trigger: HTMLButtonElement | null) => void;
   onConfirm: (action: CompetitionAction, trigger: HTMLButtonElement | null) => void;
@@ -785,7 +785,7 @@ function RowActionMenu({
             <button className="ac-menu-item" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("clone", trigger))}>
               Clone
             </button>
-            {/* Chỉ draft xoá được — published/closed giữ lịch sử thi (ADR-009). */}
+            {/* Chỉ draft xoá được - published/closed giữ lịch sử thi (ADR-009). */}
             {c.status === "draft" && (
               <>
                 <div className="ac-menu-separator" />

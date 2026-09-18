@@ -1,4 +1,4 @@
-"""Import hàng loạt participant từ CSV — chạy: python scripts/import_accounts.py <file.csv>
+"""Import hàng loạt participant từ CSV - chạy: python scripts/import_accounts.py <file.csv>
 
 Định dạng CSV (header bắt buộc): email,name,password
 Mỗi dòng một account role=participant. Duplicate email trong file hoặc đã tồn tại
@@ -57,15 +57,15 @@ async def main() -> int:
             try:
                 data = AccountCreate(email=email, name=name, password=password, role="participant")
             except ValidationError:
-                print(f"Dòng {i}: BỎ QUA — email/k dữ liệu không hợp lệ ({email or 'trống'})", file=sys.stderr)
+                print(f"Dòng {i}: BỎ QUA - email/k dữ liệu không hợp lệ ({email or 'trống'})", file=sys.stderr)
                 skipped += 1
                 continue
             if policy_error := password_policy_error(data.password):
-                print(f"Dòng {i}: BỎ QUA — {policy_error} ({email})", file=sys.stderr)
+                print(f"Dòng {i}: BỎ QUA - {policy_error} ({email})", file=sys.stderr)
                 skipped += 1
                 continue
             if email in seen_emails or await find_account_by_email(db, email) is not None:
-                print(f"Dòng {i}: BỎ QUA — email đã tồn tại ({email})", file=sys.stderr)
+                print(f"Dòng {i}: BỎ QUA - email đã tồn tại ({email})", file=sys.stderr)
                 skipped += 1
                 continue
             await create_account(db, data)

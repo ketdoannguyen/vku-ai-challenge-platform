@@ -1,6 +1,6 @@
 # SUPPORT_PAGE_DESIGN.md
 
-# VKU AI Challenge — Hỗ trợ & Liên hệ
+# VKU AI Challenge - Hỗ trợ & Liên hệ
 
 > Design specification cho trang:
 >
@@ -190,7 +190,7 @@ Không thêm sidebar thứ ba.
 ## 9. PAGE CONTAINER
 
 Trần rộng của trang là **1440px** (`--container-wide`), áp qua class shell `.app-main-support`
-của `<main>` — cùng cách `.app-main-dashboard` áp cho `/`. Không đổi `--container` toàn cục.
+của `<main>` - cùng cách `.app-main-dashboard` áp cho `/`. Không đổi `--container` toàn cục.
 
 ```css
 .app-main-support {
@@ -408,7 +408,7 @@ border-top: 3px solid #0969e8;
 
 Header: `[Book icon] Các bước tham gia`.
 
-## 21. HƯỚNG DẪN — HEADER
+## 21. HƯỚNG DẪN - HEADER
 
 SVG inline glyph sách/checklist/lộ trình. Icon block:
 
@@ -663,7 +663,7 @@ Mỗi đầu mối là một sub-section riêng, theo đúng source hiện tại
 3. Hỗ trợ kỹ thuật nền tảng
 ```
 
-Không hardcode nếu source thay đổi — lấy từ `frontend/src/lib/vkuInfo.ts`.
+Không hardcode nếu source thay đổi - lấy từ `frontend/src/lib/vkuInfo.ts`.
 
 ## 40. CONTACT ITEM
 
@@ -735,7 +735,7 @@ Từ `min-height: 44px` trở lên để đạt touch target. Chip wrap khi hẹ
 
 Dùng `mailto:` như implementation hiện tại. Không tự thay email.
 
-Trong anchor chỉ có icon decorative (`aria-hidden`) và chính giá trị email — không thêm text hay
+Trong anchor chỉ có icon decorative (`aria-hidden`) và chính giá trị email - không thêm text hay
 nhãn ẩn nào khác, để accessible name vẫn đúng bằng email.
 
 ## 46. PHONE
@@ -748,8 +748,8 @@ Render neutral action màu xanh. Không tự thêm URL.
 
 Hiện có hai action ngoài:
 
-- `https://vku.udn.vn/` — nhãn `vku.udn.vn`
-- `https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/` — nhãn `Trang đơn vị`
+- `https://vku.udn.vn/` - nhãn `vku.udn.vn`
+- `https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/` - nhãn `Trang đơn vị`
 
 Cả hai giữ `target="_blank"` + `rel="noopener noreferrer nofollow"`.
 
@@ -810,7 +810,7 @@ Lý do:
 
 Trang không có phần tử sticky nào.
 
-## 54. RESPONSIVE — LARGE DESKTOP
+## 54. RESPONSIVE - LARGE DESKTOP
 
 `>= 75rem` (1200px):
 
@@ -825,7 +825,7 @@ Trang không có phần tử sticky nào.
 
 Left ≈ 70%, Right ≈ 30%. Hero nằm ngang.
 
-## 55. RESPONSIVE — TABLET
+## 55. RESPONSIVE - TABLET
 
 `768–1199px`: một cột.
 
@@ -838,7 +838,7 @@ Thứ tự: Hướng dẫn → Liên hệ → FAQ.
 
 Chọn thứ tự này để contact không bị đẩy quá xa; và vì nó trùng với DOM order nên tab order luôn khớp visual order (WCAG 2.4.3).
 
-## 56. RESPONSIVE — MOBILE
+## 56. RESPONSIVE - MOBILE
 
 `< 768px`: single column, đúng thứ tự:
 

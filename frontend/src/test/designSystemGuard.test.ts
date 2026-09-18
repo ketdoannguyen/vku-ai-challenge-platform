@@ -1,10 +1,10 @@
 /**
  * Guard cấp nguồn: dự án không cài Tailwind, nên utility token kiểu Tailwind viết trong TSX
- * không khớp selector nào trong `index.css` — class chết, không có tác dụng gì về mặt hiển thị.
+ * không khớp selector nào trong `index.css` - class chết, không có tác dụng gì về mặt hiển thị.
  * Guard quét thẳng giá trị `className` của mọi file TSX để chặn chúng quay lại.
  *
  * Phạm vi cố ý hẹp: chỉ những token trong `LEGACY_LAYOUT_TOKENS` mới bị chặn, không phải mọi
- * class lạ trong repo — đây không phải một CSS linter. Vì vậy các class không có rule CSS nào
+ * class lạ trong repo - đây không phải một CSS linter. Vì vậy các class không có rule CSS nào
  * (`support-faq-panel`, …) và các class trông giống Tailwind nhưng là class thật của ứng dụng
  * (`text-muted`, `sr-only`, `btn-sm`) đều không bị chặn.
  */
@@ -92,7 +92,7 @@ function legacyTokensIn(source: string): string[] {
 }
 
 test("guard quét được toàn bộ TSX trong src", () => {
-  // Nếu cú pháp glob đổi mà không ai để ý, test dưới sẽ pass rỗng — chốt lại ở đây.
+  // Nếu cú pháp glob đổi mà không ai để ý, test dưới sẽ pass rỗng - chốt lại ở đây.
   expect(Object.keys(TSX_SOURCES).length).toBeGreaterThan(20);
 });
 

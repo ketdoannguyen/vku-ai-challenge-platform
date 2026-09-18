@@ -1,5 +1,5 @@
 # CREATE_COMPETITION_DIALOG_DESIGN.md
-# VKU AI Challenge — Create Competition Dialog
+# VKU AI Challenge - Create Competition Dialog
 
 Scope: Admin → Tạo cuộc thi  
 Frontend: React + TypeScript / TSX  
@@ -411,7 +411,7 @@ color: #B77900;
 ---
 
 # ============================================================
-# SECTION 01 — THÔNG TIN CƠ BẢN
+# SECTION 01 - THÔNG TIN CƠ BẢN
 # ============================================================
 
 # 20. SECTION PURPOSE
@@ -494,7 +494,7 @@ Không để textarea quá cao nếu chỉ là mô tả ngắn.
 ---
 
 # ============================================================
-# SECTION 02 — THỜI GIAN
+# SECTION 02 - THỜI GIAN
 # ============================================================
 
 # 25. SECTION LAYOUT
@@ -545,7 +545,7 @@ Không tự tạo validation rule mới.
 ---
 
 # ============================================================
-# SECTION 03 — CÁCH THAM GIA
+# SECTION 03 - CÁCH THAM GIA
 # ============================================================
 
 # 28. PARTICIPATION MODES
@@ -676,7 +676,7 @@ Không tự xóa nếu source đang intentionally hiển thị.
 ---
 
 # ============================================================
-# SECTION 04 — CHẤM ĐIỂM & GIỚI HẠN
+# SECTION 04 - CHẤM ĐIỂM & GIỚI HẠN
 # ============================================================
 
 # 35. TWO COLUMN ROW
@@ -783,7 +783,7 @@ reuse current component.
 ---
 
 # ============================================================
-# SECTION 05 — TÀI NGUYÊN TẢI VỀ
+# SECTION 05 - TÀI NGUYÊN TẢI VỀ
 # ============================================================
 
 # 41. SECTION TITLE

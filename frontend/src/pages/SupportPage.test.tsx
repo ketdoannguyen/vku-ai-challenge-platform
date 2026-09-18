@@ -32,7 +32,7 @@ afterEach(() => {
 test("tiêu đề trang và tiêu đề tab", () => {
   renderPage();
   expect(screen.getByRole("heading", { level: 1, name: "Hỗ trợ & Liên hệ" })).toBeTruthy();
-  expect(document.title).toBe("Hỗ trợ & Liên hệ — AI Challenge");
+  expect(document.title).toBe("Hỗ trợ & Liên hệ - AI Challenge");
 });
 
 test("nêu các bước tham gia theo đúng hành vi nền tảng", () => {
@@ -158,7 +158,7 @@ test("không có sidebar, form liên hệ hay CTA phụ và không gọi API", (
   vi.stubGlobal("fetch", fetchSpy);
   const { container } = renderPage();
   expect(container.querySelector("form, input, textarea, aside, nav")).toBeNull();
-  // Chín trigger FAQ là toàn bộ button của trang — không có CTA nào khác.
+  // Chín trigger FAQ là toàn bộ button của trang - không có CTA nào khác.
   expect(screen.getAllByRole("button")).toHaveLength(9);
   expect(fetchSpy).not.toHaveBeenCalled();
 });

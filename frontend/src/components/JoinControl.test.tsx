@@ -234,7 +234,7 @@ test("khách: CTA đăng nhập kèm đường dẫn quay lại, không gọi AP
   );
   fireEvent.click(await screen.findByRole("link", { name: "Đăng nhập để tham gia" }));
   expect(await screen.findByText("FROM:/competitions/ai-cup?source=home#join")).toBeTruthy();
-  // Chỉ lượt bootstrap /auth/me — khách không bắn POST join rồi ăn 401.
+  // Chỉ lượt bootstrap /auth/me - khách không bắn POST join rồi ăn 401.
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 

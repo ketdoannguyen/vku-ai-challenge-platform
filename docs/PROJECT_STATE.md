@@ -4,7 +4,7 @@
 - Date: 2026-09-17
 - Branch: `feat/admin-competitions-ui`
 - Commit/working tree status: HEAD `88456ed` (Sprint 08 + UI admin/participant + block "Vận hành cuộc thi"); thay đổi **chưa commit** trong working tree: đợt remediation P0/P1/P2 theo plan `declarative-honking-bee.md` (Waves 2–6)
-- Overall state: **release candidate** — 186 backend tests + 216 frontend tests pass; typecheck, production build, lint và Compose config pass. Vòng này đã chạy lại live smoke (`scripts/dev_up.sh`) và kiểm chứng bằng trình duyệt trên bundle mới (xem §9)
+- Overall state: **release candidate** - 186 backend tests + 216 frontend tests pass; typecheck, production build, lint và Compose config pass. Vòng này đã chạy lại live smoke (`scripts/dev_up.sh`) và kiểm chứng bằng trình duyệt trên bundle mới (xem §9)
 
 ## 2. Implemented capabilities
 - Sprint 01-07: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets, participant portal, scoring + ground truth private, submission policy/quota, my submissions, leaderboard, XLSX export, login rate limit + error envelope + CSP Report-Only
@@ -21,9 +21,9 @@
 - Tổng quan participant (working tree, user làm song song): tab Tổng quan là trang thật với thể lệ/quy cách bài nộp/danh sách tài liệu, không tự nhảy sang tài liệu đầu tiên
 
 ## 3. Not implemented yet (đúng kế hoạch)
-- Production deploy (GCE, Cloudflare Tunnel, compose prod, HSTS, CSP enforce, edge/IP-based rate limit) — Sprint 08
-- Backup/restore/pilot — Sprint 09
-- Public/private leaderboard split — **tạm hoãn có chủ đích** (ADR-020); không giải quyết bằng cách nhân đôi competition
+- Production deploy (GCE, Cloudflare Tunnel, compose prod, HSTS, CSP enforce, edge/IP-based rate limit) - Sprint 08
+- Backup/restore/pilot - Sprint 09
+- Public/private leaderboard split - **tạm hoãn có chủ đích** (ADR-020); không giải quyết bằng cách nhân đôi competition
 
 ## 4. Repository structure that matters
 - `backend/app/core/datetimes.py`: `as_utc`, `utc_day_bounds`, `iso_z` dùng chung (naive Mongo được hiểu là UTC)
@@ -33,7 +33,7 @@
 - `backend/app/leaderboard/service.py`: `leaderboard_response` (participant, phân trang + `me`) vs `admin_leaderboard_response` (full list)
 - `frontend/src/lib/countdown.ts`, `frontend/src/hooks/useCountdown.ts`: formatter thuần + clock sống
 - `frontend/src/components/CompetitionResources.tsx`: block tài nguyên, tự lọc URL trước khi render anchor
-- `backend/tests/helpers.py`: fixture dùng chung (`configure_scoring`, `publish_competition`) — `backend/tests` là package nên import qua `tests.helpers`
+- `backend/tests/helpers.py`: fixture dùng chung (`configure_scoring`, `publish_competition`) - `backend/tests` là package nên import qua `tests.helpers`
 
 ## 5. Runtime/services
 - Kiến trúc web/api/mongo và volume `/data` giữ nguyên; không thêm dependency, service hay collection mới
@@ -55,15 +55,15 @@
 - Không env mới. `MAX_UPLOAD_MB`, `MAX_CONTENT_MB`, `MAX_ASSET_MB`, `DATA_DIR` giữ nguyên
 
 ## 9. Commands verified
-- `cd backend && .venv/bin/pytest -q` — **186 passed**
-- `cd frontend && npx vitest run` — **216 passed (19 files)**, chạy 3 lần liên tiếp đều sạch
-- `cd frontend && npx tsc -b --force` — pass (không lỗi)
-- `cd frontend && npm run build` — pass; entry 437.29 kB (gzip 120.84 kB) + chunk `MarkdownView` 159.71 kB (gzip 48.18 kB), không còn cảnh báo >500 kB
-- `cd frontend && npx oxlint src` — exit 0, chỉ warnings có sẵn (set-state-in-effect, Fast Refresh, `Date.now` trong JoinControl)
-- `bash -n scripts/dev_up.sh` — pass
-- `./scripts/dev_up.sh` — chạy live: login 200, `/auth/me` role=admin, admin API 200, login sai 401 generic
-- `docker compose config --quiet` — pass
-- Kiểm chứng trình duyệt trên bundle đã rebuild (`index-3_0qCuvI.js`, hash khớp bản build cục bộ): drawer/picker/title/H1/nav công khai, touch target ở 375/768/1280, hint upload động ở 375/768/1280/1440, phân trang accounts 230 dòng ở 375/1280 — tất cả PASS
+- `cd backend && .venv/bin/pytest -q` - **186 passed**
+- `cd frontend && npx vitest run` - **216 passed (19 files)**, chạy 3 lần liên tiếp đều sạch
+- `cd frontend && npx tsc -b --force` - pass (không lỗi)
+- `cd frontend && npm run build` - pass; entry 437.29 kB (gzip 120.84 kB) + chunk `MarkdownView` 159.71 kB (gzip 48.18 kB), không còn cảnh báo >500 kB
+- `cd frontend && npx oxlint src` - exit 0, chỉ warnings có sẵn (set-state-in-effect, Fast Refresh, `Date.now` trong JoinControl)
+- `bash -n scripts/dev_up.sh` - pass
+- `./scripts/dev_up.sh` - chạy live: login 200, `/auth/me` role=admin, admin API 200, login sai 401 generic
+- `docker compose config --quiet` - pass
+- Kiểm chứng trình duyệt trên bundle đã rebuild (`index-3_0qCuvI.js`, hash khớp bản build cục bộ): drawer/picker/title/H1/nav công khai, touch target ở 375/768/1280, hint upload động ở 375/768/1280/1440, phân trang accounts 230 dòng ở 375/1280 - tất cả PASS
 
 ## 10. Tests currently passing
 - Backend: 186 (nền 177 của Sprint 08 + block vận hành; đợt remediation thêm 6 test clone slug/race + 3 test `upload_limits` trong `test_competitions_admin.py` và 1 test bound query trong `test_admin_accounts.py`)
@@ -72,14 +72,14 @@
 ## 11. Known issues / technical debt (non-blocking)
 - Limiter login process-local theo email (ADR-013): lockout 15 phút nếu kẻ xấu biết email; cần IP companion khi có Cloudflare trusted headers
 - Limit 200 cho admin members: vượt 200 dòng sẽ truncate (có hiển thị total); thêm pagination khi quy mô vượt. **Admin accounts đã có phân trang** (`limit=50` mặc định + `offset`, backend bound `1..200`/`>=0`) nên danh sách tài khoản không còn bị cắt ở 200
-- Leaderboard vẫn tính full ranking trong bộ nhớ: phù hợp 40-80 người; phân trang chỉ giảm payload/UI, không đổi độ phức tạp query — review nếu vượt quy mô
+- Leaderboard vẫn tính full ranking trong bộ nhớ: phù hợp 40-80 người; phân trang chỉ giảm payload/UI, không đổi độ phức tạp query - review nếu vượt quy mô
 - Cascade xoá competition không có transaction (Mongo standalone): đã xoá con-trước-cha-sau + test failure injection, nhưng file cleanup chỉ best-effort và có thể báo partial (`files_removed:false`)
 - Race nhỏ giữa check `has_completed_submission` và xoá member với một submission đồng thời; backend vẫn enforce membership khi nộp nên không mất điểm đã chấm
-- Quota check count-then-insert không transaction; UI quota có thể stale trên nhiều tab — backend 429 vẫn là authority
+- Quota check count-then-insert không transaction; UI quota có thể stale trên nhiều tab - backend 429 vẫn là authority
 - Trần upload (`MAX_UPLOAD_MB`/`MAX_CONTENT_MB`/`MAX_ASSET_MB`) là cấu hình **theo môi trường, không lưu theo cuộc thi** (ADR-011); admin detail trả `upload_limits` để UI render hint đúng giá trị đang áp dụng thay vì hardcode, list/public cố ý không mang field này
 - UI/UX audit trình duyệt chỉ chạy ở light mode: sản phẩm có chủ đích chỉ có light mode (không dark mode, không `prefers-color-scheme`)
 - Lint warnings set-state-in-effect/Fast Refresh là pattern có sẵn; không có lint error
-- Link Drive không được kiểm tra còn truy cập được (chủ đích, ADR-015) — BTC tự đảm bảo quyền chia sẻ
+- Link Drive không được kiểm tra còn truy cập được (chủ đích, ADR-015) - BTC tự đảm bảo quyền chia sẻ
 
 ## 12. Decisions made this sprint
 - ADR-015: resources là link Drive, không host binary

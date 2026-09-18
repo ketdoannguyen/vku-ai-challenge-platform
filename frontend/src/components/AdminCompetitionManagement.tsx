@@ -140,7 +140,7 @@ function IconMailCheck({ className }: { className?: string }) {
 
 type SectionTone = "blue" | "red" | "yellow";
 
-/** Icon và tone trang trí cho từng chế độ tham gia — không đọc trạng thái nghiệp vụ nào khác. */
+/** Icon và tone trang trí cho từng chế độ tham gia - không đọc trạng thái nghiệp vụ nào khác. */
 const JOIN_MODE_TONE: Record<Competition["join_mode"], SectionTone> = {
   open: "blue",
   code: "red",
@@ -206,14 +206,14 @@ export function CompetitionActionConfirmModal({
     action === "publish"
       ? {
           title: "Publish cuộc thi",
-          body: `Publish "${competition.name}" — thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
+          body: `Publish "${competition.name}" - thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
           label: "Publish",
           danger: false,
         }
       : action === "close"
         ? {
             title: "Kết thúc cuộc thi",
-            body: `Kết thúc "${competition.name}" — không nhận submission mới, cuộc thi không thể mở lại.`,
+            body: `Kết thúc "${competition.name}" - không nhận submission mới, cuộc thi không thể mở lại.`,
             label: "Kết thúc",
             danger: true,
           }
@@ -389,7 +389,7 @@ export function CompetitionFormModal({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const title = isEdit
-    ? `Sửa cuộc thi — ${competition.slug}`
+    ? `Sửa cuộc thi - ${competition.slug}`
     : "Tạo cuộc thi";
   const metricLocked = isEdit && competition.status === "published";
 
@@ -627,7 +627,7 @@ export function CompetitionFormModal({
                   <option value="recall">{METRIC_LABEL.recall}</option>
                 </select>
                 {metricLocked && (
-                  <small>Cuộc thi đã publish — không thể đổi chỉ số chính.</small>
+                  <small>Cuộc thi đã publish - không thể đổi chỉ số chính.</small>
                 )}
               </div>
 
@@ -682,7 +682,7 @@ export function CompetitionFormModal({
               <fieldset className="ac-resource-fieldset">
                 <legend className="sr-only">Tài nguyên tải về</legend>
                 <p className="ac-resource-hint">
-                  Chỉ nhận link Google Drive hoặc Google Docs — hệ thống không lưu file dataset.
+                  Chỉ nhận link Google Drive hoặc Google Docs - hệ thống không lưu file dataset.
                   Nhớ đặt quyền chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
                 </p>
 

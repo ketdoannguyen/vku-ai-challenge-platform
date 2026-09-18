@@ -27,6 +27,6 @@ def configure_scoring(client, competition_id: str, *, ground_truth: bytes = GROU
 
 
 def publish_competition(client, competition_id: str, *, ground_truth: bytes = GROUND_TRUTH_CSV):
-    """Publish kèm cấu hình chấm điểm + ground truth — publish có readiness gate."""
+    """Publish kèm cấu hình chấm điểm + ground truth - publish có readiness gate."""
     configure_scoring(client, competition_id, ground_truth=ground_truth)
     return client.post(f"/api/admin/competitions/{competition_id}/publish")

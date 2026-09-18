@@ -1,5 +1,5 @@
 # COMPETITION_DETAIL_DESIGN.md
-# VKU AI Challenge — Competition Detail Administration
+# VKU AI Challenge - Competition Detail Administration
 
 > Design specification cho toàn bộ module Chi tiết cuộc thi.
 >
@@ -713,7 +713,7 @@ Luân phiên có chủ ý.
 ---
 
 # ============================================================
-# PAGE 1 — NỘI DUNG
+# PAGE 1 - NỘI DUNG
 # ============================================================
 
 # 22. CONTENT TAB GOAL
@@ -868,7 +868,7 @@ Không dùng button black.
 ---
 
 # ============================================================
-# PAGE 2 — ASSETS
+# PAGE 2 - ASSETS
 # ============================================================
 
 # 29. ASSETS TAB GOAL
@@ -1013,7 +1013,7 @@ red.
 ---
 
 # ============================================================
-# PAGE 3 — CHẤM ĐIỂM
+# PAGE 3 - CHẤM ĐIỂM
 # ============================================================
 
 # 35. SCORING TAB GOAL
@@ -1201,7 +1201,7 @@ Chỉ hiển thị information dựa trên config hiện tại.
 ---
 
 # ============================================================
-# PAGE 4 — KẾT QUẢ
+# PAGE 4 - KẾT QUẢ
 # ============================================================
 
 # 44. RESULTS TAB GOAL
@@ -1385,7 +1385,7 @@ Không tự tạo status.
 ---
 
 # ============================================================
-# PAGE 5 — THÀNH VIÊN & MÃ THAM GIA
+# PAGE 5 - THÀNH VIÊN & MÃ THAM GIA
 # ============================================================
 
 # 52. MEMBERS TAB LAYOUT

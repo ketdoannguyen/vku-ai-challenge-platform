@@ -530,7 +530,7 @@ export function AdminCompetitionDetailPage() {
 
   const editDisabled = competition.status === "closed";
   const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
-  // Backend cũ chưa trả `upload_limits` — rơi về mặc định thay vì ẩn hint.
+  // Backend cũ chưa trả `upload_limits` - rơi về mặc định thay vì ẩn hint.
   const uploadLimits = competition.upload_limits ?? DEFAULT_UPLOAD_LIMITS;
   // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
   const publishBlocked = competition.publish_blocked_reason ?? null;
@@ -1351,7 +1351,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
 
 /**
  * Gợi ý cách chia trang nội dung. Đây là hướng dẫn tĩnh cho quản trị viên, không
- * phải dữ liệu của cuộc thi — không suy ra từ API và không thay thế nội dung thật.
+ * phải dữ liệu của cuộc thi - không suy ra từ API và không thay thế nội dung thật.
  */
 const CONTENT_TOPICS: ReadonlyArray<{ title: string; hint: string }> = [
   { title: "Thể lệ", hint: "Điều kiện dự thi, cách tính điểm và quy định bài nộp." },
@@ -1575,7 +1575,7 @@ function ContentRow({
   competitionId: string;
   maxContentMb: number;
   content: AdminContent;
-  /** Vị trí trong danh sách đã sắp theo order — thứ tự hiển thị, không phải `content.order`. */
+  /** Vị trí trong danh sách đã sắp theo order - thứ tự hiển thị, không phải `content.order`. */
   position: number;
   first: boolean;
   last: boolean;
@@ -1740,7 +1740,7 @@ function ContentFormModal({
   }
 
   return (
-    <Modal title={isEdit ? `Sửa nội dung — ${content.title}` : "Thêm trang nội dung"} onClose={onClose}>
+    <Modal title={isEdit ? `Sửa nội dung - ${content.title}` : "Thêm trang nội dung"} onClose={onClose}>
       <form onSubmit={submit}>
         <div className="form-grid">
           <div className="form-field">
@@ -1888,7 +1888,7 @@ function ResourcesPanel({
 
       {locked && (
         <div className="status-banner warning">
-          Cuộc thi đã kết thúc — không thể sửa tài nguyên.
+          Cuộc thi đã kết thúc - không thể sửa tài nguyên.
         </div>
       )}
 
@@ -2419,7 +2419,7 @@ function MembersPanel({
         {competition.join_mode !== "code" ? (
           <p className="text-muted admin-members-note">
             Cuộc thi này dùng chế độ tham gia{" "}
-            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} — không dùng mã.
+            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} - không dùng mã.
           </p>
         ) : (
           <form
@@ -2446,7 +2446,7 @@ function MembersPanel({
               className="input"
               type="password"
               aria-label="Mã tham gia mới"
-              placeholder={codeConfigured ? "Đã đặt mã — nhập mã mới để đổi" : "Chưa đặt mã"}
+              placeholder={codeConfigured ? "Đã đặt mã - nhập mã mới để đổi" : "Chưa đặt mã"}
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value)}
               minLength={8}

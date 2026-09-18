@@ -64,7 +64,7 @@ async def get_visible_content(
 
 @router.get("/{slug}/assets/{name}")
 async def get_asset(slug: str, name: str, request: Request) -> Response:
-    """Ảnh công khai trong nội dung — không cần phiên, nhưng vẫn chặn traversal/symlink."""
+    """Ảnh công khai trong nội dung - không cần phiên, nhưng vẫn chặn traversal/symlink."""
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
     extension = Path(name).suffix.lower()

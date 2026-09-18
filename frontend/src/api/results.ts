@@ -71,5 +71,5 @@ export function fetchLeaderboard(
 }
 
 export function formatScore(value: number | null | undefined): string {
-  return value == null ? "—" : value.toFixed(6);
+  return value == null ? "-" : value.toFixed(6);
 }

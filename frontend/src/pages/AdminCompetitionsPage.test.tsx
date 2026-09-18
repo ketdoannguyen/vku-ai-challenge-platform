@@ -55,7 +55,7 @@ function makeCompetition(index: number, overrides: Record<string, unknown> = {})
   return { ...DRAFT, id: String(index), slug: `cuoc-thi-${index}`, name: `Cuộc thi ${index}`, ...overrides };
 }
 
-/** 6 cuộc thi: 2 draft, 3 published, 1 closed — đủ để kiểm cả đếm thống kê lẫn phân trang. */
+/** 6 cuộc thi: 2 draft, 3 published, 1 closed - đủ để kiểm cả đếm thống kê lẫn phân trang. */
 const SIX = [
   makeCompetition(1),
   makeCompetition(2),
@@ -65,7 +65,7 @@ const SIX = [
   makeCompetition(6, { status: "closed" }),
 ];
 
-/** Card thống kê chứa nhãn đã cho — tìm qua phần tử cha để không phụ thuộc cấu trúc bên trong. */
+/** Card thống kê chứa nhãn đã cho - tìm qua phần tử cha để không phụ thuộc cấu trúc bên trong. */
 function statArticle(stats: HTMLElement, label: string) {
   return within(stats).getByText(label).closest("article") as HTMLElement;
 }
@@ -505,5 +505,5 @@ test("tiêu đề tab đặt theo tên trang", async () => {
     </MemoryRouter>,
   );
   await screen.findByText("AI Challenge 2026");
-  expect(document.title).toBe("Quản lý cuộc thi — AI Challenge");
+  expect(document.title).toBe("Quản lý cuộc thi - AI Challenge");
 });

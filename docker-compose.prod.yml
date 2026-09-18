@@ -1,4 +1,4 @@
-# Production stack (Sprint 08) — file tự đứng, KHÔNG kế thừa docker-compose.yml.
+# Production stack (Sprint 08) - file tự đứng, KHÔNG kế thừa docker-compose.yml.
 #
 # Khác biệt có chủ ý so với bản dev:
 #   - Không publish bất kỳ port nào ra host. cloudflared đi vào `web:80` qua Docker network,
@@ -59,14 +59,14 @@ services:
       MAX_CONTENT_MB: ${MAX_CONTENT_MB:-2}
       MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
       DATA_DIR: /data
-      # SESSION_SECRET trong .env.example là config chết (ADR-008) — session là token ngẫu nhiên
+      # SESSION_SECRET trong .env.example là config chết (ADR-008) - session là token ngẫu nhiên
       # server-side, không ký cookie, nên không truyền và không sinh thêm.
       SESSION_LIFETIME_HOURS: ${SESSION_LIFETIME_HOURS:-24}
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aic_session}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
     expose:
-      - "8000" # internal only — đi qua Nginx same-origin (ADR-002)
+      - "8000" # internal only - đi qua Nginx same-origin (ADR-002)
     volumes:
       - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/app:/data
     depends_on:
@@ -124,7 +124,7 @@ services:
         condition: service_healthy
     healthcheck:
       # Image cloudflared là distroless (không có shell/curl), nhưng chính binary cloudflared
-      # gọi được /ready của metrics server — đã kiểm chứng trả exit 0 khi tunnel lên.
+      # gọi được /ready của metrics server - đã kiểm chứng trả exit 0 khi tunnel lên.
       test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
       interval: 30s
       timeout: 10s

@@ -14,7 +14,7 @@ function renderPage() {
   );
 }
 
-/** Link nguồn/website ngoài — tách khỏi link nội bộ để kiểm tra thuộc tính an toàn. */
+/** Link nguồn/website ngoài - tách khỏi link nội bộ để kiểm tra thuộc tính an toàn. */
 function externalLinks() {
   return screen.getAllByRole("link").filter((link) => link.getAttribute("target") === "_blank");
 }
@@ -26,7 +26,7 @@ afterEach(() => {
 test("tiêu đề trang và tiêu đề tab", () => {
   renderPage();
   expect(screen.getByRole("heading", { level: 1, name: "Giới thiệu" })).toBeTruthy();
-  expect(document.title).toBe("Giới thiệu — AI Challenge");
+  expect(document.title).toBe("Giới thiệu - AI Challenge");
 });
 
 test("nêu tên chính thức và quan hệ thành viên Đại học Đà Nẵng", () => {
@@ -83,7 +83,7 @@ test("cấu trúc heading: một h1 và năm khối h2 theo đúng thứ tự đ
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     "Về nền tảng AI Challenge",
-    "VKU — đơn vị chủ trì",
+    "VKU - đơn vị chủ trì",
     "Đơn vị và đầu mối hỗ trợ",
     "Bắt đầu",
     "Nguồn thông tin",

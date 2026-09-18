@@ -10,21 +10,21 @@ export interface SubmissionConfig {
   id_column: string | null;
   prediction_column: string | null;
   average: "binary" | "macro" | "weighted" | null;
-  /** Chỉ có với admin và thành viên đang hoạt động — nhãn dương là thông tin của ground truth. */
+  /** Chỉ có với admin và thành viên đang hoạt động - nhãn dương là thông tin của ground truth. */
   pos_label?: string | null;
   max_upload_mb: number;
 }
 
-/** Link tài nguyên BTC khai báo — nền tảng chỉ lưu URL, không host dataset. */
+/** Link tài nguyên BTC khai báo - nền tảng chỉ lưu URL, không host dataset. */
 export interface CompetitionResource {
   label: string;
   url: string;
 }
 
-/** Khớp RESOURCES_MAX ở backend — chặn thêm dòng ngay trên UI. */
+/** Khớp RESOURCES_MAX ở backend - chặn thêm dòng ngay trên UI. */
 export const MAX_COMPETITION_RESOURCES = 10;
 
-/** Hạn mức nộp trong ngày UTC — chỉ detail trả về, và chỉ cho thành viên đang hoạt động. */
+/** Hạn mức nộp trong ngày UTC - chỉ detail trả về, và chỉ cho thành viên đang hoạt động. */
 export interface QuotaStatus {
   per_day: number;
   used_today: number;
@@ -61,7 +61,7 @@ export interface JoinResponse {
 export interface LeaveResponse {
   competition_id: string;
   membership: Membership;
-  /** false khi gọi lại trên membership đã rời — thao tác vẫn thành công. */
+  /** false khi gọi lại trên membership đã rời - thao tác vẫn thành công. */
   left_now: boolean;
 }
 
@@ -69,14 +69,14 @@ export interface CompetitionsResponse {
   competitions: Competition[];
 }
 
-/** Bảng admin kèm số liệu tổng hợp và created_by — endpoint public không trả về các field này. */
+/** Bảng admin kèm số liệu tổng hợp và created_by - endpoint public không trả về các field này. */
 export interface AdminCompetition extends Competition {
   created_by: string;
   /** Chỉ đếm thành viên đang hoạt động; người đã rời/bị vô hiệu hóa nằm ở inactive_member_count. */
   member_count: number;
   inactive_member_count: number;
   submission_count: number;
-  /** Chỉ endpoint admin detail trả về — list cố ý không đọc ground truth cho từng dòng. */
+  /** Chỉ endpoint admin detail trả về - list cố ý không đọc ground truth cho từng dòng. */
   publish_ready?: boolean;
   publish_blocked_reason?: PublishBlockedReason | null;
   /** Trần upload theo môi trường; optional để frontend mới vẫn chạy với backend cũ. */

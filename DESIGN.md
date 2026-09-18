@@ -1,4 +1,4 @@
-# DESIGN.md — VKU AI Challenge Competition Dashboard
+# DESIGN.md - VKU AI Challenge Competition Dashboard
 
 Nguồn yêu cầu cho giao diện trang danh sách cuộc thi (`/`). Tài liệu này mô tả **thiết kế**;
 mọi quy tắc về dữ liệu và nghiệp vụ bên dưới là ràng buộc cứng, không phải gợi ý.
@@ -124,7 +124,7 @@ phải vẽ bằng CSS (`::before` + `linear-gradient`), `pointer-events: none`,
 không ảnh AI, không ảnh campus giả.
 
 Bên trái giữ đúng text hiện có: tiêu đề `Cuộc thi`, phụ đề `Các cuộc thi bạn có thể tham gia`.
-Bên phải là ba ô thống kê, giá trị lấy từ logic hiện tại — **không hardcode**.
+Bên phải là ba ô thống kê, giá trị lấy từ logic hiện tại - **không hardcode**.
 
 Toolbar (§9) nằm trong cùng panel, ngăn cách bằng vạch mảnh chứ không thành băng riêng; panel
 đo được 209px ở 1440px. Đây là chủ ý: vùng "tiêu đề + thống kê + tìm kiếm/lọc" đọc như một
@@ -149,7 +149,7 @@ Search và filter cùng hàng ở desktop, cao 44px, bo 10px, focus-visible rõ.
 - Chưa chọn: nền `--surface-container-low`, viền `--vku-border`, chữ `--text`.
 - Không render sort giả: hệ thống hiện không có state/control/logic sort.
 - Từ 48rem hàng toolbar giãn hết bề ngang panel: ô search chiếm phần trống, ba nút lọc giữ
-  nguyên cỡ và dồn về mép phải — trùng đúng mép phải ô thống kê "Đã tham gia" ở khối trên.
+  nguyên cỡ và dồn về mép phải - trùng đúng mép phải ô thống kê "Đã tham gia" ở khối trên.
 
 ## 10. Lưới cuộc thi
 
@@ -180,7 +180,7 @@ index 1 = red     index 4 = red
 index 2 = yellow  index 5 = yellow
 ```
 
-- Cột 1 luôn xanh, cột 2 luôn đỏ, cột 3 luôn vàng — lặp lại theo hàng.
+- Cột 1 luôn xanh, cột 2 luôn đỏ, cột 3 luôn vàng - lặp lại theo hàng.
 - Cuộc thi `status = closed` nằm ở cột 2 **vẫn giữ nguyên thẻ đỏ**; chỉ status badge chuyển xám.
 - Không có card nào chuyển xám/chuyển màu vì status.
 - Theme tính trên mảng `filtered` đang render, nên sau search/filter card đầu tiên trở lại xanh.
@@ -205,7 +205,7 @@ border-radius: 12–14px;
 - Nút primary theo màu cột; `btn-outline` theo màu cột.
 - Text và action của button giữ nguyên theo logic hiện tại.
 - Thẻ đã tham gia chỉ hiện "Đã tham gia" + "Vào cuộc thi". Nút `btn-danger-ghost` "Rời cuộc thi"
-  **không đặt trong danh sách** — `JoinControl` nhận `showLeave={false}`; thao tác rời màu đỏ
+  **không đặt trong danh sách** - `JoinControl` nhận `showLeave={false}`; thao tác rời màu đỏ
   vẫn nằm ở trang chi tiết cuộc thi và mở modal xác nhận danger.
 
 Hover: dịch lên 2px + shadow nhẹ, 180–220ms. Chỉ bật trong
@@ -268,7 +268,7 @@ sidebar phải hay ảnh AI-generated. Không cài thêm UI framework/dependency
 
 ## 20. Ghi chú riêng của repository
 
-Các điểm dưới đây điều chỉnh contract cho đúng với code hiện tại — phần còn lại giữ nguyên.
+Các điểm dưới đây điều chỉnh contract cho đúng với code hiện tại - phần còn lại giữ nguyên.
 
 - **CSS thuần, không Tailwind.** Toàn bộ style nằm ở `frontend/src/index.css`; các đoạn
   `className` Tailwind trong contract gốc được chuyển thành CSS thường. Không thêm Tailwind,
@@ -276,7 +276,7 @@ Các điểm dưới đây điều chỉnh contract cho đúng với code hiện
 - **Icon là SVG inline.** Repo không dùng Lucide/Heroicons; mọi icon trong contract được vẽ
   bằng component SVG nội bộ theo convention `aria-hidden="true" focusable="false"`.
 - **Sort không tồn tại.** Repo hiện không có state, control hay logic sort nào. Thêm sort sẽ
-  đổi thứ tự dữ liệu API trả về, tức đổi business behavior — nên không làm.
+  đổi thứ tự dữ liệu API trả về, tức đổi business behavior - nên không làm.
 - **Logo chính thức đã có.** `frontend/public/vku-logo.png` do người dùng cung cấp, đã được
   `BrandMark` trong `frontend/src/App.tsx` dùng. Không tạo hay thay asset mới.
 - **Light mode only.** `color-scheme: light` được khoá ở `:root`; không thêm

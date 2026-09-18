@@ -7,7 +7,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Status: accepted
 - Context: MVP phục vụ 40-80 đội; cần chi phí và vận hành tối thiểu.
 - Decision: Toàn bộ runtime trên 01 Google Compute Engine VM (Ubuntu Server LTS), điều phối bằng Docker Compose. Không Kubernetes, không multi-VM, không Cloud Run.
-- Consequences: Đơn giản, rẻ, dễ backup cả VM/disk. Không HA — chấp nhận được cho MVP.
+- Consequences: Đơn giản, rẻ, dễ backup cả VM/disk. Không HA - chấp nhận được cho MVP.
 - Affected files/contracts: `plans/01_MASTER_CONTEXT.md` §3, `docs/DEPLOYMENT.md`
 
 ## ADR-002 - Same-origin frontend/API through Nginx
@@ -71,11 +71,11 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Status: accepted
 - Context: Sprint 03 cần chốt status transition, quy tắc edit theo trạng thái, hành vi clone và participant visibility; sprint file yêu cầu "clear rules" nhưng không chỉ định chi tiết.
 - Decision:
-  - Lifecycle: create → `draft`; `draft` → `published` (publish); `published` → `closed` (close). `closed` là terminal — không reopen/archive ở MVP (sprint file: dừng và hỏi nếu cần).
-  - Edit theo status: `draft` sửa mọi config field; `published` mọi field trừ `primary_metric` (ảnh hưởng leaderboard đã có); `closed` read-only. `slug`, `status`, `created_by` luôn immutable — status chỉ đổi qua endpoint publish/close.
+  - Lifecycle: create → `draft`; `draft` → `published` (publish); `published` → `closed` (close). `closed` là terminal - không reopen/archive ở MVP (sprint file: dừng và hỏi nếu cần).
+  - Edit theo status: `draft` sửa mọi config field; `published` mọi field trừ `primary_metric` (ảnh hưởng leaderboard đã có); `closed` read-only. `slug`, `status`, `created_by` luôn immutable - status chỉ đổi qua endpoint publish/close.
   - Clone: copy config (name/mô tả/join_mode/metric/quota/leaderboard_visible) thành draft mới với slug tự sinh `<slug>-copy`; KHÔNG copy status, dates (now → +1 năm), submissions, memberships. Content/ground-truth clone defer Sprint 04.
   - Visibility participant: API public chỉ trả `published` + `closed`; `draft` trả 404 như không tồn tại (không tiết lộ sự tồn tại).
-- Consequences: Quota 0-1000, slug ≤64 ký tự enforced ở API layer. Publish/close sai trạng thái → 422 `INVALID_TRANSITION`. Không reopen — nếu BTC cần, phải hỏi user trước khi thêm transition mới.
+- Consequences: Quota 0-1000, slug ≤64 ký tự enforced ở API layer. Publish/close sai trạng thái → 422 `INVALID_TRANSITION`. Không reopen - nếu BTC cần, phải hỏi user trước khi thêm transition mới.
 - Affected files/contracts: `backend/app/competitions/`, `docs/API_CONTRACT.md` §3+§5.2, `docs/DATA_MODEL.md` §3
 
 ## ADR-010 - Sprint 04: membership policies, content storage & safe Markdown
@@ -136,7 +136,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 ## ADR-014 - Sprint 08: đọc công khai cho khách (danh sách, chi tiết, nội dung public)
 - Date: 2026-09-17
 - Status: accepted
-- Context: Nút "quay lại" ở `/login` bấm được và `navigate("/")` chạy, nhưng `RequireAuth` đẩy ngược về `/login` vì `/` đòi phiên, và backend cũng trả 401 cho `GET /api/competitions` khi ẩn danh — người dùng không có lối về dashboard. User chọn hướng mở dashboard cho khách thay vì sửa nút quay lại.
+- Context: Nút "quay lại" ở `/login` bấm được và `navigate("/")` chạy, nhưng `RequireAuth` đẩy ngược về `/login` vì `/` đòi phiên, và backend cũng trả 401 cho `GET /api/competitions` khi ẩn danh - người dùng không có lối về dashboard. User chọn hướng mở dashboard cho khách thay vì sửa nút quay lại.
 - Decision:
   - Thêm `get_optional_account`/`OptionalAccount` (`backend/app/auth/dependencies.py`): trả `request.state.account` hoặc `None` thay vì 401. Middleware sẵn có chỉ set `request.state.account` khi có cookie phiên nên không cần đổi gì thêm.
   - Chuyển sang auth tuỳ chọn: `GET /api/competitions`, `GET /api/competitions/{slug}`, `GET /api/competitions/{slug}/contents`, `.../contents/{content_slug}`, `.../assets/{name}`.
@@ -144,7 +144,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - **Thay đổi so với ADR-010**, vốn ghi "public = mọi account đã đăng nhập (không anonymous API)". Từ ADR-014, `public` nghĩa là "mọi người, kể cả khách"; `members` không đổi.
   - Vẫn yêu cầu đăng nhập (401, dùng `CurrentAccount`): join, submissions, submissions/me, leaderboard. Frontend giữ ranh giới tương ứng: bỏ `RequireAuth` ở `/` và route cha `/competitions/:slug`, bọc lại cho 3 route con `submit`/`submissions`/`leaderboard`.
   - Điều hướng khách: navbar hiện mục "Cuộc thi"; drawer mobile (dưới 40rem nút "Đăng nhập" trên header bị ẩn) có thêm lối "Đăng nhập"; thẻ cuộc thi hiện CTA "Đăng nhập để tham gia" kèm `state.from` để quay lại đúng trang, thay vì bắn POST join rồi ăn 401. Ô thống kê "Đã tham gia" bị ẩn với khách vì luôn bằng 0.
-- Consequences: `assets/{name}` trước đây chỉ đòi đăng nhập chứ không kiểm tra visibility của content; mở cho khách giữ nguyên mức phơi nhiễm với participant và mở rộng thêm cho khách — chấp nhận để ảnh trong nội dung public hiển thị. `Cache-Control: private, max-age=300` giữ nguyên. Leaderboard vẫn chặn đăng nhập vì nằm ngoài phạm vi user xác nhận.
+- Consequences: `assets/{name}` trước đây chỉ đòi đăng nhập chứ không kiểm tra visibility của content; mở cho khách giữ nguyên mức phơi nhiễm với participant và mở rộng thêm cho khách - chấp nhận để ảnh trong nội dung public hiển thị. `Cache-Control: private, max-age=300` giữ nguyên. Leaderboard vẫn chặn đăng nhập vì nằm ngoài phạm vi user xác nhận.
 - Affected files/contracts: `backend/app/auth/dependencies.py`, `backend/app/competitions/router.py`, `backend/app/content/router.py`, `frontend/src/App.tsx`, `frontend/src/components/JoinControl.tsx`, `frontend/src/pages/DashboardPage.tsx`, `docs/API_CONTRACT.md` §3, `docs/TEST_MATRIX.md` §4-5
 
 ## ADR-015 - Tài nguyên cuộc thi là link Google Drive, không host binary
@@ -156,7 +156,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Không upload dataset/zip/binary lên hệ thống; không proxy download, không gọi Drive API, không lưu kích thước/version/checksum. Platform chỉ validate shape của URL và **không** kiểm tra link còn truy cập được.
   - FE re-filter URL lần nữa trước khi render anchor (`target="_blank"`, `rel="noopener noreferrer nofollow"`) để document legacy/DB sửa tay không tạo được link nguy hiểm; không dùng attribute `download` vì cross-origin.
   - Block "Tài nguyên tải về" nằm dưới "Mục lục nội dung" trong tab Tổng quan, ẩn khi rỗng. Feature upload ảnh dùng trong Markdown giữ nguyên, không liên quan.
-- Consequences: Rủi ro chuyển sang phía BTC — link có thể private/hết hạn mà platform không biết; helper text yêu cầu bật "Bất kỳ ai có liên kết". Đổi lại không có file người dùng nào đi vào `/data`, không tốn dung lượng, không cần thêm hạ tầng.
+- Consequences: Rủi ro chuyển sang phía BTC - link có thể private/hết hạn mà platform không biết; helper text yêu cầu bật "Bất kỳ ai có liên kết". Đổi lại không có file người dùng nào đi vào `/data`, không tốn dung lượng, không cần thêm hạ tầng.
 - Affected files/contracts: `backend/app/competitions/service.py` (`normalize_resources`, `_validate_resource_url`), `frontend/src/components/CompetitionResources.tsx`, `docs/API_CONTRACT.md` §3+§5.6, `docs/DATA_MODEL.md` §9
 
 ## ADR-016 - Tách representation public/admin, không lộ `created_by`/`pos_label`, chuẩn hoá datetime
@@ -174,12 +174,12 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 ## ADR-017 - Publish phải chấm được, join mở đến hết `end_at`
 - Date: 2026-09-17
 - Status: accepted
-- Context: Publish chỉ kiểm tra trạng thái nên BTC publish được một cuộc thi thiếu scoring config hoặc ground truth hỏng — mọi bài nộp sau đó đều 422 `SCORING_NOT_READY`. Ở chiều ngược lại, join chỉ chặn draft/closed nên thí sinh vẫn join được sau `end_at` cho tới khi admin bấm close thủ công.
+- Context: Publish chỉ kiểm tra trạng thái nên BTC publish được một cuộc thi thiếu scoring config hoặc ground truth hỏng - mọi bài nộp sau đó đều 422 `SCORING_NOT_READY`. Ở chiều ngược lại, join chỉ chặn draft/closed nên thí sinh vẫn join được sau `end_at` cho tới khi admin bấm close thủ công.
 - Decision:
   - `backend/app/scoring/readiness.py` là **một** nguồn sự thật: đọc và parse lại ground truth thật bằng chính code chấm điểm (không chỉ `is_file()`), trả `{ready, code, message}`. Publish, banner admin và endpoint scoring đều đi qua đây.
   - Thứ tự kiểm tra khi publish: join code (`JOIN_CODE_REQUIRED`) trước, readiness sau (`SCORING_CONFIG_REQUIRED`/`SCORING_CONFIG_INVALID`/`GROUND_TRUTH_REQUIRED`/`GROUND_TRUTH_INVALID`). Publish thất bại giữ nguyên `draft`; submission runtime vẫn map về code chung `SCORING_NOT_READY` để không phá contract cũ.
   - Admin detail trả `publish_ready`/`publish_blocked_reason`; list cố ý không, vì readiness phải đọc file (N+1). Nút Publish ở list vẫn gọi backend và hiển thị lỗi API.
-  - Join mở từ lúc publish đến hết `end_at`. Không có khái niệm "hạn đăng ký". Không kiểm tra `start_at` — join sớm để chuẩn bị là hợp lệ, chỉ nộp bài mới phụ thuộc `start_at`.
+  - Join mở từ lúc publish đến hết `end_at`. Không có khái niệm "hạn đăng ký". Không kiểm tra `start_at` - join sớm để chuẩn bị là hợp lệ, chỉ nộp bài mới phụ thuộc `start_at`.
   - Thứ tự policy join: draft/unknown → 404; inactive membership → 403; đã join → 200 idempotent (kể cả sau deadline/closed); closed → `JOIN_CLOSED`; `now > end_at` → `JOIN_DEADLINE_PASSED`; rồi mới tới invite/code. Membership hiện có được xử lý trước cửa sổ thời gian để UI luôn đọc được trạng thái của mình.
 - Consequences: BTC phải có config + ground truth hợp lệ trước khi mở cuộc thi; đổi lại không còn tình huống publish xong mà không ai nộp được. `JOIN_CLOSED` và `JOIN_DEADLINE_PASSED` cùng 422 nhưng khác code để UI phân biệt "BTC đã đóng" với "đã quá hạn".
 - Affected files/contracts: `backend/app/scoring/readiness.py`, `backend/app/competitions/admin_router.py`, `backend/app/memberships/router.py`, `frontend/src/components/JoinControl.tsx`, `docs/API_CONTRACT.md` §3+§5.2+§6
@@ -194,7 +194,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - **Xoá competition chỉ cho `draft`** (`confirm_slug` phải khớp, sai → 422 `CONFIRM_SLUG_MISMATCH`, không phải draft → 409 `COMPETITION_NOT_DELETABLE`). Published/closed phải giữ lịch sử; muốn kết thúc thì Đóng cuộc thi.
   - Cascade không dùng transaction (Mongo standalone): xoá con trước, cha sau, để lỗi giữa đường vẫn retry được. File dọn **sau** khi DB xong, best-effort; không phục hồi DB nếu xoá file lỗi mà báo `files_removed:false`.
   - `member_count` của admin đổi nghĩa thành số membership đang hoạt động, thêm `active_total` bên cạnh `total` để UI không trộn hai con số.
-- Consequences: Không có đường nào xoá mất điểm đã chấm. Đổi lại, dữ liệu membership inactive tồn tại vĩnh viễn (đúng chủ đích) và race nhỏ giữa check-vs-delete member với một submission đồng thời vẫn tồn tại — chấp nhận, backend vẫn enforce membership khi nộp (ghi ở technical debt).
+- Consequences: Không có đường nào xoá mất điểm đã chấm. Đổi lại, dữ liệu membership inactive tồn tại vĩnh viễn (đúng chủ đích) và race nhỏ giữa check-vs-delete member với một submission đồng thời vẫn tồn tại - chấp nhận, backend vẫn enforce membership khi nộp (ghi ở technical debt).
 - Affected files/contracts: `backend/app/competitions/service.py` (`delete_competition_cascade`, `remove_competition_files`), `backend/app/memberships/{router,admin_router}.py`, `backend/app/submissions/service.py`, `docs/API_CONTRACT.md` §3+§5.2+§5.3, `docs/DATA_MODEL.md` §10
 
 ## ADR-019 - Quota hiển thị trước khi nộp; leaderboard phân trang nhưng hạng vẫn toàn cục
@@ -207,12 +207,12 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Leaderboard participant nhận `limit` (1-200, default 50)/`offset` và trả `{entries,total,limit,offset,has_more,me}`. Ranking vẫn tính full trong bộ nhớ (quy mô 40-80), `rank` giữ nguyên thứ hạng toàn cục, `me` tìm trên full list trước rồi mới cắt trang nên vẫn đúng khi người dùng ngoài page.
   - `me` dùng chung serializer participant: không có `account_id`/email. Admin leaderboard và XLSX export vẫn lấy toàn bộ danh sách, contract không đổi.
   - Countdown ở dashboard/chi tiết đổi thành clock sống: một page-level clock cho dashboard (không mở timer cho từng thẻ), nhịp thưa 30 giây khi còn trên 1 ngày và mỗi giây khi dưới 1 ngày, dọn timer khi unmount, đồng bộ lại khi tab visible trở lại.
-- Consequences: Thêm một `count_documents` cho mỗi lần mở detail của thành viên — chấp nhận. Phân trang chỉ giảm payload/UI, không đổi độ phức tạp query; còn in-memory nên phải xem lại nếu vượt quy mô hiện tại. Countdown không còn đứng yên nhưng tốn timer chạy nền; nhịp thưa giữ chi phí thấp.
+- Consequences: Thêm một `count_documents` cho mỗi lần mở detail của thành viên - chấp nhận. Phân trang chỉ giảm payload/UI, không đổi độ phức tạp query; còn in-memory nên phải xem lại nếu vượt quy mô hiện tại. Countdown không còn đứng yên nhưng tốn timer chạy nền; nhịp thưa giữ chi phí thấp.
 - Affected files/contracts: `backend/app/submissions/service.py` (`quota_status`), `backend/app/competitions/router.py`, `backend/app/leaderboard/{router,service}.py`, `frontend/src/hooks/useCountdown.ts`, `frontend/src/lib/countdown.ts`, `docs/API_CONTRACT.md` §3+§4
 
 ## ADR-020 - Tạm hoãn public/private leaderboard split (deferred)
 - Date: 2026-09-17
-- Status: deferred — không implement trong scope này
+- Status: deferred - không implement trong scope này
 - Context: Cần bảng xếp hạng public và private (theo mùa thi). Đề xuất ban đầu là tạo hai competition, một public một private.
 - Decision: Không làm theo hướng hai competition, và cũng chưa implement split trong scope hiện tại.
   - Hai competition không tương đương: join/quota/content/submission/export bị nhân đôi, một lần nộp không sinh được hai điểm đúng nghĩa, và thí sinh phải join hai lần.
@@ -229,9 +229,9 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Nội dung là văn bản tĩnh + liên kết/hộp thư chính thức. Mọi khẳng định về VKU gắn với mục "Nguồn thông tin" và ngày truy cập; không thêm khẩu hiệu, xếp hạng, số liệu hay nội dung không có nguồn. **[Sửa bởi ADR-022: chỉ `/gioi-thieu` còn khối "Nguồn thông tin".]**
   - Thay đổi duy nhất trên shell hiện có: hai mục thêm vào `useNavItems()` (dùng chung navbar desktop và drawer). Nhãn điều hướng dùng bản ngắn `Giới thiệu`/`Hỗ trợ` để navbar không chật ở 768–1023px; H1 giữ tên đầy đủ "Hỗ trợ & Liên hệ". Không sửa CSS, không sửa route/nội dung/bố cục của bất kỳ trang hiện có nào. **[Sửa bởi ADR-022: `/ho-tro` được redesign và có CSS riêng.]**
   - Liên hệ ba tầng: VKU (chung), Phòng Khoa học Công nghệ - Hợp tác Quốc tế, và hỗ trợ kỹ thuật nền tảng. Không có biểu mẫu liên hệ; chỉ website, `mailto:` và `tel:`.
-  - Thông tin cá nhân của đầu mối hỗ trợ kỹ thuật (Nguyễn Kết Đoàn — `nkdoan@vku.udn.vn` — `0396090576`) do user uỷ quyền công bố, chỉ gồm tên/email/điện thoại, không thêm chức danh hay dữ liệu khác.
-- Consequences: Dashboard, trang chi tiết cuộc thi và luồng nghiệp vụ giữ nguyên; chỉ navbar có thêm hai mục. Nội dung tĩnh có thể lệch khi VKU đổi thông tin — vì vậy dữ kiện, nguồn và ngày truy cập nằm một chỗ ở `frontend/src/lib/vkuInfo.ts`. Không thêm footer, contact form, asset, dependency hay schema.
-  - Hạn chế đã biết (đo trên browser; chưa xử lý vì nằm ngoài phạm vi additive-only của ADR này): hai mục nav mới làm `.app-nav` rộng thêm ~95px. Ở khung nhìn 1024–1152px với tài khoản **admin** (5 mục), capsule tên vượt khỏi cột phải của `.app-header-inner` và chồng lên mục cuối khi tên hiển thị rộng hơn ~130px — đo được "Trần Thị Ngọc Huyền" (139px) chồng 6px ở 1024px, tên dài 252px chồng tới 119px. Đây là điểm yếu sẵn có của shell: trước ADR-021, tên 252px đã chồng 24px ở 1024px, ADR-021 mở rộng vùng lỗi. Từ 1280px trở lên không chồng; khách và thí sinh với tên thực tế không bị. Muốn xử lý dứt điểm cần một thay đổi CSS riêng cho `.app-header-inner`/`.app-header-right`.
+  - Thông tin cá nhân của đầu mối hỗ trợ kỹ thuật (Nguyễn Kết Đoàn - `nkdoan@vku.udn.vn` - `0396090576`) do user uỷ quyền công bố, chỉ gồm tên/email/điện thoại, không thêm chức danh hay dữ liệu khác.
+- Consequences: Dashboard, trang chi tiết cuộc thi và luồng nghiệp vụ giữ nguyên; chỉ navbar có thêm hai mục. Nội dung tĩnh có thể lệch khi VKU đổi thông tin - vì vậy dữ kiện, nguồn và ngày truy cập nằm một chỗ ở `frontend/src/lib/vkuInfo.ts`. Không thêm footer, contact form, asset, dependency hay schema.
+  - Hạn chế đã biết (đo trên browser; chưa xử lý vì nằm ngoài phạm vi additive-only của ADR này): hai mục nav mới làm `.app-nav` rộng thêm ~95px. Ở khung nhìn 1024–1152px với tài khoản **admin** (5 mục), capsule tên vượt khỏi cột phải của `.app-header-inner` và chồng lên mục cuối khi tên hiển thị rộng hơn ~130px - đo được "Trần Thị Ngọc Huyền" (139px) chồng 6px ở 1024px, tên dài 252px chồng tới 119px. Đây là điểm yếu sẵn có của shell: trước ADR-021, tên 252px đã chồng 24px ở 1024px, ADR-021 mở rộng vùng lỗi. Từ 1280px trở lên không chồng; khách và thí sinh với tên thực tế không bị. Muốn xử lý dứt điểm cần một thay đổi CSS riêng cho `.app-header-inner`/`.app-header-right`.
 - Affected files/contracts: `frontend/src/App.tsx`, `frontend/src/lib/vkuInfo.ts`, `frontend/src/pages/AboutPage.tsx`, `frontend/src/pages/SupportPage.tsx`, `docs/DECISIONS.md`
 
 ## ADR-022 - Redesign `/ho-tro` thành Help Center: bỏ khối "Nguồn thông tin", FAQ accordion
@@ -241,9 +241,9 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Decision:
   - Trình bày lại `/ho-tro`: hero VKU, 6 bước thành timeline dọc có nhịp màu blue→red→yellow theo chỉ số bước (thuần trang trí, không mang nghĩa nghiệp vụ), FAQ thành accordion, panel Liên hệ 3 tầng. Desktop khoảng 70/30; dưới 1200px một cột theo thứ tự Hướng dẫn → Liên hệ → FAQ.
   - **Bỏ hẳn khối "Nguồn thông tin" trên `/ho-tro`** (đảo một phần ADR-021). Vẫn không thêm nguồn mới, không đổi email/điện thoại/địa chỉ/đơn vị; mọi dữ kiện vẫn lấy từ `frontend/src/lib/vkuInfo.ts`. Khối "Nguồn thông tin" của `/gioi-thieu` giữ nguyên, kèm `SOURCE_ACCESSED`.
-  - Không render "Danh mục hỗ trợ", sidebar phụ, CTA "Cần hỗ trợ thêm?" hay biểu mẫu liên hệ; không chatbot/ticket/SLA. Không thêm API, dependency, asset hay route — SVG inline theo convention sẵn có, light mode only.
-  - FAQ là accordion native (`button` trong `h3`, `aria-expanded`/`aria-controls`; panel `role="region"` + `aria-labelledby`) đóng hết mặc định và chỉ mở một mục. Panel **luôn được mount**, đóng bằng thuộc tính `hidden` để `aria-controls` không trỏ vào phần tử không tồn tại — vì vậy CSS không được khai báo `display` trên `.support-faq-panel`.
-  - `/ho-tro` dùng trần 1440px qua `.app-main-support` — ngoại lệ page-specific mà `VKU_GLOBAL_DESIGN.md` §9 cho phép. Breakpoint 70/30 đặt tại `75rem` (1200px) chứ không phải 1024px, vì cột phải 30% ở 1024px chỉ còn ~215px, không đủ cho chip email.
+  - Không render "Danh mục hỗ trợ", sidebar phụ, CTA "Cần hỗ trợ thêm?" hay biểu mẫu liên hệ; không chatbot/ticket/SLA. Không thêm API, dependency, asset hay route - SVG inline theo convention sẵn có, light mode only.
+  - FAQ là accordion native (`button` trong `h3`, `aria-expanded`/`aria-controls`; panel `role="region"` + `aria-labelledby`) đóng hết mặc định và chỉ mở một mục. Panel **luôn được mount**, đóng bằng thuộc tính `hidden` để `aria-controls` không trỏ vào phần tử không tồn tại - vì vậy CSS không được khai báo `display` trên `.support-faq-panel`.
+  - `/ho-tro` dùng trần 1440px qua `.app-main-support` - ngoại lệ page-specific mà `VKU_GLOBAL_DESIGN.md` §9 cho phép. Breakpoint 70/30 đặt tại `75rem` (1200px) chứ không phải 1024px, vì cột phải 30% ở 1024px chỉ còn ~215px, không đủ cho chip email.
   - Liên hệ **không** dùng `position: sticky`: panel có thể cao hơn viewport và sẽ chui dưới header cố định, che control đang focus.
 - Consequences: `/ho-tro` không còn chỗ trích dẫn nguồn, nên khi VKU đổi thông tin chỉ còn `/gioi-thieu` hiển thị ngày truy cập; bù lại trang gọn hơn và không lặp lại cùng một danh sách link ở hai nơi. Nội dung, thứ tự 3 tầng liên hệ và mọi `mailto:`/`tel:`/URL giữ nguyên. Rủi ro còn lại: nếu sau này thêm nguồn mới cho dữ kiện trên `/ho-tro` thì phải mở lại quyết định này.
 - Affected files/contracts: `frontend/src/pages/SupportPage.tsx`, `frontend/src/pages/SupportPage.test.tsx`, `frontend/src/App.tsx`, `frontend/src/index.css`, `frontend/src/lib/vkuInfo.ts`, `SUPPORT_PAGE_DESIGN.md`, `docs/TEST_MATRIX.md`
@@ -253,13 +253,13 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Status: accepted
 - Context: Sau khi dashboard, hai màn quản trị và `/ho-tro` chuyển sang design system VKU, `/gioi-thieu` là trang cuối cùng còn dùng class chung `.page`/`.card`/`.ov-*`: nội dung đúng nhưng đổ thành khối văn bản dài, hierarchy yếu, không có neo thị giác nào và lệch hẳn so với phần còn lại của hệ thống. User yêu cầu redesign theo `ABOUT_PAGE_DESIGN.md`, đồng bộ với dashboard/admin, **chỉ đổi trình bày**: mọi text, dữ kiện, nguồn, liên kết và route giữ nguyên.
 - Decision:
-  - Trình bày lại `/gioi-thieu`: hero VKU (icon + tiêu đề + subtitle hiện có + ba vạch `vku-accent`), rồi bốn card có semantic hierarchy — `Về nền tảng AI Challenge` (4 đặc điểm, mỗi đặc điểm một `h3` + mô tả nguyên văn), `VKU — đơn vị chủ trì` (5 dữ kiện, list vẫn giữ accessible name `Thông tin VKU`), `Đơn vị và đầu mối hỗ trợ` (3 đầu mối + câu dẫn sang `/ho-tro`), `Bắt đầu` (đúng một CTA xanh VKU tới `/`).
-  - **Giữ khối "Nguồn thông tin" thành card thứ năm, neutral, full-width ở cuối lưới** — đúng cam kết của ADR-022 về việc `/gioi-thieu` tiếp tục có khối này (không bỏ mất nguồn). Card dùng viền trên `--vku-border` để không tranh nhịp màu với bốn khối chính; ở desktop danh sách trải hai cột để nhãn ngắn không bị kéo căng hết chiều rộng card.
-  - **Điều chỉnh theo yêu cầu trực tiếp của user (2026-09-18):** bỏ câu dẫn "Thông tin về VKU được tổng hợp từ các nguồn chính thức dưới đây, truy cập ngày…" — hằng `SOURCE_ACCESSED` vì thế không còn nơi dùng nên đã xoá khỏi `frontend/src/lib/vkuInfo.ts`; bổ sung nguồn thứ tư là trang Phòng KHCN - HTQT (nguồn này đã có sẵn trong `VKU_SOURCES` và đang dùng ở `/ho-tro`, không phải nguồn bịa thêm), URL đổi sang biến thể `/vi/` do user cung cấp; cả bốn nhãn rút về tên ngắn 2–6 chữ thay vì dán tiền tố domain.
+  - Trình bày lại `/gioi-thieu`: hero VKU (icon + tiêu đề + subtitle hiện có + ba vạch `vku-accent`), rồi bốn card có semantic hierarchy - `Về nền tảng AI Challenge` (4 đặc điểm, mỗi đặc điểm một `h3` + mô tả nguyên văn), `VKU - đơn vị chủ trì` (5 dữ kiện, list vẫn giữ accessible name `Thông tin VKU`), `Đơn vị và đầu mối hỗ trợ` (3 đầu mối + câu dẫn sang `/ho-tro`), `Bắt đầu` (đúng một CTA xanh VKU tới `/`).
+  - **Giữ khối "Nguồn thông tin" thành card thứ năm, neutral, full-width ở cuối lưới** - đúng cam kết của ADR-022 về việc `/gioi-thieu` tiếp tục có khối này (không bỏ mất nguồn). Card dùng viền trên `--vku-border` để không tranh nhịp màu với bốn khối chính; ở desktop danh sách trải hai cột để nhãn ngắn không bị kéo căng hết chiều rộng card.
+  - **Điều chỉnh theo yêu cầu trực tiếp của user (2026-09-18):** bỏ câu dẫn "Thông tin về VKU được tổng hợp từ các nguồn chính thức dưới đây, truy cập ngày…" - hằng `SOURCE_ACCESSED` vì thế không còn nơi dùng nên đã xoá khỏi `frontend/src/lib/vkuInfo.ts`; bổ sung nguồn thứ tư là trang Phòng KHCN - HTQT (nguồn này đã có sẵn trong `VKU_SOURCES` và đang dùng ở `/ho-tro`, không phải nguồn bịa thêm), URL đổi sang biến thể `/vi/` do user cung cấp; cả bốn nhãn rút về tên ngắn 2–6 chữ thay vì dán tiền tố domain.
   - Nhịp màu thuần trang trí: viền trên 3px blue/red/yellow/blue cho bốn khối chính, thân card luôn nền trắng; icon feature xoay vòng blue/blue/red/yellow; icon đầu mối hỗ trợ blue; CTA chính vẫn là `.btn` xanh VKU, không dùng nút đen. Ý nghĩa luôn nằm ở heading chữ, màu không mang thông tin.
-  - Desktop từ `75rem` (1200px): hai cột trái/phải (`platform`+`vku` | `support`+`cta`) bằng `grid-template-areas`, `sources` span cả hai. Dưới 1200px một cột theo đúng thứ tự DOM — nên tab order luôn khớp thứ tự thị giác, không cần `tabindex` hay đảo DOM.
-  - **Hai cột xếp dọc độc lập** qua wrapper `.about-col` (`display: contents` dưới 1200px, `flex-direction: column` từ 1200px). Lưới theo hàng ban đầu để lại ~350px trống ở rail phải tại 1440px — đúng lỗi "khoảng trắng chưa dùng hiệu quả" mà đặc tả §2 yêu cầu loại bỏ. Wrapper `display: contents` không đổi cây DOM nên thứ tự tab giữ nguyên.
+  - Desktop từ `75rem` (1200px): hai cột trái/phải (`platform`+`vku` | `support`+`cta`) bằng `grid-template-areas`, `sources` span cả hai. Dưới 1200px một cột theo đúng thứ tự DOM - nên tab order luôn khớp thứ tự thị giác, không cần `tabindex` hay đảo DOM.
+  - **Hai cột xếp dọc độc lập** qua wrapper `.about-col` (`display: contents` dưới 1200px, `flex-direction: column` từ 1200px). Lưới theo hàng ban đầu để lại ~350px trống ở rail phải tại 1440px - đúng lỗi "khoảng trắng chưa dùng hiệu quả" mà đặc tả §2 yêu cầu loại bỏ. Wrapper `display: contents` không đổi cây DOM nên thứ tự tab giữ nguyên.
   - `/gioi-thieu` dùng trần 1440px qua `.app-main-about`, thêm cạnh `.app-main-support`: ngoại lệ page-specific mà `VKU_GLOBAL_DESIGN.md` §9 cho phép. Không đổi `--container` toàn cục.
-  - Chỉ SVG inline theo convention sẵn có (`aria-hidden`, `focusable="false"`, `stroke="currentColor"`); không thêm icon package, dependency, API, asset hay route. Không có ảnh campus chính thức trong repo nên hero dùng hình học CSS chữ nhật chéo — không đưa ảnh AI-generated vào production. Light mode only, không animation.
-- Consequences: `/gioi-thieu` đồng bộ với dashboard/admin/`/ho-tro` và dễ quét hơn nhiều, nhưng từ nay có thêm một trang phải cập nhật khi design token đổi. Nội dung tĩnh vẫn có thể lệch khi VKU đổi thông tin — vì vậy dữ kiện và nguồn vẫn nằm một chỗ ở `frontend/src/lib/vkuInfo.ts`, không hardcode trong page. Việc bỏ câu dẫn và đổi nhãn nguồn khiến trang không còn nói rõ các link này là nguồn tham chiếu — bù lại bằng heading `Nguồn thông tin` và `target="_blank"`; nếu cần nêu ngày truy cập lại thì phải thêm hằng mới chứ không khôi phục `SOURCE_ACCESSED`.
+  - Chỉ SVG inline theo convention sẵn có (`aria-hidden`, `focusable="false"`, `stroke="currentColor"`); không thêm icon package, dependency, API, asset hay route. Không có ảnh campus chính thức trong repo nên hero dùng hình học CSS chữ nhật chéo - không đưa ảnh AI-generated vào production. Light mode only, không animation.
+- Consequences: `/gioi-thieu` đồng bộ với dashboard/admin/`/ho-tro` và dễ quét hơn nhiều, nhưng từ nay có thêm một trang phải cập nhật khi design token đổi. Nội dung tĩnh vẫn có thể lệch khi VKU đổi thông tin - vì vậy dữ kiện và nguồn vẫn nằm một chỗ ở `frontend/src/lib/vkuInfo.ts`, không hardcode trong page. Việc bỏ câu dẫn và đổi nhãn nguồn khiến trang không còn nói rõ các link này là nguồn tham chiếu - bù lại bằng heading `Nguồn thông tin` và `target="_blank"`; nếu cần nêu ngày truy cập lại thì phải thêm hằng mới chứ không khôi phục `SOURCE_ACCESSED`.
 - Affected files/contracts: `frontend/src/pages/AboutPage.tsx`, `frontend/src/pages/AboutPage.test.tsx`, `frontend/src/App.tsx`, `frontend/src/App.test.tsx`, `frontend/src/index.css`, `ABOUT_PAGE_DESIGN.md`, `docs/TEST_MATRIX.md`

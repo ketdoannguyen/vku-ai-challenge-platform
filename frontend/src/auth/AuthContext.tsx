@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setAccount(me);
       })
       .catch(() => {
-        /* chưa đăng nhập — state mặc định null */
+        /* chưa đăng nhập - state mặc định null */
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -95,7 +95,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.middleware("http")
 async def resolve_account_middleware(request: Request, call_next):
-    """Gắn account hiện tại (nếu có) vào request.state — dependency auth dùng lại."""
+    """Gắn account hiện tại (nếu có) vào request.state - dependency auth dùng lại."""
     token = request.cookies.get(get_settings().session_cookie_name, "")
     if token and request.url.path.startswith("/api"):
         request.state.account = await resolve_session(request.app.state.mongo.db, token)

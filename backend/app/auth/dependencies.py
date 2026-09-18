@@ -1,4 +1,4 @@
-"""FastAPI dependencies cho authorization — backend là nơi quyết định (Sprint 02 locked)."""
+"""FastAPI dependencies cho authorization - backend là nơi quyết định (Sprint 02 locked)."""
 
 from typing import Annotated
 

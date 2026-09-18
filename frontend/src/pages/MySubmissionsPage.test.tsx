@@ -11,7 +11,7 @@ const COMPETITION = {
   primary_metric: "f1",
 } as Competition;
 
-/** Vùng thông báo của dải phân trang — trang còn live region riêng cho phản hồi sao chép ID. */
+/** Vùng thông báo của dải phân trang - trang còn live region riêng cho phản hồi sao chép ID. */
 function pagerStatus(): HTMLElement {
   return within(document.querySelector(".subm-pagination-footer") as HTMLElement).getByRole("status");
 }

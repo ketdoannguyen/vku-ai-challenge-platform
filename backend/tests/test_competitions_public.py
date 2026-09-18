@@ -84,7 +84,7 @@ def test_public_detail_unknown_slug_404(seeded):
 
 
 def test_public_payload_never_exposes_created_by(seeded):
-    """created_by là email admin — từng rò cho cả khách ẩn danh lẫn participant chưa join."""
+    """created_by là email admin - từng rò cho cả khách ẩn danh lẫn participant chưa join."""
     seeded.post("/api/auth/logout")
     guest_list = seeded.get("/api/competitions").json()["competitions"]
     assert guest_list
@@ -97,7 +97,7 @@ def test_public_payload_never_exposes_created_by(seeded):
 
 
 def test_public_detail_exposes_resources_to_guest(client):
-    """Khách xem tổng quan vẫn thấy link dataset — đây là cách BTC phát tài nguyên."""
+    """Khách xem tổng quan vẫn thấy link dataset - đây là cách BTC phát tài nguyên."""
     resources = [{"label": "Dataset", "url": "https://drive.google.com/drive/folders/abc"}]
     client.post("/api/auth/login", json={"identifier": "admin@vku.vn", "password": "adminmatkhau1"})
     cid = client.post(
@@ -173,7 +173,7 @@ def test_quota_block_only_for_active_member_on_detail(client):
     after = client.get("/api/competitions/quota-cup").json()["quota"]
     assert after["used_today"] == 1
     assert after["remaining"] == 2
-    # List vẫn không tính quota dù member đang hoạt động — tránh N+1.
+    # List vẫn không tính quota dù member đang hoạt động - tránh N+1.
     assert "quota" not in client.get("/api/competitions").json()["competitions"][0]
 
 
@@ -205,7 +205,7 @@ def test_quota_excludes_yesterday_and_absent_for_inactive_member(client):
 
 
 def test_legacy_document_without_resources_serializes_empty(client):
-    """Document tạo trước khi có field resources vẫn phải trả [] — không migration Mongo."""
+    """Document tạo trước khi có field resources vẫn phải trả [] - không migration Mongo."""
     now = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
     async def insert_legacy():

@@ -1,7 +1,7 @@
 """Competition service: validation, tạo/tra cứu, public representation.
 
 Lifecycle (ADR-009): create -> draft; draft -> published; published -> closed.
-Closed là terminal — không reopen ở MVP.
+Closed là terminal - không reopen ở MVP.
 """
 
 import logging
@@ -29,7 +29,7 @@ METRICS = ("f1", "precision", "recall")
 _SLUG_MAX = SLUG_MAX
 _QUOTA_MAX = 1000
 
-# Tài nguyên cuộc thi chỉ là link ngoài (Google Drive) — nền tảng không host dataset/binary.
+# Tài nguyên cuộc thi chỉ là link ngoài (Google Drive) - nền tảng không host dataset/binary.
 RESOURCES_MAX = 10
 _RESOURCE_LABEL_MAX = 120
 _RESOURCE_URL_MAX = 2048
@@ -109,7 +109,7 @@ def _validate_resource_url(url: str) -> str:
 
 
 def public_resources(competition: dict) -> list[dict]:
-    """Document cũ chưa có field resources trả [] — không cần migration Mongo."""
+    """Document cũ chưa có field resources trả [] - không cần migration Mongo."""
     return competition.get("resources") or []
 
 
@@ -189,7 +189,7 @@ def validate_update(competition: dict, changes: dict) -> dict:
     if "resources" in updates:
         updates["resources"] = normalize_resources(updates["resources"])
 
-    # Body là aware còn giá trị lưu trong Mongo là naive — bắt buộc chuẩn hoá trước khi so.
+    # Body là aware còn giá trị lưu trong Mongo là naive - bắt buộc chuẩn hoá trước khi so.
     start = as_utc(updates.get("start_at", competition["start_at"]))
     end = as_utc(updates.get("end_at", competition["end_at"]))
     if start >= end:
@@ -198,7 +198,7 @@ def validate_update(competition: dict, changes: dict) -> dict:
 
 
 def public_competition(competition: dict, membership: dict | None = None) -> dict:
-    """Representation cho guest/participant — không bao giờ lộ join_code_hash, created_by."""
+    """Representation cho guest/participant - không bao giờ lộ join_code_hash, created_by."""
     from app.memberships.service import public_membership
 
     return {

@@ -80,7 +80,7 @@ export function MySubmissionsPage() {
   function copyId(id: string) {
     if (!navigator.clipboard) {
       setCopiedId(null);
-      setCopyError("Trình duyệt không cho phép sao chép tự động — hãy chọn ID và sao chép thủ công.");
+      setCopyError("Trình duyệt không cho phép sao chép tự động - hãy chọn ID và sao chép thủ công.");
       return;
     }
     navigator.clipboard.writeText(id).then(
@@ -95,7 +95,7 @@ export function MySubmissionsPage() {
       },
       () => {
         setCopiedId(null);
-        setCopyError("Không sao chép được ID — hãy chọn ID và sao chép thủ công.");
+        setCopyError("Không sao chép được ID - hãy chọn ID và sao chép thủ công.");
       },
     );
   }

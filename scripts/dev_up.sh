@@ -5,7 +5,7 @@
 #   1. Tạo .env từ .env.example nếu chưa có (ghi đè MONGO_USER/MONGO_PASSWORD random)
 #   2. docker compose up --build -d (qua sudo nếu user chưa có group docker)
 #   3. Chờ api healthy
-#   4. Tạo admin + 2 participant mẫu (idempotent — chạy lại không lỗi duplicate)
+#   4. Tạo admin + 2 participant mẫu (idempotent - chạy lại không lỗi duplicate)
 #   5. Smoke test: health + login (cookie jar) + /auth/me đúng admin + admin API qua Nginx
 #   6. In thông tin đăng nhập để test UI tại http://localhost:8080
 #
@@ -34,7 +34,7 @@ fail() { printf '\033[1;31m[dev_up]\033[0m LỖI: %s\n' "$*" >&2; exit 1; }
 if docker info >/dev/null 2>&1; then
   DOCKER="docker"
 else
-  log "User chưa có quyền docker — dùng 'sudo docker' (cần nhập password sudo 1 lần)."
+  log "User chưa có quyền docker - dùng 'sudo docker' (cần nhập password sudo 1 lần)."
   log "Để khỏi bị hỏi nữa: sudo usermod -aG docker nkd && đăng xuất/login lại."
   DOCKER="sudo docker"
 fi
@@ -74,10 +74,10 @@ for _ in $(seq 1 30); do
   if [[ "$STATUS" == "200" ]]; then HEALTH_OK="1"; break; fi
   sleep 2
 done
-[[ -n "$HEALTH_OK" ]] || fail "api không healthy sau 60s — xem log: $DOCKER compose logs api"
+[[ -n "$HEALTH_OK" ]] || fail "api không healthy sau 60s - xem log: $DOCKER compose logs api"
 log "Health: $(curl -s "$BASE_URL/api/health")"
 
-# ---------- 4. seed accounts (chạy trong container api — không cần venv host) ----------
+# ---------- 4. seed accounts (chạy trong container api - không cần venv host) ----------
 seed() { # email name password role
   $DOCKER compose exec -T api python - "$1" "$2" "$3" "$4" <<'PYEOF'
 import sys
@@ -126,7 +126,7 @@ ACCOUNTS_BODY="$(mktemp)"
 WRONG_BODY="$(mktemp)"
 trap 'rm -f "$COOKIE_JAR" "$LOGIN_BODY" "$ME_BODY" "$ACCOUNTS_BODY" "$WRONG_BODY"' EXIT
 
-# Đọc một field JSON từ stdin bằng python của container api — host không cần jq.
+# Đọc một field JSON từ stdin bằng python của container api - host không cần jq.
 json_field() { # $1 = tên field
   $DOCKER compose exec -T api python -c \
     'import json,sys; print(json.load(sys.stdin).get(sys.argv[1], ""))' "$1"
@@ -138,7 +138,7 @@ LOGIN_CODE="$(curl -s -o "$LOGIN_BODY" -w '%{http_code}' -c "$COOKIE_JAR" -X POS
   -d "{\"identifier\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")"
 [[ "$LOGIN_CODE" == "200" ]] || SMOKE_FAIL="login đúng trả $LOGIN_CODE: $(cat "$LOGIN_BODY")"
 
-# /auth/me phải 200 bằng chính cookie jar đó — nếu cookie không được ghi/đọc thì fail tại đây.
+# /auth/me phải 200 bằng chính cookie jar đó - nếu cookie không được ghi/đọc thì fail tại đây.
 ME_CODE="$(curl -s -o "$ME_BODY" -w '%{http_code}' -b "$COOKIE_JAR" -c "$COOKIE_JAR" "$BASE_URL/api/auth/me")"
 [[ "$ME_CODE" == "200" ]] || SMOKE_FAIL="${SMOKE_FAIL:+$SMOKE_FAIL; }/auth/me trả $ME_CODE (kỳ vọng 200)"
 ME_ROLE="$(json_field role < "$ME_BODY" 2>/dev/null || true)"

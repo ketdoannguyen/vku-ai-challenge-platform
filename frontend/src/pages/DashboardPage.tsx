@@ -222,7 +222,7 @@ function IconUsers() {
   );
 }
 
-/** Icon lớn cho hai trạng thái rỗng — thay emoji để đồng bộ bộ icon SVG của app. */
+/** Icon lớn cho hai trạng thái rỗng - thay emoji để đồng bộ bộ icon SVG của app. */
 function IconEmptyState({ kind }: { kind: "search" | "trophy" }) {
   return (
     <svg
@@ -337,7 +337,7 @@ export function DashboardPage() {
               </dt>
               <dd className="dash-stat-value">{String(closedCount).padStart(2, "0")}</dd>
             </dl>
-            {/* Khách chưa có membership nào nên ô này luôn 00 — chỉ tổ rối. */}
+            {/* Khách chưa có membership nào nên ô này luôn 00 - chỉ tổ rối. */}
             {!isGuest && (
               <dl className="dash-stat dash-stat-joined">
                 <dt className="dash-stat-label">
@@ -387,7 +387,7 @@ export function DashboardPage() {
       ) : error ? (
         <div className="form-error dash-error" role="alert">
           <IconError />
-          {/* Mã lỗi thô của API là chi tiết kỹ thuật — người dùng cuối chỉ cần câu mô tả. */}
+          {/* Mã lỗi thô của API là chi tiết kỹ thuật - người dùng cuối chỉ cần câu mô tả. */}
           <div>
             <p>{errorMessage}</p>
           </div>
@@ -425,7 +425,7 @@ export function DashboardPage() {
           </div>
         </>
       ) : hasCompetitions ? (
-        // Có cuộc thi nhưng bộ lọc không khớp — khác hẳn "hệ thống chưa có gì".
+        // Có cuộc thi nhưng bộ lọc không khớp - khác hẳn "hệ thống chưa có gì".
         <div className="card empty-state">
           <div className="empty-state-icon" aria-hidden="true">
             <IconEmptyState kind="search" />
@@ -453,9 +453,9 @@ function CompetitionCard({
   onMembershipChange,
 }: {
   competition: Competition;
-  /** Theme lấy theo vị trí trong lưới đang render — không lấy từ trạng thái cuộc thi. */
+  /** Theme lấy theo vị trí trong lưới đang render - không lấy từ trạng thái cuộc thi. */
   theme: CardTheme;
-  /** Mốc giờ dùng chung của cả trang — mỗi thẻ không tự mở timer riêng. */
+  /** Mốc giờ dùng chung của cả trang - mỗi thẻ không tự mở timer riêng. */
   now: number | null;
   onMembershipChange: (slug: string, membership: Membership) => void;
 }) {

@@ -1,4 +1,4 @@
-/** API client nhỏ dùng relative `/api` — same-origin qua Nginx (ADR-002). */
+/** API client nhỏ dùng relative `/api` - same-origin qua Nginx (ADR-002). */
 
 export interface ApiError {
   code: string;

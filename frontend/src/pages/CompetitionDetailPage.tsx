@@ -30,7 +30,7 @@ export interface CompetitionContext {
   contents: ContentSummary[];
   contentsLoading?: boolean;
   contentsError?: unknown;
-  /** Tải lại mục lục nội dung — dùng ở trạng thái lỗi của khối tài liệu trong Tổng quan. */
+  /** Tải lại mục lục nội dung - dùng ở trạng thái lỗi của khối tài liệu trong Tổng quan. */
   reloadContents: () => Promise<void>;
   /** Tải lại cuộc thi (quota sau khi nộp) mà không bật skeleton, để không unmount trang con. */
   refreshCompetition: () => Promise<void>;
@@ -270,7 +270,7 @@ export function CompetitionDetailPage() {
   }
 
   const c = competition;
-  // Chip chỉ có nghĩa với cuộc thi đang mở — cuộc thi đã đóng không đếm ngược nữa.
+  // Chip chỉ có nghĩa với cuộc thi đang mở - cuộc thi đã đóng không đếm ngược nữa.
   const countdownLabel = c.status === "published" ? remaining : null;
   const currentPath = pathname.replace(/\/+$/, "");
   const basePath = `/competitions/${slug}`.replace(/\/+$/, "");
@@ -322,7 +322,7 @@ export function CompetitionDetailPage() {
               competition={c}
               onMembershipChange={(membership: Membership) => {
                 setCompetition({ ...c, membership });
-                // Quota chỉ xuất hiện sau khi join — tải lại để chỗ nộp bài biết còn bao nhiêu lượt.
+                // Quota chỉ xuất hiện sau khi join - tải lại để chỗ nộp bài biết còn bao nhiêu lượt.
                 void refreshCompetition();
               }}
             />
@@ -339,7 +339,7 @@ export function CompetitionDetailPage() {
               Thời gian thi đấu
             </dt>
             <dd className="comp-fact-value">
-              {formatLocal(c.start_at)} — {formatLocal(c.end_at)}
+              {formatLocal(c.start_at)} - {formatLocal(c.end_at)}
             </dd>
           </div>
           <div className="comp-fact">
@@ -391,7 +391,7 @@ export function CompetitionDetailPage() {
                   Mục lục nội dung
                 </span>
                 {!contentsLoading && !contentsError && contents.length > 0 && (
-                  <span className="content-card-count">{contents.length} mục</span>
+                  <span className="content-card-count">{contents.length}</span>
                 )}
               </div>
 
@@ -451,7 +451,7 @@ export function CompetitionDetailPage() {
 
 /**
  * Mục lục dạng pill. Đây là điều hướng route chứ không phải tab cục bộ, nên chỉ
- * đánh dấu `aria-current="page"` — không giả lập `role="tab"`/`aria-selected`.
+ * đánh dấu `aria-current="page"` - không giả lập `role="tab"`/`aria-selected`.
  */
 function CompTab({
   to,

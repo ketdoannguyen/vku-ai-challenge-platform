@@ -47,7 +47,7 @@ async def ranked_entries(db, competition_id) -> list[dict]:
 
 
 def _participant_entry(entry: dict, current_account_id) -> dict:
-    """Bỏ account_id và gắn cờ người xem — `me` dùng chung serializer này để không lộ định danh."""
+    """Bỏ account_id và gắn cờ người xem - `me` dùng chung serializer này để không lộ định danh."""
     item = {key: value for key, value in entry.items() if key != "account_id"}
     item["is_current_user"] = entry["account_id"] == str(current_account_id)
     return item

@@ -60,7 +60,7 @@ export function AdminAccountsPage() {
       const response = await api.get<AccountsResponse>(`/admin/accounts?${params.toString()}`);
       if (sequence !== requestSequence.current) return;
       hasData.current = true;
-      // Trang cuối có thể vừa rỗng đi sau khi vô hiệu hóa/xóa — lùi về trang còn dữ liệu.
+      // Trang cuối có thể vừa rỗng đi sau khi vô hiệu hóa/xóa - lùi về trang còn dữ liệu.
       if (response.accounts.length === 0 && response.offset > 0) {
         const lastOffset = Math.max(0, Math.floor(Math.max(response.total - 1, 0) / PAGE_SIZE) * PAGE_SIZE);
         if (lastOffset !== response.offset) {
@@ -313,7 +313,7 @@ export function AdminAccountsPage() {
 
 const STAT_TONES = ["blue", "red", "yellow", "green"] as const;
 
-/** Một ô KPI. `value` null nghĩa là chưa có dữ liệu — không được hiện số giả. */
+/** Một ô KPI. `value` null nghĩa là chưa có dữ liệu - không được hiện số giả. */
 function AccountStatCard({
   tone,
   label,
@@ -615,7 +615,7 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
   }
 
   return (
-    <Modal title={`Đặt lại mật khẩu — ${account.email}`} onClose={onClose} variant="account-form">
+    <Modal title={`Đặt lại mật khẩu - ${account.email}`} onClose={onClose} variant="account-form">
       <form className="account-form-modal" onSubmit={submit}>
         <div className="form-field">
           <label className="field-label account-required" htmlFor="reset-password">Mật khẩu mới (tối thiểu 10 ký tự)</label>
@@ -624,7 +624,7 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
             <PasswordToggle visible={passwordVisible} onToggle={() => setPasswordVisible((value) => !value)} />
           </div>
         </div>
-        <p className="account-security-note">Mật khẩu mới cần được chuyển cho người dùng qua kênh riêng (email/chat) — hệ thống không gửi tự động.</p>
+        <p className="account-security-note">Mật khẩu mới cần được chuyển cho người dùng qua kênh riêng (email/chat) - hệ thống không gửi tự động.</p>
         {error && <div className="error-box" role="alert">{error}</div>}
         <div className="modal-actions account-form-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>Hủy</button>

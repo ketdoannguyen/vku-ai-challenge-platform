@@ -70,7 +70,7 @@ function renderDashboard() {
   );
 }
 
-/** Mốc ISO cách hiện tại `seconds` giây — clock chạy bằng timer thật trong test này. */
+/** Mốc ISO cách hiện tại `seconds` giây - clock chạy bằng timer thật trong test này. */
 function inSeconds(seconds: number): string {
   return new Date(Date.now() + seconds * 1000).toISOString();
 }
@@ -237,7 +237,7 @@ test("màu card độc lập với status: cuộc thi đã kết thúc ở vị 
 
   expect(ended.getAttribute("data-theme")).toBe("red");
   expect(ended.getAttribute("data-status")).toBe("closed");
-  // Root card không mang class trạng thái — màu không được lấy từ status.
+  // Root card không mang class trạng thái - màu không được lấy từ status.
   expect(ended.className).not.toContain("closed");
 
   // Badge bên trong vẫn giữ ngữ nghĩa trạng thái và nhãn chữ, không chỉ dựa vào màu.
@@ -268,7 +268,7 @@ test("ô thống kê lấy từ dữ liệu thật, nằm trong vùng có tên",
   expect(within(stats).getByText("Đang diễn ra")).toBeTruthy();
   expect(within(stats).getByText("Đã kết thúc")).toBeTruthy();
   expect(within(stats).getByText("Đã tham gia")).toBeTruthy();
-  // 2 published, 1 closed, 1 joined — vẫn pad hai chữ số như trước.
+  // 2 published, 1 closed, 1 joined - vẫn pad hai chữ số như trước.
   expect(within(stats).getByText("02")).toBeTruthy();
   expect(within(stats).getAllByText("01")).toHaveLength(2);
 });
@@ -304,5 +304,5 @@ test("tiêu đề tab đặt theo tên trang", async () => {
   mockApi({ competitions: [PUBLISHED] });
   renderDashboard();
   await screen.findByRole("link", { name: "AI Challenge 2026" });
-  expect(document.title).toBe("Cuộc thi — AI Challenge");
+  expect(document.title).toBe("Cuộc thi - AI Challenge");
 });

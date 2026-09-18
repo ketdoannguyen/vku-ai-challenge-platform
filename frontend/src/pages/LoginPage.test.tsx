@@ -279,6 +279,6 @@ describe("tiêu đề tab", () => {
     vi.stubGlobal("fetch", vi.fn(stubAuthMeUnauthorized));
     renderLogin();
     expect(await screen.findByRole("heading", { name: "VKU AI Challenge Platform" })).toBeInTheDocument();
-    expect(document.title).toBe("Đăng nhập — AI Challenge");
+    expect(document.title).toBe("Đăng nhập - AI Challenge");
   });
 });

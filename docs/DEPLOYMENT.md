@@ -1,12 +1,12 @@
 # Deployment - AI Challenge Platform
 
-Status: **pilot public trên GCE (Sprint 08)** — stack production chạy bằng `docker-compose.prod.yml`,
+Status: **pilot public trên GCE (Sprint 08)** - stack production chạy bằng `docker-compose.prod.yml`,
 public tạm qua Cloudflare **Quick Tunnel**. Chưa phải production ổn định: xem §7.
 
 ## Kiến trúc đang chạy
 
 - 01 GCE VM (Ubuntu LTS), Docker Engine + Compose plugin.
-- Compose stack `mongo → api → web → cloudflared`; **không** service nào publish port ra host —
+- Compose stack `mongo → api → web → cloudflared`; **không** service nào publish port ra host -
   host chỉ lắng nghe SSH. `cloudflared` vào `web:80` qua Docker network.
 - Dữ liệu bind mount ngoài repo tại `/srv/vku-ai-challenge/data` (theo yêu cầu dùng boot disk;
   xem rủi ro ở §7).
@@ -45,7 +45,7 @@ sudo chown -R 999:999 /srv/vku-ai-challenge/data/mongo   # UID của user mongod
 sudo chmod 700 /srv/vku-ai-challenge/backups
 ```
 
-Không cần cài Python, pip, Node, Nginx hay cloudflared trên host — tất cả chạy trong container.
+Không cần cài Python, pip, Node, Nginx hay cloudflared trên host - tất cả chạy trong container.
 
 ## 2. Cấu hình env
 
@@ -72,7 +72,7 @@ openssl rand -hex 24    # -> MONGO_PASSWORD
 | `APP_NAME` | Tên hiển thị |
 
 `APP_ENV=production`, `DATA_DIR=/data` và `MONGO_HOST=mongo` do compose đặt cứng, không khai trong `.env`.
-`SESSION_SECRET` trong `.env.example` là config chết (ADR-008) — không dùng, không cần sinh.
+`SESSION_SECRET` trong `.env.example` là config chết (ADR-008) - không dùng, không cần sinh.
 
 `.env` chỉ vào Compose qua `--env-file`, **không** mount vào container: Settings của backend đặt
 `extra="forbid"` nên biến chỉ dành cho Compose sẽ làm API chết lúc khởi động.
@@ -125,7 +125,7 @@ dcp exec api python -c "import urllib.request;print(urllib.request.urlopen('http
 ## 5. Admin và tài khoản
 
 ```bash
-# Mật khẩu nhập ở prompt ẩn — KHÔNG truyền qua tham số dòng lệnh (lộ trong ps/history)
+# Mật khẩu nhập ở prompt ẩn - KHÔNG truyền qua tham số dòng lệnh (lộ trong ps/history)
 dcp exec api python scripts/create_admin.py admin@vku.udn.vn "ADMIN NKD"
 ```
 
@@ -174,7 +174,7 @@ Không bao giờ restore đè lên database đang chạy. Lưu ý đã kiểm ch
 **treo khi đọc archive từ stdin**, nên phải copy file vào container rồi dùng `--archive=/path`.
 
 Khi chạy các lệnh trên trong script/CI (không phải gõ tay), thêm `-T` và `</dev/null` cho mỗi
-`docker compose exec`: thiếu `-T`, Docker mở TTY và `exec` sẽ đọc hết stdin còn lại — nếu script được
+`docker compose exec`: thiếu `-T`, Docker mở TTY và `exec` sẽ đọc hết stdin còn lại - nếu script được
 pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script dừng giữa chừng mà không báo lỗi.
 
 ## 7. Cảnh báo và giới hạn
@@ -187,7 +187,7 @@ pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script d�
   (xoá nhầm, migrate hỏng), **không** cứu được khi mất disk/VM. Cần một trong: snapshot schedule của GCE,
   copy sang object storage, hoặc persistent disk riêng.
 - Không chạy `docker compose down -v`; không xoá `/srv/vku-ai-challenge/data`.
-- Cookie `Secure` bật khi `APP_ENV=production`, nên **không thể** kiểm thử đăng nhập qua HTTP thuần —
+- Cookie `Secure` bật khi `APP_ENV=production`, nên **không thể** kiểm thử đăng nhập qua HTTP thuần -
   mọi smoke test auth phải đi qua URL HTTPS của tunnel.
 
 ## 8. Rollback

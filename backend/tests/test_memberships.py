@@ -61,7 +61,7 @@ def _future_window() -> tuple[datetime, datetime]:
 
 
 def _set_end_at(client, competition_id, value: datetime):
-    """Dời end_at trực tiếp trong Mongo — mô phỏng cuộc thi trôi qua hạn mà không cần chờ."""
+    """Dời end_at trực tiếp trong Mongo - mô phỏng cuộc thi trôi qua hạn mà không cần chờ."""
 
     async def update():
         await client.app.state.mongo.db[COMPETITIONS_COLLECTION].update_one(
@@ -390,7 +390,7 @@ def test_participant_leave_keeps_history_and_requires_admin_to_return(client):
     leaderboard = client.get(f"/api/competitions/{competition['id']}/leaderboard").json()
     assert [row["display_name"] for row in leaderboard["entries"]] == ["Thí Sinh"]
 
-    # Tự vào lại bị chặn — phải nhờ Ban Tổ chức kích hoạt.
+    # Tự vào lại bị chặn - phải nhờ Ban Tổ chức kích hoạt.
     blocked = client.post("/api/competitions/open-cup/join", json={})
     assert blocked.status_code == 403
     assert blocked.json()["error"]["code"] == "MEMBERSHIP_INACTIVE"
@@ -402,7 +402,7 @@ def test_participant_leave_keeps_history_and_requires_admin_to_return(client):
         json={"email": "thi.sinh@vku.vn"},
     )
     assert reactivated.json()["reactivated"] is True
-    # Kích hoạt lại không được reset joined_at — đó là mốc tham gia gốc.
+    # Kích hoạt lại không được reset joined_at - đó là mốc tham gia gốc.
     assert reactivated.json()["member"]["joined_at"][:23] == before["members"][0]["joined_at"][:23]
 
 
