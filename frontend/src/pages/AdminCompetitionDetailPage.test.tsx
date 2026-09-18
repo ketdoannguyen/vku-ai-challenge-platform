@@ -89,6 +89,18 @@ function headerActions(): HTMLElement {
   return document.querySelector(".admin-detail-actions") as HTMLElement;
 }
 
+/** Sáu ô của dải tóm tắt; `data-tone` phải theo vị trí render chứ không theo nghiệp vụ. */
+function summaryFacts(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>(".admin-detail-fact"));
+}
+
+/** Chuỗi `data-tone` của các block trong một panel — kiểm tra nhịp màu, không kiểm tra CSS. */
+function cardTones(panel: HTMLElement): Array<string | null> {
+  return Array.from(panel.querySelectorAll<HTMLElement>("[data-tone]")).map((el) =>
+    el.getAttribute("data-tone"),
+  );
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/admin/competitions/64a000000000000000000001"]}>
@@ -1097,6 +1109,16 @@ test("backend cũ chưa trả upload_limits: rơi về mặc định thay vì �
   expect(await screen.findByText(/Tối đa 2 MiB \/ tệp/)).toBeTruthy();
 });
 
+test("nút upload tách nhãn khỏi giới hạn dung lượng trong tên truy cập", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  // Khoảng cách thị giác giữa nhãn và hint đến từ `gap` của flex, không phải từ
+  // ký tự trắng — thiếu dấu cách thì trình đọc màn hình đọc liền "Upload .md≤ 2 MiB".
+  expect(screen.getByRole("button", { name: "Upload .md ≤ 2 MiB" }).textContent).toBe("Upload .md ≤ 2 MiB");
+});
+
 test("Markdown vượt trần bị chặn ở client, không phát request upload", async () => {
   mockApi((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -1128,4 +1150,321 @@ test("ảnh asset vượt trần bị chặn ở client, không phát request up
 
   expect(await screen.findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 3 MiB.");
   expect(calls.some((call) => call.url.endsWith("/assets") && call.init?.method === "POST")).toBe(false);
+});
+
+/** Dữ liệu tối thiểu để cả năm panel render đủ bảng, dùng cho test cấu trúc chung. */
+function mockFullDetail() {
+  mockApi((url) => {
+    if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/assets")) {
+      return {
+        body: {
+          assets: [
+            {
+              name: "banner.png",
+              content_type: "image/png",
+              size_bytes: 204800,
+              url: "/api/competitions/code-cup/assets/banner.png",
+            },
+          ],
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/leaderboard")) {
+      return {
+        body: {
+          competition_id: COMPETITION.id,
+          primary_metric: "f1",
+          total: 1,
+          entries: [
+            {
+              rank: 1,
+              account_id: "u1",
+              display_name: "Thí Sinh",
+              primary_score: 0.9,
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              best_submission_id: "s1",
+              best_submission_at: "2026-09-15T09:00:00Z",
+              total_submissions: 2,
+            },
+          ],
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/submissions")) {
+      return {
+        body: {
+          submissions: [
+            {
+              id: "s1",
+              competition_id: COMPETITION.id,
+              filename: "result.csv",
+              status: "completed",
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              primary_score: 0.9,
+              created_at: "2026-09-15T09:00:00Z",
+              account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+        status: 200,
+      };
+    }
+    return { body: COMPETITION, status: 200 };
+  });
+}
+
+test("header chi tiết: một h1 duy nhất, status có nhãn chữ và accent thuần trang trí", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const headings = screen.getAllByRole("heading", { level: 1 });
+  expect(headings).toHaveLength(1);
+  expect(headings[0]).toHaveTextContent("Code Cup");
+
+  // Trạng thái không bao giờ chỉ dựa vào màu: badge luôn kèm nhãn chữ.
+  const status = document.querySelector(".admin-detail-status") as HTMLElement;
+  expect(status).toHaveTextContent("Đang diễn ra");
+  expect(status.classList.contains("success")).toBe(true);
+
+  const accent = document.querySelector(".admin-detail-page .vku-accent") as HTMLElement;
+  expect(accent).toHaveAttribute("aria-hidden", "true");
+});
+
+test("header chi tiết: status closed dùng lớp xám chung, không phải lớp trạng thái chết", async () => {
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: { ...COMPETITION, status: "closed" }, status: 200 },
+  );
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const status = document.querySelector(".admin-detail-status") as HTMLElement;
+  expect(status).toHaveTextContent("Đã kết thúc");
+  expect(status.classList.contains("closed")).toBe(true);
+});
+
+test("dải tóm tắt: đủ sáu field theo formatter hiện có, tone xoay theo vị trí render", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  const first = renderPage();
+  await screen.findByText("Đề bài");
+
+  const summary = screen.getByLabelText("Thông tin chung cuộc thi");
+  expect(summary.tagName).toBe("SECTION");
+
+  const facts = summaryFacts();
+  expect(facts).toHaveLength(6);
+  expect(facts.map((fact) => fact.querySelector("dt")!.textContent)).toEqual([
+    "Slug",
+    "Bắt đầu",
+    "Kết thúc",
+    "Tham gia",
+    "Chỉ số chính",
+    "Quota",
+  ]);
+
+  const values = facts.map((fact) => fact.querySelector("dd")!.textContent ?? "");
+  expect(values[0]).toBe("code-cup");
+  expect(values[1]).toContain("01/10/2026");
+  expect(values[2]).toContain("01/11/2026");
+  expect(values[3]).toBe("Cần mã tham gia");
+  expect(values[4]).toBe("F1");
+  expect(values[5]).toBe("5 lượt/ngày");
+
+  // Tone suy từ vị trí render, không đọc status/join_mode/metric.
+  const tones = facts.map((fact) => fact.getAttribute("data-tone"));
+  expect(tones).toEqual(["blue", "red", "yellow", "blue", "red", "yellow"]);
+  first.unmount();
+
+  mockApi((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : {
+          body: {
+            ...COMPETITION,
+            status: "closed",
+            join_mode: "invite_only",
+            primary_metric: "recall",
+            quota_per_day: 9,
+          },
+          status: 200,
+        },
+  );
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const after = summaryFacts();
+  expect(after.map((fact) => fact.getAttribute("data-tone"))).toEqual(tones);
+  // Giá trị đổi theo dữ liệu mới, chứng minh tone không bám nghiệp vụ.
+  expect(after[3].querySelector("dd")).toHaveTextContent("Chỉ theo lời mời");
+  expect(after[4].querySelector("dd")).toHaveTextContent("Recall");
+  expect(after[5].querySelector("dd")).toHaveTextContent("9 lượt/ngày");
+});
+
+test("tab rail: icon decorative aria-hidden, accessible name vẫn đúng bằng nhãn chữ", async () => {
+  await renderRail();
+
+  const labels = ["Nội dung", "Assets", "Chấm điểm", "Kết quả", "Thành viên & mã tham gia"];
+  const tabs = within(rail()).getAllByRole("tab");
+  expect(tabs.map((tab) => tab.textContent)).toEqual(labels);
+
+  for (const [index, tab] of tabs.entries()) {
+    const icon = tab.querySelector("svg");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("aria-hidden", "true");
+    expect(icon).toHaveAttribute("focusable", "false");
+    // Nếu icon lọt vào accessible name thì truy vấn theo tên chính xác sẽ trượt.
+    expect(within(rail()).getByRole("tab", { name: labels[index] })).toBe(tab);
+  }
+});
+
+test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không suy từ dữ liệu", async () => {
+  await renderRail();
+
+  expect(cardTones(screen.getByRole("tabpanel", { name: "Nội dung" }))).toEqual(["blue", "yellow"]);
+
+  for (const [name, tones] of [
+    ["Assets", ["blue", "yellow", "red"]],
+    ["Chấm điểm", ["blue", "red", "yellow"]],
+    ["Kết quả", ["yellow", "blue"]],
+    ["Thành viên & mã tham gia", ["red", "blue"]],
+  ] as Array<[string, string[]]>) {
+    fireEvent.click(railTab(name));
+    const panel = await screen.findByRole("tabpanel", { name });
+    expect(cardTones(panel)).toEqual(tones);
+  }
+});
+
+test("tab Nội dung có heading khối mới và CTA mở đúng modal tạo trang", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  expect(screen.getByRole("heading", { level: 2, name: "Quản lý nội dung" })).toBeTruthy();
+
+  const cta = screen.getByRole("button", { name: "Thêm trang nội dung" });
+  expect(cta).not.toBeDisabled();
+  fireEvent.click(cta);
+  expect(screen.getByRole("dialog", { name: "Thêm trang nội dung" })).toBeTruthy();
+});
+
+test("cột Thứ tự đọc theo vị trí 1..n thay vì giá trị order thô của API", async () => {
+  // Fixture giữ order 10/20 đúng như dữ liệu backend đang trả về.
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const numbers = Array.from(document.querySelectorAll(".order-num")).map((el) => el.textContent);
+  expect(numbers).toEqual(["1", "2"]);
+});
+
+test("khối hướng dẫn dưới Quản lý nội dung liệt kê năm phần nội dung thường có", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const heading = screen.getByRole("heading", { level: 2, name: "Các phần nội dung thường có" });
+  const card = heading.closest(".admin-detail-card") as HTMLElement;
+  expect(card.getAttribute("data-tone")).toBe("yellow");
+
+  const names = within(card)
+    .getAllByRole("listitem")
+    .map((item) => item.querySelector("strong")?.textContent);
+  expect(names).toEqual([
+    "Thể lệ",
+    "Lịch trình",
+    "Dataset / Tài nguyên",
+    "Giải thưởng / Kết quả",
+    "Ban Tổ chức & Liên hệ",
+  ]);
+});
+
+test("năm bảng vẫn là vùng focus được và giữ nguyên accessible name", async () => {
+  mockFullDetail();
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  async function expectRegion(name: string) {
+    const region = await screen.findByRole("region", { name });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(within(region).getByRole("table")).toBeTruthy();
+  }
+
+  await expectRegion("Bảng nội dung cuộc thi");
+
+  fireEvent.click(railTab("Assets"));
+  await expectRegion("Bảng tài nguyên cuộc thi");
+
+  // Chấm điểm: không có bảng; form cấu hình vẫn nằm trong tabpanel.
+  fireEvent.click(railTab("Chấm điểm"));
+  const scoringPanel = await screen.findByRole("tabpanel", { name: "Chấm điểm" });
+  expect(within(scoringPanel).queryByRole("region")).toBeNull();
+
+  fireEvent.click(railTab("Kết quả"));
+  await expectRegion("Bảng xếp hạng của cuộc thi");
+  await expectRegion("Bảng bài nộp của cuộc thi");
+
+  fireEvent.click(railTab("Thành viên & mã tham gia"));
+  await expectRegion("Bảng thành viên cuộc thi");
+});
+
+test("Hướng dẫn định dạng chỉ phản ánh cấu hình backend đang lưu", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  const first = renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  const binaryGuide = (await screen.findByRole("heading", { name: "Hướng dẫn định dạng" })).closest(
+    "section",
+  ) as HTMLElement;
+  expect(within(binaryGuide).getByText("prediction")).toBeTruthy();
+  expect(within(binaryGuide).getByText("binary")).toBeTruthy();
+  expect(within(binaryGuide).getByText("Positive label")).toBeTruthy();
+  first.unmount();
+
+  // average khác binary: không còn dòng positive label.
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) {
+      return {
+        body: { ...SCORING, config: { ...SCORING.config, average: "macro", pos_label: null } },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  const second = renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  const macroGuide = (await screen.findByRole("heading", { name: "Hướng dẫn định dạng" })).closest(
+    "section",
+  ) as HTMLElement;
+  expect(within(macroGuide).getByText("macro")).toBeTruthy();
+  expect(within(macroGuide).queryByText("Positive label")).toBeNull();
+  second.unmount();
+
+  // Chưa lưu cấu hình: form đang giữ giá trị mặc định nên không được coi là cấu hình đang áp dụng.
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) {
+      return { body: { ...SCORING, ready: false, config: null, ground_truth: null }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  expect(await screen.findByText("Lưu cấu hình CSV trước khi upload.")).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Hướng dẫn định dạng" })).toBeNull();
 });

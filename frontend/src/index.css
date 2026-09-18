@@ -3335,20 +3335,21 @@ select.input {
   opacity: 0.85;
 }
 
+/* Nhãn và giới hạn dung lượng nằm cùng một dòng: kiểu xếp chồng trước đây bó bề
+   ngang theo dòng dài nhất nên nút bị nén và lệch hẳn so với Sửa/Xóa.
+   `min-width` giữ nguyên bề ngang của CTA chính khi nhãn đổi giữa "Upload .md"
+   và "Thay .md", tránh cả nhóm nút nhảy qua lại sau mỗi lần upload. */
 .upload-md-btn {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  line-height: 1.1;
-  padding: 4px 8px;
+  gap: 0.375rem;
+  min-width: 9.5rem;
+  padding-inline: 0.875rem;
   cursor: pointer;
 }
 
 .upload-size-hint {
-  font-size: 10px;
-  font-weight: 400;
-  opacity: 0.75;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  opacity: 0.85;
   font-family: var(--font-sans);
 }
 
@@ -3386,40 +3387,7 @@ select.input {
   color: var(--text-secondary);
 }
 
-/* S15: Scoring admin */
-.scoring-admin-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-lg);
-  align-items: start;
-}
-
-@media (min-width: 64rem) {
-  .scoring-admin-grid {
-    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
-  }
-}
-
-.scoring-panel h2 {
-  margin: 0 0 var(--space-xs);
-  font-size: var(--text-heading-sm);
-  font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-}
-
-.scoring-panel-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-}
-
-.scoring-panel-head p {
-  margin: 0;
-}
-
+/* S15: Scoring admin — bảng metadata dùng chung cho ground truth và hướng dẫn định dạng. */
 .scoring-metadata {
   margin: var(--space-md) 0;
   border: 1px solid var(--border);
@@ -5028,7 +4996,7 @@ select.input {
 .admin-results-export {
   height: 34px;
   padding: 0 16px;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
 }
 
 .results-filters {
@@ -5037,19 +5005,19 @@ select.input {
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-lg);
   background: var(--surface-subtle);
 }
 
 .results-filters .input,
 .results-filters .btn {
   height: 36px;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
 }
 
 .admin-results-table-wrap {
-  border-radius: 2px;
+  border-radius: var(--radius-lg);
   box-shadow: none;
 }
 
@@ -5094,6 +5062,31 @@ select.input {
 .primary-score {
   color: var(--text);
   font-weight: 600;
+}
+
+/* Điểm chính là metric chính của cuộc thi: chỉ cột này được nhấn, các metric phụ
+   (F1/Precision/Recall) giữ nguyên để không metric nào bị đọc nhầm là primary. */
+.admin-detail-page .primary-score {
+  color: var(--vku-blue-700);
+}
+
+/* Huy chương nhẹ cho top 3; badge luôn kèm số hạng nên màu chỉ là phụ trợ. */
+.admin-detail-page .rank-cell[data-rank="1"] {
+  background: var(--vku-yellow-100);
+  border: 1px solid var(--vku-yellow-600);
+  color: var(--vku-yellow-800);
+}
+
+.admin-detail-page .rank-cell[data-rank="2"] {
+  background: var(--surface-container);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+.admin-detail-page .rank-cell[data-rank="3"] {
+  background: var(--vku-yellow-50);
+  border: 1px solid var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
 }
 
 .rank-cell {
@@ -5187,7 +5180,6 @@ select.input {
 
 .admin-members-code-card {
   padding: 24px;
-  border-radius: 2px;
 }
 
 .admin-members-note {
@@ -5207,7 +5199,7 @@ select.input {
 .admin-members-add-form .input,
 .admin-members-add-form .btn {
   height: 36px;
-  border-radius: 2px;
+  border-radius: var(--radius-md);
 }
 
 .admin-members-list {
@@ -5216,7 +5208,7 @@ select.input {
 
 .admin-members-head {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
@@ -5236,8 +5228,15 @@ select.input {
 }
 
 .admin-members-table-wrap {
-  border-radius: 2px;
+  border-radius: var(--radius-lg);
   box-shadow: none;
+}
+
+/* Vai trò Admin mang nhận diện xanh; Thí sinh vẫn là pill neutral (.badge-muted). */
+.admin-members-table .role-badge:not(.badge-muted) {
+  border-color: var(--vku-blue-100);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-800);
 }
 
 .admin-members-table {
@@ -5275,27 +5274,249 @@ select.input {
   }
 }
 
+/* =============================================================================
+   Quản lý tài khoản (ACCOUNT_MANAGEMENT_DESIGN.md)
+   Cùng ngôn ngữ token với trang Quản lý cuộc thi; thuần trình bày, không đổi
+   nghiệp vụ. Mọi selector đều nằm dưới `.admin-accounts` để không rò sang trang
+   khác, trừ nhóm modal vốn đã có scope riêng là `.modal-account-form`.
+   ============================================================================= */
+.admin-accounts {
+  --acc-secondary: var(--vku-ink-muted);
+
+  color: var(--vku-ink);
+}
+
+/* Panel đầu trang: nền trắng chuyển dần sang xanh nhạt. */
 .admin-accounts-head {
-  margin-bottom: 32px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+  min-height: 132px;
+  margin-bottom: var(--space-lg);
+  padding: var(--space-lg);
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Ba vệt chéo xanh–đỏ–vàng ở góc phải: nhận diện VKU bằng CSS thuần, không ảnh,
+   không animation. */
+.admin-accounts-head::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(320px, 42%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.admin-accounts-head > * {
+  position: relative;
+}
+
+.admin-accounts-head-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 60px;
+  height: 60px;
+  border: 1px solid #cee1ff;
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--vku-blue-100) 0%, var(--vku-blue-50) 100%);
+  color: var(--vku-blue-700);
+}
+
+.admin-accounts-head-glyph {
+  width: 26px;
+  height: 26px;
+}
+
+.admin-accounts-head-copy {
+  min-width: 0;
+}
+
+.admin-accounts-title {
+  margin: 0;
+  color: var(--vku-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-h1);
+  font-weight: 700;
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
+}
+
+.admin-accounts-subtitle {
+  margin: var(--space-sm) 0 0;
+  max-width: 42rem;
+  color: var(--acc-secondary);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+
+/* Ba line màu VKU dưới subtitle — thuần trang trí, không mang nghĩa nghiệp vụ. */
+.admin-accounts-accent {
+  display: flex;
+  gap: 6px;
+  margin-top: var(--space-md);
+}
+
+.admin-accounts-accent > span {
+  width: 32px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.admin-accounts-accent > span:nth-child(1) {
+  background: var(--vku-blue-600);
+}
+
+.admin-accounts-accent > span:nth-child(2) {
+  background: var(--vku-red-600);
+}
+
+.admin-accounts-accent > span:nth-child(3) {
+  background: var(--vku-yellow-600);
+}
+
+/* Bốn KPI là bốn card rời; tone chỉ để nhận diện thương hiệu, không dùng để suy
+   ra trạng thái hay quyền thao tác. Số liệu lấy từ aggregate toàn hệ thống. */
+.admin-accounts-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
+  margin-bottom: var(--space-lg);
+}
+
+.admin-account-stat {
+  --stat-bg: linear-gradient(135deg, #f3f8ff 0%, var(--vku-blue-100) 100%);
+  --stat-border: #cfe1ff;
+  --stat-icon-bg: #dbeafe;
+  --stat-ink: var(--vku-blue-700);
+
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  min-width: 0;
+  min-height: 126px;
+  padding: 20px 22px;
+  border: 1px solid var(--stat-border);
+  border-top: 3px solid var(--vku-blue-600);
+  border-radius: var(--radius-2xl);
+  background: var(--stat-bg);
+}
+
+.admin-account-stat[data-tone="red"] {
+  --stat-bg: linear-gradient(135deg, #fff8f9 0%, var(--vku-red-100) 100%);
+  --stat-border: #ffd0d6;
+  --stat-icon-bg: #ffdde2;
+  --stat-ink: var(--vku-red-700);
+
+  border-top-color: var(--vku-red-600);
+}
+
+/* Vàng 800 là tông vàng duy nhất đủ tương phản để làm màu chữ. */
+.admin-account-stat[data-tone="yellow"] {
+  --stat-bg: linear-gradient(135deg, #fffdf5 0%, #fff7de 100%);
+  --stat-border: #f6d987;
+  --stat-icon-bg: var(--vku-yellow-100);
+  --stat-ink: var(--vku-yellow-800);
+
+  border-top-color: var(--vku-yellow-600);
+}
+
+/* "Đang hoạt động" là trạng thái semantic nên dùng xanh lá; viền trên vẫn giữ
+   xanh VKU để không lệch nhận diện thương hiệu. */
+.admin-account-stat[data-tone="green"] {
+  --stat-bg: linear-gradient(135deg, #f4fcf8 0%, #ecfdf5 100%);
+  --stat-border: #bce8d3;
+  --stat-icon-bg: #d1fae5;
+  --stat-ink: #047857;
+}
+
+.admin-account-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--stat-icon-bg);
+  color: var(--stat-ink);
+}
+
+.admin-account-stat-body {
+  min-width: 0;
+}
+
+.admin-account-stat-label {
+  margin: 0;
+  color: var(--acc-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.admin-account-stat-value {
+  display: block;
+  margin-top: 6px;
+  color: var(--stat-ink);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chưa có dữ liệu thì để chỗ trống, tuyệt đối không hiện số giả. */
+.admin-account-stat-placeholder {
+  display: block;
+  width: 56px;
+  height: 26px;
+  margin-top: 6px;
+  border-radius: var(--radius-lg);
+  background: var(--stat-icon-bg);
+}
+
+.admin-account-stat-detail {
+  margin: 6px 0 0;
+  color: var(--acc-secondary);
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
 }
 
 .admin-accounts-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: 64px;
-  margin-bottom: 16px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+  padding: 12px 16px;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
   background: var(--surface);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.02),
+    0 6px 20px rgba(15, 23, 42, 0.035);
 }
 
 .admin-accounts-search {
   position: relative;
   display: block;
-  width: min(100%, 512px);
+  width: min(100%, 480px);
 }
 
 .admin-accounts-search > svg {
@@ -5303,73 +5524,360 @@ select.input {
   top: 50%;
   left: 12px;
   z-index: 1;
-  color: var(--outline);
+  color: var(--acc-secondary);
   pointer-events: none;
   transform: translateY(-50%);
 }
 
-.admin-accounts-search .input {
-  height: 38px;
-  padding-right: 92px;
-  padding-left: 36px;
-  border-radius: 2px;
-  background: var(--surface-subtle);
+.admin-accounts-search input {
+  width: 100%;
+  height: 46px;
+  padding: 0 92px 0 36px;
+  border: 1px solid #dce3ec;
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--vku-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
+  line-height: 1.25;
+}
+
+.admin-accounts-search input::placeholder {
+  color: var(--acc-secondary);
+}
+
+/* `outline: none` chỉ được phép đi kèm thay thế nhìn thấy được: viền xanh + ring. */
+.admin-accounts-search input:focus {
+  outline: none;
+  border-color: var(--vku-blue-500);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14);
 }
 
 .admin-accounts-sync {
   position: absolute;
   top: 50%;
   right: 12px;
-  color: var(--text-muted);
+  color: var(--acc-secondary);
   font-size: 11px;
   transform: translateY(-50%);
 }
 
+/* CTA tạo tài khoản: xanh VKU, không dùng đen. */
 .admin-accounts-create {
-  height: 30px;
-  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  flex: none;
+  min-height: 46px;
+  padding: 0 20px;
+  border: 1px solid var(--vku-blue-700);
+  border-radius: 9px;
+  background: var(--vku-blue-700);
+  box-shadow: var(--shadow-sm);
+  color: #ffffff;
+  font-family: var(--font-sans);
+  font-size: var(--text-control);
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
-.admin-accounts-table-wrap {
-  /* Bảng rộng hơn khung ở mobile: neo containing block vào wrapper để phần tử
-     .sr-only (position: absolute) trong ô không thoát khỏi vùng cuộn ngang. */
+.admin-accounts-create:hover {
+  border-color: var(--vku-blue-800);
+  background: var(--vku-blue-800);
+}
+
+.admin-accounts-create > span {
+  font-size: 16px;
+  font-weight: 300;
+  line-height: 1;
+}
+
+.admin-accounts-card {
+  overflow: hidden;
+  border: 1px solid var(--vku-border);
+  border-top: 3px solid var(--vku-blue-600);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.02),
+    0 6px 20px rgba(15, 23, 42, 0.035);
+}
+
+.admin-accounts-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px 14px;
+}
+
+.admin-accounts-card-accent {
+  flex: none;
+  width: 4px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    180deg,
+    var(--vku-blue-600) 0 33%,
+    var(--vku-red-600) 33% 66%,
+    var(--vku-yellow-600) 66% 100%
+  );
+}
+
+.admin-accounts-card-title {
+  margin: 0;
+  color: var(--vku-ink);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.admin-accounts-card-count {
+  margin-left: auto;
+  color: var(--acc-secondary);
+  font-size: var(--text-label);
+  white-space: nowrap;
+}
+
+.admin-accounts-table-scroll {
+  /* Bảng rộng hơn khung ở mobile: neo containing block vào khung cuộn để phần tử
+     .sr-only (position: absolute) trong ô không thoát ra ngoài và kéo cả trang
+     cuộn ngang. */
   position: relative;
-  border-radius: 2px;
-  box-shadow: none;
+  overflow-x: auto;
+}
+
+.admin-accounts-table-scroll:focus-visible {
+  outline: 2px solid var(--vku-blue-500);
+  outline-offset: -2px;
 }
 
 .admin-accounts-table {
+  width: 100%;
   min-width: 900px;
+  border-collapse: collapse;
+  text-align: left;
 }
 
 .admin-accounts-table th {
-  padding: 8px 16px;
-  font-size: 11px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--vku-border-soft);
+  border-bottom: 1px solid var(--vku-border);
+  background: #fafbfd;
+  color: var(--acc-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: var(--leading-label);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .admin-accounts-table td {
-  padding: 12px 16px;
-  font-size: 13px;
+  padding: 16px;
+  border-bottom: 1px solid var(--vku-border-soft);
+  color: var(--vku-ink);
+  font-size: var(--text-body);
+  vertical-align: middle;
+}
+
+.admin-accounts-table tbody tr:hover {
+  background: #fafcff;
+}
+
+.admin-accounts-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .admin-account-email {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.admin-account-name {
+  overflow-wrap: anywhere;
 }
 
 .admin-you-badge {
   display: inline-flex;
-  padding: 2px 6px;
-  border: 1px solid var(--text);
-  border-radius: 2px;
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid #b9d5ff;
+  border-radius: var(--radius-pill);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
   font-size: 11px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.4;
 }
 
-.admin-account-actions .btn {
-  border-radius: 2px;
+/* Badge vai trò/trạng thái scoped cho trang này; không sửa `.role-badge` dùng chung. */
+.admin-role-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border: 1px solid #e1e5ea;
+  border-radius: var(--radius-pill);
+  background: #f5f6f8;
+  color: #526078;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.admin-role-badge[data-role="admin"] {
+  border-color: #bcd7ff;
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+}
+
+.admin-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid #dce3ea;
+  border-radius: var(--radius-pill);
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.admin-status-badge[data-active="true"] {
+  border-color: #aee8cc;
+  background: #e8fbf2;
+  color: #047857;
+}
+
+.admin-status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.admin-account-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.admin-account-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 13px;
+  border: 1px solid #d7dfe9;
+  border-radius: 8px;
+  background: var(--surface);
+  color: #172b4d;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.admin-account-action:hover:not(:disabled) {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+}
+
+.admin-account-action-danger {
+  border-color: #ffd1d6;
+  background: #fff6f6;
+  color: #d30b23;
+}
+
+.admin-account-action-danger:hover:not(:disabled) {
+  border-color: #f8aab5;
+  background: #fff0f2;
+  color: #d30b23;
+}
+
+.admin-account-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-accounts-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #d7dfe9;
+  border-radius: 8px;
+  background: var(--surface);
+  color: #172b4d;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.admin-accounts-secondary:hover {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+}
+
+.admin-accounts-secondary[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-accounts-secondary[aria-disabled="true"]:hover {
+  border-color: #d7dfe9;
+  background: var(--surface);
+  color: #172b4d;
+}
+
+.admin-accounts-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 14px 20px;
+  border-top: 1px solid var(--vku-border-soft);
+  color: var(--acc-secondary);
+  font-size: var(--text-mono-sm);
+}
+
+.admin-accounts-pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.admin-accounts-message {
+  margin-bottom: var(--space-md);
 }
 
 .admin-accounts-message,
@@ -5405,7 +5913,7 @@ select.input {
 
 .modal-overlay-account-form {
   padding: 32px;
-  background: rgba(26, 28, 28, 0.25);
+  background: rgba(15, 23, 42, 0.32);
 }
 
 .modal-account-form {
@@ -5414,20 +5922,46 @@ select.input {
   padding: 0;
   /* Canh ngang để bo góc header, nhưng vẫn cuộn dọc khi form cao hơn viewport. */
   overflow-x: hidden;
-  border-radius: 8px;
+  border-radius: 16px;
 }
 
+/* Header modal mang accent xanh VKU; ba vệt chéo giữ nhận diện như panel đầu trang. */
 .modal-account-form .modal-head {
+  position: relative;
   margin: 0;
-  padding: 32px 32px 16px;
-  background: var(--surface-subtle);
+  padding: 28px 32px 16px;
+  overflow: hidden;
+  border-top: 3px solid var(--vku-blue-600);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+.modal-account-form .modal-head::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(200px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+.modal-account-form .modal-head > * {
+  position: relative;
 }
 
 .modal-account-form .modal-title {
   max-width: calc(100% - 40px);
-  font-size: 42px;
-  line-height: 1.02;
-  letter-spacing: -0.025em;
+  font-size: 24px;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
 }
 
 .modal-account-form .modal-close {
@@ -5459,9 +5993,14 @@ select.input {
 }
 
 .account-form-modal .input {
-  height: 42px;
-  border-radius: 2px;
-  background: var(--surface-subtle);
+  height: 44px;
+  border-radius: 9px;
+  background: var(--surface);
+}
+
+.account-form-modal .input:focus {
+  border-color: var(--vku-blue-500);
+  box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14);
 }
 
 .password-field {
@@ -5497,12 +6036,12 @@ select.input {
 }
 
 .account-security-note {
-  margin: 0;
+  margin: 16px 0 0;
   padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  background: var(--surface-subtle);
-  color: var(--text-muted);
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--vku-blue-50);
+  color: var(--vku-ink-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -5510,11 +6049,25 @@ select.input {
 .account-form-actions {
   gap: 16px;
   padding-top: 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--vku-border);
 }
 
 .account-form-actions .btn {
-  border-radius: 2px;
+  height: 44px;
+  border-radius: 9px;
+}
+
+/* Primary của modal tài khoản là xanh VKU. `.btn` mặc định lấy `--accent` toàn cục
+   (#000000) nên phải ghi đè trong đúng scope này, không sửa token dùng chung. */
+.modal-account-form .account-form-actions .btn:not(.btn-secondary) {
+  border-color: var(--vku-blue-700);
+  background: var(--vku-blue-700);
+  color: #ffffff;
+}
+
+.modal-account-form .account-form-actions .btn:not(.btn-secondary):hover:not(:disabled) {
+  border-color: var(--vku-blue-800);
+  background: var(--vku-blue-800);
 }
 
 .current-user-row,
@@ -6995,7 +7548,8 @@ select.input {
 }
 
 @media (max-width: 74.99rem) {
-  .ac-stats {
+  .ac-stats,
+  .admin-accounts-stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -7048,8 +7602,22 @@ select.input {
     width: 100%;
   }
 
+  .admin-accounts-head {
+    align-items: flex-start;
+    min-height: 0;
+  }
+
   .admin-accounts-create {
     align-self: flex-start;
+  }
+
+  .admin-accounts-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-accounts-pager {
+    justify-content: space-between;
   }
 
   .modal-overlay-account-form {
@@ -7057,7 +7625,7 @@ select.input {
   }
 
   .modal-account-form .modal-title {
-    font-size: 32px;
+    font-size: 20px;
   }
 
   .account-form-grid {
@@ -7136,7 +7704,7 @@ select.input {
   }
 
   .modal-account-form .modal-title {
-    font-size: 28px;
+    font-size: 18px;
   }
 
   .account-form-modal {
@@ -7155,6 +7723,7 @@ select.input {
   }
 
   .ac-stats,
+  .admin-accounts-stats,
   .ac-form-grid,
   .ac-join-options {
     grid-template-columns: 1fr;
@@ -7526,8 +8095,306 @@ button:focus-visible {
   padding: 0 0 3rem;
 }
 
+/* --- Hệ thống card dùng chung cho cả năm tab -------------------------------
+   `data-tone` chọn accent theo **vị trí render** (xanh → đỏ → vàng), không đọc
+   status/join_mode/metric: màu chỉ để nhận diện thương hiệu. Text luôn dùng
+   `--vku-ink`; vàng chỉ dùng cho nền/viền/icon vì `--vku-yellow-800` là tông
+   vàng duy nhất đạt 4.5:1 khi làm màu chữ. */
+.admin-detail-card {
+  --card-accent: var(--vku-blue-600);
+  --card-icon-bg: var(--vku-blue-100);
+  --card-icon-ink: var(--vku-blue-700);
+  min-width: 0;
+  padding: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--vku-border);
+  border-top: 3px solid var(--card-accent);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-detail-card[data-tone="red"] {
+  --card-accent: var(--vku-red-600);
+  --card-icon-bg: var(--vku-red-100);
+  --card-icon-ink: var(--vku-red-700);
+}
+
+.admin-detail-card[data-tone="yellow"] {
+  --card-accent: var(--vku-yellow-600);
+  --card-icon-bg: var(--vku-yellow-100);
+  --card-icon-ink: var(--vku-yellow-800);
+  background: linear-gradient(135deg, var(--surface), var(--vku-yellow-50));
+}
+
+.admin-detail-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.admin-detail-section-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.admin-detail-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  border-radius: var(--radius-lg);
+  background: var(--card-icon-bg);
+  color: var(--card-icon-ink);
+}
+
+.admin-detail-card-icon-glyph {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+/* Thẻ "Mã tham gia" mượn accent đỏ nhưng icon chìa khoá giữ tone vàng. */
+.admin-detail-card-icon-key {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.admin-detail-card-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--vku-ink);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.admin-detail-card-desc {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* Khối gợi ý cách chia nội dung: thẻ vàng nối tiếp thẻ chính của tab Nội dung.
+   `.admin-detail-panel` không đặt gap nên khoảng cách nằm ở đây. */
+.admin-detail-topic-card {
+  margin-top: 1.25rem;
+}
+
+.admin-detail-topic-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.625rem 1rem;
+  /* Thẻ này không có `.admin-detail-card-head` nên danh sách phải tự tách khỏi
+     dòng mô tả; 1.25rem đúng bằng nhịp head → nội dung của các thẻ khác. */
+  margin: 1.25rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-detail-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--vku-yellow-100);
+  border-radius: var(--radius-lg);
+}
+
+.admin-detail-topic-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--vku-ink);
+}
+
+.admin-detail-topic-hint {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Hai cột của tab Chấm điểm: cấu hình CSV bên trái, ground truth + hướng dẫn bên phải. */
+.admin-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.admin-detail-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+/* Từ lg mới tách hai cột; dưới ngưỡng đó form cấu hình cần trọn chiều ngang. */
+@media (min-width: 64rem) {
+  .admin-detail-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(20rem, 0.85fr);
+  }
+}
+
+/* --- CTA của module --------------------------------------------------------
+   Gắn class trực tiếp lên nút thay vì override `.btn` toàn cục, để nút ở trang
+   khác không đổi màu. Hai class liền nhau để thắng cả `.btn:disabled:hover`
+   (nút primary bị khoá sẽ không rơi về nền đen của `.btn`). */
+.btn.admin-detail-primary-action,
+.btn.admin-detail-primary-action:hover,
+.btn.admin-detail-primary-action:disabled:hover {
+  background: var(--vku-blue-700);
+  border-color: var(--vku-blue-700);
+  color: #fff;
+}
+
+.btn.admin-detail-primary-action:hover:not(:disabled) {
+  background: var(--vku-blue-800);
+  border-color: var(--vku-blue-800);
+}
+
+.admin-detail-primary-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+.btn.admin-detail-outline-action {
+  background: var(--surface);
+  border-color: var(--vku-blue-600);
+  color: var(--vku-blue-700);
+}
+
+.btn.admin-detail-outline-action:hover:not(:disabled) {
+  background: var(--vku-blue-50);
+  border-color: var(--vku-blue-700);
+  color: var(--vku-blue-800);
+}
+
+.btn.admin-detail-outline-action:disabled,
+.btn.admin-detail-outline-action:disabled:hover {
+  background: var(--surface);
+  border-color: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+/* Hành động phá huỷ dùng viền đỏ đặc thay vì kiểu ghost trong suốt, để ba nút
+   trong cùng một hàng có chung trọng lượng thị giác. */
+.btn.admin-detail-danger-action {
+  background: var(--surface);
+  border-color: var(--vku-red-600);
+  color: var(--vku-red-700);
+}
+
+.btn.admin-detail-danger-action:hover:not(:disabled) {
+  background: var(--vku-red-50);
+  border-color: var(--vku-red-700);
+  color: var(--vku-red-800);
+}
+
+.btn.admin-detail-danger-action:disabled,
+.btn.admin-detail-danger-action:disabled:hover {
+  background: var(--surface);
+  border-color: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
 .admin-detail-header {
   margin-bottom: 1.5rem;
+}
+
+/* Panel header: nền trắng → xanh rất nhạt kèm ba vệt chéo xanh–đỏ–vàng vẽ bằng
+   CSS, cùng công thức với `.dash-hero`. Tĩnh, không animation, không chặn chuột. */
+.admin-detail-shell {
+  position: relative;
+  overflow: hidden;
+  padding: 1.25rem 1.5rem 1.5rem;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
+}
+
+.admin-detail-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+}
+
+.admin-detail-shell > * {
+  position: relative;
+}
+
+/* Khối icon cạnh tên cuộc thi — decorative, không suy diễn loại cuộc thi. */
+.admin-detail-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: none;
+  border: 1px solid var(--vku-blue-100);
+  border-radius: var(--radius-2xl);
+  background: linear-gradient(135deg, var(--vku-blue-100), var(--vku-blue-50));
+  color: var(--vku-blue-600);
+}
+
+.admin-detail-mark-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
+.admin-detail-title-group {
+  min-width: 0;
+}
+
+.admin-detail-title-line {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Ba vạch ngắn xanh–đỏ–vàng dưới mô tả; thuần decorative. */
+.admin-detail-page .vku-accent {
+  display: flex;
+  gap: 5px;
+  margin-top: 0.625rem;
+}
+
+.admin-detail-page .vku-accent span {
+  display: block;
+  width: 26px;
+  height: 4px;
+  border-radius: var(--radius-pill);
+}
+
+.admin-detail-page .vku-accent .blue {
+  background: var(--vku-blue-600);
+}
+
+.admin-detail-page .vku-accent .red {
+  background: var(--vku-red-600);
+}
+
+.admin-detail-page .vku-accent .yellow {
+  background: var(--vku-yellow-500);
 }
 
 .admin-detail-breadcrumb-wrap {
@@ -7604,37 +8471,8 @@ button:focus-visible {
   background-color: currentColor;
 }
 
-.admin-detail-status.live,
-.admin-detail-status.published {
-  background-color: #ecfdf5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
-}
-
-.admin-detail-status.live .admin-detail-status-dot,
-.admin-detail-status.published .admin-detail-status-dot {
-  background-color: #10b981;
-}
-
-.admin-detail-status.draft {
-  background-color: #f3f4f6;
-  color: #4b5563;
-  border: 1px solid #e5e7eb;
-}
-
-.admin-detail-status.draft .admin-detail-status-dot {
-  background-color: #9ca3af;
-}
-
-.admin-detail-status.closed {
-  background-color: #fef2f2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
-}
-
-.admin-detail-status.closed .admin-detail-status-dot {
-  background-color: #ef4444;
-}
+/* Tone của status pill lấy từ `.status-badge.{success|warning|closed}` do
+   `statusClass()` trả về, dùng chung với màn danh sách quản trị. */
 
 .admin-detail-description {
   font-size: 0.875rem;
@@ -7681,14 +8519,28 @@ button:focus-visible {
   background: var(--surface-subtle);
 }
 
-.admin-detail-action.primary {
-  background: var(--text);
-  color: var(--surface);
-  border-color: var(--text);
+/* Sửa/Clone: outline xanh. Publish: CTA xanh đặc. Kết thúc/Xóa: danger tint đỏ. */
+.admin-detail-action.admin-detail-action-outline {
+  border-color: var(--vku-blue-600);
+  color: var(--vku-blue-700);
 }
 
-.admin-detail-action.primary:hover:not(:disabled) {
-  opacity: 0.9;
+.admin-detail-action.admin-detail-action-outline:hover:not(:disabled) {
+  background: var(--vku-blue-50);
+  border-color: var(--vku-blue-700);
+  color: var(--vku-blue-800);
+}
+
+.admin-detail-action.admin-detail-action-publish {
+  background: var(--vku-blue-700);
+  border-color: var(--vku-blue-700);
+  color: #fff;
+}
+
+.admin-detail-action.admin-detail-action-publish:hover:not(:disabled) {
+  background: var(--vku-blue-800);
+  border-color: var(--vku-blue-800);
+  color: #fff;
 }
 
 .admin-detail-action.danger {
@@ -7715,10 +8567,12 @@ button:focus-visible {
   -webkit-appearance: none;
   display: inline-flex;
   align-items: center;
+  gap: 0.5rem;
   flex: none;
   min-height: 40px;
   padding: 0.5rem 0.875rem;
-  border: 0;
+  /* Viền trong suốt từ đầu để tab active không nhảy 2px khi được tô viền. */
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-muted);
@@ -7734,16 +8588,23 @@ button:focus-visible {
     color var(--duration-fast) var(--ease-standard);
 }
 
+.admin-detail-tab-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
 .admin-detail-tab:hover {
-  color: var(--text);
-  background: var(--surface);
+  color: var(--vku-blue-800);
+  background: var(--vku-blue-50);
 }
 
 .admin-detail-tab.active {
-  color: var(--text);
+  color: var(--vku-blue-800);
   font-weight: 600;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  background: var(--vku-blue-100);
+  border-color: var(--vku-blue-100);
+  box-shadow: inset 0 -2px 0 var(--vku-blue-600);
 }
 
 .admin-detail-toast {
@@ -7778,8 +8639,8 @@ button:focus-visible {
 
 .s14-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
   padding: 1.25rem;
   box-shadow: var(--shadow-sm);
   display: flex;
@@ -7797,6 +8658,33 @@ button:focus-visible {
   grid-column: span 4;
   background: var(--surface-subtle);
   gap: 0.75rem;
+}
+
+/* Tone của khối Assets: xanh cho upload, vàng cho quy chuẩn Markdown, đỏ cho
+   danh sách tài nguyên (chỉ ở viền trên + icon; bảng giữ nền trung tính). */
+.s14-card[data-tone="blue"] {
+  border-top: 3px solid var(--vku-blue-600);
+}
+
+.s14-table-card[data-tone="red"] {
+  border-top: 3px solid var(--vku-red-600);
+}
+
+.s14-card[data-tone="blue"] .s14-card-icon {
+  background: var(--vku-blue-100);
+  border-color: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.s14-card[data-tone="yellow"] {
+  border-top: 3px solid var(--vku-yellow-600);
+  background: linear-gradient(135deg, var(--surface), var(--vku-yellow-50));
+}
+
+.s14-card[data-tone="yellow"] .s14-card-icon.guide-icon {
+  background: var(--vku-yellow-100);
+  border-color: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
 }
 
 .s14-card-header {
@@ -7874,23 +8762,10 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
+/* Chỉ còn phần nhận diện; nền/chữ lấy từ `.admin-detail-primary-action` (VKU Blue). */
 .s14-upload-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4375rem;
-  background: var(--text);
-  color: var(--surface);
-  border: 1px solid var(--text);
   border-radius: var(--radius-sm);
-  padding: 0.5rem 1rem;
   font-size: 0.8125rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.s14-upload-btn:hover {
-  opacity: 0.9;
 }
 
 .s14-btn-icon {
@@ -7941,8 +8816,8 @@ button:focus-visible {
 .s14-copy-pill-btn {
   appearance: none;
   -webkit-appearance: none;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
+  background: var(--surface);
+  border: 1px solid var(--vku-blue-600);
   border-radius: 3px;
   padding: 0.1875rem 0.4375rem;
   /* Nút copy trong pill chỉ cao ~22px; nâng lên ngưỡng chạm 24px tối thiểu. */
@@ -7950,17 +8825,18 @@ button:focus-visible {
   font-family: inherit;
   font-size: 0.6875rem;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--vku-blue-700);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 
 .s14-copy-pill-btn:hover {
-  color: var(--text);
-  background: var(--surface);
+  color: var(--vku-blue-800);
+  background: var(--vku-blue-50);
+  border-color: var(--vku-blue-700);
 }
 
 .s14-guide-subtext {
@@ -7973,9 +8849,9 @@ button:focus-visible {
 /* S14 Table Card */
 .s14-table-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 
@@ -8244,6 +9120,40 @@ button:focus-visible {
     width: 100%;
     justify-content: flex-start;
   }
+  /* Nút hành động chính đạt ngưỡng chạm 44px khi tay cầm điện thoại. */
+  .admin-detail-action,
+  .admin-detail-primary-action.btn,
+  .btn.admin-detail-outline-action,
+  .btn.admin-detail-danger-action {
+    min-height: 44px;
+  }
+  .admin-detail-shell {
+    padding: 1rem 1rem 1.25rem;
+  }
+  .admin-detail-mark {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .admin-detail-mark-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+  .admin-detail-card {
+    padding: 1.125rem;
+  }
+  .admin-detail-card-head,
+  .results-head,
+  .admin-members-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .admin-members-add-form {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .results-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .s14-bento-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 1rem;
@@ -8317,9 +9227,9 @@ button:focus-visible {
   gap: var(--space-sm);
   margin: 0.875rem 0 0;
   padding: 12px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--vku-border-soft);
   border-radius: var(--radius-lg);
-  background: var(--surface-subtle);
+  background: var(--surface);
 }
 
 .admin-detail-fact {
@@ -8331,11 +9241,42 @@ button:focus-visible {
 }
 
 .admin-detail-fact dt {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--text-muted);
   font-size: var(--text-label);
   font-weight: 500;
   letter-spacing: 0.01em;
   text-transform: uppercase;
+}
+
+/* Ô tint nhỏ quanh icon; màu lặp theo vị trí trong dải, không theo dữ liệu. */
+.admin-detail-fact-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
+}
+
+.admin-detail-fact[data-tone="red"] .admin-detail-fact-icon {
+  background: var(--vku-red-100);
+  color: var(--vku-red-700);
+}
+
+.admin-detail-fact[data-tone="yellow"] .admin-detail-fact-icon {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.admin-detail-fact-icon-glyph {
+  width: 0.875rem;
+  height: 0.875rem;
 }
 
 .admin-detail-fact dd {
@@ -8403,10 +9344,10 @@ button:focus-visible {
 .admin-detail-rail {
   display: flex;
   gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-container-low);
+  padding: 5px;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
   box-shadow: var(--shadow-sm);
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;

@@ -39,13 +39,46 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 type Tab = "contents" | "assets" | "scoring" | "members" | "results";
 
+type IconComponent = (props: { className?: string }) => ReactNode;
+
 /** Định nghĩa tab ở module scope để không tạo mảng mới mỗi lần render. */
-const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string }> = [
-  { key: "contents", label: "Nội dung" },
-  { key: "assets", label: "Assets" },
-  { key: "scoring", label: "Chấm điểm" },
-  { key: "results", label: "Kết quả" },
-  { key: "members", label: "Thành viên & mã tham gia" },
+const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }> = [
+  { key: "contents", label: "Nội dung", Icon: IconFileText },
+  { key: "assets", label: "Assets", Icon: IconImage },
+  { key: "scoring", label: "Chấm điểm", Icon: IconGauge },
+  { key: "results", label: "Kết quả", Icon: IconTrophy },
+  { key: "members", label: "Thành viên & mã tham gia", Icon: IconUsers },
+];
+
+/**
+ * Accent xanh–đỏ–vàng lặp theo **vị trí render**, không đọc status/join_mode/metric:
+ * màu chỉ để nhận diện thương hiệu, không mang nghĩa nghiệp vụ.
+ */
+const ROW_ACCENTS = ["blue", "red", "yellow"] as const;
+
+type AccentTone = (typeof ROW_ACCENTS)[number];
+
+function toneAt(index: number): AccentTone {
+  return ROW_ACCENTS[index % ROW_ACCENTS.length];
+}
+
+/** Sáu field của dải tóm tắt; `read` giữ nguyên formatter hiện có, không hardcode giá trị. */
+const SUMMARY_FACTS: ReadonlyArray<{
+  label: string;
+  Icon: IconComponent;
+  mono?: boolean;
+  read: (competition: Competition) => ReactNode;
+}> = [
+  { label: "Slug", Icon: IconTag, mono: true, read: (c) => c.slug },
+  { label: "Bắt đầu", Icon: IconCalendar, read: (c) => formatLocal(c.start_at) },
+  { label: "Kết thúc", Icon: IconFlag, read: (c) => formatLocal(c.end_at) },
+  { label: "Tham gia", Icon: IconKey, read: (c) => JOIN_MODE_LABEL[c.join_mode] ?? c.join_mode },
+  {
+    label: "Chỉ số chính",
+    Icon: IconTarget,
+    read: (c) => METRIC_LABEL[c.primary_metric] ?? c.primary_metric.toUpperCase(),
+  },
+  { label: "Quota", Icon: IconClock, read: (c) => `${c.quota_per_day} lượt/ngày` },
 ];
 
 interface AdminContent extends ContentSummary {
@@ -233,6 +266,109 @@ function IconCheck({ className }: { className?: string }) {
   );
 }
 
+function IconFileText({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 3v5h5" />
+      <path d="M9 13h6M9 17h4" />
+    </Icon>
+  );
+}
+
+function IconGauge({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M4 18a8 8 0 1 1 16 0" />
+      <path d="m12 18 4.5-5" />
+      <path d="M3 18h18" />
+    </Icon>
+  );
+}
+
+function IconTrophy({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M8 4h8v5a4 4 0 0 1-8 0Z" />
+      <path d="M8 5H5v2a3 3 0 0 0 3 3M16 5h3v2a3 3 0 0 1-3 3" />
+      <path d="M12 13v4M9 20h6" />
+    </Icon>
+  );
+}
+
+function IconUsers({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="9" cy="8.5" r="3.5" />
+      <path d="M3 20v-.5a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v.5" />
+      <path d="M16.5 5.4a3.5 3.5 0 0 1 0 6.2M18 14.8a5 5 0 0 1 3 4.6v.6" />
+    </Icon>
+  );
+}
+
+function IconPlus({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M12 5v14M5 12h14" />
+    </Icon>
+  );
+}
+
+function IconTag({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3 11V5a2 2 0 0 1 2-2h6l10 10-8 8Z" />
+      <circle cx="7.5" cy="7.5" r="1.25" />
+    </Icon>
+  );
+}
+
+function IconCalendar({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M8 3v4M16 3v4M3 11h18" />
+    </Icon>
+  );
+}
+
+function IconFlag({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M6 21V4" />
+      <path d="M6 5h12l-2.5 4L18 13H6" />
+    </Icon>
+  );
+}
+
+function IconTarget({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3.5" />
+    </Icon>
+  );
+}
+
+function IconClock({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </Icon>
+  );
+}
+
+function IconKey({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="8.5" cy="15.5" r="3.5" />
+      <path d="m11 13 8.5-8.5" />
+      <path d="m15.5 8.5 2.5 2.5M18.5 5.5l2 2" />
+    </Icon>
+  );
+}
+
 function formatAssetType(contentType: string): string {
   switch (contentType.toLowerCase()) {
     case "image/png":
@@ -389,24 +525,37 @@ export function AdminCompetitionDetailPage() {
           </Link>
         </div>
 
+        <div className="admin-detail-shell">
         <div className="admin-detail-heading-row">
           <div className="admin-detail-heading">
             <div className="admin-detail-title-row">
-              <h1 className="admin-detail-title page-title">{competition.name}</h1>
-              <div className={`admin-detail-status status-badge ${statusClass(competition.status)}`}>
-                <span className="admin-detail-status-dot" aria-hidden="true" />
-                <span>{STATUS_LABEL[competition.status]}</span>
+              <span className="admin-detail-mark" aria-hidden="true">
+                <IconTrophy className="admin-detail-mark-icon" />
+              </span>
+              <div className="admin-detail-title-group">
+                <div className="admin-detail-title-line">
+                  <h1 className="admin-detail-title page-title">{competition.name}</h1>
+                  <div className={`admin-detail-status status-badge ${statusClass(competition.status)}`}>
+                    <span className="admin-detail-status-dot" aria-hidden="true" />
+                    <span>{STATUS_LABEL[competition.status]}</span>
+                  </div>
+                </div>
+                {competition.short_description && (
+                  <p className="admin-detail-description admin-summary-desc">{competition.short_description}</p>
+                )}
+                <span className="vku-accent" aria-hidden="true">
+                  <span className="blue" />
+                  <span className="red" />
+                  <span className="yellow" />
+                </span>
               </div>
             </div>
-            {competition.short_description && (
-              <p className="admin-detail-description admin-summary-desc">{competition.short_description}</p>
-            )}
           </div>
 
           <div className="admin-detail-actions">
             <button
               type="button"
-              className="admin-detail-action"
+              className="admin-detail-action admin-detail-action-outline"
               disabled={editDisabled}
               title={editDisabled ? editReason : undefined}
               aria-describedby={editDisabled ? `edit-reason-${competition.id}` : undefined}
@@ -422,7 +571,7 @@ export function AdminCompetitionDetailPage() {
             )}
             <button
               type="button"
-              className="admin-detail-action"
+              className="admin-detail-action admin-detail-action-outline"
               onClick={() => setConfirming("clone")}
             >
               <IconCopy className="admin-detail-action-icon" />
@@ -431,7 +580,7 @@ export function AdminCompetitionDetailPage() {
             {competition.status === "draft" && (
               <button
                 type="button"
-                className="admin-detail-action primary"
+                className="admin-detail-action admin-detail-action-publish"
                 disabled={publishBlocked !== null}
                 title={publishBlocked?.message}
                 aria-describedby={
@@ -469,14 +618,20 @@ export function AdminCompetitionDetailPage() {
 
         <section className="admin-competition-summary" aria-label="Thông tin chung cuộc thi">
           <dl className="admin-detail-facts">
-            <div className="admin-detail-fact"><dt>Slug</dt><dd className="mono">{competition.slug}</dd></div>
-            <div className="admin-detail-fact"><dt>Bắt đầu</dt><dd>{formatLocal(competition.start_at)}</dd></div>
-            <div className="admin-detail-fact"><dt>Kết thúc</dt><dd>{formatLocal(competition.end_at)}</dd></div>
-            <div className="admin-detail-fact"><dt>Tham gia</dt><dd>{JOIN_MODE_LABEL[competition.join_mode] ?? competition.join_mode}</dd></div>
-            <div className="admin-detail-fact"><dt>Chỉ số chính</dt><dd>{METRIC_LABEL[competition.primary_metric] ?? competition.primary_metric.toUpperCase()}</dd></div>
-            <div className="admin-detail-fact"><dt>Quota</dt><dd>{competition.quota_per_day} lượt/ngày</dd></div>
+            {SUMMARY_FACTS.map(({ label, Icon: FactIcon, mono, read }, index) => (
+              <div className="admin-detail-fact" key={label} data-tone={toneAt(index)}>
+                <dt>
+                  <span className="admin-detail-fact-icon" aria-hidden="true">
+                    <FactIcon className="admin-detail-fact-icon-glyph" />
+                  </span>
+                  <span>{label}</span>
+                </dt>
+                <dd className={mono ? "mono" : undefined}>{read(competition)}</dd>
+              </div>
+            ))}
           </dl>
         </section>
+        </div>
       </header>
 
       {competition.status === "draft" && publishBlocked && (
@@ -519,7 +674,7 @@ export function AdminCompetitionDetailPage() {
           aria-label="Quản lý cuộc thi"
           role="tablist"
         >
-          {ADMIN_TABS.map(({ key, label }, index) => (
+          {ADMIN_TABS.map(({ key, label, Icon: TabIcon }, index) => (
             <button
               key={key}
               ref={(el) => {
@@ -536,6 +691,7 @@ export function AdminCompetitionDetailPage() {
               onClick={() => activateTab(key)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
             >
+              <TabIcon className="admin-detail-tab-icon" />
               <span>{label}</span>
             </button>
           ))}
@@ -696,14 +852,19 @@ function ResultsPanel({ competition }: { competition: Competition }) {
 
   return (
     <div className="admin-results">
-      <section className="card results-section">
+      <section className="results-section admin-detail-card" data-tone="yellow">
         <div className="results-head">
-          <div>
-            <h2>Bảng xếp hạng</h2>
-            <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconTrophy className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Bảng xếp hạng</h2>
+              <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
+            </div>
           </div>
           <button
-            className="btn admin-results-export"
+            className="btn admin-results-export admin-detail-primary-action"
             type="button"
             aria-busy={exporting}
             disabled={exporting}
@@ -736,7 +897,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
-                    <td><span className="rank-cell">{entry.rank}</span></td>
+                    <td><span className="rank-cell" data-rank={entry.rank}>{entry.rank}</span></td>
                     <td>{entry.display_name}</td>
                     <td className="score-cell primary-score">{formatScore(entry.primary_score)}</td>
                     <td className="score-cell">{formatScore(entry.metrics.f1)}</td>
@@ -751,11 +912,16 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : <p className="admin-results-empty text-muted">Chưa có kết quả xếp hạng.</p>}
       </section>
 
-      <section className="card results-section">
+      <section className="results-section admin-detail-card" data-tone="blue">
         <div className="results-head">
-          <div>
-            <h2>Danh sách submissions</h2>
-            <p className="text-muted">{total} submission trong bộ lọc hiện tại.</p>
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconUpload className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Danh sách submissions</h2>
+              <p className="text-muted">{total} submission trong bộ lọc hiện tại.</p>
+            </div>
           </div>
         </div>
         <form
@@ -773,7 +939,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             <option value="rejected">Không hợp lệ</option>
             <option value="failed">Lỗi chấm điểm</option>
           </select>
-          <button className="btn" type="submit">Lọc</button>
+          <button className="btn admin-detail-primary-action" type="submit">Lọc</button>
           {hasFilters && <button className="btn btn-ghost" type="button" onClick={clearFilters}>Xóa bộ lọc</button>}
         </form>
         {submissionsError ? (
@@ -916,20 +1082,26 @@ function ScoringPanel({ competition }: { competition: Competition }) {
   if (loading) return <Loading />;
 
   return (
-    <div className="scoring-admin-grid">
-      <div className="card scoring-panel">
-        <div className="scoring-panel-head">
-          <div>
-            <h2>Cấu hình CSV</h2>
-            <p className="text-muted">
-              Metric chính: {competition.primary_metric.toUpperCase()} · Quota: {competition.quota_per_day} lượt/ngày
-            </p>
-          </div>
-          {status && (
-            <span className={`status-badge ${status.ready ? "success" : "warning"}`}>
-              {status.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
+    <div className="admin-detail-grid">
+      <section className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconGauge className="admin-detail-card-icon-glyph" />
             </span>
-          )}
+              <div>
+                <h2 className="admin-detail-card-title">Cấu hình CSV</h2>
+                <p className="admin-detail-card-desc">
+                  Metric chính: {competition.primary_metric.toUpperCase()} · Quota:{" "}
+                  {competition.quota_per_day} lượt/ngày
+                </p>
+              </div>
+            </div>
+            {status && (
+              <span className={`status-badge ${status.ready ? "success" : "warning"}`}>
+                {status.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
+              </span>
+            )}
         </div>
 
         {status?.locked && (
@@ -1027,17 +1199,30 @@ function ScoringPanel({ competition }: { competition: Competition }) {
               </div>
             )}
           </div>
-          <button className="btn" type="submit" disabled={busy || status?.locked}>
+          <button
+            className="btn admin-detail-primary-action"
+            type="submit"
+            disabled={busy || status?.locked}
+          >
             {busy ? "Đang lưu..." : "Lưu cấu hình"}
           </button>
         </form>
-      </div>
+      </section>
 
-      <div className="card scoring-panel">
-        <h2>Ground truth private</h2>
-        <p className="text-muted">
-          CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có public download URL.
-        </p>
+      <div className="admin-detail-column">
+      <section className="admin-detail-card" data-tone="red">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconInfo className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Ground truth private</h2>
+            <p className="admin-detail-card-desc">
+              CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có public
+              download URL.
+            </p>
+          </div>
+        </div>
         {status?.ground_truth ? (
           <dl className="scoring-metadata">
             <div className="scoring-meta-item">
@@ -1057,7 +1242,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
           <p className="text-muted">Chưa có ground truth.</p>
         )}
         <FileButton
-          className="btn btn-secondary"
+          className="btn btn-secondary admin-detail-outline-action"
           inputLabel="Upload ground truth CSV"
           accept=".csv,text/csv"
           disabled={busy || status?.locked || !status?.config}
@@ -1069,6 +1254,49 @@ function ScoringPanel({ competition }: { competition: Competition }) {
           {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
         </FileButton>
         {!status?.config && <p className="text-muted">Lưu cấu hình CSV trước khi upload.</p>}
+      </section>
+
+      {/* Chỉ hiện khi đã có cấu hình lưu ở backend; nếu chưa, form đang giữ giá
+          trị mặc định và không phải cấu hình đang áp dụng. */}
+      {status?.config && (
+        <section className="admin-detail-card" data-tone="yellow">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconInfo className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Hướng dẫn định dạng</h2>
+              <p className="admin-detail-card-desc">
+                Cấu hình đang áp dụng khi đọc file CSV lúc chấm điểm.
+              </p>
+            </div>
+          </div>
+          <dl className="scoring-metadata admin-detail-guide-list">
+            <div className="scoring-meta-item">
+              <dt>Cột ID</dt>
+              <dd><code>{idColumn}</code></dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Cột prediction</dt>
+              <dd><code>{predictionColumn}</code></dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Cột label</dt>
+              <dd><code>{labelColumn}</code></dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Average</dt>
+              <dd><code>{average}</code></dd>
+            </div>
+            {average === "binary" && (
+              <div className="scoring-meta-item">
+                <dt>Positive label</dt>
+                <dd><code>{posLabel}</code></dd>
+              </div>
+            )}
+          </dl>
+        </section>
+      )}
       </div>
       {pendingGroundTruth && (
         <ConfirmModal
@@ -1088,6 +1316,18 @@ function ScoringPanel({ competition }: { competition: Competition }) {
 }
 
 /** ---------- Nội dung ---------- */
+
+/**
+ * Gợi ý cách chia trang nội dung. Đây là hướng dẫn tĩnh cho quản trị viên, không
+ * phải dữ liệu của cuộc thi — không suy ra từ API và không thay thế nội dung thật.
+ */
+const CONTENT_TOPICS: ReadonlyArray<{ title: string; hint: string }> = [
+  { title: "Thể lệ", hint: "Điều kiện dự thi, cách tính điểm và quy định bài nộp." },
+  { title: "Lịch trình", hint: "Mốc mở đề, hạn nộp và thời gian công bố kết quả." },
+  { title: "Dataset / Tài nguyên", hint: "Tập dữ liệu, file mẫu và tài liệu kèm theo." },
+  { title: "Giải thưởng / Kết quả", hint: "Cơ cấu giải thưởng và cách công bố kết quả." },
+  { title: "Ban Tổ chức & Liên hệ", hint: "Đơn vị tổ chức và kênh hỗ trợ thí sinh." },
+];
 
 function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string; maxContentMb: number }) {
   const [contents, setContents] = useState<AdminContent[]>([]);
@@ -1136,119 +1376,155 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
   }
 
   return (
-    <div>
-      <div className="toolbar">
-        <button className="btn" onClick={() => setCreating(true)}>
-          Thêm trang nội dung
-        </button>
-      </div>
-      {message && (
-        <div className="status-banner success" role="status">
-          <span>{message}</span>
-          <button
-            type="button"
-            className="banner-dismiss"
-            aria-label="Đóng thông báo"
-            onClick={() => setMessage("")}
-          >
-            ×
+    <>
+      <div className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconFileText className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Quản lý nội dung</h2>
+              <p className="admin-detail-card-desc">
+                Thêm, chỉnh sửa và sắp xếp các trang nội dung của cuộc thi.
+              </p>
+            </div>
+          </div>
+          <button className="btn admin-detail-primary-action" type="button" onClick={() => setCreating(true)}>
+            <IconPlus className="admin-detail-primary-icon" />
+            <span>Thêm trang nội dung</span>
           </button>
         </div>
-      )}
-      {error ? (
-        <div className="admin-section-error">
-          <ErrorBox error={error} />
-          <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
-            Thử lại
-          </button>
+        {message && (
+          <div className="status-banner success" role="status">
+            <span>{message}</span>
+            <button
+              type="button"
+              className="banner-dismiss"
+              aria-label="Đóng thông báo"
+              onClick={() => setMessage("")}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {error ? (
+          <div className="admin-section-error">
+            <ErrorBox error={error} />
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
+              Thử lại
+            </button>
+          </div>
+        ) : null}
+        <div
+          className="table-wrap"
+          aria-busy={loading}
+          tabIndex={0}
+          role="region"
+          aria-label="Bảng nội dung cuộc thi"
+        >
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Thứ tự</th>
+                <th scope="col">Tiêu đề</th>
+                <th scope="col">Slug</th>
+                <th scope="col">Hiển thị</th>
+                <th scope="col">File</th>
+                <th scope="col">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={6} className="table-state">
+                    <Loading />
+                  </td>
+                </tr>
+              ) : contents.length > 0 ? (
+                contents.map((content, index) => (
+                  <ContentRow
+                    key={content.id}
+                    competitionId={competitionId}
+                    maxContentMb={maxContentMb}
+                    content={content}
+                    position={index + 1}
+                    first={index === 0}
+                    last={index === contents.length - 1}
+                    onEdit={() => setEditing(content)}
+                    onDelete={() => setDeleting(content)}
+                    onMove={(d) => void move(index, d)}
+                    onChanged={notify}
+                  />
+                ))
+              ) : error ? null : (
+                <tr>
+                  <td colSpan={6} className="table-state">
+                    Chưa có trang nội dung nào.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      ) : null}
-      <div
-        className="table-wrap"
-        aria-busy={loading}
-        tabIndex={0}
-        role="region"
-        aria-label="Bảng nội dung cuộc thi"
-      >
-        <table className="table">
-          <thead>
-            <tr>
-              <th scope="col">Thứ tự</th>
-              <th scope="col">Tiêu đề</th>
-              <th scope="col">Slug</th>
-              <th scope="col">Hiển thị</th>
-              <th scope="col">File</th>
-              <th scope="col">Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="table-state">
-                  <Loading />
-                </td>
-              </tr>
-            ) : contents.length > 0 ? (
-              contents.map((content, index) => (
-                <ContentRow
-                  key={content.id}
-                  competitionId={competitionId}
-                  maxContentMb={maxContentMb}
-                  content={content}
-                  first={index === 0}
-                  last={index === contents.length - 1}
-                  onEdit={() => setEditing(content)}
-                  onDelete={() => setDeleting(content)}
-                  onMove={(d) => void move(index, d)}
-                  onChanged={notify}
-                />
-              ))
-            ) : error ? null : (
-              <tr>
-                <td colSpan={6} className="table-state">
-                  Chưa có trang nội dung nào.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {creating && (
+          <ContentFormModal
+            competitionId={competitionId}
+            onClose={() => setCreating(false)}
+            onSaved={() => {
+              setCreating(false);
+              notify("Đã tạo trang nội dung.");
+            }}
+          />
+        )}
+        {editing && (
+          <ContentFormModal
+            competitionId={competitionId}
+            content={editing}
+            onClose={() => setEditing(null)}
+            onSaved={() => {
+              setEditing(null);
+              notify("Đã cập nhật trang nội dung.");
+            }}
+          />
+        )}
+        {deleting && (
+          <ConfirmModal
+            title="Xóa trang nội dung"
+            body={`Xóa "${deleting.title}" và file Markdown liên quan? Thao tác này không thể hoàn tác.`}
+            confirmLabel="Xóa"
+            danger
+            onConfirm={async () => {
+              await api.del(`/admin/competitions/${competitionId}/contents/${deleting.id}`);
+              setDeleting(null);
+              notify(`Đã xóa "${deleting.title}".`);
+            }}
+            onClose={() => setDeleting(null)}
+          />
+        )}
       </div>
-      {creating && (
-        <ContentFormModal
-          competitionId={competitionId}
-          onClose={() => setCreating(false)}
-          onSaved={() => {
-            setCreating(false);
-            notify("Đã tạo trang nội dung.");
-          }}
-        />
-      )}
-      {editing && (
-        <ContentFormModal
-          competitionId={competitionId}
-          content={editing}
-          onClose={() => setEditing(null)}
-          onSaved={() => {
-            setEditing(null);
-            notify("Đã cập nhật trang nội dung.");
-          }}
-        />
-      )}
-      {deleting && (
-        <ConfirmModal
-          title="Xóa trang nội dung"
-          body={`Xóa "${deleting.title}" và file Markdown liên quan? Thao tác này không thể hoàn tác.`}
-          confirmLabel="Xóa"
-          danger
-          onConfirm={async () => {
-            await api.del(`/admin/competitions/${competitionId}/contents/${deleting.id}`);
-            setDeleting(null);
-            notify(`Đã xóa "${deleting.title}".`);
-          }}
-          onClose={() => setDeleting(null)}
-        />
-      )}
-    </div>
+      <section className="admin-detail-card admin-detail-topic-card" data-tone="yellow">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconInfo className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Các phần nội dung thường có</h2>
+            <p className="admin-detail-card-desc">
+              Gợi ý cách chia trang cho dễ theo dõi. Số lượng và thứ tự tuỳ từng cuộc thi.
+            </p>
+          </div>
+        </div>
+        <ul className="admin-detail-topic-list">
+          {CONTENT_TOPICS.map((topic) => (
+            <li key={topic.title} className="admin-detail-topic">
+              <strong className="admin-detail-topic-name">{topic.title}</strong>
+              <span className="admin-detail-topic-hint">{topic.hint}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
   );
 }
 
@@ -1256,6 +1532,7 @@ function ContentRow({
   competitionId,
   maxContentMb,
   content,
+  position,
   first,
   last,
   onEdit,
@@ -1266,6 +1543,8 @@ function ContentRow({
   competitionId: string;
   maxContentMb: number;
   content: AdminContent;
+  /** Vị trí trong danh sách đã sắp theo order — thứ tự hiển thị, không phải `content.order`. */
+  position: number;
   first: boolean;
   last: boolean;
   onEdit: () => void;
@@ -1294,7 +1573,7 @@ function ContentRow({
       <tr>
         <td className="order-col">
           <div className="order-cell">
-            <span className="order-num">{content.order}</span>
+            <span className="order-num">{position}</span>
             <div className="order-arrows">
               <button
                 type="button"
@@ -1342,7 +1621,7 @@ function ContentRow({
         <td className="col-actions">
           <span className="action-group">
             <FileButton
-              className="btn btn-secondary btn-sm upload-md-btn"
+              className="btn btn-sm upload-md-btn admin-detail-primary-action"
               inputLabel={`Upload file Markdown cho "${content.title}"`}
               accept=".md,text/markdown"
               disabled={busy}
@@ -1358,15 +1637,20 @@ function ContentRow({
                 );
               }}
             >
-              {content.size_bytes !== null ? "Thay .md" : "Upload .md"}
+              {content.size_bytes !== null ? "Thay .md" : "Upload .md"}{" "}
               <span className="upload-size-hint">≤ {maxContentMb} MiB</span>
             </FileButton>
-            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={onEdit}>
+            <button
+              type="button"
+              className="btn btn-sm admin-detail-outline-action"
+              disabled={busy}
+              onClick={onEdit}
+            >
               Sửa
             </button>
             <button
               type="button"
-              className="btn btn-ghost btn-sm btn-danger-ghost"
+              className="btn btn-sm admin-detail-danger-action"
               disabled={busy}
               onClick={onDelete}
             >
@@ -1478,7 +1762,7 @@ function ContentFormModal({
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Hủy
           </button>
-          <button className="btn" type="submit" disabled={busy}>
+          <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
             {busy ? "Đang lưu..." : isEdit ? "Lưu" : "Tạo"}
           </button>
         </div>
@@ -1575,7 +1859,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
     <div className="s14-assets-container">
       {/* Bento Grid: 8 col Upload Card + 4 col Markdown Guide Card */}
       <div className="s14-bento-grid">
-        <div className="s14-card s14-upload-card">
+        <div className="s14-card s14-upload-card" data-tone="blue">
           <div className="s14-card-header">
             <div className="s14-card-icon">
               <IconUpload className="s14-icon" />
@@ -1594,7 +1878,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
           <div className="s14-upload-body">
             <div className="toolbar s14-upload-toolbar">
               <FileButton
-                className="btn s14-upload-btn"
+                className="btn s14-upload-btn admin-detail-primary-action"
                 inputLabel="Chọn tệp ảnh"
                 accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp"
                 disabled={busy}
@@ -1614,7 +1898,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
           </div>
         </div>
 
-        <div className="s14-card s14-guide-card">
+        <div className="s14-card s14-guide-card" data-tone="yellow">
           <div className="s14-card-header">
             <div className="s14-card-icon guide-icon">
               <IconInfo className="s14-icon" />
@@ -1649,7 +1933,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
       </div>
 
       {/* Table Card */}
-      <div className="s14-table-card">
+      <div className="s14-table-card" data-tone="red">
         <div className="s14-table-toolbar">
           <div className="s14-table-title-group">
             <h3 className="s14-table-title">Danh sách tài nguyên đã tải lên</h3>
@@ -1906,8 +2190,13 @@ function MembersPanel({
 
   return (
     <div className="admin-members">
-      <aside className="card admin-members-code-card">
-        <h2>Mã tham gia</h2>
+      <aside className="admin-members-code-card admin-detail-card" data-tone="red">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon admin-detail-card-icon-key" aria-hidden="true">
+            <IconKey className="admin-detail-card-icon-glyph" />
+          </span>
+          <h2 className="admin-detail-card-title">Mã tham gia</h2>
+        </div>
         {competition.join_mode !== "code" ? (
           <p className="text-muted admin-members-note">
             Cuộc thi này dùng chế độ tham gia{" "}
@@ -1946,21 +2235,26 @@ function MembersPanel({
               required
               autoComplete="off"
             />
-            <button className="btn" type="submit" disabled={busy}>
+            <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
               {codeConfigured ? "Đổi mã" : "Đặt mã"}
             </button>
           </form>
         )}
       </aside>
 
-      <section className="admin-members-list">
+      <section className="admin-members-list admin-detail-card" data-tone="blue">
         <div className="admin-members-head">
-          <div>
-            <h2>Thành viên cuộc thi</h2>
-            <p>
-              {activeTotal} đang hoạt động
-              {total > activeTotal ? ` · ${total} tổng cộng` : ""}
-            </p>
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconUsers className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Thành viên cuộc thi</h2>
+              <p>
+                {activeTotal} đang hoạt động
+                {total > activeTotal ? ` · ${total} tổng cộng` : ""}
+              </p>
+            </div>
           </div>
           <form
             className="admin-members-add-form"
@@ -1984,7 +2278,7 @@ function MembersPanel({
               onChange={(e) => setEmail(e.target.value)}
               required
             />
-            <button className="btn" type="submit" disabled={busy}>Thêm thành viên</button>
+            <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>Thêm thành viên</button>
           </form>
         </div>
         {message && (
