@@ -59,7 +59,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Slug unique: 409 SLUG_EXISTS | passing | `backend/tests/test_competitions_admin.py` |
 | List admin gồm cả draft; detail by id; 404 unknown id | passing | `backend/tests/test_competitions_admin.py` |
 | Edit rules: draft sửa được, slug/status immutable; published khóa primary_metric; closed từ chối | passing | `backend/tests/test_competitions_admin.py` |
-| Publish/close transition đúng; sai trạng thái 422 INVALID_TRANSITION | passing | `backend/tests/test_competitions_admin.py` |
+| Publish/close/reopen transition đúng; draft→close, published→publish/reopen, closed→publish/close đều 422 INVALID_TRANSITION | passing | `backend/tests/test_competitions_admin.py` |
+| Reopen là hoàn tác: quyền sửa quay lại nhưng chỉ ở mức published (primary_metric vẫn khoá), và cuộc thi nhận bài trở lại chứ không chỉ đổi status | passing | `backend/tests/test_competitions_admin.py`, `backend/tests/test_submissions.py` |
 | Clone: copy config, draft mới, slug -copy, không copy status/submissions | passing | `backend/tests/test_competitions_admin.py` |
 | Participant list chỉ thấy published/closed, không lộ join_code | passing | `backend/tests/test_competitions_public.py` |
 | Draft detail → 404 như không tồn tại | passing | `backend/tests/test_competitions_public.py` |
@@ -179,6 +180,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Publish readiness: thiếu config / config invalid / thiếu ground truth / file hỏng / config+GT hợp lệ | passing | `backend/tests/test_scoring_admin.py`, `backend/tests/test_competitions_admin.py` |
 | Publish thất bại giữ nguyên `draft`; join-code thiếu thắng readiness khi cả hai cùng thiếu; publish xong thì submission fixture chấm được | passing | `backend/tests/test_competitions_admin.py`, `backend/tests/test_submissions.py` |
 | Admin detail trả `publish_ready`/`publish_blocked_reason`; banner + disable Publish; 422 vẫn hiện trong modal | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
+| Cổng publish không lệch nhau: detail trả `JOIN_CODE_REQUIRED` khi `join_mode=code` chưa có mã, đặt mã xong rơi xuống `SCORING_CONFIG_REQUIRED` | passing | `backend/tests/test_competitions_admin.py` |
+| Upload ground truth xong banner publish biến mất + nút Publish mở khóa; banner chặn vì mã tham gia mở tab Thành viên | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Join: trước `start_at` thành công; non-member sau `end_at` → `JOIN_DEADLINE_PASSED` và không tạo membership; active member sau deadline/closed vẫn idempotent; inactive vẫn 403; closed thắng deadline | passing | `backend/tests/test_memberships.py`, `frontend/src/components/JoinControl.test.tsx` |
 | Quota: đúng trước/sau khi nộp, `resets_at` ISO `Z`, loại bài của ngày hôm trước, quota 0; không có key quota trên guest/non-member/inactive/list | passing | `backend/tests/test_competitions_public.py`, `backend/tests/test_submissions.py` |
 | UI quota: hiện "Còn X/Y lượt", khoá form khi remaining=0, nộp xong refetch detail | passing | `frontend/src/pages/{CompetitionDetailPage,SubmissionPage}.test.tsx` |
@@ -187,8 +190,9 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Leave: active/inactive/chưa join/draft; bài nộp + rank còn nguyên; `joined_at` giữ khi admin reactivate | passing | `backend/tests/test_memberships.py` |
 | Hard-delete member: chưa nộp → xoá và dọn file; đã có bài completed → 409 và Mongo/file/membership đều còn | passing | `backend/tests/test_memberships.py` |
 | Đếm thành viên: `active_total` tách khỏi `total` (kể cả document legacy thiếu `active`) | passing | `backend/tests/test_memberships.py`, `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
-| Delete competition: thiếu/sai `confirm_slug` không xoá gì; published/closed → 409; draft cascade sạch 4 collection + 2 thư mục, không đụng competition khác/accounts/sessions; lỗi dở đường giữ competition để retry | passing | `backend/tests/test_competitions_delete.py` |
-| UI xoá competition: chỉ draft có action, modal bắt gõ đúng slug, 409 hiện trong modal, xoá từ detail thì về danh sách | passing | `frontend/src/pages/{AdminCompetitionsPage,AdminCompetitionDetailPage}.test.tsx` |
+| Delete competition: thiếu/sai `confirm_slug` không xoá gì; published → 409; draft và closed cascade sạch 4 collection + 2 thư mục, không đụng competition khác/accounts/sessions; lỗi dở đường giữ competition để retry | passing | `backend/tests/test_competitions_delete.py` |
+| UI xoá competition: draft và closed có action, published thì không, modal bắt gõ đúng slug, 409 hiện trong modal, xoá từ detail thì về danh sách | passing | `frontend/src/pages/{AdminCompetitionsPage,AdminCompetitionDetailPage}.test.tsx` |
+| UI mở lại: chỉ closed có nút/menu Mở lại, modal xác nhận gọi POST `/reopen` (chưa bấm xác nhận thì chưa gọi), Sửa vẫn khoá khi đang closed | passing | `frontend/src/pages/{AdminCompetitionsPage,AdminCompetitionDetailPage}.test.tsx` |
 | Countdown sống: nhãn ngày/`HH:MM:SS`, mốc đúng biên 1 ngày, hết hạn trả null, dọn timer khi unmount, resync khi tab visible, clock dùng chung lấy nhịp theo deadline gần nhất | passing | `frontend/src/lib/countdown.test.ts`, `frontend/src/hooks/useCountdown.test.tsx` |
 | Dashboard/chi tiết: mọi thẻ đang mở cùng nhảy nhãn theo clock cấp trang; thẻ hết hạn vẫn hiện nhưng không còn chip | passing | `frontend/src/pages/{DashboardPage,CompetitionDetailPage}.test.tsx` |
 

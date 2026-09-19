@@ -1,4 +1,4 @@
-"""Xoá cuộc thi: chỉ draft, xác nhận bằng slug, cascade con trước cha sau và dọn file best-effort."""
+"""Xoá cuộc thi: draft/closed (không published), xác nhận bằng slug, cascade con trước cha sau và dọn file best-effort."""
 
 import asyncio
 from pathlib import Path
@@ -108,23 +108,41 @@ def test_delete_requires_admin_and_matching_slug(client):
     assert _count(client, COMPETITIONS_COLLECTION, {"_id": ObjectId(competition_id)}) == 1
 
 
-def test_delete_rejects_published_and_closed_competitions(client):
+def test_delete_rejects_published_competition(client):
+    """Cuộc thi đang chạy phải Kết thúc trước: đóng là bước xác nhận có chủ đích trước khi mất lịch sử thi."""
     published_id = _create_draft(client, slug="da-publish")
     assert publish_competition(client, published_id).status_code == 200
 
     blocked = client.delete(f"/api/admin/competitions/{published_id}?confirm_slug=da-publish")
     assert blocked.status_code == 409
     assert blocked.json()["error"]["code"] == "COMPETITION_NOT_DELETABLE"
+    assert _count(client, COMPETITIONS_COLLECTION, {"_id": ObjectId(published_id)}) == 1
 
-    closed_id = _create_draft(client, slug="da-dong")
-    assert publish_competition(client, closed_id).status_code == 200
-    assert client.post(f"/api/admin/competitions/{closed_id}/close").status_code == 200
 
-    closed = client.delete(f"/api/admin/competitions/{closed_id}?confirm_slug=da-dong")
-    assert closed.status_code == 409
-    assert closed.json()["error"]["code"] == "COMPETITION_NOT_DELETABLE"
+def test_delete_closed_cascades_children_and_files(client, tmp_path):
+    """Đã kết thúc vẫn xoá được, và phải dọn sạch y hệt draft - cascade không phụ thuộc status."""
+    competition_id = _create_draft(client, slug="da-dong")
+    # Publish (kèm cấu hình chấm điểm) phải xong trước khi seed bài completed - có bài rồi thì
+    # ground truth bị khoá và bước configure_scoring sẽ 422.
+    assert publish_competition(client, competition_id).status_code == 200
+    assert client.post(f"/api/admin/competitions/{competition_id}/close").status_code == 200
 
-    assert _count(client, COMPETITIONS_COLLECTION, {"_id": {"$in": [ObjectId(published_id), ObjectId(closed_id)]}}) == 2
+    account = asyncio.run(_db(client)[ACCOUNTS_COLLECTION].find_one({"email": "thi.sinh@vku.vn"}))
+    _seed_children(client, competition_id, account["_id"])
+    competition_root, submission_root = _make_files(tmp_path, competition_id)
+
+    resp = client.delete(f"/api/admin/competitions/{competition_id}?confirm_slug=da-dong")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] is True
+    assert resp.json()["files_removed"] is True
+
+    cid = ObjectId(competition_id)
+    assert _count(client, COMPETITIONS_COLLECTION, {"_id": cid}) == 0
+    assert _count(client, MEMBERSHIPS_COLLECTION, {"competition_id": cid}) == 0
+    assert _count(client, SUBMISSIONS_COLLECTION, {"competition_id": cid}) == 0
+    assert _count(client, CONTENTS_COLLECTION, {"competition_id": cid}) == 0
+    assert not competition_root.exists()
+    assert not submission_root.exists()
 
 
 def test_delete_draft_cascades_children_and_files(client, tmp_path):

@@ -508,7 +508,9 @@ export function AdminCompetitionsPage() {
                 ? `Đã clone thành "${clone!.name}" (draft).`
                 : action === "publish"
                   ? "Đã publish cuộc thi."
-                  : "Đã kết thúc cuộc thi.",
+                  : action === "reopen"
+                    ? "Đã mở lại cuộc thi."
+                    : "Đã kết thúc cuộc thi.",
             );
           }}
           onClose={() => setConfirming(null)}
@@ -771,7 +773,8 @@ function RowActionMenu({
               {editDisabled && <IconLock className="ac-action-lock" />}
               Sửa
             </button>
-            {(c.status === "draft" || c.status === "published") && <div className="ac-menu-separator" />}
+            {/* Mọi status đều có đúng một transition nên separator này luôn đứng trước một item thật. */}
+            <div className="ac-menu-separator" />
             {c.status === "draft" && (
               <button className="ac-menu-item ac-menu-item-strong" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("publish", trigger))}>
                 Publish
@@ -782,11 +785,16 @@ function RowActionMenu({
                 Kết thúc
               </button>
             )}
+            {c.status === "closed" && (
+              <button className="ac-menu-item" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("reopen", trigger))}>
+                Mở lại
+              </button>
+            )}
             <button className="ac-menu-item" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("clone", trigger))}>
               Clone
             </button>
-            {/* Chỉ draft xoá được - published/closed giữ lịch sử thi (ADR-009). */}
-            {c.status === "draft" && (
+            {/* Xoá được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
+            {c.status !== "published" && (
               <>
                 <div className="ac-menu-separator" />
                 <button

@@ -1,4 +1,4 @@
-"""Admin competition API: list (kể cả draft), create, detail, edit, publish, close, clone."""
+"""Admin competition API: list (kể cả draft), create, detail, edit, publish, close, reopen, clone, delete."""
 
 import logging
 from datetime import datetime, timezone
@@ -19,9 +19,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
 
 _SLUG_EXISTS_MESSAGE = "Slug này đã có cuộc thi khác dùng."
+_JOIN_CODE_REQUIRED_MESSAGE = "Cần cấu hình mã tham gia trước khi publish cuộc thi."
 # Số ứng viên tối đa cho slug clone trước khi bỏ cuộc - chặn vòng lặp vô hạn khi slug gốc quá dài.
 _CLONE_SUFFIX = "-copy"
 _CLONE_SLUG_ATTEMPTS = 5
+# Log của _transition cần thì quá khứ; ghép `f"{action}d"` cho ra "reopend" nên phải khai tường minh.
+_TRANSITION_PAST = {"publish": "published", "close": "closed", "reopen": "reopened"}
 
 
 async def _get_competition_or_404(db, competition_id: str) -> dict:
@@ -75,6 +78,17 @@ async def get_competition(competition_id: str, request: Request, admin: AdminAcc
     return _admin_detail(competition)
 
 
+def _publish_blocked_reason(competition: dict) -> dict | None:
+    """Cổng publish thật, theo đúng thứ tự ADR-017: mã tham gia trước, rồi readiness chấm điểm.
+
+    Publish và banner admin phải đi qua **cùng** hàm này, nếu không banner sẽ báo "sẵn sàng"
+    trong khi endpoint vẫn 422 - đúng lỗi đã xảy ra với `JOIN_CODE_REQUIRED`.
+    """
+    if competition["join_mode"] == "code" and not competition.get("join_code_hash"):
+        return {"code": "JOIN_CODE_REQUIRED", "message": _JOIN_CODE_REQUIRED_MESSAGE}
+    return blocked_reason(check_readiness(competition))
+
+
 def _admin_detail(competition: dict) -> dict:
     """Detail kèm trạng thái publish-readiness - dùng cho detail VÀ mọi response mutate.
 
@@ -82,12 +96,12 @@ def _admin_detail(competition: dict) -> dict:
     sẽ làm banner publish biến mất sai. List cố ý không gọi hàm này: readiness phải đọc file
     ground truth nên không được chạy cho từng dòng của bảng admin.
     """
-    readiness = check_readiness(competition)
+    blocked = _publish_blocked_reason(competition)
     settings = get_settings()
     return {
         **service.admin_competition(competition),
-        "publish_ready": readiness.ready,
-        "publish_blocked_reason": blocked_reason(readiness),
+        "publish_ready": blocked is None,
+        "publish_blocked_reason": blocked,
         # Trần upload là cấu hình môi trường, không lưu theo cuộc thi (ADR-011);
         # đọc tại thời điểm request để UI hiển thị đúng giá trị đang áp dụng.
         "upload_limits": {
@@ -126,18 +140,19 @@ async def delete_competition(
     admin: AdminAccount,
     confirm_slug: str = Query(...),
 ) -> dict:
-    """Xoá cuộc thi nháp kèm toàn bộ dữ liệu con.
+    """Xoá cuộc thi kèm toàn bộ dữ liệu con.
 
-    Chỉ draft: published/closed phải giữ lịch sử thi, muốn kết thúc thì Đóng cuộc thi.
+    `draft` và `closed` xoá được; `published` phải Kết thúc trước - cuộc thi đang chạy không
+    bị xoá nhầm, và trạng thái closed là bước xác nhận có chủ đích trước khi mất lịch sử thi.
     `confirm_slug` buộc admin gõ đúng slug - thao tác này không hoàn tác được.
     """
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
-    if competition["status"] != "draft":
+    if competition["status"] == "published":
         raise api_error(
             409,
             "COMPETITION_NOT_DELETABLE",
-            "Chỉ xoá được cuộc thi ở trạng thái Nháp. Hãy Đóng cuộc thi để giữ lịch sử.",
+            "Cuộc thi đang chạy phải Kết thúc trước khi xoá.",
         )
     if confirm_slug != competition["slug"]:
         raise api_error(422, "CONFIRM_SLUG_MISMATCH", "Slug xác nhận không khớp với cuộc thi cần xoá.")
@@ -160,21 +175,25 @@ async def delete_competition(
 async def publish_competition(competition_id: str, request: Request, admin: AdminAccount) -> dict:
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
-    if competition["join_mode"] == "code" and not competition.get("join_code_hash"):
-        raise api_error(
-            422,
-            "JOIN_CODE_REQUIRED",
-            "Cần cấu hình mã tham gia trước khi publish cuộc thi.",
-        )
-    readiness = check_readiness(competition)
-    if not readiness.ready:
-        raise api_error(422, readiness.code, readiness.message)
+    blocked = _publish_blocked_reason(competition)
+    if blocked:
+        raise api_error(422, blocked["code"], blocked["message"])
     return await _transition(request, admin, competition_id, "draft", "published", "publish")
 
 
 @router.post("/{competition_id}/close")
 async def close_competition(competition_id: str, request: Request, admin: AdminAccount) -> dict:
     return await _transition(request, admin, competition_id, "published", "closed", "close")
+
+
+@router.post("/{competition_id}/reopen")
+async def reopen_competition(competition_id: str, request: Request, admin: AdminAccount) -> dict:
+    """closed -> published. Chỉ đảo status, không kiểm tra lại readiness.
+
+    Cuộc thi đã từng qua cổng publish nên đây là hoàn tác, không phải publish mới. `end_at`
+    đã qua vẫn chặn join/nộp bài (độc lập với status) - admin dời ngày ở PATCH sau khi mở lại.
+    """
+    return await _transition(request, admin, competition_id, "closed", "published", "reopen")
 
 
 async def _transition(request: Request, admin: AdminAccount, competition_id: str, expected: str, target: str, action: str) -> dict:
@@ -190,7 +209,7 @@ async def _transition(request: Request, admin: AdminAccount, competition_id: str
         {"_id": competition["_id"]},
         {"$set": {"status": target, "updated_at": datetime.now(timezone.utc)}},
     )
-    logger.info("Admin %s %sd competition %s", admin["email"], action, competition["slug"])
+    logger.info("Admin %s %s competition %s", admin["email"], _TRANSITION_PAST[action], competition["slug"])
     return _admin_detail(await _get_competition_or_404(db, competition_id))
 
 

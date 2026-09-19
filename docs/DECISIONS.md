@@ -69,7 +69,7 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 
 ## ADR-009 - Competition lifecycle, edit rules, clone & visibility
 - Date: 2026-09-15
-- Status: accepted
+- Status: accepted, riêng mệnh đề "`closed` là terminal - không reopen" đã bị ADR-027 thay thế
 - Context: Sprint 03 cần chốt status transition, quy tắc edit theo trạng thái, hành vi clone và participant visibility; sprint file yêu cầu "clear rules" nhưng không chỉ định chi tiết.
 - Decision:
   - Lifecycle: create → `draft`; `draft` → `published` (publish); `published` → `closed` (close). `closed` là terminal - không reopen/archive ở MVP (sprint file: dừng và hỏi nếu cần).
@@ -177,17 +177,18 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
 - Status: accepted
 - Context: Publish chỉ kiểm tra trạng thái nên BTC publish được một cuộc thi thiếu scoring config hoặc ground truth hỏng - mọi bài nộp sau đó đều 422 `SCORING_NOT_READY`. Ở chiều ngược lại, join chỉ chặn draft/closed nên thí sinh vẫn join được sau `end_at` cho tới khi admin bấm close thủ công.
 - Decision:
-  - `backend/app/scoring/readiness.py` là **một** nguồn sự thật: đọc và parse lại ground truth thật bằng chính code chấm điểm (không chỉ `is_file()`), trả `{ready, code, message}`. Publish, banner admin và endpoint scoring đều đi qua đây.
+  - `backend/app/scoring/readiness.py` là **một** nguồn sự thật cho readiness *chấm điểm*: đọc và parse lại ground truth thật bằng chính code chấm điểm (không chỉ `is_file()`), trả `{ready, code, message}`. Endpoint scoring và `_publish_blocked_reason` đều đi qua đây.
+  - Cổng publish là **phép gộp** của hai điều kiện (mã tham gia + readiness chấm điểm), nằm ở `_publish_blocked_reason` trong `backend/app/competitions/admin_router.py` và dùng chung cho cả endpoint publish lẫn `publish_blocked_reason` của admin detail. Không tách làm hai chỗ: bản đầu chỉ kiểm tra join code ở endpoint nên banner báo sẵn sàng trong khi bấm Publish vẫn 422 `JOIN_CODE_REQUIRED`.
   - Thứ tự kiểm tra khi publish: join code (`JOIN_CODE_REQUIRED`) trước, readiness sau (`SCORING_CONFIG_REQUIRED`/`SCORING_CONFIG_INVALID`/`GROUND_TRUTH_REQUIRED`/`GROUND_TRUTH_INVALID`). Publish thất bại giữ nguyên `draft`; submission runtime vẫn map về code chung `SCORING_NOT_READY` để không phá contract cũ.
-  - Admin detail trả `publish_ready`/`publish_blocked_reason`; list cố ý không, vì readiness phải đọc file (N+1). Nút Publish ở list vẫn gọi backend và hiển thị lỗi API.
+  - Admin detail trả `publish_ready`/`publish_blocked_reason` = kết quả `_publish_blocked_reason`, nên banner và nút Publish luôn khớp cổng thật ở endpoint; list cố ý không, vì readiness phải đọc file (N+1). Nút Publish ở list vẫn gọi backend và hiển thị lỗi API.
   - Join mở từ lúc publish đến hết `end_at`. Không có khái niệm "hạn đăng ký". Không kiểm tra `start_at` - join sớm để chuẩn bị là hợp lệ, chỉ nộp bài mới phụ thuộc `start_at`.
   - Thứ tự policy join: draft/unknown → 404; inactive membership → 403; đã join → 200 idempotent (kể cả sau deadline/closed); closed → `JOIN_CLOSED`; `now > end_at` → `JOIN_DEADLINE_PASSED`; rồi mới tới invite/code. Membership hiện có được xử lý trước cửa sổ thời gian để UI luôn đọc được trạng thái của mình.
-- Consequences: BTC phải có config + ground truth hợp lệ trước khi mở cuộc thi; đổi lại không còn tình huống publish xong mà không ai nộp được. `JOIN_CLOSED` và `JOIN_DEADLINE_PASSED` cùng 422 nhưng khác code để UI phân biệt "BTC đã đóng" với "đã quá hạn".
+- Consequences: BTC phải có config + ground truth hợp lệ trước khi mở cuộc thi; đổi lại không còn tình huống publish xong mà không ai nộp được. `JOIN_CLOSED` và `JOIN_DEADLINE_PASSED` cùng 422 nhưng khác code để UI phân biệt "BTC đã đóng" với "đã quá hạn". Banner publish của admin detail giờ có thể mang `JOIN_CODE_REQUIRED`, nên nút CTA chọn tab theo `code` (mã tham gia nằm ở tab Thành viên, không phải tab Chấm điểm).
 - Affected files/contracts: `backend/app/scoring/readiness.py`, `backend/app/competitions/admin_router.py`, `backend/app/memberships/router.py`, `frontend/src/components/JoinControl.tsx`, `docs/API_CONTRACT.md` §3+§5.2+§6
 
 ## ADR-018 - Xoá theo hướng giữ lịch sử thi
 - Date: 2026-09-17
-- Status: accepted
+- Status: accepted, riêng mệnh đề "xoá competition chỉ cho `draft`" đã bị ADR-027 nới thành `draft` + `closed`
 - Context: Thiếu cả ba đường thoát: participant không rời được cuộc thi, admin không xoá cứng được member, và không có `DELETE` cho competition. Đồng thời phải tránh việc dọn dữ liệu làm mất kết quả đã chấm.
 - Decision:
   - Participant **rời** cuộc thi = soft deactivate (`active=false`) qua `POST /leave`, áp dụng cả published/closed, idempotent, giữ nguyên bài nộp/điểm/thứ hạng. Tự join lại vẫn bị 403 `MEMBERSHIP_INACTIVE`; muốn quay lại phải nhờ BTC kích hoạt.
@@ -329,3 +330,15 @@ Format theo ADR. Chỉ ghi quyết định có ảnh hưởng về sau; thay dec
   - Ghi chú cũ trong `docker-compose.prod.yml` và `docs/DEPLOYMENT.md` nói Settings của backend đặt `extra="forbid"` là **sai** (`backend/app/core/config.py` chỉ khai `env_file`), đã sửa lại: lý do `api` không nhận `env_file:` là quyền tối thiểu, không phải vì API sẽ chết lúc khởi động.
 - Rollout: code + test + tài liệu đã xong và qua local gate (frontend `lint`/`vitest`/`build`/`cf:dry-run`; backend `pytest`; harness deployer 131 assert với `git` thật + `docker` giả, và đã kiểm chứng các assert của watchdog là load-bearing bằng cách tắt tính năng rồi xác nhận 7 assert đổ); `systemd-analyze verify`; compose `config --quiet`; cài thử installer trong sandbox). Đã push `main`, đã tạo `release`, đã giới hạn environment `production` cho đúng nhánh `release`, và **đã deploy Worker thật** qua `workflow_dispatch` (run `35441083752`, version `03c71a3f`; smoke tĩnh và `/api/health` đều `200`, `keep_vars` giữ nguyên `API_ORIGIN`). **Chưa** cài gì lên VPS và chưa deploy lần nào qua đường timer. Còn cần user: bootstrap trên VM theo `docs/DEPLOYMENT.md` §7.1.
 - Affected files/contracts: `.github/workflows/release-gate.yml`, `.github/workflows/deploy-worker.yml`, `.github/scripts/previous-version.mjs`, `deploy/vps/auto-deploy.sh`, `deploy/vps/install-auto-deploy.sh`, `deploy/vps/vku-deploy.service`, `deploy/vps/vku-deploy.timer`, `deploy/vps/tests/auto-deploy.test.sh`, `deploy/vku-backup.service`, `frontend/src/test/setup.ts`, `frontend/src/pages/CompetitionDetailPage.test.tsx`, `.gitignore`, `docker-compose.prod.yml`, `docs/DEPLOYMENT.md`, `docs/TEST_MATRIX.md`, `docs/DECISIONS.md`
+
+## ADR-027 - `closed` không còn là terminal: mở lại được và xoá được
+- Date: 2026-09-19
+- Status: accepted
+- Context: ADR-009 chốt `closed` là terminal và ghi rõ "Không reopen - nếu BTC cần, phải hỏi user trước khi thêm transition mới"; `DELETE` cũng chỉ nhận `draft` với lý do "giữ lịch sử thi". User yêu cầu đúng cái đã chừa chỗ đó: cuộc thi khi kết thúc vẫn phải xoá được và vẫn phải mở lại được. Đây là mệnh đề của ADR-009 bị thay thế, không phải một tính năng mới nằm ngoài nó.
+- Decision:
+  - **Thêm `POST /api/admin/competitions/{id}/reopen`**: `closed → published`. Chỉ đảo status - **không** kiểm tra lại readiness và **không** đụng `end_at`. Cuộc thi đã từng qua cổng publish nên reopen là *hoàn tác*, không phải publish mới; thêm gate sẽ chặn mở lại trong trường hợp ground truth bị mất ngoài luồng, đúng lúc cần mở lại nhất.
+  - **`DELETE` nhận `draft` và `closed`, từ chối `published`** (409 `COMPETITION_NOT_DELETABLE`). "Đóng trước rồi xoá" được giữ làm bước xác nhận có chủ đích: cuộc thi đang chạy không bị xoá nhầm, và trạng thái `closed` là tín hiệu cuộc thi đã xong trước khi mất lịch sử thi. Hệ quả được chấp nhận có ý thức: `closed` **không** còn là bảo đảm dữ liệu thi còn nguyên - ADR-009 hứa điều đó, ADR-027 rút lại.
+  - **Rào chắn xoá giữ nguyên, không thêm bước thứ hai**: modal bắt gõ đúng slug đã là xác nhận đủ mạnh; thêm nữa là nghi thức.
+  - **Hai hệ quả của reopen phải được biết, không phải bug**: (1) `end_at` đã qua vẫn chặn join/nộp bài vì hai cổng đó enforce độc lập với status - muốn nhận bài lại thì PATCH `end_at` sau khi mở; (2) cấu hình chấm điểm/ground truth vẫn khoá nếu đã có submission `completed`, vì khoá đó theo dữ liệu chứ không theo status. Cả hai ghi trong `API_CONTRACT.md` và docstring endpoint.
+- Consequences: `closed` giờ là trạng thái đảo được, nên mọi thứ suy ra từ nó cũng đảo theo - join, nộp bài, sửa config, đổi join-code đều mở lại; quyền sửa quay về mức của `published` (vẫn khoá `primary_metric`). Xoá cuộc thi `closed` **không** bị chặn bởi "đã có điểm" - admin phải tự biết mình đang xoá bảng điểm. `_transition` giữ nguyên cấu trúc chung; log của nó đổi sang bảng quá khứ tường minh vì `f"{action}d"` cho ra "reopend".
+- Affected files/contracts: `backend/app/competitions/admin_router.py`, `backend/app/competitions/service.py`, `frontend/src/components/AdminCompetitionManagement.tsx`, `frontend/src/pages/AdminCompetitionDetailPage.tsx`, `frontend/src/pages/AdminCompetitionsPage.tsx`, `docs/API_CONTRACT.md` §5.2, `docs/DATA_MODEL.md` §3, `docs/TEST_MATRIX.md`

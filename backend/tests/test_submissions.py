@@ -236,6 +236,27 @@ def test_submission_enforces_status_start_and_deadline(client):
     assert expired.json()["error"]["code"] == "SUBMISSION_DEADLINE_PASSED"
 
 
+def test_reopen_restores_submission_after_close(client):
+    """Mở lại là hoàn tác việc đóng nên cuộc thi phải nhận bài trở lại, không chỉ đổi status."""
+    valid = b"id,prediction\n1,1\n2,1\n3,0\n4,0\n"
+    competition = _ready_competition(client, slug="reopen-cup")
+    cid = competition["id"]
+
+    _login(client)
+    assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 200
+    _login_participant(client)
+    blocked = _submit(client, cid, valid)
+    assert blocked.status_code == 422
+    assert blocked.json()["error"]["code"] == "SUBMISSION_CLOSED"
+
+    _login(client)
+    assert client.post(f"/api/admin/competitions/{cid}/reopen").status_code == 200
+    _login_participant(client)
+    accepted = _submit(client, cid, valid)
+    assert accepted.status_code == 201
+    assert accepted.json()["status"] == "completed"
+
+
 def test_daily_quota_counts_completed_submissions_in_utc_day(client):
     competition = _ready_competition(client, quota=1)
     valid = b"id,prediction\n1,1\n2,1\n3,0\n4,0\n"

@@ -40,11 +40,13 @@ import {
 } from "../components/AdminCompetitionManagement";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, FileButton, Loading } from "../components/ui";
+import { useAutoSlug } from "../hooks/useAutoSlug";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import {
   cleanCompetitionResources,
   sameCompetitionResources,
 } from "../lib/competitionResources";
+import { SLUG_MAX } from "../lib/slug";
 
 type Tab = "contents" | "assets" | "resources" | "scoring" | "members" | "results";
 
@@ -213,6 +215,15 @@ function IconStop({ className }: { className?: string }) {
     <Icon className={className}>
       <circle cx="12" cy="12" r="9" />
       <rect x="9" y="9" width="6" height="6" rx="1" />
+    </Icon>
+  );
+}
+
+function IconReopen({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
     </Icon>
   );
 }
@@ -534,6 +545,12 @@ export function AdminCompetitionDetailPage() {
   const uploadLimits = competition.upload_limits ?? DEFAULT_UPLOAD_LIMITS;
   // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
   const publishBlocked = competition.publish_blocked_reason ?? null;
+  // CTA phải mở đúng tab chứa thứ đang thiếu: mã tham gia nằm ở tab Thành viên, mọi lý do
+  // chặn còn lại (cấu hình chấm điểm, ground truth) đều thuộc tab Chấm điểm.
+  const publishBlockCta =
+    publishBlocked?.code === "JOIN_CODE_REQUIRED"
+      ? { tab: "members" as Tab, label: "Mở tab Thành viên" }
+      : { tab: "scoring" as Tab, label: "Mở tab Chấm điểm" };
 
   return (
     <div className="page admin-detail-page">
@@ -622,8 +639,18 @@ export function AdminCompetitionDetailPage() {
                 <span>Kết thúc</span>
               </button>
             )}
-            {/* Xoá chỉ dành cho draft; published/closed phải giữ lịch sử thi. */}
-            {competition.status === "draft" && (
+            {competition.status === "closed" && (
+              <button
+                type="button"
+                className="admin-detail-action admin-detail-action-outline"
+                onClick={() => setConfirming("reopen")}
+              >
+                <IconReopen className="admin-detail-action-icon" />
+                <span>Mở lại</span>
+              </button>
+            )}
+            {/* Xoá được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
+            {competition.status !== "published" && (
               <button
                 type="button"
                 className="admin-detail-action danger"
@@ -666,9 +693,9 @@ export function AdminCompetitionDetailPage() {
           <button
             type="button"
             className="btn btn-secondary btn-sm"
-            onClick={() => activateTab("scoring")}
+            onClick={() => activateTab(publishBlockCta.tab)}
           >
-            Mở tab Chấm điểm
+            {publishBlockCta.label}
           </button>
         </div>
       )}
@@ -742,7 +769,9 @@ export function AdminCompetitionDetailPage() {
               onNotify={notify}
             />
           )}
-          {tab === "scoring" && <ScoringPanel competition={competition} />}
+          {tab === "scoring" && (
+            <ScoringPanel competition={competition} onCompetitionChanged={load} />
+          )}
           {tab === "results" && <ResultsPanel competition={competition} />}
           {tab === "members" && (
             <MembersPanel competition={competition} onCompetitionChanged={load} />
@@ -773,7 +802,9 @@ export function AdminCompetitionDetailPage() {
               notify(
                 action === "publish"
                   ? "Đã publish cuộc thi."
-                  : "Đã kết thúc cuộc thi.",
+                  : action === "reopen"
+                    ? "Đã mở lại cuộc thi."
+                    : "Đã kết thúc cuộc thi.",
               );
               await load();
             }
@@ -1029,7 +1060,15 @@ function ResultsPanel({ competition }: { competition: Competition }) {
 
 /** ---------- Chấm điểm ---------- */
 
-function ScoringPanel({ competition }: { competition: Competition }) {
+function ScoringPanel({
+  competition,
+  onCompetitionChanged,
+}: {
+  competition: Competition;
+  // Readiness của publish nằm ở state trang cha, nên panel phải báo lại sau mỗi lần đổi
+  // config/ground truth - nếu không banner "Chưa thể publish" và nút Publish đứng hình.
+  onCompetitionChanged: () => Promise<void>;
+}) {
   const [status, setStatus] = useState<ScoringStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -1086,6 +1125,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
       );
       setStatus(data);
       setMessage("Đã lưu cấu hình chấm điểm.");
+      await onCompetitionChanged();
     } catch (err) {
       setError(err);
     } finally {
@@ -1104,6 +1144,7 @@ function ScoringPanel({ competition }: { competition: Competition }) {
       );
       setStatus(data);
       setMessage("Đã upload và kiểm tra ground truth.");
+      await onCompetitionChanged();
     } catch (err) {
       setError(err);
     } finally {
@@ -1715,7 +1756,8 @@ function ContentFormModal({
 }) {
   const isEdit = content !== undefined;
   const [title, setTitle] = useState(content?.title ?? "");
-  const [slug, setSlug] = useState(content?.slug ?? "");
+  // Sửa trang cũng bám theo tiêu đề: đổi tiêu đề là đổi URL trang nội dung.
+  const { slug, onTitleChange, onSlugChange } = useAutoSlug(content?.slug ?? "", true);
   const [visibility, setVisibility] = useState<"public" | "members">(content?.visibility ?? "public");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1751,7 +1793,10 @@ function ContentFormModal({
               id="content-title"
               className="input"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                onTitleChange(e.target.value);
+              }}
               required
               autoFocus
             />
@@ -1764,11 +1809,17 @@ function ContentFormModal({
               id="content-slug"
               className="input"
               value={slug}
-              onChange={(e) => setSlug(e.target.value)}
+              onChange={(e) => onSlugChange(e.target.value)}
               pattern="[a-z0-9]+(-[a-z0-9]+)*"
               title="Chỉ a-z, 0-9 và dấu gạch ngang"
+              maxLength={SLUG_MAX}
               required
             />
+            <small className="text-muted">
+              {isEdit
+                ? "Bám theo tiêu đề: sửa tiêu đề là đổi URL trang. Gõ tay để tự chọn slug khác."
+                : "Tự điền theo tiêu đề, gõ tay để đổi."}
+            </small>
           </div>
           <div className="form-field">
             <label className="field-label" htmlFor="content-visibility">
