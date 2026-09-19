@@ -1,0 +1,103 @@
+# Release gate: mọi PR vào `release` (và mọi push lên `main`) phải qua đây trước khi merge.
+#
+# Tên workflow giữ đúng `release-gate`: branch protection match required check theo
+# "<tên workflow> / <tên job>", nên đổi tên ở đây sẽ làm required check cũ không bao giờ
+# xanh trở lại và chặn mọi PR vào `release`.
+#
+# Gate chạy cả với PR từ fork, nên tuyệt đối không đặt secret production ở đây và không
+# dùng `pull_request_target`.
+name: release-gate
+
+on:
+  pull_request:
+    branches: [release]
+  # Push thẳng lên `main` cũng chạy gate để biết `main` còn release-ready hay không.
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      # --maxWorkers=1: chạy một process duy nhất cho kết quả trùng với local, đổi lấy
+      # thời gian chạy lâu hơn. Suite hiện tại vẫn dưới vài phút nên chưa cần song song.
+      - run: npx vitest run --maxWorkers=1
+      - run: npm run build
+      # Dry-run đọc `wrangler.jsonc` + `dist/` nhưng không cần credential Cloudflare và
+      # không gọi API deploy. Đây là chỗ bắt config asset/binding hỏng trước khi vào release.
+      - run: npm run cf:dry-run
+
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          # `working-directory` của action này là gốc để tìm pyproject.toml/uv.lock.
+          working-directory: backend
+      - run: uv sync --frozen --dev
+      - run: uv run pytest
+
+  deploy-script:
+    name: deploy-script
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cú pháp shell
+        run: bash -n deploy/vps/auto-deploy.sh deploy/vps/install-auto-deploy.sh deploy/vps/tests/auto-deploy.test.sh
+      # Harness chạy deployer trên repo tạm với `docker`/`git` giả: không cần Docker thật,
+      # không chạm mạng và không cần bất kỳ credential nào.
+      - name: Harness deployer
+        run: bash deploy/vps/tests/auto-deploy.test.sh
+      - name: Cú pháp systemd unit
+        run: |
+          set -euo pipefail
+          # `systemd-analyze verify` từ chối unit có ExecStart không tồn tại, mà binary production
+          # chỉ có trên VM. Verify trên bản copy đã thay ExecStart bằng /bin/true để vẫn bắt được lỗi
+          # cú pháp/khoá sai, rồi khẳng định riêng rằng ExecStart thật đúng là đường dẫn đóng băng.
+          tmp="$(mktemp -d)"
+          sed 's|^ExecStart=.*|ExecStart=/bin/true|' deploy/vps/vku-deploy.service >"$tmp/vku-deploy.service"
+          cp deploy/vps/vku-deploy.timer "$tmp/vku-deploy.timer"
+          systemd-analyze verify "$tmp/vku-deploy.service" "$tmp/vku-deploy.timer"
+          grep -qx 'ExecStart=/usr/local/sbin/vku-auto-deploy' deploy/vps/vku-deploy.service
+          # Unit backup cũng phải trỏ vào bản copy đóng băng, không phải file trong repo.
+          grep -qx 'ExecStart=/usr/local/sbin/vku-backup-prod' deploy/vku-backup.service
+      # Chỉ `config --quiet`: kết quả nội suy đầy đủ có thể chứa secret nên không in ra log.
+      - name: Cú pháp Compose (env giả, không in config)
+        env:
+          MONGO_USER: ci-dummy
+          MONGO_PASSWORD: ci-dummy
+          PROD_DATA_ROOT: /tmp/ci-dummy
+          CLOUDFLARE_TUNNEL_TOKEN: ci-dummy
+        run: |
+          docker compose -f docker-compose.prod.yml config --quiet
+          docker compose \
+            -f docker-compose.prod.yml \
+            -f deploy/docker-compose.tunnel.named.yml \
+            config --quiet

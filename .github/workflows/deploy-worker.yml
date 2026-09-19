@@ -1,0 +1,146 @@
+# Deploy Worker `vku-ai-challenge-platform` (static assets + proxy `/api/*`) khi `release` đổi frontend.
+#
+# Đây là cơ chế deploy Worker DUY NHẤT. Không bật Workers Builds song song: hai đường deploy cùng
+# ghi vào một Worker sẽ tranh nhau version và làm mất provenance của Git SHA.
+#
+# `API_ORIGIN` là runtime variable đặt ngoài repo (Dashboard hoặc `wrangler deploy --var`). Workflow
+# này TUYỆT ĐỐI không truyền `--var API_ORIGIN`: `keep_vars` giữ binding cũ, còn truyền `--var` sẽ
+# ghi đè nó bằng giá trị nằm trong log của CI.
+name: deploy-worker
+
+on:
+  push:
+    branches: [release]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-worker.yml"
+  # Đường break-glass: deploy lại đúng commit đang có trên `release` mà không cần push gì thêm.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Một deploy một thời điểm, và không huỷ run đang chạy: huỷ giữa lúc deploy sẽ để lại
+# trạng thái không rõ ràng về version nào đang nhận traffic.
+concurrency:
+  group: production-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Kiểm tra cấu hình trước khi deploy: thiếu biến ở đây phải fail khi production chưa bị
+      # đụng tới, không phải sau khi đã đẩy version mới lên.
+      - name: Kiểm tra cấu hình
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_URL: ${{ vars.WORKER_URL }}
+        run: |
+          set -euo pipefail
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || { echo "::error::Thiếu secret CLOUDFLARE_API_TOKEN ở environment 'production'."; exit 1; }
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || { echo "::error::Thiếu variable CLOUDFLARE_ACCOUNT_ID ở environment 'production'."; exit 1; }
+          case "$WORKER_URL" in
+            https://*) ;;
+            *) echo "::error::Thiếu hoặc sai variable WORKER_URL (phải là https://...)."; exit 1 ;;
+          esac
+
+      - run: npm ci
+
+      # Lặp lại gate frontend ngay trước deploy: push thẳng vào `release` là đường break-glass
+      # không đi qua PR, nên không được tin rằng gate đã chạy.
+      - run: npm run lint
+      - run: npx vitest run --maxWorkers=1
+      - run: npm run build
+
+      - name: Lưu version đang nhận traffic
+        id: previous
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node "$GITHUB_WORKSPACE/.github/scripts/previous-version.mjs"
+
+      - name: Deploy
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # `--keep-vars`: giữ nguyên binding runtime (API_ORIGIN) đặt ngoài repo.
+          npx wrangler deploy \
+            --keep-vars \
+            --tag "release-${GITHUB_SHA:0:12}" \
+            --message "release ${GITHUB_SHA}"
+
+      - name: Smoke tĩnh (quyết định rollback)
+        id: smoke
+        env:
+          WORKER_URL: ${{ vars.WORKER_URL }}
+        run: |
+          set -euo pipefail
+          probe() {
+            local path="$1"
+            local code
+            code=$(curl -sS -o "$RUNNER_TEMP/body" -w '%{http_code}' \
+              --retry 3 --retry-delay 2 --retry-all-errors \
+              "$WORKER_URL$path")
+            echo "$code"
+          }
+          bust="cb=${GITHUB_SHA:0:12}"
+
+          # `/` và deep-link SPA là static do Worker phục vụ: fail ở đây là lỗi thật của bản deploy.
+          for path in "/?$bust" "/competitions/ai-challenge-2026?$bust"; do
+            code=$(probe "$path")
+            ctype=$(file -b --mime-type "$RUNNER_TEMP/body")
+            echo "GET $path -> $code ($ctype)"
+            if [ "$code" != "200" ]; then
+              echo "::error::Smoke tĩnh thất bại: $path trả $code."
+              exit 1
+            fi
+            case "$ctype" in
+              text/html*) ;;
+              *) echo "::error::Smoke tĩnh thất bại: $path không trả HTML ($ctype)."; exit 1 ;;
+            esac
+          done
+
+          # `/api/health` chỉ là DIAGNOSTIC: `API_ORIGIN` đang trỏ Quick Tunnel nên tunnel chết
+          # làm API lỗi trong khi static vẫn khoẻ. Rollback Worker không sửa được tunnel, nên
+          # tuyệt đối không dùng kết quả này để quyết định rollback.
+          api_code=$(probe "/api/health?$bust")
+          echo "GET /api/health -> $api_code"
+          if [ "$api_code" != "200" ]; then
+            echo "::warning::/api/health trả $api_code. Static OK nên KHÔNG rollback. Kiểm tra API_ORIGIN và tunnel (xem docs/DEPLOYMENT.md)."
+          fi
+
+      - name: Rollback khi smoke tĩnh thất bại
+        if: failure() && steps.deploy.outcome == 'success' && steps.smoke.outcome == 'failure'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIOUS_VERSION: ${{ steps.previous.outputs.version }}
+        run: |
+          set -euo pipefail
+          msg="rollback release ${GITHUB_SHA} do smoke tĩnh thất bại"
+          if [ -n "$PREVIOUS_VERSION" ]; then
+            echo "Rollback về Worker Version $PREVIOUS_VERSION"
+            npx wrangler rollback "$PREVIOUS_VERSION" --yes --message "$msg"
+          else
+            # Không xác định được version trước (deploy đầu tiên, hoặc API trả shape lạ):
+            # để Wrangler tự chọn version liền trước thay vì đoán bừa một ID.
+            echo "::warning::Không xác định được version trước; dùng rollback mặc định của Wrangler."
+            npx wrangler rollback --yes --message "$msg"
+          fi
+          echo "::error::Đã rollback. Kiểm tra log smoke phía trên trước khi deploy lại."
