@@ -371,6 +371,14 @@ expect_eq "state tiến sang SHA mới" "$(state_read last-success-sha)" "$DOCS"
 expect_eq "không đụng container" "$(docker_mutations)" "0"
 expect_eq "checkout detached theo SHA mới" "$(git -C "$REPO_DIR" rev-parse HEAD)" "$DOCS"
 
+begin ".env.example: file mẫu trong repo, không đòi dựng lại container"
+setup_deployed
+ENV_EXAMPLE="$(advance "env-example" .env.example)"
+run_deploy
+expect_status "chỉ đổi .env.example vẫn deploy được" 0
+expect_eq "state tiến sang SHA mới" "$(state_read last-success-sha)" "$ENV_EXAMPLE"
+expect_eq "không đụng container" "$(docker_mutations)" "0"
+
 begin "backend-only: deploy cả api và web (nginx giữ IP của api)"
 setup_deployed
 BE="$(advance "backend" backend/app.py)"
