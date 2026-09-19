@@ -4,17 +4,14 @@ import { formatLocal } from "../api/competitions";
 import {
   fetchMySubmissions,
   formatScore,
+  SUBMISSION_STATUS_LABEL,
   type SubmissionsResponse,
 } from "../api/results";
+import { ArtifactLinks } from "../components/ArtifactLinks";
 import { ErrorBox, Loading } from "../components/ui";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 const PAGE_SIZE = 50;
-const STATUS_LABEL: Record<string, string> = {
-  completed: "Đã chấm điểm",
-  rejected: "Không hợp lệ",
-  failed: "Lỗi chấm điểm",
-};
 
 export function MySubmissionsPage() {
   const { competition } = useOutletContext<CompetitionContext>();
@@ -275,7 +272,7 @@ export function MySubmissionsPage() {
           <thead>
             <tr>
               <th scope="col" className="subm-col-id">Submission / thời gian</th>
-              <th scope="col" className="subm-col-file">File</th>
+              <th scope="col" className="subm-col-file">Tệp đã nộp</th>
               <th scope="col" className="subm-col-status">Trạng thái</th>
               <th scope="col" className="subm-col-num">F1</th>
               <th scope="col" className="subm-col-num">Precision</th>
@@ -322,14 +319,12 @@ export function MySubmissionsPage() {
                     </div>
                     <span className="cell-secondary">{formatLocal(submission.created_at)}</span>
                   </td>
-                  <td className="filename-cell">
-                    <div className="subm-file-row">
-                      <svg className="subm-file-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                      <span title={submission.filename}>{submission.filename}</span>
-                    </div>
+                  <td className="subm-artifact-cell">
+                    <ArtifactLinks
+                      basePath={`/competitions/${competition.id}/submissions`}
+                      submissionId={submission.id}
+                      artifacts={submission.artifacts}
+                    />
                   </td>
                   <td>
                     <span
@@ -337,7 +332,7 @@ export function MySubmissionsPage() {
                         submission.status === "completed" ? "success" : "danger"
                       }`}
                     >
-                      {STATUS_LABEL[submission.status] ?? submission.status}
+                      {SUBMISSION_STATUS_LABEL[submission.status]}
                     </span>
                     {submission.error && (
                       <span className="cell-error">{submission.error.message}</span>

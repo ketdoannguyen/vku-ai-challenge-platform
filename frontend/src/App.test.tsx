@@ -111,7 +111,7 @@ test("đăng nhập xong quay lại đúng trang nộp bài đã bị chặn", a
   await userEvent.type(await screen.findByLabelText("Email"), ACCOUNT.email);
   await userEvent.type(screen.getByLabelText("Mật khẩu"), "matkhau1234");
   await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));
-  expect(await screen.findByRole("heading", { name: "Nộp bài CSV" })).toBeTruthy();
+  expect(await screen.findByRole("heading", { name: "Nộp bài dự đoán" })).toBeTruthy();
 });
 
 /** App thật mount vào `#root`; gắn id lên container của RTL để test được `inert`. */

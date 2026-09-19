@@ -13,6 +13,8 @@ export interface SubmissionConfig {
   /** Chỉ có với admin và thành viên đang hoạt động - nhãn dương là thông tin của ground truth. */
   pos_label?: string | null;
   max_upload_mb: number;
+  /** Trần notebook Jupyter - mỗi lượt nộp bắt buộc kèm một tệp .ipynb. */
+  max_notebook_mb: number;
 }
 
 /** Link tài nguyên BTC khai báo - nền tảng chỉ lưu URL, không host dataset. */

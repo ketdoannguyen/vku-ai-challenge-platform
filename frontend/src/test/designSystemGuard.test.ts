@@ -124,7 +124,7 @@ test("không còn utility token Tailwind chết trong className của TSX", () =
 /**
  * Guard panel tiêu đề đầu trang.
  *
- * Năm màn từng dựng panel tiêu đề bằng năm nhóm class riêng nên lệch nhau về
+ * Các màn từng dựng panel tiêu đề bằng nhóm class riêng nên lệch nhau về
  * chiều cao, cỡ chữ, icon và khoảng cách. Chúng đã được gom về `.page-hero`, và
  * guard này chặn việc mỗi màn tự dựng lại biến thể của riêng mình.
  */
@@ -179,6 +179,7 @@ const PAGE_HERO_PAGES = [
   "SupportPage.tsx",
   "AdminCompetitionsPage.tsx",
   "AdminAccountsPage.tsx",
+  "AdminSubmissionsPage.tsx",
 ];
 
 /** Nguồn TSX của một màn, tra theo tên file. */
@@ -192,7 +193,7 @@ function classTokensOf(source: string): Set<string> {
   return new Set(classNameValues(source).flatMap(classTokens));
 }
 
-test("năm màn dựng panel tiêu đề bằng đúng bộ class dùng chung", () => {
+test("mọi màn dựng panel tiêu đề bằng đúng bộ class dùng chung", () => {
   for (const page of PAGE_HERO_PAGES) {
     const tokens = classTokensOf(pageSource(page));
     const missing = PAGE_HERO_CLASSES.filter((required) => !tokens.has(required));

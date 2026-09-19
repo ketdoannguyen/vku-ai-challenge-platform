@@ -10,6 +10,7 @@ import { SupportPage } from "./pages/SupportPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
 import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
+import { AdminSubmissionsPage } from "./pages/AdminSubmissionsPage";
 import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
 import { CompetitionContentPanel, CompetitionOverview } from "./pages/CompetitionContentPanel";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -119,6 +120,7 @@ function useNavItems(): NavItem[] {
   items.push({ to: "/ho-tro", label: "Hỗ trợ", end: true });
   if (account?.role === "admin") {
     items.push({ to: "/admin/competitions", label: "Quản trị" });
+    items.push({ to: "/admin/submissions", label: "Bài nộp", end: true });
     items.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
   }
   return items;
@@ -375,9 +377,13 @@ export function App() {
   const bare = pathname === "/login";
   // Dashboard là lưới 3 cột nên cần trần rộng hơn các màn còn lại.
   const dashboard = pathname === "/";
-  // Danh sách quản trị có bảng 8 cột nên cũng cần trần rộng; màn chi tiết cuộc thi
-  // (`/admin/competitions/:id`) vẫn giữ 1280px, nên so khớp đúng hai đường dẫn này.
-  const adminList = pathname === "/admin/competitions" || pathname === "/admin";
+  // Danh sách quản trị và bảng bài nộp toàn cục (8–9 cột) cũng cần trần rộng; màn chi
+  // tiết cuộc thi (`/admin/competitions/:id`) vẫn giữ 1280px, nên so khớp đúng các
+  // đường dẫn này.
+  const adminList =
+    pathname === "/admin/competitions" ||
+    pathname === "/admin" ||
+    pathname === "/admin/submissions";
   // Trang hỗ trợ có lưới hai cột (hướng dẫn + liên hệ) nên cần trần rộng hơn 1280px.
   const support = pathname === "/ho-tro";
   // Trang giới thiệu cũng hai cột ở desktop nên dùng chung trần rộng với hỗ trợ.
@@ -439,6 +445,14 @@ export function App() {
             element={
               <RequireAdmin>
                 <AdminCompetitionDetailPage />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/submissions"
+            element={
+              <RequireAdmin>
+                <AdminSubmissionsPage />
               </RequireAdmin>
             }
           />

@@ -4376,6 +4376,33 @@ select.input {
   font-weight: 400;
 }
 
+/* Hai slot cạnh nhau: CSV và notebook là hai phần bắt buộc ngang hàng, không phải
+   bước nối tiếp. `minmax(0, 1fr)` để tên file dài không kéo giãn cột. */
+.sub-upload-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.sub-upload-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sub-upload-slot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-label-md);
+  font-weight: 500;
+  color: var(--text);
+}
+
 .sub-dropzone {
   width: 100%;
   box-sizing: border-box;
@@ -4407,18 +4434,9 @@ select.input {
   border-color: var(--border);
 }
 
-.sub-dropzone-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-muted);
-  margin-bottom: 12px;
-  box-shadow: var(--shadow-sm);
+/* Trong slot nửa chiều rộng, vùng thả thu lại để hai slot không cao lệch nhau. */
+.sub-upload-slot .sub-dropzone {
+  padding: 24px 16px;
 }
 
 .sub-dropzone-prompt {
@@ -5229,15 +5247,12 @@ select.input {
   color: var(--success);
 }
 
-.subm-file-row {
+/* Cột tệp: hai nút tải cạnh nhau, xuống dòng khi cột hẹp. */
+.artifact-links {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.subm-file-icon {
-  flex: none;
-  color: var(--text-muted);
+  flex-wrap: wrap;
 }
 
 /* "Tốt nhất" là điểm nhấn, không phải trạng thái thành công: dùng vàng highlight kèm
@@ -5978,15 +5993,6 @@ select.input {
   line-height: 1;
 }
 
-.filename-cell {
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: var(--text-code);
-}
-
 .cell-secondary,
 .cell-error {
   display: block;
@@ -6043,6 +6049,50 @@ select.input {
 
 .admin-results-pagination .btn {
   border-radius: 2px;
+}
+
+/* Ô tiêu đề sắp xếp được: nút giữ nguyên dáng của `th`, chỉ đổi màu khi cột đang áp dụng. */
+.admin-sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.admin-sort-button:hover {
+  color: var(--vku-blue-700);
+}
+
+.admin-sort-arrow {
+  flex: 0 0 auto;
+  opacity: 0.45;
+}
+
+.table th[aria-sort="ascending"] .admin-sort-button,
+.table th[aria-sort="descending"] .admin-sort-button {
+  color: var(--vku-blue-700);
+}
+
+.table th[aria-sort="ascending"] .admin-sort-arrow,
+.table th[aria-sort="descending"] .admin-sort-arrow {
+  opacity: 1;
+}
+
+/* Bảng bài nộp toàn cục có thêm ô lọc cuộc thi nên lưới rộng hơn lưới hai bộ lọc của
+   tab kết quả; dưới 48rem vẫn thừa hưởng nhánh một cột của `.results-filters`. */
+.admin-submissions-filters {
+  grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 200px) auto auto;
+}
+
+.admin-submissions-error {
+  margin-bottom: 16px;
 }
 
 .admin-members {
@@ -8963,7 +9013,8 @@ button:focus-visible {
     grid-template-columns: 1fr;
   }
   .submission-form,
-  .metric-grid {
+  .metric-grid,
+  .sub-upload-slots {
     grid-template-columns: 1fr;
   }
   .submission-form .btn {

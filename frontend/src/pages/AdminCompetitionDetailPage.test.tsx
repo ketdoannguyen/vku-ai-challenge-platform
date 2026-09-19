@@ -753,11 +753,14 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
             {
               id: "s1",
               competition_id: COMPETITION.id,
-              filename: "result.csv",
               status: "completed",
               metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
               primary_score: 0.9,
               created_at: "2026-09-15T09:00:00Z",
+              artifacts: {
+                prediction: { filename: "result.csv", size_bytes: 128, available: true },
+                notebook: { filename: "solution.ipynb", size_bytes: 4096, available: true },
+              },
               account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
             },
           ],
@@ -774,7 +777,7 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   renderPage();
 
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
-  expect(await screen.findByText("result.csv")).toBeTruthy();
+  expect(await screen.findByTitle("result.csv")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Bảng xếp hạng" })).toBeTruthy();
   // Hai bảng kết quả cuộn ngang được nên phải là vùng focus được bằng bàn phím.
   for (const name of ["Bảng xếp hạng của cuộc thi", "Bảng bài nộp của cuộc thi"]) {
@@ -787,7 +790,69 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   expect(screen.getByLabelText("Lọc theo trạng thái")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
   await waitFor(() => {
-    expect(calls.some((call) => call.url.includes("/submissions?limit=50&offset=50"))).toBe(true);
+    // Bảng dùng chung luôn gửi kèm sắp xếp, nên đọc tham số thay vì so khớp cả query string.
+    const paged = calls.find(
+      (call) =>
+        call.url.includes("/submissions?") &&
+        new URL(call.url, "http://localhost").searchParams.get("offset") === "50",
+    );
+    expect(paged).toBeTruthy();
+    expect(new URL(paged!.url, "http://localhost").searchParams.get("sort")).toBe("created_at");
+  });
+});
+
+test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async () => {
+  mockApi((url) => {
+    if (url.includes("/leaderboard")) {
+      return {
+        body: { competition_id: COMPETITION.id, primary_metric: "f1", total: 0, entries: [] },
+        status: 200,
+      };
+    }
+    if (url.includes("/submissions")) {
+      return {
+        body: {
+          submissions: [
+            {
+              id: "s1",
+              competition_id: COMPETITION.id,
+              status: "completed",
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              primary_score: 0.9,
+              created_at: "2026-09-15T09:00:00Z",
+              artifacts: {
+                prediction: { filename: "result.csv", size_bytes: 128, available: true },
+                notebook: { filename: "solution.ipynb", size_bytes: 4096, available: true },
+              },
+              account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
+  const region = await screen.findByRole("region", { name: "Bảng bài nộp của cuộc thi" });
+
+  // Cuộc thi đã biết sẵn nên bảng ẩn cả ô lọc lẫn cột cuộc thi, và không gọi endpoint toàn cục.
+  expect(screen.queryByLabelText("Lọc theo cuộc thi")).toBeNull();
+  expect(within(region).queryByRole("columnheader", { name: "Cuộc thi" })).toBeNull();
+  expect(calls.some((call) => call.url.includes("/api/admin/submissions?"))).toBe(false);
+
+  // Sắp xếp vẫn chạy phía server, qua chính endpoint của cuộc thi.
+  fireEvent.click(within(screen.getByRole("columnheader", { name: /Đội/ })).getByRole("button"));
+  await waitFor(() => {
+    const sorted = calls.find(
+      (call) => new URL(call.url, "http://localhost").searchParams.get("sort") === "team",
+    );
+    expect(sorted?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
   });
 });
 
@@ -1474,11 +1539,14 @@ function mockFullDetail() {
             {
               id: "s1",
               competition_id: COMPETITION.id,
-              filename: "result.csv",
               status: "completed",
               metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
               primary_score: 0.9,
               created_at: "2026-09-15T09:00:00Z",
+              artifacts: {
+                prediction: { filename: "result.csv", size_bytes: 128, available: true },
+                notebook: { filename: "solution.ipynb", size_bytes: 4096, available: true },
+              },
               account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
             },
           ],

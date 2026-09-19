@@ -27,17 +27,14 @@ import {
   statusClass,
 } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
-import {
-  formatScore,
-  type LeaderboardResponse,
-  type SubmissionHistoryItem,
-} from "../api/results";
+import { formatScore, type LeaderboardResponse } from "../api/results";
 import {
   CompetitionActionConfirmModal,
   CompetitionDeleteModal,
   CompetitionFormModal,
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
+import { AdminSubmissionsPanel } from "../components/AdminSubmissionsPanel";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, FileButton, Loading } from "../components/ui";
 import { useAutoSlug } from "../hooks/useAutoSlug";
@@ -46,6 +43,7 @@ import {
   cleanCompetitionResources,
   sameCompetitionResources,
 } from "../lib/competitionResources";
+import { downloadArtifact } from "../lib/downloadArtifact";
 import { SLUG_MAX } from "../lib/slug";
 
 type Tab = "contents" | "assets" | "resources" | "scoring" | "members" | "results";
@@ -136,18 +134,6 @@ interface ScoringStatus {
   quota_per_day: number;
   max_upload_mb: number;
 }
-
-interface AdminSubmission extends SubmissionHistoryItem {
-  account: { id: string; name: string; email: string };
-}
-
-const ADMIN_RESULTS_PAGE_SIZE = 50;
-
-const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], string> = {
-  completed: "Đã chấm điểm",
-  rejected: "Không hợp lệ",
-  failed: "Lỗi chấm điểm",
-};
 
 function Icon({
   children,
@@ -829,35 +815,18 @@ function ResultsPanel({ competition }: { competition: Competition }) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState<unknown>(null);
-  const [submissions, setSubmissions] = useState<AdminSubmission[]>([]);
-  const [submissionsLoading, setSubmissionsLoading] = useState(true);
-  const [submissionsError, setSubmissionsError] = useState<unknown>(null);
-  const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("");
-  const [filters, setFilters] = useState({ search: "", status: "" });
-  const [offset, setOffset] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<unknown>(null);
 
-  /** Tải qua fetch để 401/500 vẫn là SPA error thay vì trang JSON của trình duyệt. */
   async function exportResults() {
     if (exporting) return;
     setExporting(true);
     setExportError(null);
     try {
-      const { blob, filename } = await api.download(
+      await downloadArtifact(
         `/admin/competitions/${competition.id}/export.xlsx`,
+        `${competition.slug}-ket-qua.xlsx`,
       );
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = filename ?? `${competition.slug}-ket-qua.xlsx`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      // Trình duyệt đọc blob sau khi click; thu hồi ở macrotask kế tiếp mới không huỷ tải.
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
     } catch (err) {
       setExportError(err);
     } finally {
@@ -877,41 +846,9 @@ function ResultsPanel({ competition }: { competition: Competition }) {
     }
   }, [competition.id]);
 
-  const loadSubmissions = useCallback(async () => {
-    setSubmissionsLoading(true);
-    setSubmissionsError(null);
-    const params = new URLSearchParams({ limit: String(ADMIN_RESULTS_PAGE_SIZE), offset: String(offset) });
-    if (filters.search) params.set("q", filters.search);
-    if (filters.status) params.set("status", filters.status);
-    try {
-      const history = await api.get<{ submissions: AdminSubmission[]; total: number }>(
-        `/admin/competitions/${competition.id}/submissions?${params.toString()}`,
-      );
-      setSubmissions(history.submissions);
-      setTotal(history.total);
-    } catch (err) {
-      setSubmissionsError(err);
-    } finally {
-      setSubmissionsLoading(false);
-    }
-  }, [competition.id, filters, offset]);
-
   useEffect(() => {
     void loadLeaderboard();
   }, [loadLeaderboard]);
-
-  useEffect(() => {
-    void loadSubmissions();
-  }, [loadSubmissions]);
-
-  function clearFilters() {
-    setSearch("");
-    setStatus("");
-    setOffset(0);
-    setFilters({ search: "", status: "" });
-  }
-
-  const hasFilters = Boolean(filters.search || filters.status);
 
   return (
     <div className="admin-results">
@@ -975,85 +912,11 @@ function ResultsPanel({ competition }: { competition: Competition }) {
         ) : <p className="admin-results-empty text-muted">Chưa có kết quả xếp hạng.</p>}
       </section>
 
-      <section className="results-section admin-detail-card" data-tone="blue">
-        <div className="results-head">
-          <div className="admin-detail-section-heading">
-            <span className="admin-detail-card-icon" aria-hidden="true">
-              <IconUpload className="admin-detail-card-icon-glyph" />
-            </span>
-            <div>
-              <h2 className="admin-detail-card-title">Danh sách submissions</h2>
-              <p className="text-muted">{total} submission trong bộ lọc hiện tại.</p>
-            </div>
-          </div>
-        </div>
-        <form
-          className="results-filters"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setOffset(0);
-            setFilters({ search: search.trim(), status });
-          }}
-        >
-          <input className="input" type="search" aria-label="Lọc theo đội" placeholder="Tên hoặc email đội" value={search} onChange={(event) => setSearch(event.target.value)} />
-          <select className="input" aria-label="Lọc theo trạng thái" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="">Mọi trạng thái</option>
-            <option value="completed">Đã chấm điểm</option>
-            <option value="rejected">Không hợp lệ</option>
-            <option value="failed">Lỗi chấm điểm</option>
-          </select>
-          <button className="btn admin-detail-primary-action" type="submit">Lọc</button>
-          {hasFilters && <button className="btn btn-ghost" type="button" onClick={clearFilters}>Xóa bộ lọc</button>}
-        </form>
-        {submissionsError ? (
-          <div className="admin-section-error">
-            <ErrorBox error={submissionsError} />
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void loadSubmissions()}>Thử lại</button>
-          </div>
-        ) : submissionsLoading ? (
-          <Loading />
-        ) : submissions.length ? (
-          <div
-            className="table-wrap admin-results-table-wrap"
-            tabIndex={0}
-            role="region"
-            aria-label="Bảng bài nộp của cuộc thi"
-          >
-            <table className="table results-table admin-submissions-table">
-              <thead><tr><th scope="col">Thời gian</th><th scope="col">Đội</th><th scope="col">File</th><th scope="col">Trạng thái</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="score-cell">Điểm chính</th></tr></thead>
-              <tbody>
-                {submissions.map((submission) => (
-                  <tr key={submission.id}>
-                    <td>{formatLocal(submission.created_at)}</td>
-                    <td><strong>{submission.account.name}</strong><span className="cell-secondary">{submission.account.email}</span></td>
-                    <td className="filename-cell">{submission.filename}</td>
-                    <td>
-                      <span className={`status-badge submission-status ${submission.status}`}>{SUBMISSION_STATUS_LABEL[submission.status]}</span>
-                      {submission.error && <span className="cell-error">{submission.error.message}</span>}
-                    </td>
-                    <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
-                    <td className="score-cell">{formatScore(submission.metrics?.precision)}</td>
-                    <td className="score-cell">{formatScore(submission.metrics?.recall)}</td>
-                    <td className="score-cell primary-score">{formatScore(submission.primary_score)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="admin-results-empty">
-            <p>Không có submission phù hợp.</p>
-            {hasFilters && <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>Xóa bộ lọc</button>}
-          </div>
-        )}
-        {!submissionsError && total > ADMIN_RESULTS_PAGE_SIZE && (
-          <div className="pagination pagination-controls admin-results-pagination">
-            <button className="btn btn-secondary btn-sm" type="button" disabled={offset === 0 || submissionsLoading} onClick={() => setOffset(Math.max(0, offset - ADMIN_RESULTS_PAGE_SIZE))}>Trang trước</button>
-            <span>{offset + 1}–{Math.min(offset + ADMIN_RESULTS_PAGE_SIZE, total)} / {total}</span>
-            <button className="btn btn-secondary btn-sm" type="button" disabled={offset + ADMIN_RESULTS_PAGE_SIZE >= total || submissionsLoading} onClick={() => setOffset(offset + ADMIN_RESULTS_PAGE_SIZE)}>Trang sau</button>
-          </div>
-        )}
-      </section>
+      <AdminSubmissionsPanel
+        competitionId={competition.id}
+        title="Danh sách submissions"
+        tableLabel="Bảng bài nộp của cuộc thi"
+      />
     </div>
   );
 }
@@ -2077,7 +1940,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
     setBusy(true);
     setError(null);
     try {
-      await api.postFile(`/admin/competitions/${competitionId}/assets`, file);
+      await api.postFile(`/admin/competitions/${competitionId}/assets`, { file });
       setMessage(`Đã upload "${file.name}".`);
       await load();
     } catch (err) {

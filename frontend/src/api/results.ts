@@ -6,14 +6,27 @@ export interface Metrics {
   recall: number;
 }
 
+/** Metadata một artifact đã lưu; backend không trả object key hay nơi lưu trữ. */
+export interface ArtifactMeta {
+  filename: string;
+  /** null với bài nộp cũ chỉ còn CSV trên đĩa - kích thước không được lưu lúc đó. */
+  size_bytes: number | null;
+  available: boolean;
+}
+
+export interface SubmissionArtifacts {
+  prediction: ArtifactMeta | null;
+  notebook: ArtifactMeta | null;
+}
+
 export interface SubmissionHistoryItem {
   id: string;
   competition_id: string;
-  filename: string;
   status: "completed" | "rejected" | "failed";
   metrics: Metrics | null;
   primary_score: number | null;
   created_at: string;
+  artifacts: SubmissionArtifacts;
   error?: { code: string; message: string };
 }
 
@@ -22,6 +35,36 @@ export interface SubmissionsResponse {
   total: number;
   limit: number;
   offset: number;
+}
+
+export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], string> = {
+  completed: "Đã chấm điểm",
+  rejected: "Không hợp lệ",
+  failed: "Lỗi chấm điểm",
+};
+
+/** Cột sắp xếp bảng submission của admin - khớp `SORT_FIELDS` phía backend. */
+export type AdminSortField = "created_at" | "team" | "primary_score";
+export type AdminSortOrder = "asc" | "desc";
+
+/** Dòng submission phía admin: thêm định danh tài khoản mà endpoint participant cố ý bỏ. */
+export interface AdminSubmissionItem extends SubmissionHistoryItem {
+  account: { id: string; name: string; email: string };
+}
+
+/** Bảng toàn cục gắn thêm cuộc thi của từng dòng. */
+export interface GlobalSubmissionItem extends AdminSubmissionItem {
+  /** Chỉ endpoint toàn cục trả về; bảng theo cuộc thi đã biết sẵn cuộc thi của nó. */
+  competition?: { id: string; slug: string; name: string };
+}
+
+export interface AdminSubmissionsResponse {
+  submissions: GlobalSubmissionItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  sort: AdminSortField;
+  order: AdminSortOrder;
 }
 
 export interface LeaderboardEntry {

@@ -30,6 +30,7 @@ function makeCompetition(overrides: Partial<Competition> = {}): Competition {
       average: null,
       pos_label: null,
       max_upload_mb: 10,
+      max_notebook_mb: 20,
     },
     ...overrides,
   };

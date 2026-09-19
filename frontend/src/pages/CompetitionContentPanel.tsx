@@ -104,7 +104,10 @@ export function CompetitionOverview() {
             </li>
           )}
           <li>
-            <strong>Dung lượng tối đa.</strong> <span>{config.max_upload_mb} MiB mỗi file.</span>
+            <strong>Dung lượng tối đa.</strong>{" "}
+            <span>
+              CSV {config.max_upload_mb} MiB, notebook {config.max_notebook_mb} MiB.
+            </span>
           </li>
         </ul>
       </section>
