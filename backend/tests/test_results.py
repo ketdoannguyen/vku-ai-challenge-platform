@@ -128,7 +128,12 @@ def test_my_submissions_is_scoped_paginated_newest_first_and_hides_paths(client)
     assert body["limit"] == 1
     assert body["offset"] == 0
     assert [item["id"] for item in body["submissions"]] == [str(latest_id)]
-    assert body["submissions"][0]["filename"] == "latest.csv"
+    # Tên file gốc chỉ còn trong metadata artifact; record legacy chỉ có CSV trên đĩa.
+    assert body["submissions"][0]["artifacts"] == {
+        "prediction": {"filename": "latest.csv", "size_bytes": None, "available": True},
+        "notebook": None,
+    }
+    assert "filename" not in body["submissions"][0]
     assert body["submissions"][0]["competition_id"] == str(competition_id)
     assert "file_path" not in body["submissions"][0]
     assert "account_id" not in body["submissions"][0]
