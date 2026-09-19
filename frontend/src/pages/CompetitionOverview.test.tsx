@@ -33,6 +33,7 @@ const BASE: Competition = {
     average: "binary",
     pos_label: "1",
     max_upload_mb: 50,
+    max_notebook_mb: 20,
   },
 };
 
@@ -118,7 +119,7 @@ test("Tổng quan nêu thể lệ và quy cách bài nộp bằng dữ liệu th
   expect(screen.getByText("Tối đa 7 lượt mỗi ngày.")).toBeTruthy();
   expect(screen.getByText("Cột ID.")).toBeTruthy();
   expect(screen.getByText("Binary")).toBeTruthy();
-  expect(screen.getByText("50 MiB mỗi file.")).toBeTruthy();
+  expect(screen.getByText("CSV 50 MiB, notebook 20 MiB.")).toBeTruthy();
 });
 
 test("cấu hình chưa thiết lập hiển thị “Chưa cấu hình”, không lộ null/undefined", async () => {
@@ -131,6 +132,7 @@ test("cấu hình chưa thiết lập hiển thị “Chưa cấu hình”, khô
       average: null,
       pos_label: null,
       max_upload_mb: 50,
+      max_notebook_mb: 20,
     },
   };
   apiMock((url) =>

@@ -10,7 +10,7 @@ from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import Settings, get_settings
 from app.core.slugs import SLUG_MAX, is_valid_slug
 from app.submissions.service import SUBMISSIONS_COLLECTION
-from tests.helpers import SCORING_CONFIG, configure_scoring, publish_competition
+from tests.helpers import SCORING_CONFIG, VALID_NOTEBOOK, configure_scoring, publish_competition
 
 
 def _login(client, email="admin@vku.vn", password="adminmatkhau1"):
@@ -560,7 +560,10 @@ def test_published_competition_accepts_a_real_submission(client):
     assert client.post("/api/competitions/ai-challenge-2026/join", json={}).status_code == 200
     submitted = client.post(
         f"/api/competitions/{cid}/submissions",
-        files={"file": ("answers.csv", b"id,prediction\n1,1\n2,0\n3,1\n4,0\n", "text/csv")},
+        files={
+            "file": ("answers.csv", b"id,prediction\n1,1\n2,0\n3,1\n4,0\n", "text/csv"),
+            "notebook": ("solution.ipynb", VALID_NOTEBOOK, "application/x-ipynb+json"),
+        },
     )
     assert submitted.status_code == 201
     assert submitted.json()["status"] == "completed"
@@ -580,6 +583,7 @@ def test_admin_detail_exposes_env_upload_limits(client, monkeypatch):
     assert resp.status_code == 200
     assert resp.json()["upload_limits"] == {
         "submission_mb": 11,
+        "notebook_mb": 20,
         "content_mb": 7,
         "asset_mb": 9,
     }
@@ -615,6 +619,7 @@ def test_upload_limits_only_on_admin_detail(client):
     settings = get_settings()
     assert detail["upload_limits"] == {
         "submission_mb": settings.max_upload_mb,
+        "notebook_mb": settings.max_notebook_mb,
         "content_mb": settings.max_content_mb,
         "asset_mb": settings.max_asset_mb,
     }

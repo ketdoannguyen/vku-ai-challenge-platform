@@ -139,6 +139,7 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
         "prediction_column": "prediction",
         "average": "binary",
         "max_upload_mb": 10,
+        "max_notebook_mb": 20,
     }
     assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404
 

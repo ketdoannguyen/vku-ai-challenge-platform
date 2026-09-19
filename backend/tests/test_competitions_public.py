@@ -7,7 +7,7 @@ import pytest
 from bson import ObjectId
 
 from app.competitions.service import COMPETITIONS_COLLECTION
-from tests.helpers import publish_competition
+from tests.helpers import VALID_NOTEBOOK, publish_competition
 
 
 @pytest.fixture()
@@ -141,7 +141,10 @@ def _login_participant(client):
 def _submit(client, competition_id, data=b"id,prediction\n1,1\n2,0\n3,1\n4,0\n"):
     return client.post(
         f"/api/competitions/{competition_id}/submissions",
-        files={"file": ("answers.csv", data, "text/csv")},
+        files={
+            "file": ("answers.csv", data, "text/csv"),
+            "notebook": ("solution.ipynb", VALID_NOTEBOOK, "application/x-ipynb+json"),
+        },
     )
 
 

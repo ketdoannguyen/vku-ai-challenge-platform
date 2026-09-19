@@ -135,9 +135,27 @@ case "$cmd" in
         ;;
       ps)
         svc=""
+        incl_stopped=0
         while [ $# -gt 0 ]; do
-          case "$1" in -q) shift ;; *) svc="$1"; shift ;; esac
+          case "$1" in
+            -q) shift ;;
+            -aq|-qa|-a) incl_stopped=1; shift ;;
+            *) svc="$1"; shift ;;
+          esac
         done
+        # `minio`/`minio-init` là hạ tầng dùng chung, nằm NGOÀI override theo SHA nên không có
+        # `running.<svc>.revision`. Kịch bản điều khiển chúng bằng FAKE_MINIO_HEALTH /
+        # FAKE_MINIO_INIT_EXIT - đúng hai thứ mà preflight của deployer đọc.
+        if [ "$svc" = "minio" ]; then
+          [ "${FAKE_MINIO_HEALTH:-healthy}" != "none" ] && echo "minio-ctr"
+          exit 0
+        fi
+        if [ "$svc" = "minio-init" ]; then
+          if [ "$incl_stopped" -eq 1 ] && [ "${FAKE_MINIO_INIT_EXIT:-0}" != "none" ]; then
+            echo "minio-init-ctr"
+          fi
+          exit 0
+        fi
         if [ -n "$svc" ] && [ -s "$state/running.$svc.revision" ]; then echo "${svc}-ctr"; fi
         exit 0
         ;;
@@ -156,6 +174,16 @@ case "$cmd" in
     esac
     ;;
   inspect)
+    # Hai lời gọi của preflight MinIO đọc state khác hẳn lời gọi label của `verify_services`, nên phải
+    # phân biệt bằng chính format string chứ không chỉ bằng container id.
+    fmt=""
+    while [ $# -gt 0 ]; do
+      case "$1" in -f) fmt="$2"; shift 2 ;; *) break ;; esac
+    done
+    case "$fmt" in
+      *State.Health*) echo "${FAKE_MINIO_HEALTH:-healthy}"; exit 0 ;;
+      *State.ExitCode*) echo "${FAKE_MINIO_INIT_EXIT:-0}"; exit 0 ;;
+    esac
     cid="${!#}"
     svc="${cid%-ctr}"
     want="$(cat "$state/running.$svc.revision" 2>/dev/null || echo "")"
@@ -223,6 +251,7 @@ begin() {
   OUT=""
   STATUS=0
   unset FAKE_FAIL_BUILD FAKE_BAD_LABEL FAKE_HEALTH_FAIL FAKE_NO_OLD_IMAGE FAKE_FAIL_UP
+  unset FAKE_MINIO_HEALTH FAKE_MINIO_INIT_EXIT
   mkdir -p "$ROOT/bin" "$ROOT/state"
   : >"$ROOT/env"
   cp "$REPO_ROOT/docker-compose.prod.yml" "$ROOT/compose.yml"
@@ -300,6 +329,8 @@ run_deploy() {
       FAKE_HEALTH_FAIL="${FAKE_HEALTH_FAIL:-}" \
       FAKE_NO_OLD_IMAGE="${FAKE_NO_OLD_IMAGE:-}" \
       FAKE_FAIL_UP="${FAKE_FAIL_UP:-}" \
+      FAKE_MINIO_HEALTH="${FAKE_MINIO_HEALTH:-healthy}" \
+      FAKE_MINIO_INIT_EXIT="${FAKE_MINIO_INIT_EXIT:-0}" \
       PATH="$ROOT/bin:$PATH" \
       bash "$SCRIPT" "$@" 2>&1
   )"
@@ -370,6 +401,65 @@ run_deploy
 expect_status "đổi compose thì deploy thành công" 0
 expect_in "build api web" "$(docker_log)" "build api web"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$COMPOSE_SHA"
+
+# ADR-028: `minio`/`minio-init` nằm ngoài override theo SHA nên deployer phải tự kiểm. Điều đáng
+# kiểm không phải "có chạy kiểm tra hay không" mà là "khi thiếu thì có dừng TRƯỚC khi thay api/web".
+begin "MinIO chưa bootstrap: dừng trước khi thay api/web"
+setup_deployed
+BE="$(advance "backend" backend/app.py)"
+
+FAKE_MINIO_HEALTH=none
+run_deploy
+expect_status "thiếu container minio thì dừng" 1
+expect_in "nói rõ không thấy minio" "$OUT" "không thấy container 'minio' đang chạy"
+expect_in "nói rõ production chưa bị chạm" "$OUT" "KHÔNG thay api/web"
+expect_in "in lệnh bootstrap" "$OUT" "up -d minio minio-init"
+expect_eq "không build, không up" "$(docker_mutations)" "0"
+
+FAKE_MINIO_HEALTH=healthy
+FAKE_MINIO_INIT_EXIT=none
+run_deploy
+expect_status "minio sống nhưng chưa init thì vẫn dừng" 1
+expect_in "nói rõ chưa chạy minio-init" "$OUT" "chưa từng chạy 'minio-init'"
+expect_eq "vẫn chưa đụng container" "$(docker_mutations)" "0"
+
+FAKE_MINIO_INIT_EXIT=1
+run_deploy
+expect_status "minio-init lỗi thì dừng" 1
+expect_in "nêu exit code" "$OUT" "'minio-init' kết thúc với exit code 1"
+expect_eq "vẫn chưa đụng container" "$(docker_mutations)" "0"
+expect_eq "state không tiến" "$(state_read last-success-sha)" "$BASE"
+# Không ghi last-failed: lỗi này không nằm ở commit, và cách sửa là chạy bootstrap rồi để lượt timer
+# sau deploy nốt chính SHA đó.
+expect_eq "không khoá SHA mục tiêu lại" "$(state_read last-failed-sha)" ""
+expect_eq "worktree trả về bản đang chạy" "$(git -C "$REPO_DIR" rev-parse HEAD)" "$BASE"
+expect_in "ghi history để còn dấu vết" "$(state_read history.log)" "minio-not-bootstrapped"
+expect_in "ghi last-failure cho operator" "$(state_read last-failure.txt)" "$BE"
+
+begin "MinIO healthy: deploy bình thường"
+setup_deployed
+BE="$(advance "backend" backend/app.py)"
+FAKE_MINIO_HEALTH=healthy
+FAKE_MINIO_INIT_EXIT=0
+run_deploy
+expect_status "deploy thành công khi MinIO đã bootstrap" 0
+expect_in "có kiểm tra bootstrap" "$(docker_log)" "ps -aq minio-init"
+expect_eq "revision api khớp SHA mục tiêu" "$(running_revision api)" "$BE"
+expect_eq "state tiến" "$(state_read last-success-sha)" "$BE"
+# Deployer chỉ quản api/web: mọi lệnh build/up đều không được nhắc tới MinIO.
+expect_not_in "không build/up container MinIO" \
+  "$(grep -E '^compose .* (build|up) ' "$ROOT/docker.log")" "minio"
+
+# Release không khai MinIO trong compose thì preflight không được chặn - nếu thiếu `needs_minio`,
+# lần chạy dưới đây sẽ dừng vì FAKE_MINIO_HEALTH=none.
+begin "compose không có MinIO: không chặn deploy"
+setup_deployed
+BE="$(advance "backend" backend/app.py)"
+printf 'services:\n  api:\n    image: x\n' >"$ROOT/compose.yml"
+FAKE_MINIO_HEALTH=none
+run_deploy
+expect_status "không cần MinIO vẫn deploy được" 0
+expect_eq "state tiến" "$(state_read last-success-sha)" "$BE"
 
 begin "đường dẫn lạ: fail closed"
 setup_deployed

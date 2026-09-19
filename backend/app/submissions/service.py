@@ -1,20 +1,43 @@
 """Submission persistence and safe result representations."""
 
+import re
 from datetime import datetime
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from app.accounts.service import ACCOUNTS_COLLECTION
 from app.core.datetimes import iso_z, utc_day_bounds
+from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
 SUBMISSIONS_COLLECTION = "submissions"
 _PUBLIC_ERROR_MESSAGES = {
     "SCORING_FAILED": "Không thể chấm điểm bài nộp.",
     "SUBMISSION_REJECTED": "Bài nộp không hợp lệ.",
 }
+# Record cũ chỉ có CSV trên đĩa; tên mặc định dùng khi metadata không có.
+LEGACY_FILENAME_FALLBACK = "submission.csv"
+
+# Allowlist sort/order của bảng quản trị: không bao giờ nội suy trực tiếp từ query vào `$sort`.
+SORT_FIELDS = ("created_at", "team", "primary_score")
+SORT_ORDERS = ("asc", "desc")
+DEFAULT_SORT = "created_at"
+DEFAULT_ORDER = "desc"
 
 
 async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     collection = db[SUBMISSIONS_COLLECTION]
+    # Số thứ tự submission là duy nhất theo (cuộc thi, account) một khi đã được cấp; partial index để
+    # record legacy thiếu `submission_no` không tham gia ràng buộc này.
+    await collection.create_index(
+        [("competition_id", 1), ("account_id", 1), ("submission_no", 1)],
+        unique=True,
+        name="submission_no_unique",
+        partialFilterExpression={"submission_no": {"$exists": True}},
+    )
+    # Trang quản trị submission toàn cục sắp xếp không kèm competition_id nên cần index riêng.
+    await collection.create_index([("created_at", -1), ("_id", -1)])
+    await collection.create_index([("primary_score", -1), ("created_at", -1), ("_id", -1)])
     await collection.create_index(
         [
             ("competition_id", 1),
@@ -81,14 +104,56 @@ async def quota_status(
     }
 
 
+async def next_submission_no(db, competition_id, account_id) -> int:
+    """Ứng viên số thứ tự kế tiếp: lớn hơn cả bề rộng lịch sử và số lớn nhất đã cấp.
+
+    Chốt chống trùng là unique index chứ không phải hàm này - hai request đồng thời cùng đọc ra một
+    ứng viên, một request sẽ nhận DuplicateKeyError rồi tính lại.
+    """
+    query = {"competition_id": competition_id, "account_id": account_id}
+    collection = db[SUBMISSIONS_COLLECTION]
+    history = await collection.count_documents(query)
+    latest = await collection.find_one(
+        {**query, "submission_no": {"$exists": True}},
+        {"submission_no": 1},
+        sort=[("submission_no", -1)],
+    )
+    highest = latest["submission_no"] if latest else 0
+    return max(history, highest) + 1
+
+
+def artifact_metadata(submission: dict) -> dict:
+    """Metadata artifact an toàn cho participant/admin - không lộ object key hay backend lưu trữ."""
+    stored = submission.get("artifacts") or {}
+    result: dict[str, dict | None] = {PREDICTION_ARTIFACT: None, NOTEBOOK_ARTIFACT: None}
+    for kind in result:
+        entry = stored.get(kind)
+        if entry:
+            result[kind] = {
+                "filename": entry.get("original_filename") or kind,
+                "size_bytes": entry.get("size_bytes"),
+                "available": True,
+            }
+    if result[PREDICTION_ARTIFACT] is None and submission.get("file_path"):
+        # Submission cũ chỉ có CSV trên đĩa; kích thước không lưu nên để null.
+        result[PREDICTION_ARTIFACT] = {
+            "filename": submission.get("original_filename") or LEGACY_FILENAME_FALLBACK,
+            "size_bytes": None,
+            "available": True,
+        }
+    return result
+
+
 def public_submission(submission: dict, quota_remaining: int) -> dict:
     return {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
+        "submission_no": submission.get("submission_no"),
         "status": submission["status"],
         "metrics": submission["metrics"],
         "primary_score": submission["primary_score"],
         "created_at": iso_z(submission["created_at"]),
+        "artifacts": artifact_metadata(submission),
         "quota_remaining": quota_remaining,
     }
 
@@ -98,11 +163,12 @@ def submission_history_item(submission: dict) -> dict:
     item = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
-        "filename": submission.get("original_filename", "submission.csv"),
+        "submission_no": submission.get("submission_no"),
         "status": submission["status"],
         "metrics": submission.get("metrics"),
         "primary_score": submission.get("primary_score"),
         "created_at": iso_z(submission["created_at"]),
+        "artifacts": artifact_metadata(submission),
     }
     if submission.get("error_code") or submission.get("error_message"):
         error_code = submission.get("error_code")
@@ -125,3 +191,70 @@ async def list_account_submissions(
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
     return [submission_history_item(item) async for item in cursor], total
+
+
+async def matching_account_ids(db, query: str) -> list[ObjectId] | None:
+    """Account khớp tên/email; None nghĩa là không lọc theo account."""
+    query = query.strip()
+    if not query:
+        return None
+    pattern = re.compile(re.escape(query), re.IGNORECASE)
+    cursor = db[ACCOUNTS_COLLECTION].find(
+        {"$or": [{"name": pattern}, {"email": pattern}]}, {"_id": 1}
+    )
+    return [account["_id"] async for account in cursor]
+
+
+def sort_spec(sort: str, order: str) -> list[tuple[str, int]]:
+    """Khóa sort luôn kết thúc bằng `_id` để tie-break ổn định giữa các trang."""
+    direction = 1 if order == "asc" else -1
+    if sort == "team":
+        return [
+            ("_account_name", direction),
+            ("_account_email", direction),
+            ("created_at", direction),
+            ("_id", direction),
+        ]
+    if sort == "primary_score":
+        return [("primary_score", direction), ("created_at", direction), ("_id", direction)]
+    return [("created_at", direction), ("_id", direction)]
+
+
+async def list_admin_submissions(
+    db, query: dict, *, sort: str, order: str, limit: int, offset: int
+) -> tuple[list[dict], int]:
+    """Trang submission cho quản trị; `team` cần tên account nên phải lookup trong aggregation."""
+    collection = db[SUBMISSIONS_COLLECTION]
+    total = await collection.count_documents(query)
+    if sort == "team":
+        cursor = collection.aggregate(
+            [
+                {"$match": query},
+                {
+                    "$lookup": {
+                        "from": ACCOUNTS_COLLECTION,
+                        "localField": "account_id",
+                        "foreignField": "_id",
+                        "as": "_account",
+                    }
+                },
+                {
+                    "$addFields": {
+                        "_account_name": {
+                            "$ifNull": [{"$arrayElemAt": ["$_account.name", 0]}, ""]
+                        },
+                        "_account_email": {
+                            "$ifNull": [{"$arrayElemAt": ["$_account.email", 0]}, ""]
+                        },
+                    }
+                },
+                {"$sort": dict(sort_spec(sort, order))},
+                {"$skip": offset},
+                {"$limit": limit},
+            ]
+        )
+        return [document async for document in cursor], total
+    cursor = (
+        collection.find(query).sort(sort_spec(sort, order)).skip(offset).limit(limit)
+    )
+    return [document async for document in cursor], total

@@ -29,6 +29,7 @@ const BASE: Competition = {
     prediction_column: null,
     average: null,
     max_upload_mb: 10,
+    max_notebook_mb: 20,
   },
 };
 

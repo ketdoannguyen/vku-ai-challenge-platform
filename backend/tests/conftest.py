@@ -14,6 +14,7 @@ from app.accounts.service import AccountCreate  # noqa: E402
 from app.auth.rate_limit import login_limiter  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import MongoContext  # noqa: E402
+from tests.fake_minio import FakeMinio  # noqa: E402
 
 
 def _mk(email, name, password, role):
@@ -34,6 +35,20 @@ def reset_login_limiter():
     login_limiter.reset_all()
     yield
     login_limiter.reset_all()
+
+
+@pytest.fixture(autouse=True)
+def fake_artifact_storage(monkeypatch):
+    """Unit test không dựng MinIO: thay client SDK bằng bản in-memory có cùng hình dạng call."""
+    from app.submission_artifacts import storage
+
+    fake = FakeMinio()
+    monkeypatch.setenv("MINIO_ACCESS_KEY", "test-access")
+    monkeypatch.setenv("MINIO_SECRET_KEY", "test-secret")
+    get_settings.cache_clear()
+    monkeypatch.setattr(storage, "_client", lambda: fake)
+    yield fake
+    get_settings.cache_clear()
 
 
 @pytest.fixture()

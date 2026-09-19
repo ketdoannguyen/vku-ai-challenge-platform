@@ -26,6 +26,7 @@ const COMPETITION: Competition = {
     average: "binary",
     pos_label: "1",
     max_upload_mb: 10,
+    max_notebook_mb: 20,
   },
 };
 
@@ -43,23 +44,66 @@ function renderPage(competition: Competition = COMPETITION) {
   return { ...view, refreshCompetition };
 }
 
+/** Notebook hợp lệ tối thiểu - mọi lượt nộp đều phải kèm tệp này. */
+function selectNotebook(name = "solution.ipynb") {
+  fireEvent.change(screen.getByLabelText("Chọn notebook"), {
+    target: { files: [new File(["{}"], name, { type: "application/x-ipynb+json" })] },
+  });
+}
+
+function selectCsv(name = "result.csv", body = "id,prediction\n1,1\n") {
+  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+    target: { files: [new File([body], name, { type: "text/csv" })] },
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("hiển thị rule summary và file đã chọn", () => {
+test("hiển thị rule summary và chỉ mở nút nộp khi đã đủ hai tệp", () => {
   renderPage();
   const rules = screen.getByLabelText("Quy định file submission");
   expect(rules).toHaveTextContent("ID: id");
   expect(rules).toHaveTextContent("Prediction: prediction");
   expect(rules).toHaveTextContent("Binary");
-  expect(rules).toHaveTextContent("10 MiB");
+  expect(rules).toHaveTextContent("CSV 10 MiB");
+  expect(rules).toHaveTextContent("notebook tối đa 20 MiB");
   expect(rules).toHaveTextContent("5 lượt/ngày");
 
   const file = new File(["id,prediction\n1,1\n"], "team-result.csv", { type: "text/csv" });
   fireEvent.change(screen.getByLabelText("Chọn file CSV"), { target: { files: [file] } });
   expect(screen.getByText("team-result.csv")).toBeTruthy();
+  // Notebook là phần bắt buộc của mỗi lượt nộp: thiếu nó thì chưa nộp được.
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
+
+  selectNotebook();
+  expect(screen.getByText("solution.ipynb")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
+});
+
+test("từ chối tệp sai định dạng và tệp vượt trần của từng slot", () => {
+  renderPage();
+
+  fireEvent.change(screen.getByLabelText("Chọn notebook"), {
+    target: { files: [new File(["<html>"], "solution.zip", { type: "application/zip" })] },
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent("Chỉ chấp nhận notebook Jupyter (.ipynb).");
+  expect(screen.queryByText("solution.zip")).toBeNull();
+
+  // Trần notebook (20 MiB) cao hơn trần CSV (10 MiB) nên một file 12 MiB phải qua được.
+  const notebook = new File([new Uint8Array(12 * 1024 * 1024)], "solution.ipynb");
+  fireEvent.change(screen.getByLabelText("Chọn notebook"), { target: { files: [notebook] } });
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText("solution.ipynb")).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+    target: { files: [new File([new Uint8Array(11 * 1024 * 1024)], "big.csv")] },
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "vượt quá giới hạn tối đa 10 MiB",
+  );
+  expect(screen.queryByText("big.csv")).toBeNull();
 });
 
 test("thanh hạn mức dài theo đúng tỉ lệ còn lại và hạ mức màu khi gần hết", () => {
@@ -121,8 +165,8 @@ test("submit hiển thị loading rồi metrics và quota còn lại", async () 
     ),
   );
   renderPage();
-  const file = new File(["id,prediction\n1,1\n"], "result.csv", { type: "text/csv" });
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), { target: { files: [file] } });
+  selectCsv();
+  selectNotebook();
   fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
   expect(await screen.findByRole("button", { name: "Đang chấm điểm..." })).toBeDisabled();
 
@@ -159,23 +203,24 @@ test("submit hiển thị loading rồi metrics và quota còn lại", async () 
 });
 
 test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp thành công", async () => {
+  const bodies: unknown[] = [];
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            id: "submission-1",
-            competition_id: COMPETITION.id,
-            status: "completed",
-            metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
-            primary_score: 0.5,
-            created_at: "2026-09-15T00:00:00Z",
-            quota_remaining: 2,
-          }),
-          { status: 201, headers: { "Content-Type": "application/json" } },
-        ),
-    ),
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(init?.body);
+      return new Response(
+        JSON.stringify({
+          id: "submission-1",
+          competition_id: COMPETITION.id,
+          status: "completed",
+          metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
+          primary_score: 0.5,
+          created_at: "2026-09-15T00:00:00Z",
+          quota_remaining: 2,
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      );
+    }),
   );
   const { refreshCompetition } = renderPage({
     ...COMPETITION,
@@ -189,12 +234,17 @@ test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp
   const rules = screen.getByLabelText("Quy định file submission");
   expect(rules).toHaveTextContent("Còn 3/5 lượt hôm nay");
 
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
-    target: { files: [new File(["id,prediction\n1,1\n"], "result.csv", { type: "text/csv" })] },
-  });
+  selectCsv();
+  selectNotebook();
   fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
   await screen.findByText("Kết quả chấm điểm");
   await waitFor(() => expect(refreshCompetition).toHaveBeenCalledTimes(1));
+
+  // Một request multipart mang đủ hai part - backend từ chối nếu thiếu một trong hai.
+  const form = bodies[0] as FormData;
+  expect(form).toBeInstanceOf(FormData);
+  expect([...form.keys()].sort()).toEqual(["file", "notebook"]);
+  expect((form.get("notebook") as File).name).toBe("solution.ipynb");
 });
 
 test("hết quota thì khóa form và nêu giờ làm mới", () => {
@@ -211,6 +261,7 @@ test("hết quota thì khóa form và nêu giờ làm mới", () => {
   expect(banner).toBeTruthy();
   expect(banner.textContent).toContain("Hạn mức làm mới lúc");
   expect(screen.getByLabelText("Chọn file CSV")).toBeDisabled();
+  expect(screen.getByLabelText("Chọn notebook")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
 });
 
@@ -230,9 +281,8 @@ test("validation error từ backend được hiển thị rõ", async () => {
     ),
   );
   renderPage();
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
-    target: { files: [new File(["id,prediction\n"], "bad.csv")] },
-  });
+  selectCsv("bad.csv", "id,prediction\n");
+  selectNotebook();
   fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Tập ID không khớp ground truth");
 });

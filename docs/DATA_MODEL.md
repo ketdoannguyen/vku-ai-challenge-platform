@@ -7,7 +7,7 @@ Quy ước chung:
 - Motor đọc về naive datetime: mọi chỗ so sánh/format đi qua `backend/app/core/datetimes.py` (`as_utc`, `utc_day_bounds`, `iso_z`), naive được hiểu là UTC (ADR-016).
 - Naming snake_case.
 - Mọi dữ liệu nghiệp vụ gắn `competition_id` (ADR-005).
-- Files không nằm trong Mongo - xem layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11.
+- Files không nằm trong Mongo: content Markdown, asset và ground truth theo layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11; artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private (ADR-028).
 
 ## 1. accounts - implemented (Sprint 02)
 
@@ -95,27 +95,38 @@ Indexes:
 
 `<DATA_DIR>/competitions/<competition_id>/assets/<uuid4>.<ext>` - PNG/JPEG/GIF/WebP ≤2 MiB (sniff magic bytes, không SVG). List bằng cách đọc directory (số lượng nhỏ); serve qua API có authz + `nosniff`.
 
-## 6. submissions - implemented (Sprint 05)
+## 6. submissions - implemented (Sprint 05; artifact trên MinIO từ ADR-028)
 
 Fields:
 - `_id`
 - `competition_id`
 - `account_id`
-- `file_path`
-- `original_filename`
-- `status`: `completed` (Sprint 05 chỉ persist bài validation/scoring thành công)
+- `submission_no` (int | absent ở record cũ) - số thứ tự thật của bài nộp theo `(competition_id, account_id)`, dùng làm token trong tên file khi tải. Record tạo trước ADR-028 không có field này.
+- `artifacts` (object | absent ở record cũ) - hai artifact của lượt nộp, mỗi kind một entry:
+  - `prediction` / `notebook`: `{object_key, original_filename, size_bytes}`
+  - `object_key` là đường dẫn trong bucket MinIO `submission-artifacts`, không bao giờ trả về API (chỉ `filename`/`size_bytes`/`available` đi ra qua `artifact_metadata`)
+- `file_path` (chỉ record cũ) - CSV trên persistent disk theo layout ADR-003; vẫn đọc được khi tải, không có migration bắt buộc
+- `original_filename` (chỉ record cũ, đi cùng `file_path`)
+- `status`: `completed` (chỉ persist bài validation/scoring thành công)
 - `metrics`: `{f1, precision, recall}` raw float
 - `primary_score`
 - `created_at`
 
-Policy: validation-rejected không tạo record và file không được lưu (ADR-011). `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
+Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
+
+Artifact mới **không** nằm dưới `<DATA_DIR>`: object key là `competitions/<competition_id>/accounts/<account_id>/submissions/<submission_id>/prediction.csv|notebook.ipynb`, bucket private, chỉ FastAPI đọc/ghi (ADR-028). Xoá cuộc thi dọn prefix `competitions/<competition_id>/`; xoá member dọn object của các bài chưa `completed` - xem §10.
 
 Indexes:
+- unique partial `(competition_id, account_id, submission_no)` (`submission_no` tồn tại) - chốt số thứ tự, record legacy không tham gia ràng buộc
 - `(competition_id, account_id, created_at DESC, _id DESC)` - participant history exact sort
 - `(competition_id, primary_score)`
 - `(competition_id, status, primary_score DESC, created_at ASC, account_id ASC, _id ASC)` - leaderboard completed/best-score exact sort
 - `(competition_id, status, created_at DESC, _id DESC)` - admin history có status filter
 - `(competition_id, created_at DESC, _id DESC)` - admin history không filter status
+- `(created_at DESC, _id DESC)` - trang `/admin/submissions` toàn cục sắp xếp không kèm `competition_id`
+- `(primary_score DESC, created_at DESC, _id DESC)` - sắp xếp theo điểm ở trang toàn cục
+
+Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_score` dùng index ở trên; `team` sắp theo **tên account** nên phải `$lookup` sang `accounts` trong aggregation - `total` vẫn đếm bằng `count_documents` trên cùng query.
 
 Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record `completed`, nhất quán với ADR-011.
 
@@ -151,8 +162,8 @@ Document tạo trước thay đổi này không có field; serializer trả `[]`
 
 Không dùng Mongo transaction (standalone). Thứ tự xoá luôn là con trước – cha sau để lỗi giữa đường vẫn còn bản ghi gốc cho lần gọi lại:
 
-- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>`. `accounts` và `sessions` không bị đụng.
-- `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm file, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá - vướng thì trả 409 và dừng.
+- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>` **và** dọn prefix MinIO `competitions/<id>/` (ADR-028). Một bước dọn lỗi ⇒ `files_removed:false`, DB đã xoá xong. `accounts` và `sessions` không bị đụng.
+- `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm object MinIO/file legacy, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá - vướng thì trả 409 và dừng.
 - `POST /api/competitions/{slug}/leave`: chỉ `update` `active=false`, không xoá gì.
 
 Xoá competition `published` không có trong phạm vi: cuộc thi đang chạy phải Kết thúc trước. `draft` và `closed` xoá được (cascade), nên "đã kết thúc" không phải là bảo đảm còn dữ liệu - muốn giữ lịch sử thi thì đừng xoá (ADR-027).

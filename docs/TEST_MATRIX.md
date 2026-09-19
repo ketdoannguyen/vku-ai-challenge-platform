@@ -619,7 +619,125 @@ hạ tầng thật, chưa thực hiện lần nào.
 | Secret của environment `production` chỉ dùng được từ `release` | passing | `deployment_branch_policies` trả đúng một policy `release`; `gh workflow run --ref main` sẽ bị chặn |
 | Push tạo nhánh `release` ở cùng commit với `main` không kích hoạt deploy | passing | Quan sát thật: `release` tạo ở `6b86509` (trùng `main`) nên `paths: frontend/**` không khớp diff rỗng; dùng `workflow_dispatch` theo thiết kế break-glass. Push có diff thật sẽ chạy bình thường |
 | Smoke tĩnh fail thì workflow tự rollback Worker | planned | Chưa diễn tập - xem "Failure drills" trong plan |
-| Smoke tĩnh fail thì workflow tự rollback Worker | planned | Chưa diễn tập - xem "Failure drills" trong plan |
-| Timer kéo commit mới về VM trong ~1 phút | planned | Cần bootstrap trên VM; xem `docs/DEPLOYMENT.md` §7.1 |
+| Timer kéo commit mới về VM trong ~1 phút | passing | Timer đã bật trên VM; kiểm chứng bằng một lượt deploy thật qua timer: probe `POST .../reopen` qua hostname Worker trả `401` còn đường dẫn bịa trả `404` ⇒ image `api` đã build lại. Xem ADR-026 "Rollout" |
 | Deploy lỗi trên VM tự rollback về image cũ | planned | Diễn tập bằng một commit cố tình hỏng |
 | Trần thời gian `TimeoutStartSec=1800` đủ cho một lượt deploy thật | planned | Đo bằng `systemd-analyze`/`journalctl` ở lượt deploy thật đầu tiên |
+
+## 13. Artifact submission trên MinIO (ADR-028)
+
+Cùng quy ước với §12: `passing` = có test/kiểm tra chạy được ở local, `planned` = phải chạy trên hạ
+tầng thật.
+
+Unit test của backend **không** cần MinIO: `backend/tests/fake_minio.py` thay SDK bằng store
+in-memory nhưng giữ đúng hình dạng lỗi/response; MinIO thật chỉ được kiểm ở smoke và khi diễn tập
+trên VM.
+
+### Backend - nộp bài (hai artifact bắt buộc)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Một lượt nộp hợp lệ lưu **cả** CSV lẫn notebook: hai object dưới cùng prefix + một document, `submission_no` thật trong response | passing | `backend/tests/test_submissions.py::test_valid_submission_scores_and_stores_both_artifacts` |
+| Thiếu part `notebook` → 400, **không** record, **không** object nào, **không** tiêu quota | passing | `test_submissions.py::test_missing_notebook_part_is_rejected_without_side_effects` |
+| Notebook sai đuôi / JSON hỏng / không phải object / `nbformat` ngoài `4.x` → mã lỗi riêng, không record | passing | `test_submissions.py::test_notebook_validation_rejects_bad_notebooks` + `test_submission_artifacts.py::test_validate_notebook_rejects_malformed_payloads` |
+| Notebook UTF-8 BOM + CRLF vẫn nhận; `nbformat 4.5` hợp lệ | passing | `test_submissions.py::test_notebook_accepts_utf8_bom_and_crlf_sources`, `test_submission_artifacts.py::test_validate_notebook_accepts_v4_notebook_with_nul_free_source` |
+| Validate notebook bằng `json` stdlib, không import/execute/render nội dung | passing | `backend/app/submission_artifacts/validation.py` chỉ `json.loads` + duyệt dict; test ở trên không dựng kernel nào |
+| Trần riêng cho từng slot: CSV `MAX_UPLOAD_MB`, notebook `MAX_NOTEBOOK_MB` | passing | `test_submissions.py::test_submission_rejects_extension_and_size_limits` |
+| Upload lỗi giữa đường → xoá object đã put; insert lỗi → xoá cả hai object | passing | `test_submissions.py::test_storage_failure_rolls_back_uploaded_artifacts`, `::test_insert_failure_removes_both_objects` |
+| `submission_no` tăng dần theo `(competition_id, account_id)`, bỏ qua khoảng trống của record legacy, chịu được nộp đua | passing | `test_submissions.py::test_submission_sequence_increments_and_ignores_legacy_gaps`, `::test_submission_sequence_is_per_account_and_competition`, `::test_concurrent_submissions_get_distinct_numbers` |
+| Log lượt nộp bị từ chối chỉ chứa mã lỗi, không chứa giá trị người dùng nộp | passing | `test_submissions.py::test_rejected_submission_log_contains_code_but_not_uploaded_values` |
+
+### Backend - tải artifact
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Chủ bài tải được cả hai artifact; header `Content-Disposition` an toàn | passing | `backend/tests/test_submission_downloads.py::test_owner_downloads_both_artifacts_with_safe_headers` |
+| Chưa đăng nhập / không phải chủ bài → từ chối | passing | `test_submission_downloads.py::test_download_requires_auth_and_ownership` |
+| Admin tải được bài của mọi đội; participant thì không | passing | `test_submission_downloads.py::test_admin_downloads_any_team_artifact_but_participant_cannot` |
+| Bài của cuộc thi khác không tải chéo được | passing | `test_submission_downloads.py::test_download_rejects_submission_of_another_competition` |
+| Tên file `{slug}__{account}__submission-NNNN__{prediction.csv,notebook.ipynb}`, fallback ObjectId ngắn cho record legacy | passing | `test_submission_artifacts.py::test_download_filename_uses_sequence_number_and_sanitized_segments`, `::test_download_filename_falls_back_to_short_id_for_legacy_submissions` |
+| Tên file chống traversal, có cận độ dài, tên account rỗng thì lấy `account_id` | passing | `test_submission_artifacts.py::test_download_filename_strips_path_traversal_from_user_controlled_parts`, `::test_download_filename_is_bounded_for_long_names`, `::test_download_filename_empty_account_name_falls_back_to_account_id` |
+| `filename*=UTF-8''…` giữ tên Unicode, `filename=` fallback ASCII, không bao giờ rỗng | passing | `test_submission_artifacts.py::test_content_disposition_keeps_unicode_name_and_ascii_fallback`, `::test_content_disposition_falls_back_when_ascii_is_empty` |
+| Bài legacy (chỉ CSV trên disk) vẫn tải được, không cần migration | passing | `test_submission_downloads.py::test_legacy_submission_is_still_downloadable` |
+| `file_path` legacy mất hoặc trỏ ra ngoài `DATA_DIR` → 404, không đọc file ngoài | passing | `test_submission_downloads.py::test_legacy_submission_with_missing_or_escaping_path_is_not_found` |
+| Object mất → 404 `ARTIFACT_NOT_FOUND`; MinIO không tới được → 503 `ARTIFACT_STORAGE_UNAVAILABLE` cho cả upload lẫn download | passing | `test_submission_downloads.py::test_missing_object_maps_to_artifact_not_found`, `::test_storage_outage_returns_503_for_upload_and_download` |
+| **MinIO hỏng không làm `/api/health` đổi trạng thái** (health là oracle rollback của auto-deploy) | passing | `test_submission_downloads.py::test_storage_outage_does_not_break_health` |
+| Trần bytes khi đọc lại vẫn áp theo settings, không tin `size_bytes` trong DB | passing | `test_submission_downloads.py::test_download_uses_stored_oversized_limit_from_settings`, `test_submission_artifacts.py::test_get_rejects_object_larger_than_limit_without_reading_all` |
+| Response tải artifact không lộ `account_id` hay `object_key` | passing | `test_submission_downloads.py::test_download_route_does_not_leak_account_ids` |
+| Put/get/remove đi qua storage module, lỗi SDK map thành lỗi nghiệp vụ; bucket sai/thiếu credential = không khả dụng | passing | `test_submission_artifacts.py::test_object_keys_are_built_from_immutable_ids`, `::test_put_then_get_roundtrip_closes_response`, `::test_get_missing_object_raises_not_found`, `::test_storage_errors_map_to_unavailable`, `::test_unknown_bucket_is_treated_as_upload_failure`, `::test_missing_credentials_are_unavailable` |
+
+### Backend - quản trị và dọn dẹp
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `/api/admin/submissions` chỉ admin gọi được | passing | `backend/tests/test_admin_submissions.py::test_global_list_requires_admin` |
+| Bảng trải nhiều cuộc thi, lọc theo cuộc thi / account / status | passing | `test_admin_submissions.py::test_global_list_spans_competitions_with_filters` |
+| Sắp xếp `created_at` / `primary_score` / `team` + phân trang server-side, `total` khớp số bản ghi | passing | `test_admin_submissions.py::test_global_list_sorts_and_paginates` |
+| Tham số `sort`/`order`/`limit`/`offset` sai → 422 chứ không im lặng dùng default | passing | `test_admin_submissions.py::test_global_list_rejects_invalid_params` |
+| Cuộc thi hoặc account đã xoá thì bảng vẫn trả về (không 500) | passing | `test_admin_submissions.py::test_global_list_survives_deleted_competition_and_account` |
+| Row của bài mới trả metadata artifact (tên file + cờ `available`), không trả `object_key` | passing | `test_admin_submissions.py::test_global_list_reports_artifact_metadata_for_new_submissions` |
+| Xoá cuộc thi dọn prefix `competitions/<id>/` trên MinIO | passing | `backend/tests/test_competitions_delete.py::test_delete_removes_artifact_objects_under_competition_prefix` |
+| MinIO không tới được lúc xoá cuộc thi → DB đã xoá xong nhưng `files_removed:false`, không kéo theo lỗi 500 | passing | `test_competitions_delete.py::test_delete_reports_partial_cleanup_when_storage_is_unavailable` |
+| Xoá cứng member dọn object của bài chưa `completed`, bài `completed` thì 409 và không xoá gì | passing | `backend/tests/test_memberships.py::test_admin_hard_delete_member_only_without_completed_submission`, `::test_admin_hard_delete_member_removes_pending_submission_artifacts` |
+
+### Frontend
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Form nộp chỉ mở nút khi đã đủ **hai** tệp; từ chối sai định dạng và vượt trần theo từng slot | passing | `frontend/src/pages/SubmissionPage.test.tsx` ("hiển thị rule summary và chỉ mở nút nộp khi đã đủ hai tệp", "từ chối tệp sai định dạng và tệp vượt trần của từng slot") |
+| Submit gửi multipart hai phần và hiển thị metrics + quota còn lại | passing | `frontend/src/pages/SubmissionPage.test.tsx` ("submit hiển thị loading rồi metrics và quota còn lại") |
+| Nút tải trong lịch sử chỉ hiện cho artifact backend thực sự có | passing | `frontend/src/components/ArtifactLinks.test.tsx` ("chỉ hiện nút cho tệp backend thực sự có") |
+| Tải dùng đúng route của nơi gọi và đặt tên file theo `Content-Disposition` | passing | `ArtifactLinks.test.tsx` ("tải đúng route của nơi gọi và dùng tên file từ Content-Disposition") |
+| 503 của MinIO hiện ngay trong dòng artifact, không làm hỏng cả bảng | passing | `ArtifactLinks.test.tsx` ("lỗi 503 hiện ngay trong dòng thay vì làm hỏng cả bảng") |
+| Trang `/admin/submissions`: bảng toàn cục có cuộc thi/đội/trạng thái/điểm + nút tải gọi route admin | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` ("hiển thị bảng toàn cục…", "nút tải artifact gọi route admin toàn cục của đúng bài nộp") |
+| Bộ lọc gửi lên server và đưa bảng về trang đầu | passing | `AdminSubmissionsPage.test.tsx` ("gửi bộ lọc lên server và đưa bảng về trang đầu") |
+| Bấm tiêu đề cột đổi `sort`/`order` gửi lên server (mặc định riêng của từng cột rồi đảo chiều) | passing | `AdminSubmissionsPage.test.tsx` ("sắp xếp theo tiêu đề cột…") |
+| Đổi trang giữ bảng cũ và báo đang bận thay vì để bảng trống | passing | `AdminSubmissionsPage.test.tsx` ("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới") |
+| Cuộc thi đã xoá hiện tên nhưng không có link; lỗi tải danh sách có nút thử lại; bộ lọc không khớp có empty state xoá được | passing | `AdminSubmissionsPage.test.tsx` (3 test còn lại) |
+
+### Browser smoke thật (stack dev: api + web + MinIO, không mock)
+
+Script `/tmp/uiverify/artifact-smoke.mjs` chạy Chromium headless trên stack dev thật
+(`docker compose` với `minio` + `minio-init`, `VITE_API_PROXY_TARGET` → api), đăng nhập thật bằng
+`team1@vku.vn` và `admin@vku.vn`; chạy lại toàn bộ 2026-09-19: **26/26 PASS**.
+
+Chạy lại: `docker compose up -d minio minio-init api web` rồi
+`LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node /tmp/uiverify/artifact-smoke.mjs`
+(đổi `BASE` nếu dev server không ở `http://localhost:5173`). Smoke tiêu một lượt quota nộp bài của
+`team1@vku.vn`.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Form nộp: nút nộp khoá khi chưa có tệp, vẫn khoá khi mới có CSV, mở khi đủ hai tệp | passing | `disabled` đúng ở cả ba trạng thái; form có đúng 2 slot `input[type=file]` |
+| Chọn tệp xong slot đổi thành thẻ tệp (tên + dung lượng) và hiện trần riêng từng slot | passing | Hint hiển thị `10 MiB` cho CSV và `20 MiB` cho notebook |
+| Nộp thật qua API → MinIO → chấm điểm, màn kết quả hiện điểm | passing | Nhận `201`, màn kết quả hiện F1 `0.571429` |
+| Lịch sử participant: hàng mới nhất có nút `CSV` và `Notebook`, tải về đúng bytes đã nộp | passing | Tên tệp `ai-challenge__Đội-01__submission-0009__notebook.ipynb` / `…__prediction.csv`; bytes khớp tệp nguồn |
+| Admin toàn cục: đủ cột cuộc thi/đội/tệp/trạng thái/điểm, có dữ liệu thật nhiều cuộc thi | passing | 17 dòng ở trang đầu |
+| Admin toàn cục: sắp xếp và lọc chạy phía server | passing | Bấm "Điểm chính" → request `?…&sort=primary_score`; cột điểm giảm dần `1.000000 → 0.000000`; lọc đội → `?…&q=team1` và bảng chỉ còn team1 |
+| Admin toàn cục: tải được artifact của đội khác bằng route admin | passing | `ai-challenge__Đội-01__submission-0009__prediction.csv` |
+| Admin toàn cục: bộ lọc không khớp thì bảng unmount và hiện empty state | passing | `Không có bài nộp phù hợp.` + nút "Xóa bộ lọc"; không còn `tbody tr` nào |
+| Không tràn ngang ở desktop 1280 cho form/lịch sử/admin | passing | `scrollWidth == innerWidth == 1280` cả ba màn |
+| Không tràn ngang ở mobile 375 cho form/lịch sử/admin | passing | `scrollWidth == innerWidth == 375` cả ba màn |
+| Ảnh chụp để soi bằng mắt | passing | `/tmp/vku-shots/artifact-smoke/{1-form-ready,2-form-result,3-history,4-admin-global,5-admin-filtered,6-mobile-*}.png` |
+
+Ghi chú khi chạy lại: bài nộp cũ (CSV trên `DATA_DIR`) vẫn hiện nút tải dù tệp đã bị dọn khỏi đĩa —
+API trả 404 và UI báo lỗi ngay trong dòng, không làm hỏng bảng (đúng thiết kế của
+`ArtifactLinks`), nên smoke chọn hàng có notebook (bài nộp mới, tệp nằm trong MinIO) làm mốc kiểm tra.
+
+### Hạ tầng và vận hành
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `minio-init` idempotent: chạy lại không lỗi, bucket `submission-artifacts` private | passing | `scripts/minio_smoke.sh` (Compose project cô lập `vku-minio-smoke`), chạy thật 2026-09-19: `MinIO smoke PASS` |
+| Anonymous **list** và **GET object** đều bị `Access Denied` sau khi object đã nằm trong bucket | passing | Cùng smoke: `anonymous bị từ chối: … Access Denied.`, `anonymous GET object bị từ chối` |
+| Credential app put/get lại đúng bytes và delete được đúng object của mình (không dư object) | passing | Cùng smoke: `cmp` cả hai artifact khớp bytes gốc |
+| MinIO không publish port ra host | passing | Cùng smoke: `docker port` trên container `minio` rỗng |
+| MinIO không có route qua Nginx | passing | `frontend/nginx.conf` không có `location` nào trỏ `minio:9000`; service chỉ nằm trong network nội bộ của compose |
+| Nginx cho phép body 32 MiB (đủ 20 MiB notebook + 10 MiB CSV + overhead multipart) | passing | `grep client_max_body_size frontend/nginx.conf` → `32m`; review §11 `docs/DEPLOYMENT.md` khi đổi trần |
+| Auto-deploy **dừng trước khi** thay `api`/`web` khi `minio`/`minio-init` chưa bootstrap, in lệnh bootstrap, và **không** khoá SHA mục tiêu lại | passing | `deploy/vps/tests/auto-deploy.test.sh` case "MinIO chưa bootstrap: dừng trước khi thay api/web" (3 nhánh: không có container/không healthy/`minio-init` exit ≠ 0) |
+| MinIO đã bootstrap → deploy chạy bình thường, không build/up container MinIO | passing | harness case "MinIO healthy: deploy bình thường" |
+| Compose file không khai báo MinIO thì preflight không chặn deploy | passing | harness case "compose không có MinIO: không chặn deploy" |
+| Cú pháp shell của deployer/backup/init/smoke + unit systemd + `docker compose config` (có biến MinIO) | passing | `release-gate / deploy-script` (`bash -n`, harness, `systemd-analyze verify`, `docker compose config --quiet` với env giả) |
+| Backup đủ ba phần và restore drill đọc lại được **cả** CSV legacy **lẫn** CSV/notebook mới | passing | Diễn tập trên stack dev 2026-09-19 (đúng quy trình §10 `docs/DEPLOYMENT.md`): `mongodump` → `gzip -t` + `mongorestore --dryRun`; `app-data.tar.gz` giải nén ra đọc được CSV legacy tại `file_path` trong DB (183 B, 15 dòng); `mc mirror` bucket bằng tag `mc` mà compose pin → `minio-artifacts.tar.gz` (6 object); Mongo restore vào DB tạm `ai_challenge_drill` (65 document, index `submission_no_unique` còn nguyên) → lấy `object_key` thật của submission `0009` → dựng bucket test private (`anonymous set none` → `private`) → mirror ngược → đọc lại hai artifact theo đúng key đó: **trùng sha256** với tệp đã nộp (`d7b9c730…` prediction, `b74a1f2b…` notebook). Bucket test và DB tạm đã xoá sau khi kiểm; bucket thật còn nguyên 6 object |
+| `scripts/backup_prod.sh` chạy trọn trên VM, `MANIFEST.txt` có sha256, và lượt dở dang bị xoá thay vì để lại bản thiếu dữ liệu | planned | Diễn tập trên VM: `sudo scripts/backup_prod.sh`, kiểm `tar -tzf` + `MANIFEST.txt`, rồi ngắt giữa đường để xem `DEST` bị dọn |
+| Restore drill trên **đường production** (backup thật trên VM → bucket test) | planned | Sau khi bootstrap MinIO trên VM: chạy lại quy trình đã kiểm ở dòng trên với `PROD_DATA_ROOT`/`.env` thật |
+| Nộp + tải artifact thật trên production (API → MinIO trong compose prod) | planned | Sau khi bootstrap MinIO trên VM: smoke §8.4 `docs/DEPLOYMENT.md`; kiểm luôn health vẫn 200 khi artifact endpoint 503 |

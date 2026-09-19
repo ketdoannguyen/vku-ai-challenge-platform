@@ -20,6 +20,7 @@ from app.memberships import service as memberships_service
 from app.memberships.admin_router import router as admin_memberships_router
 from app.memberships.router import router as memberships_router
 from app.scoring.admin_router import router as admin_scoring_router
+from app.submissions.admin_router import global_router as admin_submissions_global_router
 from app.submissions.admin_router import router as admin_submissions_router
 from app.submissions import service as submissions_service
 from app.submissions.router import router as submissions_router
@@ -109,6 +110,7 @@ app.include_router(admin_memberships_router)
 app.include_router(admin_content_router)
 app.include_router(admin_scoring_router)
 app.include_router(admin_submissions_router)
+app.include_router(admin_submissions_global_router)
 app.include_router(submissions_router)
 app.include_router(leaderboard_router)
 app.include_router(memberships_router)

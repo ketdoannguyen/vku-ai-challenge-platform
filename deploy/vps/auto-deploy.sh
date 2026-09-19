@@ -16,6 +16,8 @@
 #     `API_ORIGIN` của Worker.
 #   - Chỉ dùng `docker compose build/up/ps/exec`, không `down`, không `down -v`, không prune.
 #   - Mỗi SHA lỗi chỉ thử một lần; muốn thử lại thì push commit mới (không sửa state tay).
+#   - `minio`/`minio-init` nằm NGOÀI override theo SHA. Release cần artifact backend mà MinIO chưa
+#     bootstrap thì deploy dừng trước khi thay api/web và in lệnh bootstrap (ADR-028, §13 kế hoạch).
 
 set -euo pipefail
 
@@ -161,6 +163,44 @@ verify_services() {
     [ "$label" = "$sha" ] ||
       { log "LỖI: $svc chạy revision '$label', mong đợi '$sha'"; return 1; }
   done
+  return 0
+}
+
+# `minio`/`minio-init` là hạ tầng dùng chung, KHÔNG nằm trong override theo SHA (deployer chỉ quản
+# `api` và `web`), nên một release cần artifact backend có thể gặp stack chưa từng bootstrap MinIO.
+# Nhận biết bằng chính compose file của SHA mục tiêu: release cũ chưa khai `minio` thì không cần.
+needs_minio() {
+  grep -qE '^[[:space:]]+minio:[[:space:]]*$' "$COMPOSE_FILE"
+}
+
+# MinIO phải bootstrap XONG trước khi thay api/web: API mới ghi artifact vào bucket ngay từ request
+# đầu tiên, còn `minio-init` mới là thứ tạo bucket + credential app. Đổi api trước khi có hai thứ đó
+# biến mọi lượt nộp thành lỗi 503. Trả về 1 kèm lý do cụ thể để log nói đúng việc cần làm.
+check_minio_bootstrap() {
+  local cid status
+  cid="$(compose "$RUNTIME_OVERRIDE" ps -q minio)"
+  if [ -z "$cid" ]; then
+    log "MinIO: không thấy container 'minio' đang chạy"
+    return 1
+  fi
+  # Không có healthcheck thì Docker trả chuỗi rỗng - vẫn là chưa sẵn sàng, không phải "đạt".
+  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid")"
+  if [ "$status" != "healthy" ]; then
+    log "MinIO: container 'minio' ở trạng thái '${status:-không có healthcheck}'"
+    return 1
+  fi
+  # `minio` sống không có nghĩa là bucket/credential đã tồn tại: minio-init là service một lần, chỉ
+  # chạy khi có người gọi. Exit code 0 của nó là bằng chứng duy nhất cho "đã bootstrap".
+  cid="$(compose "$RUNTIME_OVERRIDE" ps -aq minio-init)"
+  if [ -z "$cid" ]; then
+    log "MinIO: chưa từng chạy 'minio-init' (bucket và credential app chưa được tạo)"
+    return 1
+  fi
+  status="$(docker inspect -f '{{.State.ExitCode}}' "$cid")"
+  if [ "$status" != "0" ]; then
+    log "MinIO: 'minio-init' kết thúc với exit code $status"
+    return 1
+  fi
   return 0
 }
 
@@ -410,6 +450,25 @@ fi
 # ---------------------------------------------------------------- deploy
 git_repo checkout --detach "$TARGET" >/dev/null 2>&1 || die "checkout ${TARGET:0:12} thất bại"
 write_override "$RUNTIME_OVERRIDE" "$TARGET" "${SERVICES[@]}"
+
+# ---------------------------------------------------------------- preflight MinIO (ADR-028)
+# Chạy sau checkout vì phải đọc compose file của chính SHA mục tiêu, và TRƯỚC `build`: dừng ở đây thì
+# chưa container nào bị thay, production vẫn nguyên vẹn trên ${LAST_SUCCESS}.
+#
+# KHÔNG ghi `last-failed-sha`: lỗi này không nằm ở commit, mà ở một thao tác tay còn thiếu. Ghi vào đó
+# sẽ khoá SHA lại cho tới khi có commit mới, trong khi cách sửa là chạy bootstrap rồi để lượt timer kế
+# tiếp deploy nốt (nhật ký sẽ lặp mỗi phút cho tới lúc đó - đúng ý: stack thiếu MinIO phải ồn ào).
+if [ "$NEED_API" -eq 1 ] && needs_minio && ! check_minio_bootstrap; then
+  printf 'MinIO chưa bootstrap cho %s\n' "$TARGET" >"$STATE_DIR/last-failure.txt"
+  history_add "$TARGET" "minio-not-bootstrapped" "${SERVICES[*]}"
+  git_repo checkout --detach "$LAST_SUCCESS" >/dev/null 2>&1 ||
+    log "Cảnh báo: không checkout lại được ${LAST_SUCCESS:0:12}"
+  die "MinIO chưa được bootstrap nên KHÔNG thay api/web (production vẫn chạy ${LAST_SUCCESS:0:12}).
+   Chạy tay trên VM rồi để lượt timer sau deploy tiếp:
+     sudo mkdir -p \${PROD_DATA_ROOT}/minio
+     sudo docker compose --env-file $ENV_FILE -f $COMPOSE_FILE up -d minio minio-init
+   Chi tiết xem docs/DEPLOYMENT.md (ADR-028)."
+fi
 
 # Compose chỉ được phép chạy tuần tự: hai build song song trên cùng VM nhỏ dễ làm healthcheck của
 # lần `up` trước đó hết thời gian chờ.

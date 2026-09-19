@@ -69,8 +69,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Ba script dưới đây chạy bằng root trên VM production (deployer, bootstrap MinIO, backup) nên
+      # lỗi cú pháp ở đó không có gì chặn trước khi tới máy thật.
       - name: Cú pháp shell
-        run: bash -n deploy/vps/auto-deploy.sh deploy/vps/install-auto-deploy.sh deploy/vps/tests/auto-deploy.test.sh
+        run: |
+          bash -n \
+            deploy/vps/auto-deploy.sh \
+            deploy/vps/install-auto-deploy.sh \
+            deploy/vps/tests/auto-deploy.test.sh \
+            scripts/backup_prod.sh \
+            scripts/minio_init.sh \
+            scripts/minio_smoke.sh
       # Harness chạy deployer trên repo tạm với `docker`/`git` giả: không cần Docker thật,
       # không chạm mạng và không cần bất kỳ credential nào.
       - name: Harness deployer
@@ -89,11 +98,17 @@ jobs:
           # Unit backup cũng phải trỏ vào bản copy đóng băng, không phải file trong repo.
           grep -qx 'ExecStart=/usr/local/sbin/vku-backup-prod' deploy/vku-backup.service
       # Chỉ `config --quiet`: kết quả nội suy đầy đủ có thể chứa secret nên không in ra log.
+      # Mọi `${VAR:?}` trong docker-compose.prod.yml đều phải có giá trị giả ở đây, kể cả credential
+      # MinIO: thiếu một biến là `config` dừng và step này đỏ ngay trên CI.
       - name: Cú pháp Compose (env giả, không in config)
         env:
           MONGO_USER: ci-dummy
           MONGO_PASSWORD: ci-dummy
           PROD_DATA_ROOT: /tmp/ci-dummy
+          MINIO_ROOT_USER: ci-dummy
+          MINIO_ROOT_PASSWORD: ci-dummy
+          MINIO_ACCESS_KEY: ci-dummy
+          MINIO_SECRET_KEY: ci-dummy
           CLOUDFLARE_TUNNEL_TOKEN: ci-dummy
         run: |
           docker compose -f docker-compose.prod.yml config --quiet
