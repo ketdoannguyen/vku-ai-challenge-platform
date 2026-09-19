@@ -5,8 +5,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// Body là chuỗi, KHÔNG phải `new Blob([...])`: trong môi trường jsdom của vitest, `Blob` toàn cục là
+// Blob của jsdom và `Blob.prototype.stream` không tồn tại, nên undici đi kèm Node 22.23.2 (bản CI
+// dùng) gọi `.stream()` trên nó và ném `TypeError: object.stream is not a function`. Node 24 không
+// tái hiện nên lỗi chỉ lộ trên CI. `Response` vẫn tự sinh blob thật cho `api.download` đọc.
 function blobResponse(headers: Record<string, string> = {}) {
-  return new Response(new Blob(["xlsx-bytes"]), {
+  return new Response("xlsx-bytes", {
     status: 200,
     headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ...headers },
   });

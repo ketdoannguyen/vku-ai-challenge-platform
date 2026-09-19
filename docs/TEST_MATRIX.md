@@ -543,6 +543,20 @@ Số đo để chọn mốc mới, trên máy 4 core chạy 4 vòng lặp CPU b�
 phải luôn luôn. Mốc 5000ms cho khoảng đệm ~4x so với đỉnh quan sát được, và vẫn là một cận có ý nghĩa:
 phần tử không bao giờ xuất hiện thì vẫn fail, chỉ chậm hơn.
 
+### `new Response(new Blob([...]))` không dựng được trong jsdom
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Test download/xuất Excel dựng `Response` từ chuỗi, không từ `Blob` | passing | `frontend/src/api/client.test.ts`, `frontend/src/pages/AdminCompetitionDetailPage.test.tsx`. Trên Node 22.23.2 (bản CI dùng) 5 test fail với `TypeError: object.stream is not a function` |
+
+Trong môi trường jsdom của vitest, `Blob` toàn cục là Blob của jsdom và `Blob.prototype.stream` không
+tồn tại. undici đi kèm Node 22.23.2 nhận nó là blob-like rồi gọi `.stream()` và ném `TypeError`.
+`new Response("xlsx-bytes")` vẫn cho `api.download` một blob thật để đọc.
+
+Đây là lỗi thật của test, không phải flake, và nó **chỉ lộ trên CI**: máy dev chạy Node 24 không tái
+hiện, Node 22.22.1 cũng pass - chỉ từ 22.23.2 mới đổ. Vì vậy đối chiếu Node phải dùng đúng bản CI chạy
+(`node-version: 22` resolve thành 22.23.2), không phải bản có sẵn trên máy.
+
 ## 10. Production deploy (Sprint 08) - planned
 
 | Check | Status |

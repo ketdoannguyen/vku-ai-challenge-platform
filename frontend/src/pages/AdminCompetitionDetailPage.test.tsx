@@ -1122,7 +1122,7 @@ test("xuất Excel: dùng filename từ Content-Disposition rồi thu hồi obje
   const { createObjectURL, revokeObjectURL, anchorClick } = stubBlobDownload();
   mockResultsWithExport(
     () =>
-      new Response(new Blob(["xlsx-bytes"]), {
+      new Response("xlsx-bytes", {
         status: 200,
         headers: {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1146,7 +1146,7 @@ test("xuất Excel: dùng filename từ Content-Disposition rồi thu hồi obje
 
 test("xuất Excel: header vắng thì fallback tên file theo slug cuộc thi", async () => {
   const { createObjectURL, anchorClick } = stubBlobDownload();
-  mockResultsWithExport(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+  mockResultsWithExport(() => new Response("xlsx-bytes", { status: 200 }));
 
   fireEvent.click(await openResultsTab());
 
@@ -1191,7 +1191,7 @@ test("bấm Xuất Excel hai lần khi request đang chờ chỉ phát một req
   const pending = new Promise<void>((resolve) => {
     releaseExport = resolve;
   });
-  mockResultsWithExport(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+  mockResultsWithExport(() => new Response("xlsx-bytes", { status: 200 }));
   // Chặn response đầu tiên để nút còn ở trạng thái pending khi bấm lần hai.
   const originalFetch = fetch as unknown as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   vi.stubGlobal(
@@ -1200,7 +1200,7 @@ test("bấm Xuất Excel hai lần khi request đang chờ chỉ phát một req
       const url = String(input);
       calls.push({ url, init });
       if (!url.includes("/export.xlsx")) return originalFetch(input, init);
-      return pending.then(() => new Response(new Blob(["xlsx-bytes"]), { status: 200 }));
+      return pending.then(() => new Response("xlsx-bytes", { status: 200 }));
     }),
   );
 
