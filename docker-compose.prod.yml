@@ -45,6 +45,50 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER bắt buộc có trong .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD bắt buộc có trong .env}
+    # KHÔNG publish 9000/9001 ra host (master context §13): MinIO chỉ nằm trong Docker network,
+    # không route Nginx, không console public (ADR-028).
+    expose:
+      - "9000"
+    volumes:
+      # Bind mount ngoài repo như `mongo`: backup là thao tác copy, và `down -v` không xoá được nó.
+      # Image chạy bằng root (UID 0) nên chỉ cần thư mục tồn tại và ghi được.
+      - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/minio:/data
+    healthcheck:
+      # `mc` có sẵn trong image MinIO (đã kiểm chứng trên đúng tag này), không cần curl/wget ngoài.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging: *logging
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    # One-shot: tạo bucket private + app user least-privilege rồi thoát. Đây là service duy nhất
+    # (cùng `minio`) nhận credential root; chạy lại khi cần xoay credential app.
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER bắt buộc có trong .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD bắt buộc có trong .env}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY bắt buộc có trong .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY bắt buộc có trong .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
+    volumes:
+      - ./scripts/minio_init.sh:/bootstrap.sh:ro
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    logging: *logging
+
   api:
     build:
       context: ./backend
@@ -58,9 +102,16 @@ services:
       MONGO_USER: ${MONGO_USER:?MONGO_USER bắt buộc có trong .env}
       MONGO_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD bắt buộc có trong .env}
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-10}
+      MAX_NOTEBOOK_MB: ${MAX_NOTEBOOK_MB:-20}
       MAX_CONTENT_MB: ${MAX_CONTENT_MB:-2}
       MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
       DATA_DIR: /data
+      # Artifact của submission nằm trong MinIO private (ADR-028). `api` nhận credential của app;
+      # MINIO_ROOT_USER/PASSWORD chỉ có ở `minio` và `minio-init`, không vào container này.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY bắt buộc có trong .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY bắt buộc có trong .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
       # SESSION_SECRET trong .env.example là config chết (ADR-008) - session là token ngẫu nhiên
       # server-side, không ký cookie, nên không truyền và không sinh thêm.
       SESSION_LIFETIME_HOURS: ${SESSION_LIFETIME_HOURS:-24}
@@ -74,6 +125,8 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       # python:3.12-slim không có curl; dùng stdlib, urlopen raise khi status != 200.
       test:
