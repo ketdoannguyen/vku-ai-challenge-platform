@@ -6,8 +6,10 @@
 #   - Dữ liệu bind-mount ra ngoài repo (`${PROD_DATA_ROOT}`) thay vì named volume, để backup
 #     và di chuyển sang persistent disk là thao tác copy chứ không phải migrate dữ liệu.
 #   - Env credential dùng `${VAR:?}` để thiếu .env là `up` dừng ngay, không âm thầm rơi về `changeme`.
-#   - KHÔNG dùng `env_file:` cho service `api`: Settings của backend đặt `extra="forbid"`, nên các
-#     biến chỉ phục vụ Compose (`PROD_DATA_ROOT`, `PROD_BACKUP_ROOT`) sẽ làm API chết lúc khởi động.
+#   - KHÔNG dùng `env_file:` cho service `api`: `.env` production chứa cả biến chỉ phục vụ Compose
+#     (`PROD_DATA_ROOT`, `PROD_BACKUP_ROOT`, `CLOUDFLARE_TUNNEL_TOKEN`) và credential của thành phần
+#     khác (`MONGO_USER`, `MONGO_PASSWORD`). Settings của backend bỏ qua khoá lạ, nên `env_file:`
+#     không làm API chết - nhưng nó đẩy thêm credential vào một container không cần tới chúng.
 #     Vì vậy `api` nhận đúng danh sách env bên dưới, không nhận cả file.
 #
 # Cách dùng (trên VM production):

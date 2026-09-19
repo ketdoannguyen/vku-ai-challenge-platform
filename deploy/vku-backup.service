@@ -6,4 +6,7 @@ Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=/srv/vku-ai-challenge/repo/scripts/backup_prod.sh
+# Trỏ vào bản copy root-owned, không phải file trong repo: unit này chạy bằng root với quyền đọc dữ
+# liệu production, nên một commit không được phép thay script sẽ được root thực thi ở lần chạy sau.
+# Nguồn vẫn là scripts/backup_prod.sh trong repo; cài/cập nhật bằng deploy/vps/install-auto-deploy.sh.
+ExecStart=/usr/local/sbin/vku-backup-prod

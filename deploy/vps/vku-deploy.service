@@ -1,0 +1,30 @@
+[Unit]
+Description=Deploy production VKU AI Challenge từ nhánh release
+Documentation=file:/srv/vku-ai-challenge/repo/docs/DEPLOYMENT.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+# ExecStart trỏ vào BẢN COPY root-owned trong /usr/local/sbin, không phải file trong repo: deployer
+# nằm trong repo thì một commit xấu tự thay được cơ chế recovery của chính nó. Cập nhật deployer là
+# thao tác có chủ ý: chạy lại deploy/vps/install-auto-deploy.sh từ commit đã duyệt.
+ExecStart=/usr/local/sbin/vku-auto-deploy
+# Trần rộng hơn WAIT_TIMEOUT (180s) của deployer: build chậm vẫn phải kịp chạy xong và ghi state,
+# thay vì bị systemd kill đúng lúc container đang được tạo lại.
+TimeoutStartSec=1800
+UMask=0077
+# Đẩy deploy xuống dưới tiến trình phục vụ: build trên VM nhỏ không được làm nghẽn `api`.
+Nice=10
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+# Không đặt ProtectSystem/ReadWritePaths: deployer cần ghi /srv và /var/lib, và một sandbox quá chặt
+# sẽ biểu hiện thành "deploy im lặng không chạy" - đúng kiểu lỗi khó chẩn đoán nhất trên production.
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Cố ý KHÔNG có [Install]: unit này chỉ chạy khi timer gọi hoặc khi người vận hành `systemctl start`.
+# Không có [Install] thì `systemctl enable vku-deploy.service` báo lỗi rõ ràng thay vì lặng lẽ thêm
+# một lần deploy vào lúc boot.

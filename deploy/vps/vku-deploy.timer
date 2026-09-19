@@ -1,0 +1,15 @@
+[Unit]
+Description=Định kỳ kiểm tra nhánh release và deploy nếu có commit mới
+
+[Timer]
+Unit=vku-deploy.service
+# Sau boot chờ 2 phút: lúc này docker và mạng đã ổn định, tránh một lượt deploy hỏng vì hạ tầng
+# chưa sẵn sàng.
+OnBootSec=2min
+# 1 phút sau khi lượt trước kết thúc. Đo theo lúc service inactive nên không bao giờ chồng lấn, và
+# một lượt deploy dài 5 phút cũng không bị dồn thành nhiều lượt.
+OnUnitInactiveSec=1min
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target
