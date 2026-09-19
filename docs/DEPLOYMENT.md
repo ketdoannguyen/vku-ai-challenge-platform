@@ -3,7 +3,8 @@
 Status: **Sprint 08** - backend/MongoDB/Nginx chạy trên GCE bằng `docker-compose.prod.yml`, public
 tạm qua Cloudflare **Quick Tunnel**; frontend đã có thêm public entry trên **Cloudflare Workers
 Static Assets** (ADR-025). Đường deploy tự động (`release` → Actions deploy Worker + timer kéo về VM,
-ADR-026) đã có code và test nhưng **chưa bật trên production** - xem §5-§7.
+ADR-026) **đã bật trên production** và đã có lượt deploy thật qua timer - xem §5-§7. MinIO thì **chưa**
+bootstrap trên VM, nên release đầu tiên chạm artifact backend sẽ bị preflight dừng lại (§3.1, §12).
 
 ## 1. Kiến trúc và nguyên tắc same-origin
 
@@ -12,7 +13,8 @@ ADR-026) đã có code và test nhưng **chưa bật trên production** - xem §
 ```
 USER → https://<random>.trycloudflare.com   (Quick Tunnel, URL đổi mỗi lần restart)
        └→ cloudflared → web:80 (Nginx) ─┬→ /            → React SPA (static + SPA fallback)
-                                        └→ /api/*       → api:8000 (FastAPI) → mongo:27017
+                                        └→ /api/*       → api:8000 (FastAPI) ─┬→ mongo:27017
+                                                                              └→ minio:9000 (nội bộ)
 ```
 
 ### Sau khi rollout Workers (ADR-025)
@@ -21,7 +23,8 @@ USER → https://<random>.trycloudflare.com   (Quick Tunnel, URL đổi mỗi l�
 USER → Cloudflare Worker `vku-ai-challenge-platform`   (workers.dev hoặc custom domain)
        ├→ /api/*  → Worker proxy → API_ORIGIN
        │            = https://origin-api.<DOMAIN>  (Named Tunnel)
-       │            → cloudflared → web:80 (Nginx) → api:8000 → mongo:27017
+       │            → cloudflared → web:80 (Nginx) → api:8000 ─┬→ mongo:27017
+       │                                                       └→ minio:9000 (nội bộ)
        └→ còn lại → Static Assets trên Cloudflare CDN (+ SPA fallback cho route con)
 ```
 
@@ -36,7 +39,9 @@ Nguyên tắc bắt buộc - đổi kiến trúc nào cũng phải giữ:
 - `API_ORIGIN` là **runtime variable của Worker**, không phải biến `VITE_*`: nó chỉ tồn tại ở phía
   server Worker. Tuyệt đối không đặt `API_ORIGIN` bằng public hostname của chính app (proxy loop).
 - `origin-api.<DOMAIN>` trỏ vào `web:80` (Nginx) chứ không vào `api:8000`: giữ nguyên giới hạn body
-  12m, header bảo mật và hành vi cookie hiện có của Nginx.
+  32m, header bảo mật và hành vi cookie hiện có của Nginx.
+- MinIO (`minio:9000`) chỉ nằm trong Docker network nội bộ, **không** đi qua Worker, tunnel hay Nginx:
+  mọi lượt tải artifact đều là `/api/*` (ADR-028).
 
 ## 2. Provision VM (một lần)
 
@@ -55,9 +60,10 @@ https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_C
 sudo apt-get update
 sudo apt-get -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-sudo mkdir -p /srv/vku-ai-challenge/{repo,data/app,data/mongo,backups}
+sudo mkdir -p /srv/vku-ai-challenge/{repo,data/app,data/mongo,data/minio,backups}
 sudo chown -R 999:999 /srv/vku-ai-challenge/data/mongo   # UID của user mongodb trong image
 sudo chmod 700 /srv/vku-ai-challenge/backups
+# data/minio: image MinIO chạy bằng root (UID 0) nên chỉ cần thư mục tồn tại và ghi được - không chown.
 ```
 
 Không cần cài Python, pip, Node, Nginx hay cloudflared trên host - tất cả chạy trong container.
@@ -70,6 +76,7 @@ Layout trên VM:
 ├── repo/         # checkout detached tại release SHA
 ├── data/app/     # upload của app (mount vào /data của api)
 ├── data/mongo/   # dbpath (mount vào /data/db của mongo)
+├── data/minio/   # dữ liệu MinIO (mount vào /data của minio) - artifact submission, ADR-028
 └── backups/      # backup hằng ngày, mode 0700
 ```
 
@@ -84,7 +91,7 @@ sudo nano /srv/vku-ai-challenge/.env
 Sinh secret (không dán vào chat/log/repo):
 
 ```bash
-openssl rand -hex 24    # -> MONGO_PASSWORD
+openssl rand -hex 24    # -> MONGO_PASSWORD, MINIO_ROOT_PASSWORD, MINIO_SECRET_KEY (mỗi biến một lần)
 ```
 
 | Biến | Ý nghĩa |
@@ -95,6 +102,10 @@ openssl rand -hex 24    # -> MONGO_PASSWORD
 | `SESSION_LIFETIME_HOURS` / `SESSION_COOKIE_NAME` | Vòng đời và tên cookie phiên |
 | `SESSION_COOKIE_SECURE` / `SESSION_COOKIE_SAMESITE` | `auto` + `lax`; `auto` bật `Secure` khi `APP_ENV=production` |
 | `MAX_UPLOAD_MB` / `MAX_CONTENT_MB` / `MAX_ASSET_MB` | Giới hạn dung lượng |
+| `MAX_NOTEBOOK_MB` | Trần notebook `.ipynb` mỗi lượt nộp (mặc định 20) |
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | Credential root của MinIO - **chỉ** service `minio` và `minio-init` nhận |
+| `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` | Credential app của MinIO - **chỉ** `api` và lệnh backup nhận |
+| `MINIO_BUCKET` | Mặc định `submission-artifacts` |
 | `APP_NAME` | Tên hiển thị |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Chỉ dùng khi chạy kèm `deploy/docker-compose.tunnel.named.yml` (§6). Để trống với Quick Tunnel |
 
@@ -116,6 +127,55 @@ sudo docker compose --env-file /srv/vku-ai-challenge/.env \
 ```
 
 Không chạy `docker compose config` rồi lưu/chia sẻ output đầy đủ - kết quả nội suy có chứa secret.
+
+### 3.1 MinIO: bootstrap bucket và credential (ADR-028)
+
+Artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private, không có route Nginx, không
+publish port, không console public, không presigned URL - mọi lượt tải đi qua FastAPI.
+
+Hai service mới trong `docker-compose.prod.yml`, **không** nằm trong cơ chế override theo SHA:
+
+| Service | Vai | Ghi chú |
+|---|---|---|
+| `minio` | server, giữ dữ liệu ở `${PROD_DATA_ROOT}/minio` | image pin theo tag; healthcheck `mc ready local` |
+| `minio-init` | one-shot: tạo bucket private + app user + policy | chỉ service này (cùng `minio`) nhận credential root |
+
+Credential tách đôi theo vai (ADR-028): `MINIO_ROOT_*` chỉ vào `minio`/`minio-init`; `MINIO_ACCESS_KEY`
+/`MINIO_SECRET_KEY` chỉ vào `api` và lệnh backup. Policy của app user chỉ cho bucket stat/list +
+object get/put/delete trên đúng bucket này.
+
+Chuẩn bị thư mục dữ liệu **trước** lần `up` đầu tiên (image chạy bằng root nên chỉ cần thư mục tồn tại
+và ghi được):
+
+```bash
+sudo mkdir -p /srv/vku-ai-challenge/data/minio
+```
+
+Bootstrap (chạy một lần, và chạy lại mỗi khi xoay credential app):
+
+```bash
+cd /srv/vku-ai-challenge/repo
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml up -d minio minio-init
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml ps -a minio minio-init     # minio: healthy, minio-init: Exited (0)
+```
+
+`minio-init` idempotent: tạo/ghi đè bucket, policy và app user rồi thoát. Exit code khác 0 nghĩa là
+bucket **chưa** sẵn sàng - đừng deploy tiếp.
+
+Kiểm chứng bucket private + quyền của app user trên một Compose project cô lập (không cần `.env`,
+không chạm stack production):
+
+```bash
+./scripts/minio_smoke.sh
+```
+
+Script dựng đúng hai service trên với credential sinh tại chỗ, kiểm anonymous bị từ chối ở cả list
+lẫn GET, app credential put/get/delete được, và byte round-trip khớp - rồi `down -v` đúng project của nó.
+
+Đổi `MINIO_SECRET_KEY` trong `.env` thì phải chạy lại `minio-init` (lệnh `up -d minio minio-init` ở
+trên) rồi tạo lại container `api` để nó nhận credential mới.
 
 ## 4. Phát triển và kiểm thử ở local
 
@@ -198,6 +258,10 @@ Cấu hình một lần trên GitHub (Settings → Environments → `production`
 - Branch protection của `release` đặt required check `release-gate / frontend`, `release-gate / backend`
   và `release-gate / deploy-script`. Đổi `name:` của workflow hoặc của job sẽ làm check cũ không bao giờ
   xanh lại và **chặn mọi PR vào `release`** - đổi tên thì phải cập nhật branch protection cùng lúc.
+  **[Kiểm 2026-09-19: chưa bật - `gh api .../branches/release/protection` trả `Branch not protected`,
+  và `main` cũng vậy.]** Hiện chỉ workflow tự chạy gate; GitHub không chặn push thẳng vào `release`,
+  nên quy tắc "không push thẳng" dựa hoàn toàn vào quy trình. Bật protection là thao tác một lần trên
+  GitHub, không phải việc của code.
 - Access policy của Worker phải **OFF**: bật Cloudflare Access sẽ chặn cả người dùng cuối.
 - Token **không** bao giờ dán vào chat/log/issue. Nghi ngờ lộ thì thu hồi ngay (My Profile → API
   Tokens → Revoke) rồi tạo token mới - token cũ đã lộ thì mọi thứ khác đều vô nghĩa.
@@ -375,6 +439,10 @@ Commit chỉ đổi `docs/`, `.github/`, `plans/`, `scripts/` không chạm cont
 state rồi thoát, không build. Đường dẫn chưa được phân loại thì deployer **dừng và báo tên file** -
 đó là chủ ý, để thêm một thư mục mới là quyết định có ý thức chứ không phải mặc định.
 
+Trước khi build, deployer còn một cổng preflight cho MinIO (ADR-028): release nào cần artifact backend
+(compose của nó khai `minio`) thì `minio` phải healthy **và** `minio-init` phải đã exit 0, nếu không
+deployer dừng trước khi thay `api`/`web` và in lệnh bootstrap. Chi tiết ở §12.
+
 Vì production đang chạy **Quick Tunnel** (§6 mục điều kiện), mỗi lượt deployer còn đọc log container
 `cloudflared` để phát hiện hostname `*.trycloudflare.com` thay đổi. Hostname đó đổi mỗi khi container
 `cloudflared` khởi động lại (VPS reboot, Docker daemon restart), và lúc đó `API_ORIGIN` của Worker trỏ
@@ -478,6 +546,28 @@ curl -sI -b /tmp/aic.jar $HOST/api/admin/competitions/<id>/export.xlsx \
   | grep -i 'content-disposition\|content-type'
 ```
 
+Artifact của submission (ADR-028) - nộp một lượt thật rồi tải lại cả hai file:
+
+```bash
+# Nộp: HAI part bắt buộc, thiếu notebook là 422
+curl -s -b /tmp/aic.jar \
+  -F 'file=@/tmp/prediction.csv' -F 'notebook=@/tmp/notebook.ipynb' \
+  $HOST/api/competitions/<id>/submissions | head -c 300
+
+# Tải: tên file chuẩn hoá + filename*=UTF-8''; phải đi qua FastAPI, KHÔNG phải URL MinIO
+curl -sI -b /tmp/aic.jar $HOST/api/competitions/<id>/submissions/<submission_id>/prediction \
+  | grep -i 'content-disposition\|content-type\|cache-control'
+curl -sI -b /tmp/aic.jar $HOST/api/admin/submissions/<submission_id>/notebook | head -n 1
+
+# Bảng toàn cục của admin
+curl -s -b /tmp/aic.jar "$HOST/api/admin/submissions?limit=5&sort=team&order=asc" | head -c 300
+```
+
+`/api/health` **không** được đỏ vì MinIO (ADR-028). Kiểm tra đúng chỗ: dừng `minio` rồi gọi
+`/api/health` (phải vẫn 200) và một endpoint artifact (phải 503 `ARTIFACT_STORAGE_UNAVAILABLE`), sau
+đó `up -d minio` lại. MinIO không có route Nginx nên **không** kiểm được bằng `curl $HOST` vào cổng
+9000/9001 - đúng như thiết kế.
+
 ### 8.5 Header bảo mật
 
 ```bash
@@ -534,8 +624,62 @@ sudo /srv/vku-ai-challenge/repo/scripts/backup_prod.sh   # chạy tay để ki�
 ```
 
 Mỗi lần chạy tạo `/srv/vku-ai-challenge/backups/<UTC-timestamp>/` gồm `mongo.archive.gz`,
-`app-data.tar.gz`, `MANIFEST.txt` (kích thước + sha256). Script chỉ dọn backup cũ hơn
-`RETENTION_DAYS` (mặc định 14) sau khi backup mới đã qua kiểm tra.
+`app-data.tar.gz`, `minio-artifacts.tar.gz`, `MANIFEST.txt` (kích thước + sha256). Script chỉ dọn
+backup cũ hơn `RETENTION_DAYS` (mặc định 14) sau khi **cả ba** phần đã xong: Mongo, app-data và MinIO.
+
+`minio-artifacts.tar.gz` là mirror toàn bộ bucket `submission-artifacts` (CSV dự đoán + notebook của
+mọi lượt nộp) bằng đúng tag `mc` mà compose pin, chạy trong container dùng một lần trên network của
+`minio`. Credential app đọc từ `.env` và truyền qua env file tạm 600 đã xoá ngay sau đó - **không**
+mount cả `.env` production vào container này, và secret không xuất hiện trong `ps` của host. Nếu
+`minio` không chạy, script **dừng** và xoá thư mục backup dở dang: một bản backup thiếu artifact trông
+y như bản đầy đủ, nên nó không được phép tồn tại.
+
+Sau khi sửa `scripts/backup_prod.sh`, phải chạy lại installer để bản đóng băng
+`/usr/local/sbin/vku-backup-prod` được cập nhật:
+
+```bash
+sudo /srv/vku-ai-challenge/repo/deploy/vps/install-auto-deploy.sh
+```
+
+Diễn tập restore MinIO. Ba bước, **đối chiếu bằng key Mongo tham chiếu** chứ không chỉ đếm object:
+
+```bash
+TS=20260918T031700Z
+sudo tar -tzf /srv/vku-ai-challenge/backups/$TS/minio-artifacts.tar.gz | wc -l   # số object đã mirror
+
+# 1. Giải nén mirror ra chỗ tạm (KHÔNG giải nén đè vào ${PROD_DATA_ROOT}/minio: đó là dữ liệu sống).
+mkdir -p /tmp/minio-drill && sudo tar -xzf /srv/vku-ai-challenge/backups/$TS/minio-artifacts.tar.gz -C /tmp/minio-drill
+
+# 2. Lấy key thật của một prediction + một notebook từ Mongo (không đoán đường dẫn).
+dcp exec mongo sh -c "mongosh --quiet $MONGO_AUTH --eval '
+  db.getSiblingDB(\"ai_challenge\").submissions.findOne({submission_no: 1}, {artifacts: 1})'"
+
+# 3. Dựng bucket test private rồi mirror ngược từ backup vào đó, đọc lại đúng key ở bước 2.
+#    Credential root cần cho `mb`/`anonymous set`; đây là bucket test, không phải bucket thật.
+sudo docker run --rm --network <network-của-minio> --env-file /srv/vku-ai-challenge/.env \
+  -v /tmp/minio-drill:/backup --entrypoint /bin/sh <mc-image-pin> -c '
+    export MC_HOST_root="http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@minio:9000"
+    mc mb --ignore-existing root/submission-artifacts-drill
+    mc anonymous set none root/submission-artifacts-drill
+    mc mirror --overwrite /backup/minio-artifacts root/submission-artifacts-drill
+    mkdir -p /backup/restored
+    mc cat "root/submission-artifacts-drill/<object_key-của-prediction>" > /backup/restored/prediction.csv
+    mc cat "root/submission-artifacts-drill/<object_key-của-notebook>" > /backup/restored/notebook.ipynb'
+
+cmp /tmp/minio-drill/restored/prediction.csv <tệp CSV gốc đã nộp>
+cmp /tmp/minio-drill/restored/notebook.ipynb <notebook gốc đã nộp>
+
+# Dọn: bucket test và thư mục tạm
+sudo docker run --rm --network <network-của-minio> --env-file /srv/vku-ai-challenge/.env \
+  --entrypoint /bin/sh <mc-image-pin> -c '
+    export MC_HOST_root="http://$MINIO_ROOT_USER:$MINIO_ROOT_PASSWORD@minio:9000"
+    mc rb --force root/submission-artifacts-drill'
+rm -rf /tmp/minio-drill
+```
+
+Đã chạy trọn quy trình này trên stack dev (2026-09-19, `docs/TEST_MATRIX.md` §13): Mongo restore vào
+DB tạm, `app-data` giải nén đọc lại được CSV legacy theo `file_path` trong DB, và hai artifact của một
+lượt nộp đọc lại từ bucket test **trùng sha256** với tệp gốc.
 
 Diễn tập restore vào database tạm (làm trước khi cần thật, không chờ sự cố):
 
@@ -556,8 +700,10 @@ dcp exec mongo sh -c "mongosh --quiet $MONGO_AUTH --eval 'db.getSiblingDB(\"rest
 dcp exec mongo rm -f /tmp/restore-check.gz
 ```
 
-Không bao giờ restore đè lên database đang chạy. Lưu ý đã kiểm chứng: `mongorestore --nsFrom/--nsTo`
-**treo khi đọc archive từ stdin**, nên phải copy file vào container rồi dùng `--archive=/path`.
+Không bao giờ restore đè lên database đang chạy. `mongorestore --nsFrom/--nsTo` đọc archive từ stdin
+chạy được **khi có `-T`** (đã kiểm chứng trên `mongo:7.0.43`, 2026-09-19: pipe `mongo.archive.gz` vào
+`docker compose exec -T mongo mongorestore --archive --gzip --nsFrom … --nsTo …`, 65 document vào DB
+tạm); thiếu `-T` thì Docker mở TTY và nuốt stdin nên lệnh trông như treo - xem đoạn ngay dưới.
 
 Khi chạy các lệnh trên trong script/CI (không phải gõ tay), thêm `-T` và `</dev/null` cho mỗi
 `docker compose exec`: thiếu `-T`, Docker mở TTY và `exec` sẽ đọc hết stdin còn lại - nếu script được
@@ -580,8 +726,15 @@ pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script d�
   `index.html` - không lộ dữ liệu nhưng đừng nhầm là đã chặn.
 - **Một public origin tại một thời điểm.** Cookie phiên là host-only nên session của hostname Workers và
   của hostname tunnel là hai cookie jar độc lập; đổi origin là toàn bộ người dùng phải đăng nhập lại.
-- **`client_max_body_size 12m` của Nginx vẫn là giới hạn body hiệu lực.** Workers không cấu hình body
-  limit trong `wrangler.jsonc`; vượt ngưỡng thì lỗi là `413` từ Nginx.
+- **`client_max_body_size 32m` của Nginx vẫn là giới hạn body hiệu lực.** Một lượt nộp gửi cả CSV
+  (10 MiB) lẫn notebook (20 MiB) trong cùng một request multipart, nên trần phải phủ tổng hai file;
+  backend vẫn là nơi chốt giới hạn thật của từng file. Workers không cấu hình body limit trong
+  `wrangler.jsonc`; vượt ngưỡng thì lỗi là `413` từ Nginx.
+- **MinIO là thành phần phải bootstrap trước, không tự mọc.** Release đầu tiên dùng artifact backend
+  cần `minio` healthy **và** `minio-init` đã exit 0 (§3.1). Auto-deployer dừng trước khi thay
+  `api`/`web` nếu thiếu một trong hai và in lệnh bootstrap - xem §12.
+- **MinIO không có route nào từ ngoài.** Không publish 9000/9001, không có `location` trong Nginx,
+  không presigned URL. Nếu thấy cổng 9000 mở trên host thì đó là hồi quy, không phải tiện lợi.
 - **`npm ci` của frontend kéo thêm `wrangler` + `workerd`** (~100 MB) vào stage build của image `web`,
   nên build trên VM lâu hơn một chút. Runtime không đổi: chỉ `dist/` được copy sang stage Nginx.
 - Ngoài scope, không thêm: Redis, queue, Kubernetes, Terraform, R2, D1, Durable Objects.
@@ -614,6 +767,22 @@ trước khi đụng vào container, nên không có đường nào dựng lại
 được coi là xong sau khi deployer đã xác minh label revision của container khớp SHA cũ, nên "rollback
 thành công" là trạng thái đã kiểm chứng, không phải suy đoán.
 
+**MinIO không nằm trong rollback theo SHA.** `minio`/`minio-init` là hạ tầng pin theo tag, không có
+image theo SHA để lùi về, và deployer không bao giờ build/up chúng. Vì vậy có thêm một cổng preflight
+(ADR-028): nếu SHA mục tiêu cần artifact backend (compose của nó khai `minio`) mà `minio` không
+healthy hoặc `minio-init` chưa exit 0, deployer dừng **trước khi** thay `api`/`web`, trả working tree về
+mốc đang chạy và in đúng lệnh cần chạy:
+
+```bash
+sudo mkdir -p /srv/vku-ai-challenge/data/minio
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f /srv/vku-ai-challenge/repo/docker-compose.prod.yml up -d minio minio-init
+```
+
+Lỗi này **không** ghi `last-failed-sha` - nó không nằm ở commit, mà ở một thao tác tay còn thiếu. Chạy
+bootstrap xong thì lượt timer kế tiếp deploy nốt chính SHA đó, không cần push commit mới. Đổi lại,
+`history.log` sẽ ghi lại lỗi này mỗi phút cho tới lúc bootstrap xong.
+
 Khi deployer báo **rollback cũng thất bại**, phải can thiệp tay: xem `last-failure.txt` và
 `history.log` trong `/var/lib/vku-deploy`, rồi deploy lại commit trước bằng đường thủ công ở §7.2.
 Dừng timer (`systemctl stop vku-deploy.timer`) trước khi sửa tay để timer không giành quyền chạy.
@@ -636,7 +805,7 @@ database và không sửa trực tiếp dữ liệu để "ép chạy". Chạy b
 | `/api/*` trả `500` `INTERNAL_ERROR` | Thiếu/sai `API_ORIGIN`, hoặc giá trị trùng host của request public | Kiểm runtime variable ở §5.2; giá trị phải là origin thuần, không `/api`, không dấu `/` cuối |
 | `/api/*` trả `502` | Worker không gọi được origin: cloudflared chết, ingress sai, service `web` down | `dcp ps`, `dcp logs cloudflared`, `curl -fsS https://origin-api.<DOMAIN>/api/health` |
 | Trình duyệt báo vòng lặp redirect / lỗi 5xx lạ | `API_ORIGIN` trỏ về chính public hostname của app | Đổi về hostname tunnel, không dùng public hostname |
-| `413` khi upload | Vượt `client_max_body_size 12m` (Nginx) hoặc `MAX_UPLOAD_MB` của backend | Giảm kích thước file; nâng giới hạn thì phải sửa cả hai nơi |
+| `413` khi upload | Vượt `client_max_body_size 32m` (Nginx) hoặc trần theo loại file của backend (`MAX_UPLOAD_MB` cho CSV, `MAX_NOTEBOOK_MB` cho notebook) | Giảm kích thước file; nâng giới hạn thì phải sửa cả hai nơi, và giữ Nginx ≥ tổng hai trần cộng overhead multipart |
 | Đăng nhập xong vẫn bị coi là chưa đăng nhập | Cookie `Secure` + đang truy cập HTTP; hoặc vừa đổi hostname | Dùng đúng HTTPS của public origin hiện hành, đăng nhập lại |
 | Cookie không có `Secure`/`HttpOnly` | `SESSION_COOKIE_SECURE`/`APP_ENV` sai trên VM | `APP_ENV=production` do compose đặt cứng; kiểm `.env` và `dcp config --quiet` |
 | Route con của SPA trả 404 | Mất `not_found_handling: single-page-application` trong `wrangler.jsonc` | Khôi phục cấu hình rồi deploy lại |
