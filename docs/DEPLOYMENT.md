@@ -1,29 +1,45 @@
 # Deployment - AI Challenge Platform
 
-Status: **pilot public trên GCE (Sprint 08)** - stack production chạy bằng `docker-compose.prod.yml`,
-public tạm qua Cloudflare **Quick Tunnel**. Chưa phải production ổn định: xem §7.
+Status: **Sprint 08** - backend/MongoDB/Nginx chạy trên GCE bằng `docker-compose.prod.yml`, public
+tạm qua Cloudflare **Quick Tunnel**; frontend đã có thêm public entry trên **Cloudflare Workers
+Static Assets** (ADR-025) nhưng **chưa rollout** - xem §5-§6.
 
-## Kiến trúc đang chạy
+Hướng dẫn truy cập máy chủ từ Linux, macOS, WSL và Windows: [`VPS_PRODUCTION_ACCESS.md`](VPS_PRODUCTION_ACCESS.md).
 
-- 01 GCE VM (Ubuntu LTS), Docker Engine + Compose plugin.
-- Compose stack `mongo → api → web → cloudflared`; **không** service nào publish port ra host -
-  host chỉ lắng nghe SSH. `cloudflared` vào `web:80` qua Docker network.
-- Dữ liệu bind mount ngoài repo tại `/srv/vku-ai-challenge/data` (theo yêu cầu dùng boot disk;
-  xem rủi ro ở §7).
-- Public qua Cloudflare Quick Tunnel; Mongo không bao giờ ra public.
+## 1. Kiến trúc và nguyên tắc same-origin
 
-Layout trên VM:
+### Đang chạy (fallback, luôn giữ được)
 
 ```
-/srv/vku-ai-challenge/
-├── .env          # secret thật, mode 0600
-├── repo/         # checkout detached tại release SHA
-├── data/app/     # upload của app (mount vào /data của api)
-├── data/mongo/   # dbpath (mount vào /data/db của mongo)
-└── backups/      # backup hằng ngày, mode 0700
+USER → https://<random>.trycloudflare.com   (Quick Tunnel, URL đổi mỗi lần restart)
+       └→ cloudflared → web:80 (Nginx) ─┬→ /            → React SPA (static + SPA fallback)
+                                        └→ /api/*       → api:8000 (FastAPI) → mongo:27017
 ```
 
-## 1. Provision VM (một lần)
+### Sau khi rollout Workers (ADR-025)
+
+```
+USER → Cloudflare Worker `vku-ai-challenge-platform`   (workers.dev hoặc custom domain)
+       ├→ /api/*  → Worker proxy → API_ORIGIN
+       │            = https://origin-api.<DOMAIN>  (Named Tunnel)
+       │            → cloudflared → web:80 (Nginx) → api:8000 → mongo:27017
+       └→ còn lại → Static Assets trên Cloudflare CDN (+ SPA fallback cho route con)
+```
+
+Nguyên tắc bắt buộc - đổi kiến trúc nào cũng phải giữ:
+
+- Browser chỉ thấy **một** origin. Frontend luôn gọi `` fetch(`/api${path}`, { credentials: "same-origin" }) ``;
+  không có URL tuyệt đối, không `credentials: "include"`, không CORS, không JWT, không token trong
+  `localStorage`.
+- Cookie phiên `aic_session` là **host-only** (`HttpOnly`, `Secure` ở production, `SameSite=Lax`,
+  không có thuộc tính `Domain`). Hệ quả: session gắn với đúng hostname đã đăng nhập - đổi public
+  origin là phải đăng nhập lại, và chỉ nên có một public origin cho người dùng thật tại một thời điểm.
+- `API_ORIGIN` là **runtime variable của Worker**, không phải biến `VITE_*`: nó chỉ tồn tại ở phía
+  server Worker. Tuyệt đối không đặt `API_ORIGIN` bằng public hostname của chính app (proxy loop).
+- `origin-api.<DOMAIN>` trỏ vào `web:80` (Nginx) chứ không vào `api:8000`: giữ nguyên giới hạn body
+  12m, header bảo mật và hành vi cookie hiện có của Nginx.
+
+## 2. Provision VM (một lần)
 
 ```bash
 # Trên VM, qua SSH key-only (tài khoản có NOPASSWD sudo, KHÔNG thêm vào group docker).
@@ -47,7 +63,18 @@ sudo chmod 700 /srv/vku-ai-challenge/backups
 
 Không cần cài Python, pip, Node, Nginx hay cloudflared trên host - tất cả chạy trong container.
 
-## 2. Cấu hình env
+Layout trên VM:
+
+```
+/srv/vku-ai-challenge/
+├── .env          # secret thật, mode 0600
+├── repo/         # checkout detached tại release SHA
+├── data/app/     # upload của app (mount vào /data của api)
+├── data/mongo/   # dbpath (mount vào /data/db của mongo)
+└── backups/      # backup hằng ngày, mode 0700
+```
+
+## 3. Cấu hình env
 
 ```bash
 sudo install -m 600 -o root -g root \
@@ -70,14 +97,209 @@ openssl rand -hex 24    # -> MONGO_PASSWORD
 | `SESSION_COOKIE_SECURE` / `SESSION_COOKIE_SAMESITE` | `auto` + `lax`; `auto` bật `Secure` khi `APP_ENV=production` |
 | `MAX_UPLOAD_MB` / `MAX_CONTENT_MB` / `MAX_ASSET_MB` | Giới hạn dung lượng |
 | `APP_NAME` | Tên hiển thị |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Chỉ dùng khi chạy kèm `deploy/docker-compose.tunnel.named.yml` (§6). Để trống với Quick Tunnel |
 
 `APP_ENV=production`, `DATA_DIR=/data` và `MONGO_HOST=mongo` do compose đặt cứng, không khai trong `.env`.
 `SESSION_SECRET` trong `.env.example` là config chết (ADR-008) - không dùng, không cần sinh.
 
 `.env` chỉ vào Compose qua `--env-file`, **không** mount vào container: Settings của backend đặt
-`extra="forbid"` nên biến chỉ dành cho Compose sẽ làm API chết lúc khởi động.
+`extra="forbid"` nên biến chỉ dành cho Compose sẽ làm API chết lúc khởi động. Vì vậy `TUNNEL_TOKEN`
+chỉ được truyền cho service `cloudflared` trong file override, không truyền cho `api`.
 
-## 3. Deploy một release
+Kiểm tra cú pháp compose mà không in secret:
+
+```bash
+cd /srv/vku-ai-challenge/repo
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml config --quiet && echo OK
+```
+
+Không chạy `docker compose config` rồi lưu/chia sẻ output đầy đủ - kết quả nội suy có chứa secret.
+
+## 4. Phát triển và kiểm thử ở local
+
+### Frontend
+
+```bash
+cd frontend
+npm ci
+npm run lint          # oxlint
+npm test              # vitest (jsdom)
+npm run build         # tsc -b && vite build -> dist/
+npm run cf:dry-run    # wrangler deploy --dry-run, phải chạy SAU npm run build
+```
+
+`npm run cf:dry-run` cần `dist/` tồn tại vì `wrangler.jsonc` đặt `assets.directory: ./dist`; chạy
+trước `npm run build` sẽ báo không tìm thấy thư mục assets.
+
+`npm test` chạy song song nhiều worker; nếu thấy test flake ở `CompetitionDetailPage.test.tsx`,
+chạy lại tuần tự để có kết quả xác định:
+
+```bash
+npx vitest run --maxWorkers 1
+```
+
+Dev server (giữ nguyên như trước, không liên quan Workers):
+
+```bash
+npm run dev           # Vite :5173, proxy /api -> http://localhost:8080 (Nginx của compose dev)
+```
+
+Muốn chạy thử chính Worker ở local: build `dist/` trước, tạo `frontend/.dev.vars` (đã ignore, không
+commit) với `API_ORIGIN=http://localhost:8080`, rồi:
+
+```bash
+npx wrangler dev
+```
+
+### Backend
+
+```bash
+cd backend
+uv run pytest
+```
+
+### Bất biến phải giữ khi sửa frontend
+
+- `src/api/client.ts` không đổi: URL tương đối `/api...`, `credentials: "same-origin"`.
+- Không thêm biến `VITE_*` nào chứa địa chỉ backend.
+- `src/markdown/resolveMarkdownAssetUrl.ts` trả path tương đối `/api/competitions/...` - giữ nguyên.
+
+## 5. Deploy frontend lên Cloudflare Workers
+
+### 5.1 Cấu hình Workers Builds (build & deploy tự động)
+
+Trong Cloudflare Dashboard → Workers & Pages → chọn Worker `vku-ai-challenge-platform` → Settings →
+Build:
+
+| Trường | Giá trị |
+|---|---|
+| Git repository | `ketdoannguyen/vku-ai-challenge-platform` |
+| Production branch | `main` |
+| Root directory | `frontend` |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| Build variables | **để trống** (không có biến build nào) |
+| Watch paths (tuỳ chọn) | `frontend/**` |
+| Access policy | **OFF** - bật Access sẽ chặn cả người dùng cuối |
+
+Build command phải chạy trước deploy vì `wrangler.jsonc` trỏ `assets.directory` vào `./dist`. Nếu
+build log báo Node quá cũ, thêm build variable `NODE_VERSION=22` (wrangler 4 yêu cầu Node >= 22).
+
+### 5.2 Runtime variable `API_ORIGIN`
+
+Dashboard → Worker → Settings → Variables and Secrets → **Plaintext**:
+
+| Tên | Giá trị |
+|---|---|
+| `API_ORIGIN` | `https://origin-api.<DOMAIN>` - hostname Named Tunnel ở §6, KHÔNG có `/api`, KHÔNG có dấu `/` cuối |
+
+Quy tắc:
+
+- Đây là **runtime variable**, không phải build variable và không phải `VITE_*`. Giá trị chỉ được
+  Worker đọc ở phía server nên browser không bao giờ thấy địa chỉ backend.
+- Không khai `API_ORIGIN` trong `wrangler.jsonc`: biến trong file sẽ ghi đè giá trị đặt ngoài file ở
+  mỗi lần deploy. `keep_vars: true` trong file giữ nguyên runtime variable qua các lần deploy - **đã
+  kiểm chứng thật**: deploy lại bằng `npx wrangler deploy` không kèm `--var`, `/api/health` vẫn `200`
+  (nếu binding mất, Worker sẽ fail closed và trả `500`). Lưu ý `keep_vars` **không** làm điều đó thành
+  vĩnh viễn: nó chỉ giữ biến không bị xoá khi deploy; vẫn nên đặt qua Dashboard để có chỗ xem lại.
+- Cách đặt nhanh không cần Dashboard (dùng khi CI/CLI):
+  `npx wrangler deploy --var API_ORIGIN:https://origin-api.<DOMAIN>`; các lần deploy sau không cần lặp
+  lại `--var` nhờ `keep_vars`.
+- **Không** đặt bằng public hostname của chính app (ví dụ `https://app.example.com`) - Worker sẽ gọi
+  lại chính nó và tạo vòng lặp proxy. Worker chủ động từ chối cấu hình này (trả `500`).
+- Trong lúc chưa có domain, có thể dùng tạm hostname Quick Tunnel (`https://<random>.trycloudflare.com`)
+  làm `API_ORIGIN`. Nhược điểm: URL này **đổi mỗi lần `cloudflared` restart**, khi đó phải sửa lại
+  runtime variable và chờ deploy mới nhất áp dụng (không cần build lại).
+- Thiếu hoặc sai `API_ORIGIN` thì Worker trả `500` với body `{"error":{"code":"INTERNAL_ERROR",...}}`
+  và **không** gọi upstream - fail closed, không lộ giá trị cấu hình.
+
+### 5.3 Deploy thủ công (khi chưa bật Workers Builds)
+
+```bash
+cd frontend
+npm ci
+npm run build
+npm run cf:dry-run        # bắt buộc: kiểm tra config + assets trước khi đẩy thật
+npx wrangler login        # hoặc export CLOUDFLARE_API_TOKEN (token KHÔNG commit, KHÔNG dán vào chat)
+npx wrangler deploy
+```
+
+Lần deploy **đầu tiên** sẽ tạo Worker nếu tài khoản chưa có Worker tên đó (`wrangler deploy` không
+hỏi lại); các lần sau cập nhật đúng Worker đang có. Nhờ `keep_vars: true` và việc `API_ORIGIN` chỉ
+nằm ngoài `wrangler.jsonc`, deploy không ghi đè origin.
+
+### 5.4 Kiểm tra sau deploy
+
+```bash
+curl -sI https://<public-host>/            # 200 + 5 header bảo mật ở §8.5
+curl -fsS https://<public-host>/api/health # {"status":"ok","mongo":"reachable"}
+curl -sI https://<public-host>/assets/<tên-file-có-hash>.js  # Cache-Control: immutable
+```
+
+Kết quả của bản deploy đã chạy (để đối chiếu khi lần sau lệch):
+
+| Kiểm tra | Kết quả đúng |
+|---|---|
+| `/` | `200`, đủ 5 header bảo mật |
+| `/competitions/<slug>` (deep link SPA) | `200` + `index.html`, không phải `404` |
+| `/api/health` | `200` `{"status":"ok","mongo":"reachable"}` |
+| `/api/auth/me` khi chưa đăng nhập | `401` `{"error":{"code":"UNAUTHORIZED",...}}` |
+| `/api/khong-ton-tai` | `404` JSON của FastAPI, **không** phải HTML của SPA |
+| `/assets/<hash>.js` | `Cache-Control: public, max-age=31536000, immutable` |
+| `/data/bat-ky` | `200` + HTML của SPA - đúng như ADR-025 mô tả, không phải rò rỉ dữ liệu |
+
+`_headers` được Wrangler **đọc làm cấu hình**, không được upload như một asset: `--dry-run` liệt kê
+`dist/_headers` trong input nhưng danh sách asset đẩy lên không có nó, còn response thật thì có đủ 5
+header. Đừng đi tìm `_headers` trong danh sách file đã upload - không thấy là đúng.
+
+## 6. Cloudflare Tunnel: Quick → Named
+
+Chỉ đổi tầng tunnel trên VM, không đụng tới Worker, backend hay dữ liệu. Base stack Quick Tunnel
+không bị sửa nên luôn quay lại được.
+
+**Điều kiện:** đã có domain trong Cloudflare (nameserver do Cloudflare quản lý).
+
+1. Zero Trust Dashboard → Networks → Tunnels → **Create a tunnel** → chọn `Cloudflared` → đặt tên
+   (ví dụ `vku-challenge-prod`) → copy **token** ở bước Install connector.
+2. Trong tunnel vừa tạo, thêm **Public Hostname**: subdomain `origin-api`, domain `<DOMAIN>`, service
+   `http://web:80`. Không bật Access cho hostname này (Worker gọi vào bằng HTTP, không qua browser).
+3. Trên VM, thêm token vào `.env` (file đã `chmod 600`, không commit):
+
+```bash
+sudo nano /srv/vku-ai-challenge/.env      # CLOUDFLARE_TUNNEL_TOKEN=<token>
+```
+
+4. Chạy lại **chỉ** service `cloudflared` với override additive:
+
+```bash
+cd /srv/vku-ai-challenge/repo
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml -f deploy/docker-compose.tunnel.named.yml \
+  up -d cloudflared
+```
+
+Override thay **toàn bộ** `command` (bỏ `--url http://web:80` vì ingress giờ do Dashboard quản lý),
+giữ `--metrics 127.0.0.1:20241` nên healthcheck kế thừa từ base vẫn dùng được. Token chỉ được truyền
+cho `cloudflared`, không truyền cho `api`.
+
+5. Kiểm tra:
+
+```bash
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml -f deploy/docker-compose.tunnel.named.yml ps   # cloudflared healthy
+curl -fsS https://origin-api.<DOMAIN>/api/health             # {"status":"ok",...}
+curl -sI  https://origin-api.<DOMAIN>/ | head -n 8           # 5 header bảo mật
+```
+
+6. Cập nhật `API_ORIGIN` của Worker thành `https://origin-api.<DOMAIN>` (§5.2) rồi chạy lại §8.
+7. Quay về Quick Tunnel: chạy `up -d cloudflared` chỉ với `docker-compose.prod.yml`, rồi trỏ
+   `API_ORIGIN` về hostname trycloudflare mới.
+
+Đổi public origin làm cookie phiên cũ vô hiệu (cookie host-only): mọi người dùng phải đăng nhập lại,
+đó là hành vi mong đợi chứ không phải lỗi.
+
+## 7. Deploy một release (backend + Nginx)
 
 Nguyên tắc: chỉ deploy một commit đã qua release gate, không build từ working tree bẩn.
 
@@ -100,29 +322,104 @@ sudo docker compose --env-file /srv/vku-ai-challenge/.env \
      -f docker-compose.prod.yml up -d
 ```
 
-Đặt `COMPOSE=...` cho gọn tay:
+Đặt `COMPOSE=...` cho gọn tay (thêm `-f deploy/docker-compose.tunnel.named.yml` khi đã bật named tunnel):
 
 ```bash
 alias dcp='sudo docker compose --env-file /srv/vku-ai-challenge/.env -f /srv/vku-ai-challenge/repo/docker-compose.prod.yml'
 ```
 
-## 4. Smoke test sau deploy
+## 8. Smoke test sau deploy
+
+### 8.1 SPA và deep link (trên public hostname của Worker)
 
 ```bash
-dcp ps                              # cả 4 service phải running/healthy
-dcp logs --tail=50 cloudflared      # đọc URL https://<random>.trycloudflare.com
-curl -fsS https://<url>/api/health  # {"status":"ok","mongo":"reachable"}
-curl -sI https://<url>/data/x       # 404
-ss -lntp                            # chỉ thấy sshd, không có 8000/27017/80
+HOST=https://<public-host>
+
+curl -sI $HOST/ | head -n 1                    # 200
+curl -s  $HOST/competitions/ai-challenge-2026 | grep -c '<div id="root"'   # 1 -> SPA fallback OK
+curl -s  $HOST/ho-tro                          | grep -c '<div id="root"'   # 1
 ```
 
-Trong container `api` không có công cụ HTTP ngoài Python stdlib; kiểm tra nội bộ bằng:
+### 8.2 API qua Worker
 
 ```bash
-dcp exec api python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').status)"
+curl -fsS $HOST/api/health                                  # {"status":"ok","mongo":"reachable"}
+curl -sI  $HOST/api/auth/me | head -n 1                     # 401 (chưa đăng nhập)
+curl -s   $HOST/api/khong-ton-tai | head -c 120             # JSON 404 của FastAPI, KHÔNG phải HTML của SPA
 ```
 
-## 5. Admin và tài khoản
+### 8.3 Phiên đăng nhập: cookie, giữ phiên, logout
+
+Không dán mật khẩu hay token vào dòng lệnh (lộ trong `ps`/history) - dùng file tạm quyền 600 và
+cookie jar:
+
+```bash
+umask 077
+# Trường định danh của `/api/auth/login` tên là `identifier` (KHÔNG phải `email`); gửi sai tên
+# trường sẽ bị FastAPI trả 422 VALIDATION_ERROR trước khi tới bước kiểm tra mật khẩu.
+printf '{"identifier":"%s","password":"%s"}' '<email>' '<password>' > /tmp/aic-login.json
+
+curl -si -c /tmp/aic.jar -o /dev/null $HOST/api/auth/login \
+  -H 'Content-Type: application/json' -d @/tmp/aic-login.json | grep -i '^HTTP/'
+
+grep aic_session /tmp/aic.jar            # cookie được lưu, KHÔNG có cột domain
+curl -s -b /tmp/aic.jar $HOST/api/auth/me | head -c 200          # 200, đúng tài khoản
+
+curl -si -X POST -b /tmp/aic.jar $HOST/api/auth/logout | grep -i '^HTTP/\|^set-cookie'
+curl -s -o /dev/null -w '%{http_code}\n' -b /tmp/aic.jar $HOST/api/auth/me   # 401 sau logout
+
+rm -f /tmp/aic.jar /tmp/aic-login.json
+```
+
+Kiểm tra thêm bằng mắt trên DevTools → Application → Cookies: `aic_session` phải có `HttpOnly`,
+`Secure`, `SameSite=Lax` và **không** có `Domain`.
+
+### 8.4 Upload, asset Markdown, download
+
+```bash
+# multipart CSV -> body phải đi nguyên trạng qua Worker
+curl -s -b /tmp/aic.jar -F 'file=@/tmp/accounts.csv' \
+  $HOST/api/admin/competitions/<id>/accounts/import | head -c 200
+
+# asset Markdown: path tương đối /api/competitions/<slug>/assets/<file>
+curl -sI $HOST/api/competitions/<slug>/assets/<file>.png | head -n 1
+
+# download: Content-Disposition và Content-Type phải giữ nguyên qua proxy
+curl -sI -b /tmp/aic.jar $HOST/api/admin/competitions/<id>/export.xlsx \
+  | grep -i 'content-disposition\|content-type'
+```
+
+### 8.5 Header bảo mật
+
+```bash
+for u in $HOST/ $HOST/api/health; do
+  echo "== $u"
+  curl -sI "$u" | grep -iE 'x-content-type-options|x-frame-options|referrer-policy|permissions-policy|content-security-policy-report-only'
+done
+```
+
+Static lấy header từ `_headers`; `/api/*` lấy từ Nginx - cả hai đều phải đủ 5 header.
+
+### 8.6 Những thứ chỉ đúng trên origin (Nginx), không có trên Workers
+
+```bash
+ORIGIN=https://origin-api.<DOMAIN>
+
+curl -sI $ORIGIN/data/bat-ky | head -n 1        # 404 - Nginx chặn /data/
+curl -s  $ORIGIN/healthz                        # ok
+curl -sI $ORIGIN/api/health | head -n 1         # 200
+```
+
+Trên hostname Workers, `/data/x` trả `index.html` (SPA fallback) - đúng thiết kế và không lộ file,
+nên đừng dùng hostname Workers để kiểm tra `/data/`.
+
+### 8.7 Không lộ port trên VM
+
+```bash
+ss -lntp     # chỉ thấy sshd; không có 80, 8000 hay 27017
+```
+
+## 9. Admin và tài khoản
 
 ```bash
 # Mật khẩu nhập ở prompt ẩn - KHÔNG truyền qua tham số dòng lệnh (lộ trong ps/history)
@@ -136,7 +433,7 @@ Script idempotent: email đã tồn tại thì thoát code 1 và không ghi đè
 `dcp exec api python scripts/import_accounts.py <file.csv>` (header `email,name,password`, policy ≥10 ký tự);
 copy CSV vào container bằng `docker compose cp` rồi xoá file tạm sau khi import.
 
-## 6. Backup và restore
+## 10. Backup và restore
 
 Timer systemd chạy `scripts/backup_prod.sh` mỗi ngày (xem `deploy/vku-backup.timer`):
 
@@ -177,20 +474,47 @@ Khi chạy các lệnh trên trong script/CI (không phải gõ tay), thêm `-T`
 `docker compose exec`: thiếu `-T`, Docker mở TTY và `exec` sẽ đọc hết stdin còn lại - nếu script được
 pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script dừng giữa chừng mà không báo lỗi.
 
-## 7. Cảnh báo và giới hạn
+## 11. Cảnh báo và giới hạn
 
 - **Quick Tunnel chỉ để pilot.** URL `*.trycloudflare.com` đổi mỗi lần `cloudflared` restart, giới hạn
   200 kết nối đồng thời, không SLA, Cloudflare xếp là công cụ test. Muốn production thật phải có domain
-  trong Cloudflare → chuyển sang named tunnel (thêm `CLOUDFLARE_TUNNEL_TOKEN`, đổi command thành
-  `tunnel --no-autoupdate run`) rồi chạy lại toàn bộ smoke gate HTTPS/auth.
+  trong Cloudflare → chuyển sang named tunnel (§6).
 - **Dữ liệu và backup cùng một boot disk** (`/srv/vku-ai-challenge`). Backup chỉ cứu được lỗi thao tác
   (xoá nhầm, migrate hỏng), **không** cứu được khi mất disk/VM. Cần một trong: snapshot schedule của GCE,
   copy sang object storage, hoặc persistent disk riêng.
 - Không chạy `docker compose down -v`; không xoá `/srv/vku-ai-challenge/data`.
 - Cookie `Secure` bật khi `APP_ENV=production`, nên **không thể** kiểm thử đăng nhập qua HTTP thuần -
-  mọi smoke test auth phải đi qua URL HTTPS của tunnel.
+  mọi smoke test auth phải đi qua URL HTTPS.
+- **Header bảo mật nằm ở hai nơi**: `frontend/nginx.conf` (cho `/api/*`) và `frontend/public/_headers`
+  (cho static). Đổi một nơi phải đổi nơi còn lại; `_headers` **không** áp dụng cho response do Worker sinh.
+- **`/data/` chỉ bị chặn ở Nginx.** Trên hostname Workers, `/data/<x>` rơi vào SPA fallback và trả
+  `index.html` - không lộ dữ liệu nhưng đừng nhầm là đã chặn.
+- **Một public origin tại một thời điểm.** Cookie phiên là host-only nên session của hostname Workers và
+  của hostname tunnel là hai cookie jar độc lập; đổi origin là toàn bộ người dùng phải đăng nhập lại.
+- **`client_max_body_size 12m` của Nginx vẫn là giới hạn body hiệu lực.** Workers không cấu hình body
+  limit trong `wrangler.jsonc`; vượt ngưỡng thì lỗi là `413` từ Nginx.
+- **`npm ci` của frontend kéo thêm `wrangler` + `workerd`** (~100 MB) vào stage build của image `web`,
+  nên build trên VM lâu hơn một chút. Runtime không đổi: chỉ `dist/` được copy sang stage Nginx.
+- Ngoài scope, không thêm: Redis, queue, Kubernetes, Terraform, R2, D1, Durable Objects.
 
-## 8. Rollback
+## 12. Rollback
+
+Từng tầng rollback độc lập:
+
+**Worker (frontend):** Dashboard → Workers & Pages → `vku-ai-challenge-platform` → Deployments → chọn
+bản deploy trước → **Rollback**. Không cần đụng tới VPS và không ảnh hưởng API.
+
+**`API_ORIGIN`:** nếu origin mới lỗi, sửa runtime variable về giá trị cũ (ví dụ hostname Quick Tunnel)
+trong Settings → Variables and Secrets. Đổi biến không cần build lại.
+
+**Tunnel:** bỏ file override để quay về Quick Tunnel:
+
+```bash
+sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+  -f docker-compose.prod.yml up -d cloudflared
+```
+
+**Backend/Nginx:**
 
 ```bash
 cd /srv/vku-ai-challenge/repo
@@ -198,15 +522,37 @@ sudo git checkout --detach <sha-truoc>
 sudo COMPOSE_PARALLEL_LIMIT=1 docker compose ... build && sudo docker compose ... up -d
 ```
 
-Dữ liệu nằm ở bind mount ngoài repo nên rollback code không đụng tới dữ liệu. Nếu release mới không
-healthy: giữ nguyên stack cũ (compose chỉ thay container khi image mới build xong), không sửa trực tiếp
-dữ liệu để "ép chạy". Chạy backup thành công **trước** mỗi lần đổi code.
+Dữ liệu nằm ở bind mount ngoài repo nên rollback code không đụng tới dữ liệu; **không** rollback
+database và không sửa trực tiếp dữ liệu để "ép chạy". Chạy backup thành công **trước** mỗi lần đổi code.
+
+## 13. Troubleshooting
+
+| Triệu chứng | Nguyên nhân thường gặp | Cách xử lý |
+|---|---|---|
+| `/api/*` trả `500` `INTERNAL_ERROR` | Thiếu/sai `API_ORIGIN`, hoặc giá trị trùng host của request public | Kiểm runtime variable ở §5.2; giá trị phải là origin thuần, không `/api`, không dấu `/` cuối |
+| `/api/*` trả `502` | Worker không gọi được origin: cloudflared chết, ingress sai, service `web` down | `dcp ps`, `dcp logs cloudflared`, `curl -fsS https://origin-api.<DOMAIN>/api/health` |
+| Trình duyệt báo vòng lặp redirect / lỗi 5xx lạ | `API_ORIGIN` trỏ về chính public hostname của app | Đổi về hostname tunnel, không dùng public hostname |
+| `413` khi upload | Vượt `client_max_body_size 12m` (Nginx) hoặc `MAX_UPLOAD_MB` của backend | Giảm kích thước file; nâng giới hạn thì phải sửa cả hai nơi |
+| Đăng nhập xong vẫn bị coi là chưa đăng nhập | Cookie `Secure` + đang truy cập HTTP; hoặc vừa đổi hostname | Dùng đúng HTTPS của public origin hiện hành, đăng nhập lại |
+| Cookie không có `Secure`/`HttpOnly` | `SESSION_COOKIE_SECURE`/`APP_ENV` sai trên VM | `APP_ENV=production` do compose đặt cứng; kiểm `.env` và `dcp config --quiet` |
+| Route con của SPA trả 404 | Mất `not_found_handling: single-page-application` trong `wrangler.jsonc` | Khôi phục cấu hình rồi deploy lại |
+| `/api` (không có dấu `/`) trả HTML của SPA | Đúng thiết kế: `run_worker_first: ["/api/*"]` chỉ bắt `/api/...` | Không cần xử lý; client không bao giờ gọi path này |
+| Redirect `307` trỏ về hostname origin | Client gọi path có dấu `/` cuối bị FastAPI redirect | Gọi đúng `/api/...` không dấu `/` cuối |
+| Static thiếu header bảo mật | `dist/_headers` không có trong bundle đã deploy | Chạy `npm run build` rồi kiểm `dist/_headers`, sau đó deploy lại |
+| Asset cũ vẫn được phục vụ | Cache `immutable` cho file **không** có hash | Chỉ đặt cache immutable cho `/assets/*`; file trong `public/` phải có hash hoặc không cache |
+| Build trên Workers Builds lỗi Node | Node mặc định của runner quá cũ cho wrangler 4 | Thêm build variable `NODE_VERSION=22` |
+
+Không bao giờ dán `CLOUDFLARE_TUNNEL_TOKEN`, mật khẩu Mongo, mật khẩu admin hay session token vào
+chat/log/issue.
 
 ## Vận hành thường ngày
 
 ```bash
 dcp ps                     # trạng thái + health
 dcp logs -f api            # log API (đã bật json-file rotation 10m x 3)
+dcp logs --tail=50 cloudflared
 dcp restart web            # restart một service
 df -h /                    # backup cùng disk nên phải theo dõi dung lượng
 ```
+
+Theo dõi thêm trên Cloudflare: Workers → Metrics (số request, lỗi 5xx) và Deployments (lịch sử build).

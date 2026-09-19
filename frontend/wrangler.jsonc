@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+
+  // Tên Worker đã xác nhận trên Cloudflare Dashboard.
+  "name": "vku-ai-challenge-platform",
+
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-09-19",
+
+  // API_ORIGIN là runtime variable đặt trong Dashboard, KHÔNG khai ở đây: biến trong file này
+  // sẽ ghi đè giá trị Dashboard ở mỗi lần deploy. keep_vars giữ nguyên biến Dashboard qua deploy.
+  "keep_vars": true,
+
+  "assets": {
+    // `npm run build` (tsc -b && vite build) phải chạy trước `wrangler deploy`.
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    // Chỉ /api/* vào Worker; phần còn lại do static assets + SPA fallback phục vụ.
+    "run_worker_first": ["/api/*"]
+  }
+}

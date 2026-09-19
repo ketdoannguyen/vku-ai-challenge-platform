@@ -1,0 +1,29 @@
+# Override BỔ SUNG (không thay thế): chuyển cloudflared từ Quick Tunnel sang Named Tunnel
+# (remotely-managed) mà không đụng tới docker-compose.prod.yml. Stack Quick Tunnel vẫn là mặc
+# định để có đường lùi.
+#
+# Cách dùng (trên VM production), sau khi đã có token tunnel:
+#   sudo docker compose --env-file /srv/vku-ai-challenge/.env \
+#     -f docker-compose.prod.yml -f deploy/docker-compose.tunnel.named.yml up -d cloudflared
+#
+# Khác biệt so với Quick Tunnel:
+#   - `command` được thay TOÀN BỘ (Compose thay cả list, không nối thêm): bỏ `--url http://web:80`
+#     vì ingress giờ do Dashboard quản lý (public hostname -> http://web:80).
+#   - Token đọc từ `CLOUDFLARE_TUNNEL_TOKEN` trong --env-file, truyền vào container qua biến
+#     TUNNEL_TOKEN mà cloudflared tự đọc. Token KHÔNG vào repo, KHÔNG truyền cho service api.
+#   - Giữ nguyên `--metrics 127.0.0.1:20241` để healthcheck kế thừa từ base compose vẫn chạy.
+#
+# Thiếu CLOUDFLARE_TUNNEL_TOKEN thì `compose up`/`config` dừng ngay thay vì chạy tunnel rỗng.
+
+name: vku-challenge
+
+services:
+  cloudflared:
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN bắt buộc có trong .env khi dùng named tunnel}
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 127.0.0.1:20241
+      - run

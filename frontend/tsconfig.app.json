@@ -23,5 +23,6 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  // `worker` được typecheck cùng app để `tsc -b` phủ luôn Cloudflare Worker.
+  "include": ["src", "worker"]
 }
