@@ -26,7 +26,12 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}"
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 die() { log "LỖI: $*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || die "phải chạy bằng sudo (Docker cần quyền root)"
+# `ALLOW_NON_ROOT` chỉ dành cho harness test (deploy/vps/tests) chạy được trên máy dev không có
+# Docker. Unit systemd của production KHÔNG đặt biến này, và đặt nó cũng không mở thêm quyền gì:
+# người chạy không phải root thì vẫn bị Docker từ chối ở lệnh đầu tiên.
+if [ "${ALLOW_NON_ROOT:-0}" != "1" ]; then
+  [[ $EUID -eq 0 ]] || die "phải chạy bằng sudo (Docker cần quyền root)"
+fi
 command -v docker >/dev/null 2>&1 || die "không thấy docker trong PATH"
 [[ -f "$COMPOSE_FILE" ]] || die "không thấy compose file: $COMPOSE_FILE"
 [[ -f "$ENV_FILE" ]] || die "không thấy env file: $ENV_FILE"
@@ -52,10 +57,18 @@ cleanup() {
   rm -f "$MINIO_ENV_FILE"
   if [[ "$complete" -ne 1 ]]; then
     rm -rf "$DEST"
-    log "Backup dở dang - đã xoá $DEST (không để lại bản backup thiếu dữ liệu)"
+    # Cảnh báo ra stderr: nếu tín hiệu tới đúng lúc đang chạy `dc exec ... >$DEST/mongo.archive.gz`
+    # thì stdout lúc đó đang trỏ vào file trong $DEST, mà dòng này chạy sau `rm -rf "$DEST"` nên
+    # thông báo sẽ rơi vào inode đã bị xoá và biến mất khỏi journal.
+    log "Backup dở dang - đã xoá $DEST (không để lại bản backup thiếu dữ liệu)" >&2
   fi
 }
 trap cleanup EXIT
+# `trap ... EXIT` KHÔNG tự chạy khi tiến trình bị tín hiệu kết thúc, nên `systemctl stop` (SIGTERM)
+# hay Ctrl-C (SIGINT) sẽ để lại đúng cái thư mục dở dang mà phần cleanup sinh ra để dọn. Đổi tín hiệu
+# thành `exit` để đường thoát đó vẫn đi qua trap EXIT ở trên.
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 dc exec -T mongo sh -c 'mongodump --host 127.0.0.1 --port 27017 \
     --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" \
@@ -114,6 +127,10 @@ docker run --rm --network "$NETWORK" --env-file "$MINIO_ENV_FILE" -v "$DEST:/bac
   ' || die "mirror bucket $MINIO_BUCKET thất bại"
 rm -f "$MINIO_ENV_FILE"
 
+# Bucket hợp lệ nhưng rỗng thì `mc mirror` không tạo thư mục đích, và `tar` sẽ chết vì thiếu nguồn -
+# đúng lúc chưa có submission nào (đầu mùa thi). Tạo sẵn thư mục để archive rỗng vẫn hợp lệ; mirror
+# lỗi thật đã bị chặn ở trên bởi `die`, nên nhánh này không che mất lỗi nào.
+mkdir -p "$DEST/minio-artifacts"
 tar -czf "$DEST/minio-artifacts.tar.gz" -C "$DEST" minio-artifacts || die "nén mirror MinIO thất bại"
 gzip -t "$DEST/minio-artifacts.tar.gz" || die "archive MinIO hỏng"
 tar -tzf "$DEST/minio-artifacts.tar.gz" >/dev/null || die "không liệt kê được archive MinIO"

@@ -77,6 +77,7 @@ jobs:
             deploy/vps/auto-deploy.sh \
             deploy/vps/install-auto-deploy.sh \
             deploy/vps/tests/auto-deploy.test.sh \
+            deploy/vps/tests/backup-prod.test.sh \
             scripts/backup_prod.sh \
             scripts/minio_init.sh \
             scripts/minio_smoke.sh
@@ -84,6 +85,10 @@ jobs:
       # không chạm mạng và không cần bất kỳ credential nào.
       - name: Harness deployer
         run: bash deploy/vps/tests/auto-deploy.test.sh
+      # Harness backup cũng dùng `docker` giả: kiểm bất biến "không để lại bản backup thiếu dữ liệu"
+      # trên các nhánh khó diễn tập tay (bucket rỗng, mirror lỗi, bị ngắt giữa đường, chạy chồng lấn).
+      - name: Harness backup
+        run: bash deploy/vps/tests/backup-prod.test.sh
       - name: Cú pháp systemd unit
         run: |
           set -euo pipefail
