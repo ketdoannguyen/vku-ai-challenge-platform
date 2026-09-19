@@ -13,12 +13,12 @@ import {
   PLATFORM_SUPPORT_PHONE,
   PLATFORM_SUPPORT_PHONE_HREF,
   VKU_ADDRESS,
+  VKU_DEPARTMENT_URL,
   VKU_EMAIL,
   VKU_NAME,
   VKU_PHONE,
   VKU_PHONE_HREF,
   VKU_SITE,
-  VKU_SOURCES,
 } from "../lib/vkuInfo";
 
 /** Icon SVG inline dùng chung trong trang; luôn là trang trí nên ẩn khỏi cây trợ năng. */
@@ -120,7 +120,7 @@ function IconGlobe() {
 
 type GuideStep = { title: string; body: ReactNode };
 
-/** Nhịp màu trang trí cho timeline; xoay vòng theo thứ tự bước, không mang nghĩa nghiệp vụ. */
+/** Nhịp màu trang trí cho số bước; xoay vòng theo thứ tự bước, không mang nghĩa nghiệp vụ. */
 const STEP_TONES = ["blue", "red", "yellow"] as const;
 
 const GUIDE_STEPS: GuideStep[] = [
@@ -378,7 +378,7 @@ export function SupportPage() {
                 <Chip href={KHCN_HTQT_PHONE_HREF} icon={<IconPhone />}>
                   {KHCN_HTQT_PHONE}
                 </Chip>
-                <Chip href={VKU_SOURCES.department.url} icon={<IconGlobe />} external>
+                <Chip href={VKU_DEPARTMENT_URL} icon={<IconGlobe />} external>
                   Trang đơn vị
                 </Chip>
               </div>

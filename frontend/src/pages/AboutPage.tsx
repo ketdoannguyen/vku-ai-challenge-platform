@@ -8,16 +8,7 @@ import {
   PLATFORM_SUPPORT_NAME,
   VKU_ADDRESS,
   VKU_NAME,
-  VKU_SOURCES,
-  type VkuSource,
 } from "../lib/vkuInfo";
-
-const SOURCES: VkuSource[] = [
-  VKU_SOURCES.about,
-  VKU_SOURCES.contact,
-  VKU_SOURCES.department,
-  VKU_SOURCES.udn,
-];
 
 /** Icon SVG inline dùng chung trong trang; luôn là trang trí nên ẩn khỏi cây trợ năng. */
 function Icon({
@@ -208,29 +199,12 @@ function IconHeadset() {
   );
 }
 
-function IconLink() {
-  return (
-    <Icon>
-      <path d="M10.2 13.8a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 0 0-5.7-5.7L11.4 6.9" />
-      <path d="M13.8 10.2a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 0 0 5.7 5.7l1.6-1.6" />
-    </Icon>
-  );
-}
-
-function IconArrowRight() {
-  return (
-    <Icon>
-      <path d="M4.5 12h15" />
-      <path d="m13.5 6 6 6-6 6" />
-    </Icon>
-  );
-}
-
 /** Nhịp màu trang trí cho icon feature; xoay vòng theo thứ tự khai báo, không mang nghĩa nghiệp vụ. */
 type Tone = "blue" | "red" | "yellow";
 
 type PlatformFeature = { title: string; body: string; icon: ReactNode; tone: Tone };
-type HostFact = { label: string; value: string; icon: ReactNode };
+/** `wide` cho dữ kiện dài: ở desktop nó chiếm hai cột để hàng dữ kiện vẫn kín, không hở ô. */
+type HostFact = { label: string; value: string; icon: ReactNode; wide?: boolean };
 type SupportUnit = { name: string; body: string; icon: ReactNode };
 
 const PLATFORM_FEATURES: PlatformFeature[] = [
@@ -277,6 +251,7 @@ const HOST_FACTS: HostFact[] = [
     value:
       "Đào tạo nguồn nhân lực chất lượng cao, nghiên cứu khoa học, chuyển giao tri thức và công nghệ về công nghệ thông tin, truyền thông, kinh tế số và các lĩnh vực liên quan.",
     icon: <IconTarget />,
+    wide: true,
   },
   { label: "Địa chỉ", value: VKU_ADDRESS, icon: <IconMapPin /> },
 ];
@@ -321,151 +296,98 @@ export function AboutPage() {
         </div>
       </header>
 
-      {/* Hai wrapper `about-col` chỉ tồn tại để mỗi cột xếp dọc độc lập ở desktop;
-          dưới 1200px chúng `display: contents` nên năm card vẫn theo đúng thứ tự
-          DOM: Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn. */}
+      {/* Ba khối công khai xếp thành ba hàng full-width, đúng thứ tự đọc
+          Nền tảng → VKU → Đầu mối hỗ trợ; mỗi khối tự chia lưới con cho các mục. */}
       <div className="about-grid">
-        <div className="about-col about-col-left">
-          <section className="about-card about-platform" aria-labelledby="about-platform-title">
-            <div className="about-card-head">
-              <span className="about-card-icon about-card-icon-blue">
-                <IconLayers />
-              </span>
-              <div className="about-card-copy">
-                <h2 className="about-card-title" id="about-platform-title">
-                  Về nền tảng AI Challenge
-                </h2>
-              </div>
-            </div>
-
-            <ul className="about-feature-list">
-              {PLATFORM_FEATURES.map((feature) => (
-                <li className="about-feature" key={feature.title}>
-                  <span
-                    className={`about-feature-icon about-feature-icon-${feature.tone}`}
-                    aria-hidden="true"
-                  >
-                    {feature.icon}
-                  </span>
-                  <div className="about-feature-body">
-                    <h3 className="about-feature-title">{feature.title}</h3>
-                    <p className="about-feature-text">{feature.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="about-card about-vku" aria-labelledby="about-vku-title">
-            <div className="about-card-head">
-              <span className="about-card-icon about-card-icon-red">
-                <IconUniversity />
-              </span>
-              <div className="about-card-copy">
-                <h2 className="about-card-title" id="about-vku-title">
-                  VKU - đơn vị chủ trì
-                </h2>
-              </div>
-            </div>
-
-            <ul className="about-fact-list" aria-label="Thông tin VKU">
-              {HOST_FACTS.map((fact) => (
-                <li className="about-fact" key={fact.label}>
-                  <span className="about-fact-icon" aria-hidden="true">
-                    {fact.icon}
-                  </span>
-                  <div className="about-fact-body">
-                    <h3 className="about-fact-title">{fact.label}</h3>
-                    <p className="about-fact-text">{fact.value}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </div>
-
-        <div className="about-col about-col-right">
-          <section className="about-card about-support" aria-labelledby="about-support-title">
-            <div className="about-card-head">
-              <span className="about-card-icon about-card-icon-yellow">
-                <IconUsers />
-              </span>
-              <div className="about-card-copy">
-                <h2 className="about-card-title" id="about-support-title">
-                  Đơn vị và đầu mối hỗ trợ
-                </h2>
-              </div>
-            </div>
-
-            <ul className="about-unit-list">
-              {SUPPORT_UNITS.map((unit) => (
-                <li className="about-unit" key={unit.name}>
-                  <span className="about-unit-icon" aria-hidden="true">
-                    {unit.icon}
-                  </span>
-                  <div className="about-unit-body">
-                    <h3 className="about-unit-title">{unit.name}</h3>
-                    <p className="about-unit-text">{unit.body}</p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            <p className="about-note">
-              Thông tin liên hệ đầy đủ ở trang <Link to="/ho-tro">Hỗ trợ &amp; Liên hệ</Link>.
-            </p>
-          </section>
-
-          <section className="about-card about-cta" aria-labelledby="about-cta-title">
-            <div className="about-card-head">
-              <span className="about-card-icon about-card-icon-blue">
-                <IconArrowRight />
-              </span>
-              <div className="about-card-copy">
-                <h2 className="about-card-title" id="about-cta-title">
-                  Bắt đầu
-                </h2>
-              </div>
-            </div>
-
-            <div className="about-cta-body">
-              <Link className="btn about-cta-link" to="/">
-                Xem danh sách cuộc thi
-              </Link>
-              <div className="about-cta-accent" aria-hidden="true">
-                <span />
-                <span />
-              </div>
-            </div>
-          </section>
-        </div>
-
-        <section className="about-card about-sources" aria-labelledby="about-sources-title">
+        <section className="about-card about-platform" aria-labelledby="about-platform-title">
           <div className="about-card-head">
-            <span className="about-card-icon about-card-icon-neutral">
-              <IconLink />
+            <span className="about-card-icon about-card-icon-blue">
+              <IconLayers />
             </span>
             <div className="about-card-copy">
-              <h2 className="about-card-title" id="about-sources-title">
-                Nguồn thông tin
+              <h2 className="about-card-title" id="about-platform-title">
+                Về nền tảng AI Challenge
               </h2>
             </div>
           </div>
 
-          <ul className="resource-list">
-            {SOURCES.map((source) => (
-              <li key={source.url}>
-                <a
-                  className="resource-link"
-                  href={source.url}
-                  target="_blank"
-                  rel="noopener noreferrer nofollow"
+          <ul className="about-feature-list">
+            {PLATFORM_FEATURES.map((feature) => (
+              <li className="about-feature" key={feature.title}>
+                <span
+                  className={`about-feature-icon about-feature-icon-${feature.tone}`}
+                  aria-hidden="true"
                 >
-                  <span className="resource-label">{source.label}</span>
-                </a>
+                  {feature.icon}
+                </span>
+                <div className="about-feature-body">
+                  <h3 className="about-feature-title">{feature.title}</h3>
+                  <p className="about-feature-text">{feature.body}</p>
+                </div>
               </li>
             ))}
           </ul>
+        </section>
+
+        <section className="about-card about-vku" aria-labelledby="about-vku-title">
+          <div className="about-card-head">
+            <span className="about-card-icon about-card-icon-red">
+              <IconUniversity />
+            </span>
+            <div className="about-card-copy">
+              <h2 className="about-card-title" id="about-vku-title">
+                VKU - đơn vị chủ trì
+              </h2>
+            </div>
+          </div>
+
+          <ul className="about-fact-list" aria-label="Thông tin VKU">
+            {HOST_FACTS.map((fact) => (
+              <li
+                className={fact.wide ? "about-fact about-fact-wide" : "about-fact"}
+                key={fact.label}
+              >
+                <span className="about-fact-icon" aria-hidden="true">
+                  {fact.icon}
+                </span>
+                <div className="about-fact-body">
+                  <h3 className="about-fact-title">{fact.label}</h3>
+                  <p className="about-fact-text">{fact.value}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="about-card about-support" aria-labelledby="about-support-title">
+          <div className="about-card-head">
+            <span className="about-card-icon about-card-icon-yellow">
+              <IconUsers />
+            </span>
+            <div className="about-card-copy">
+              <h2 className="about-card-title" id="about-support-title">
+                Đơn vị và đầu mối hỗ trợ
+              </h2>
+            </div>
+          </div>
+
+          <ul className="about-unit-list">
+            {SUPPORT_UNITS.map((unit) => (
+              <li className="about-unit" key={unit.name}>
+                <span className="about-unit-icon" aria-hidden="true">
+                  {unit.icon}
+                </span>
+                <div className="about-unit-body">
+                  <h3 className="about-unit-title">{unit.name}</h3>
+                  <p className="about-unit-text">{unit.body}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <p className="about-note">
+            Thông tin liên hệ đầy đủ ở trang <Link to="/ho-tro">Hỗ trợ &amp; Liên hệ</Link>.
+          </p>
         </section>
       </div>
     </div>

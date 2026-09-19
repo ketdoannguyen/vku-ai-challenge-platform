@@ -118,20 +118,23 @@ test("ảnh external/data bị loại, chỉ asset same-origin được transfor
   expect(srcs.filter(Boolean)).toEqual(["/api/competitions/ai-cup/assets/ok.png"]);
 });
 
-test("bốn cấp heading tác giả map thành h2..h5 và giữ nguyên chữ của tác giả", () => {
+test("sáu cấp heading tác giả map thành h2..h6, cấp sáu là mức chặn dưới", () => {
   const { container } = render(
     <MarkdownView
-      markdown={"# Cấp một\n\n## Cấp hai\n\n### Cấp ba\n\n#### Cấp bốn"}
+      markdown={
+        "# Cấp một\n\n## Cấp hai\n\n### Cấp ba\n\n#### Cấp bốn\n\n##### Cấp năm\n\n###### Cấp sáu"
+      }
       competitionSlug="ai-cup"
     />,
   );
+  // Sáu cấp tác giả hạ đúng một bậc; không còn bậc nào dưới h6 nên `######` giữ nguyên h6.
   expect(
     Array.from(container.querySelectorAll("h2, h3, h4, h5, h6")).map((el) => el.tagName),
-  ).toEqual(["H2", "H3", "H4", "H5"]);
+  ).toEqual(["H2", "H3", "H4", "H5", "H6", "H6"]);
   // Renderer không tự đánh số hay thêm chữ vào heading.
   expect(
-    Array.from(container.querySelectorAll("h2, h3, h4, h5")).map((el) => el.textContent),
-  ).toEqual(["Cấp một", "Cấp hai", "Cấp ba", "Cấp bốn"]);
+    Array.from(container.querySelectorAll("h2, h3, h4, h5, h6")).map((el) => el.textContent),
+  ).toEqual(["Cấp một", "Cấp hai", "Cấp ba", "Cấp bốn", "Cấp năm", "Cấp sáu"]);
 });
 
 test("bold, italic và strikethrough giữ đúng element semantic", () => {
@@ -212,6 +215,94 @@ test("ảnh lỗi tải chuyển sang placeholder và giữ mô tả alt", () =>
 
   expect(container.querySelector("img")).toBeNull();
   expect(container.querySelector(".md-image-fallback")?.textContent).toContain("Sơ đồ luồng");
+});
+
+test("đúng một # là title tài liệu, ## được nâng thành thanh mục", () => {
+  const { container } = render(
+    <MarkdownView markdown={"# Tổng quan\n\nNội dung.\n\n## Dữ liệu"} competitionSlug="ai-cup" />,
+  );
+  const title = screen.getByRole("heading", { level: 2, name: "Tổng quan" });
+  expect(title).toHaveClass("md-doc-title");
+  expect(title.querySelector(".md-section-badge")).toBeNull();
+
+  const section = screen.getByRole("heading", { level: 3, name: "Dữ liệu" });
+  const badge = section.querySelector(".md-section-badge");
+  const lead = section.querySelector(".md-section-lead");
+  expect(container.querySelector("h3.md-section")).toBe(section);
+  expect(section).toHaveAttribute("data-md-accent", "blue");
+  expect(badge).toHaveAttribute("aria-hidden", "true");
+  expect(lead).toHaveAttribute("aria-hidden", "true");
+  expect(section.textContent).toBe("Dữ liệu");
+  expect(section.textContent).not.toMatch(/\d/);
+});
+
+test("nhiều # giữ chế độ thanh mục và marker con theo màu mục cha", () => {
+  const { container } = render(
+    <MarkdownView
+      markdown={
+        "# Mục lam\n\n## Con lam\n\n### Cháu lam\n\n# Mục đỏ\n\n## Con đỏ\n\n# Mục vàng\n\n## Con vàng\n\n# Mục lam lại\n\n## Con lam lại"
+      }
+      competitionSlug="ai-cup"
+    />,
+  );
+  expect(container.querySelector(".md-doc-title")).toBeNull();
+  expect(Array.from(container.querySelectorAll("h2.md-section")).map((el) => el.textContent)).toEqual([
+    "Mục lam",
+    "Mục đỏ",
+    "Mục vàng",
+    "Mục lam lại",
+  ]);
+  expect(
+    Array.from(container.querySelectorAll("h2.md-section")).map((el) =>
+      el.getAttribute("data-md-accent"),
+    ),
+  ).toEqual(["blue", "red", "yellow", "blue"]);
+  expect(
+    ["Con lam", "Cháu lam", "Con đỏ", "Con vàng", "Con lam lại"].map((name) =>
+      screen.getByRole("heading", { name }).getAttribute("data-md-accent"),
+    ),
+  ).toEqual(["blue", "blue", "red", "yellow", "blue"]);
+});
+
+test("title mode nâng lần lượt các cấp thị giác nhưng giữ semantic heading", () => {
+  render(
+    <MarkdownView
+      markdown={"# Title\n\n## Section\n\n### Square\n\n#### Dash\n\n##### Sub\n\n###### Label"}
+      competitionSlug="ai-cup"
+    />,
+  );
+  expect(screen.getByRole("heading", { level: 2, name: "Title" })).toHaveClass("md-doc-title");
+  expect(screen.getByRole("heading", { level: 3, name: "Section" })).toHaveClass("md-section");
+  expect(screen.getByRole("heading", { level: 4, name: "Square" })).toHaveClass("md-h-square");
+  expect(screen.getByRole("heading", { level: 5, name: "Dash" })).toHaveClass("md-h-dash");
+  expect(screen.getByRole("heading", { level: 6, name: "Sub" })).toHaveClass("md-h-sub");
+  expect(screen.getByRole("heading", { level: 6, name: "Label" })).toHaveClass("md-h-label");
+});
+
+test("không có # thì không tự suy diễn title hay thanh mục", () => {
+  const { container } = render(
+    <MarkdownView markdown={"## Cấp hai\n\n### Cấp ba"} competitionSlug="ai-cup" />,
+  );
+  expect(container.querySelector(".md-doc-title, .md-section")).toBeNull();
+  expect(screen.getByRole("heading", { level: 3, name: "Cấp hai" })).toHaveClass("md-h-square");
+  expect(screen.getByRole("heading", { level: 4, name: "Cấp ba" })).toHaveClass("md-h-dash");
+});
+
+test("title và thanh mục giữ inline code, bold và accessible name của tác giả", () => {
+  const { container } = render(
+    <MarkdownView
+      markdown={"# Cột `id` và **`label`**\n\n## Phần **`score`**"}
+      competitionSlug="ai-cup"
+    />,
+  );
+  const title = screen.getByRole("heading", { level: 2, name: "Cột id và label" });
+  expect(title).toHaveClass("md-doc-title");
+  expect(title.querySelectorAll("code")).toHaveLength(2);
+  expect(title.querySelector("strong")).toBeTruthy();
+
+  const section = container.querySelector("h3.md-section") as HTMLElement;
+  expect(section.textContent).toBe("Phần score");
+  expect(section.querySelector(".md-section-text strong code")).toBeTruthy();
 });
 
 test("prop nội bộ `node` của react-markdown không rơi xuống DOM", () => {

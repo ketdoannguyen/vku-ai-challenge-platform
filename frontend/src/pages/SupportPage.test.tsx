@@ -4,7 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { KHCN_HTQT_NAME, VKU_SOURCES } from "../lib/vkuInfo";
+import { KHCN_HTQT_NAME } from "../lib/vkuInfo";
 import { SupportPage } from "./SupportPage";
 
 function renderPage() {
@@ -42,7 +42,7 @@ test("nêu các bước tham gia theo đúng hành vi nền tảng", () => {
   expect(screen.getByText(/Nộp bài CSV/)).toBeTruthy();
 });
 
-test("timeline trình bày đủ sáu bước theo đúng thứ tự", () => {
+test("lưới sáu bước trình bày đủ và đúng thứ tự", () => {
   const { container } = renderPage();
   const steps = container.querySelectorAll(".support-step");
   expect(steps).toHaveLength(6);
@@ -58,7 +58,7 @@ test("timeline trình bày đủ sáu bước theo đúng thứ tự", () => {
   expect(screen.getByRole("link", { name: "Cuộc thi" })).toHaveAttribute("href", "/");
 });
 
-test("nhịp màu timeline xoay vòng và chỉ mang tính trang trí", () => {
+test("nhịp màu số bước xoay vòng và chỉ mang tính trang trí", () => {
   const { container } = renderPage();
   expect(
     [...container.querySelectorAll(".support-step")].map((step) => step.getAttribute("data-tone")),
@@ -145,10 +145,10 @@ test("link website mở tab mới an toàn", () => {
 
 test("không còn khối Nguồn thông tin hay Danh mục hỗ trợ", () => {
   renderPage();
+  // Sau ADR-024 không trang nào còn khối nguồn; khối này cũng không được quay lại `/ho-tro`.
   expect(screen.queryByText(/Nguồn thông tin/)).toBeNull();
   expect(screen.queryByText(/truy cập ngày/)).toBeNull();
-  // Nhãn nguồn chỉ có ở `/gioi-thieu`; khối này không được quay lại `/ho-tro`.
-  expect(screen.queryByText(VKU_SOURCES.about.label)).toBeNull();
+  expect(screen.queryByText(/Giới thiệu Trường/)).toBeNull();
   expect(screen.queryByText(/Danh mục hỗ trợ/)).toBeNull();
   expect(screen.queryByText(/Cần hỗ trợ thêm/)).toBeNull();
 });

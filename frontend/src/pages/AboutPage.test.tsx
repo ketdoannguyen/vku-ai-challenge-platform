@@ -1,9 +1,9 @@
-/** Trang Giới thiệu: nội dung tĩnh, có nguồn chính thức, không gọi API. */
+/** Trang Giới thiệu: nội dung tĩnh, ba hàng full-width, không gọi API. */
 
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { KHCN_HTQT_NAME, PLATFORM_SUPPORT_NAME, VKU_NAME, VKU_SOURCES } from "../lib/vkuInfo";
+import { KHCN_HTQT_NAME, PLATFORM_SUPPORT_NAME, VKU_NAME } from "../lib/vkuInfo";
 import { AboutPage } from "./AboutPage";
 
 function renderPage() {
@@ -12,11 +12,6 @@ function renderPage() {
       <AboutPage />
     </MemoryRouter>,
   );
-}
-
-/** Link nguồn/website ngoài - tách khỏi link nội bộ để kiểm tra thuộc tính an toàn. */
-function externalLinks() {
-  return screen.getAllByRole("link").filter((link) => link.getAttribute("target") === "_blank");
 }
 
 afterEach(() => {
@@ -49,26 +44,10 @@ test("hiển thị đơn vị chủ trì và các đầu mối hỗ trợ", () =
   expect(screen.getByText(/Nguyễn Kết Đoàn/)).toBeTruthy();
 });
 
-test("dẫn tiếp tới danh sách cuộc thi và trang hỗ trợ", () => {
+test("chỉ dẫn tiếp sang trang Hỗ trợ, không còn CTA hay link ngoài", () => {
   renderPage();
-  expect(screen.getByRole("link", { name: "Xem danh sách cuộc thi" })).toHaveAttribute("href", "/");
   expect(screen.getByRole("link", { name: "Hỗ trợ & Liên hệ" })).toHaveAttribute("href", "/ho-tro");
-});
-
-test("link nguồn trỏ tới trang chính thức và mở tab mới an toàn", () => {
-  renderPage();
-  const sources = [
-    "https://vku.udn.vn/gioi-thieu",
-    "https://vku.udn.vn/lien-he",
-    "https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/",
-    "https://udn.vn/",
-  ];
-  const hrefs = externalLinks().map((link) => link.getAttribute("href"));
-  expect(hrefs).toEqual(expect.arrayContaining(sources));
-
-  for (const link of externalLinks()) {
-    expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
-  }
+  expect(screen.getAllByRole("link")).toHaveLength(1);
 });
 
 test("trang tĩnh: không gọi API", () => {
@@ -78,16 +57,26 @@ test("trang tĩnh: không gọi API", () => {
   expect(fetchSpy).not.toHaveBeenCalled();
 });
 
-test("cấu trúc heading: một h1 và năm khối h2 theo đúng thứ tự đọc", () => {
+test("cấu trúc heading: một h1 và ba khối h2 theo đúng thứ tự đọc", () => {
   renderPage();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   expect(screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent)).toEqual([
     "Về nền tảng AI Challenge",
     "VKU - đơn vị chủ trì",
     "Đơn vị và đầu mối hỗ trợ",
-    "Bắt đầu",
-    "Nguồn thông tin",
   ]);
+});
+
+test("ba khối là ba hàng full-width, mỗi khối tự chia lưới con", () => {
+  const { container } = renderPage();
+  expect(container.querySelectorAll(".about-grid > .about-card")).toHaveLength(3);
+  expect(
+    container.querySelectorAll(".about-feature-list, .about-fact-list, .about-unit-list"),
+  ).toHaveLength(3);
+  // Không còn wrapper cột nửa hay card "Bắt đầu"/"Nguồn thông tin".
+  expect(container.querySelector(".about-col, .about-cta, .about-sources")).toBeNull();
+  expect(screen.queryByText(/Nguồn thông tin/)).toBeNull();
+  expect(screen.queryByText(/Xem danh sách cuộc thi/)).toBeNull();
 });
 
 test("nền tảng được tách thành bốn feature item giữ nguyên nội dung", () => {
@@ -108,8 +97,8 @@ test("nền tảng được tách thành bốn feature item giữ nguyên nội 
   expect(text).toContain("hạn mức nộp do Ban Tổ chức cấu hình cho từng cuộc thi");
 });
 
-test("thông tin VKU giữ đủ năm dữ kiện có nguồn", () => {
-  renderPage();
+test("thông tin VKU giữ đủ năm dữ kiện, Sứ mệnh mang ô rộng", () => {
+  const { container } = renderPage();
   const facts = screen.getByRole("list", { name: "Thông tin VKU" });
   const items = within(facts).getAllByRole("listitem");
   expect(items).toHaveLength(5);
@@ -120,6 +109,10 @@ test("thông tin VKU giữ đủ năm dữ kiện có nguồn", () => {
     "Sứ mệnh",
     "Địa chỉ",
   ]);
+  // Dữ kiện dài nhất chiếm hai cột để hàng dữ kiện ở desktop không hở ô nào.
+  const wide = container.querySelectorAll(".about-fact-wide");
+  expect(wide).toHaveLength(1);
+  expect(wide[0]?.querySelector("h3")?.textContent).toBe("Sứ mệnh");
 });
 
 test("ba đầu mối hỗ trợ đúng thứ tự và không lặp dữ liệu liên hệ của trang Hỗ trợ", () => {
@@ -134,53 +127,6 @@ test("ba đầu mối hỗ trợ đúng thứ tự và không lặp dữ liệu 
   // Không lặp email/điện thoại: đó là việc của `/ho-tro`.
   expect(container.querySelector('a[href^="mailto:"], a[href^="tel:"]')).toBeNull();
   expect(screen.queryByText(/nkdoan@vku\.udn\.vn|info@vku\.udn\.vn/)).toBeNull();
-});
-
-test("khối Nguồn thông tin liệt kê bốn nguồn chính thức, gồm cả Phòng KHCN - HTQT", () => {
-  const { container } = renderPage();
-  expect(screen.getByRole("heading", { level: 2, name: "Nguồn thông tin" })).toBeTruthy();
-  const sources = container.querySelectorAll(".about-sources li");
-  expect(sources).toHaveLength(4);
-  expect([...sources].map((item) => item.querySelector("a")?.getAttribute("href"))).toEqual([
-    VKU_SOURCES.about.url,
-    VKU_SOURCES.contact.url,
-    VKU_SOURCES.department.url,
-    VKU_SOURCES.udn.url,
-  ]);
-});
-
-test("nhãn nguồn là tên ngắn, không dán URL", () => {
-  const { container } = renderPage();
-  const labels = [...container.querySelectorAll(".about-sources .resource-label")].map(
-    (label) => label.textContent ?? "",
-  );
-  expect(labels).toEqual([
-    VKU_SOURCES.about.label,
-    VKU_SOURCES.contact.label,
-    VKU_SOURCES.department.label,
-    VKU_SOURCES.udn.label,
-  ]);
-  for (const label of labels) {
-    expect(label).not.toMatch(/https?:\/\/|\.vn/);
-    // Đếm chữ, bỏ dấu nối đứng riêng ("Phòng KHCN - Hợp tác Quốc tế" là sáu chữ).
-    const words = label.split(/\s+/).filter((token) => /\p{L}/u.test(token));
-    expect(words.length).toBeLessThanOrEqual(6);
-  }
-});
-
-test("CTA chính là link VKU Blue duy nhất, không có CTA phụ", () => {
-  const { container } = renderPage();
-  const cta = screen.getByRole("link", { name: "Xem danh sách cuộc thi" });
-  expect(cta).toHaveClass("btn", "about-cta-link");
-  expect(container.querySelectorAll(".about-cta-link")).toHaveLength(1);
-  expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
-    "Hỗ trợ & Liên hệ",
-    "Xem danh sách cuộc thi",
-    VKU_SOURCES.about.label,
-    VKU_SOURCES.contact.label,
-    VKU_SOURCES.department.label,
-    VKU_SOURCES.udn.label,
-  ]);
 });
 
 test("không còn markup của giao diện cũ hay của trang Hỗ trợ", () => {

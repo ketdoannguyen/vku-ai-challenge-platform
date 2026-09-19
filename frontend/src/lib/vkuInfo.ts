@@ -1,6 +1,6 @@
 /**
  * Thông tin chính thức dùng chung cho hai trang tĩnh `/gioi-thieu` và `/ho-tro`.
- * Mọi dữ kiện về VKU lấy từ `VKU_SOURCES`; đổi thông tin thì sửa ở đây, không sửa trong JSX.
+ * Mọi dữ kiện về VKU đều khai ở đây; đổi thông tin thì sửa file này, không sửa trong JSX.
  */
 
 export const VKU_NAME =
@@ -23,25 +23,9 @@ export const PLATFORM_SUPPORT_EMAIL = "nkdoan@vku.udn.vn";
 export const PLATFORM_SUPPORT_PHONE = "0396090576";
 export const PLATFORM_SUPPORT_PHONE_HREF = "tel:+84396090576";
 
-/** Nhãn nguồn cố ý ngắn (2–6 chữ) thay vì dán URL dài; domain đã thể hiện qua `target="_blank"`. */
-export type VkuSource = { label: string; url: string };
-
-export const VKU_SOURCES: { about: VkuSource; contact: VkuSource; department: VkuSource; udn: VkuSource } =
-  {
-    about: {
-      label: "Giới thiệu Trường",
-      url: "https://vku.udn.vn/gioi-thieu",
-    },
-    contact: {
-      label: "Liên hệ",
-      url: "https://vku.udn.vn/lien-he",
-    },
-    department: {
-      label: "Phòng KHCN - Hợp tác Quốc tế",
-      url: "https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/",
-    },
-    udn: {
-      label: "Đại học Đà Nẵng",
-      url: "https://udn.vn/",
-    },
-  };
+/**
+ * Trang giới thiệu đơn vị chủ trì trên site VKU. Đây là nguồn ngoài duy nhất còn lại sau ADR-024:
+ * danh mục "Nguồn thông tin" ở `/gioi-thieu` đã bị bỏ nên ba URL còn lại không còn nơi hiển thị.
+ */
+export const VKU_DEPARTMENT_URL =
+  "https://vku.udn.vn/vi/co-cau-to-chuc/phong-khoa-hoc-cong-nghe-hop-tac-quoc-te/";

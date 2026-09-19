@@ -785,13 +785,13 @@ samp {
   max-width: var(--container-wide);
 }
 
-/* Trang Hỗ trợ có lưới hai cột (hướng dẫn + liên hệ) nên cũng dùng trần rộng. */
+/* Trang Hỗ trợ có hàng Các bước tham gia trải sáu ô nên cũng dùng trần rộng. */
 .app-main-support {
   max-width: var(--container-wide);
 }
 
-/* Trang Giới thiệu cũng hai cột ở desktop nên dùng chung trần rộng; chỉ áp cho
-   đúng `/gioi-thieu`, không đổi trần mặc định của các màn còn lại. */
+/* Trang Giới thiệu cũng chia lưới con bên trong khối full-width nên dùng chung
+   trần rộng; chỉ áp cho đúng `/gioi-thieu`, không đổi trần mặc định các màn khác. */
 .app-main-about {
   max-width: var(--container-wide);
 }
@@ -3474,55 +3474,118 @@ select.input {
   scroll-margin-top: var(--header-offset);
 }
 
-/* Bốn cấp heading tác giả (`#`, `##`, `###`, `####`) lần lượt render thành h2..h5. Mỗi cấp có
-   một dấu hiệu thị giác riêng để hierarchy đọc được ngay: h2 vạch xanh đặc, h3 vạch ngăn chân
-   mục, h4 gạch đỏ ngắn, h5/h6 nhỏ và dịu hơn. Đây thuần là trình bày - renderer không đánh số,
-   không chèn chữ hay nhãn vào heading. */
-.markdown-body h2 {
-  padding-left: 14px;
-  border-left: 4px solid var(--vku-blue-600);
-  border-radius: var(--radius-xs);
+/* Heading giữ semantic tag nhưng vai trò thị giác phụ thuộc cấu trúc tài liệu:
+   đúng một source `#` thì đó là title đỏ và các cấp dưới nâng lên một bậc; nhiều/không có `#`
+   thì `#` là thanh mục. Renderer không đánh số, không chèn chữ hay sửa nội dung. */
+
+/* Heading là sibling phẳng, nên mỗi heading con nhận lại màu section cha từ AST. */
+.markdown-body [data-md-accent="blue"] {
+  --md-section-accent: var(--vku-blue-600);
+}
+
+.markdown-body [data-md-accent="red"] {
+  --md-section-accent: var(--vku-red-600);
+}
+
+.markdown-body [data-md-accent="yellow"] {
+  --md-section-accent: var(--vku-yellow-700);
+}
+
+/* Title tổng chỉ xuất hiện khi có đúng một source `#`; vẫn là h2 để trang chỉ có một H1. */
+.markdown-body .md-doc-title {
+  font-size: var(--text-h1);
+  line-height: var(--leading-h1);
+  letter-spacing: var(--tracking-h1);
+  color: var(--vku-red-700);
+  margin: 0 0 1.5rem;
+}
+
+/* Thanh mục. Hàng flex có đúng ba mục nên tiêu đề dài vẫn xuống dòng bình thường. */
+.markdown-body .md-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-size: var(--text-h2);
   line-height: var(--leading-h2);
   letter-spacing: var(--tracking-h2);
   margin: 2.5rem 0 1rem;
 }
 
-.markdown-body h3 {
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-soft);
+/* Ô màu chỉ lớn hơn marker cấp dưới một ít: đủ phân cấp nhưng không lấn át chữ. */
+.markdown-body .md-section-badge {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--md-section-accent, var(--vku-blue-600));
+}
+
+.markdown-body .md-section-text {
+  min-width: 0;
+}
+
+.markdown-body .md-section-lead {
+  flex: 1 1 0;
+  min-width: 12px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--md-section-accent, var(--vku-blue-600));
+  opacity: 0.3;
+}
+
+.markdown-body .md-h-square {
   font-size: var(--text-h3);
   line-height: var(--leading-h3);
   letter-spacing: var(--tracking-h3);
   margin: 1.75rem 0 0.75rem;
 }
 
-.markdown-body h4 {
+/* Ô viền nhỏ, mảnh và theo màu section cha - không fix cứng màu xanh. */
+.markdown-body .md-h-square::before {
+  content: "";
+  display: inline-block;
+  box-sizing: border-box;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border: 1.5px solid var(--md-section-accent, var(--vku-blue-600));
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+.markdown-body .md-h-dash {
   font-size: var(--text-h4);
   line-height: var(--leading-h4);
   letter-spacing: var(--tracking-h4);
   margin: 1.5rem 0 0.5rem;
 }
 
-/* Gạch đỏ ngắn là dấu hiệu của cấp bốn, dùng inline-block nên heading vẫn wrap bình thường
-   khi bên trong có bold/italic/code. */
-.markdown-body h4::before {
+/* Gạch ngắn cũng theo màu section cha. */
+.markdown-body .md-h-dash::before {
   content: "";
   display: inline-block;
-  width: 12px;
-  height: 3px;
+  width: 10px;
+  height: 2px;
   margin-right: 8px;
   border-radius: var(--radius-pill);
-  background: var(--vku-red-600);
+  background: var(--md-section-accent, var(--vku-red-600));
   vertical-align: middle;
 }
 
-.markdown-body h5,
-.markdown-body h6 {
+.markdown-body .md-h-sub {
   font-size: var(--text-body-sm);
   line-height: var(--leading-body-sm);
   letter-spacing: var(--tracking-body-sm);
   color: var(--text-secondary);
+  margin: 1.25rem 0 0.5rem;
+}
+
+.markdown-body .md-h-label {
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
   margin: 1.25rem 0 0.5rem;
 }
 
@@ -3610,13 +3673,12 @@ select.input {
   color: var(--vku-red-600);
 }
 
-/* Trích dẫn là nhịp VKU rõ nhất trong bài viết: nền xanh rất nhạt chuyển dần sang
-   vàng rất nhạt, viền trái xanh. Đây thuần trình bày - không suy ra trạng thái nào. */
+/* Trích dẫn dùng nền xanh rất nhạt chuyển dần sang vàng rất nhạt; không thêm viền màu hay
+   suy diễn trạng thái từ nội dung. */
 .markdown-body blockquote {
   margin: 1.5rem 0;
   padding: var(--space-md);
-  border-left: 4px solid var(--vku-blue-600);
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  border-radius: var(--radius-lg);
   background: linear-gradient(90deg, var(--vku-blue-50), var(--vku-yellow-50));
   color: var(--text-secondary);
 }
@@ -3829,11 +3891,15 @@ select.input {
 }
 
 @media (min-width: 48rem) {
-  .markdown-body h2 {
+  .markdown-body .md-doc-title {
+    font-size: var(--text-h1-desktop);
+  }
+
+  .markdown-body .md-section {
     font-size: var(--text-h2-desktop);
   }
 
-  .markdown-body h3 {
+  .markdown-body .md-h-square {
     font-size: var(--text-h3-desktop);
   }
 }
@@ -3843,6 +3909,17 @@ select.input {
   .markdown-body .md-code-copy {
     min-height: 44px;
     padding-inline: 14px;
+  }
+
+  /* Thanh mục thu gọn để tiêu đề dài còn chỗ xuống dòng ở 375px. */
+  .markdown-body .md-section {
+    gap: 8px;
+  }
+
+  .markdown-body .md-section-badge {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
   }
 }
 
@@ -10330,7 +10407,7 @@ button:focus-visible {
 
 /* Panel đầu trang dùng `.page-hero`. */
 
-/* --- Lưới nội dung --- */
+/* --- Lưới nội dung: hàng 1 là Các bước tham gia, hàng 2 là Liên hệ ｜ FAQ --- */
 .support-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -10342,14 +10419,16 @@ button:focus-visible {
   align-items: start;
 }
 
-/* `grid-template-areas` đặt Liên hệ sang cột phải ở desktop mà vẫn giữ nguyên thứ
+/* `grid-template-areas` đặt Liên hệ sang cột trái ở desktop mà vẫn giữ nguyên thứ
    tự DOM (Hướng dẫn → Liên hệ → FAQ) - nhờ vậy tab order khớp thứ tự thị giác. */
 @media (min-width: 75rem) {
   .support-grid {
-    grid-template-columns: minmax(0, 1.8fr) minmax(340px, 0.8fr);
+    /* Hai cột hàng 2 chia đôi đều nhau: Liên hệ là danh sách ngắn còn FAQ là
+       accordion chín mục, lệch bề ngang làm hai khối đọc như hai cỡ khác nhau. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-template-areas:
-      "guide contact"
-      "faq contact";
+      "guide   guide"
+      "contact faq";
     gap: var(--space-lg);
   }
 }
@@ -10432,24 +10511,42 @@ button:focus-visible {
   line-height: var(--leading-body-sm);
 }
 
-/* --- Timeline 6 bước --- */
+/* --- Lưới 6 bước --- */
+/* Card hướng dẫn full-width nên sáu bước trải thành lưới, không dồn về một cột
+   trái rồi bỏ trống nửa card bên phải. Số cột luôn chia hết cho 6. */
 .support-timeline {
   display: grid;
-  gap: 18px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   margin: var(--space-md) 0 0;
   padding: 0;
   list-style: none;
 }
 
+@media (min-width: 48rem) {
+  .support-timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 75rem) {
+  .support-timeline {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 .support-step {
-  position: relative;
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 12px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
 }
 
 .support-step-marker {
-  position: relative;
   display: grid;
   place-items: center;
   width: 32px;
@@ -10473,18 +10570,6 @@ button:focus-visible {
 .support-step[data-tone="yellow"] .support-step-marker {
   background: var(--vku-yellow-600);
   color: #4a3400;
-}
-
-/* Đường nối mảnh giữa các marker; chỉ trang trí nên aria-hidden ở markup. */
-.support-step:not(:last-child) .support-step-marker::after {
-  content: "";
-  position: absolute;
-  top: calc(100% + 3px);
-  left: 50%;
-  width: 1px;
-  height: 16px;
-  transform: translateX(-50%);
-  background: var(--vku-border);
 }
 
 .support-step-body {
@@ -10692,48 +10777,16 @@ button:focus-visible {
 
 /* Panel đầu trang dùng `.page-hero`. */
 
-/* --- Lưới nội dung --- */
+/* --- Lưới nội dung: ba khối là ba hàng, mỗi khối chiếm trọn bề ngang --- */
 .about-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-md);
-  align-items: start;
 }
 
-/* Wrapper cột không tạo hộp ở màn hẹp, nhờ vậy năm card vẫn là item trực tiếp
-   của lưới và giữ đúng thứ tự DOM: Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn. */
-.about-col {
-  display: contents;
-}
-
-/* Từ 1200px mỗi cột là một chồng dọc độc lập: card dưới bám ngay đuôi card trên,
-   không để lại khoảng trống theo hàng của lưới khi hai cột lệch chiều cao. */
-@media (min-width: 75rem) {
+@media (min-width: 48rem) {
   .about-grid {
-    grid-template-columns: minmax(0, 1.6fr) minmax(340px, 0.95fr);
-    grid-template-areas:
-      "left    right"
-      "sources sources";
     gap: var(--space-lg);
-  }
-
-  .about-col {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-lg);
-    min-width: 0;
-  }
-
-  .about-col-left {
-    grid-area: left;
-  }
-
-  .about-col-right {
-    grid-area: right;
-  }
-
-  .about-sources {
-    grid-area: sources;
   }
 }
 
@@ -10764,15 +10817,6 @@ button:focus-visible {
 
 .about-support {
   border-top: 3px solid var(--vku-yellow-600);
-}
-
-.about-cta {
-  border-top: 3px solid var(--vku-blue-600);
-  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
-}
-
-.about-sources {
-  border-top: 3px solid var(--vku-border);
 }
 
 .about-card-head {
@@ -10807,11 +10851,6 @@ button:focus-visible {
   color: var(--vku-yellow-800);
 }
 
-.about-card-icon-neutral {
-  background: var(--vku-border-soft);
-  color: var(--vku-ink-muted);
-}
-
 .about-card-copy {
   min-width: 0;
 }
@@ -10826,11 +10865,27 @@ button:focus-visible {
   letter-spacing: var(--tracking-h3);
 }
 
+/* --- Ô dữ kiện dùng chung cho cả ba khối: viền mảnh, nền trắng --- */
+.about-feature,
+.about-fact,
+.about-unit {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
 /* --- Khối 1: bốn đặc điểm nền tảng --- */
+/* Card đã full-width nên lưới con phải chia đủ cột, không để ô dữ kiện ngắn nằm
+   trơ giữa hàng rộng cả nghìn pixel. */
 .about-feature-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 18px;
+  gap: 12px;
   margin: var(--space-md) 0 0;
   padding: 0;
   list-style: none;
@@ -10839,15 +10894,13 @@ button:focus-visible {
 @media (min-width: 48rem) {
   .about-feature-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px 24px;
   }
 }
 
-.about-feature {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
+@media (min-width: 75rem) {
+  .about-feature-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
 
 .about-feature-icon {
@@ -10899,17 +10952,33 @@ button:focus-visible {
 /* --- Khối 2: thông tin VKU --- */
 .about-fact-list {
   display: grid;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
   margin: var(--space-md) 0 0;
   padding: 0;
   list-style: none;
 }
 
-.about-fact {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  min-width: 0;
+/* Năm dữ kiện: ở hai cột thì ô cuối lẻ ra trải hết hàng, ở ba cột thì "Sứ mệnh"
+   (dài nhất) chiếm hai cột - hàng nào cũng kín, không hở ô trống. */
+@media (min-width: 48rem) and (max-width: 74.99rem) {
+  .about-fact-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-fact-list > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 75rem) {
+  .about-fact-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .about-fact-wide {
+    grid-column: span 2;
+  }
 }
 
 /* Icon ở đây chỉ để dò nhanh, không tô nền: màu mạnh đã dành cho viền card. */
@@ -10920,12 +10989,6 @@ button:focus-visible {
   width: 24px;
   height: 24px;
   color: var(--vku-ink-muted);
-}
-
-/* Khối VKU nằm ở cột trái rộng nên phải tự giới hạn bề ngang đọc. */
-.about-fact-text,
-.about-unit-text {
-  max-width: 62ch;
 }
 
 .about-fact-title {
@@ -10947,21 +11010,28 @@ button:focus-visible {
 /* --- Khối 3: đơn vị và đầu mối hỗ trợ --- */
 .about-unit-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   margin: var(--space-md) 0 0;
   padding: 0;
   list-style: none;
 }
 
-.about-unit {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--vku-border-soft);
-  border-radius: var(--radius-xl);
-  background: var(--surface);
+/* Ba đầu mối: ô thứ ba lẻ nên trải hết hàng ở mức hai cột. */
+@media (min-width: 48rem) and (max-width: 74.99rem) {
+  .about-unit-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .about-unit-list > :last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 75rem) {
+  .about-unit-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 .about-unit-icon {
@@ -11009,70 +11079,4 @@ button:focus-visible {
   font-weight: 600;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-/* --- Khối 4: bắt đầu --- */
-.about-cta-body {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-md);
-  margin-top: var(--space-md);
-}
-
-/* `.btn` cao 40px; CTA cuối trang là đích chạm chính nên nâng lên 46px theo
-   `ABOUT_PAGE_DESIGN.md` §52. `min-height` thắng `height` của `.btn` nên không
-   phải phụ thuộc thứ tự khai báo. */
-.about-cta-link {
-  min-height: 46px;
-}
-
-/* Trang trí đỏ–vàng nhỏ; CTA chính vẫn là xanh VKU, không dùng nút đen. */
-.about-cta-accent {
-  display: flex;
-  gap: 6px;
-}
-
-.about-cta-accent > span {
-  width: 30px;
-  height: 4px;
-  border-radius: var(--radius-pill);
-}
-
-.about-cta-accent > span:nth-child(1) {
-  background: var(--vku-red-600);
-}
-
-.about-cta-accent > span:nth-child(2) {
-  background: var(--vku-yellow-600);
-}
-
-/* --- Khối 5: nguồn thông tin --- */
-.about-sources .resource-list {
-  margin-top: var(--space-md);
-}
-
-/* Card nguồn full-width; ở desktop trải hai cột để nhãn ngắn không bị kéo căng
-   hết một hàng rộng cả nghìn pixel. */
-@media (min-width: 48rem) {
-  .about-sources .resource-list {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 6px 24px;
-  }
-}
-
-/* Link nguồn là vùng chạm nên cao tối thiểu 44px. */
-.about-sources .resource-link {
-  min-height: 44px;
-  border-color: var(--vku-border-soft);
-  border-radius: var(--radius-xl);
-}
-
-/* Nhãn nguồn nhiều chữ hơn `.resource-label` mặc định, cho xuống dòng thay vì cắt
-   bằng dấu ba chấm. */
-.about-sources .resource-label {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
 }

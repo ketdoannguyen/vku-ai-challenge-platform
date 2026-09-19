@@ -1,0 +1,205 @@
+vku-ai-challenge-platform/
+├── backend/
+│   ├── app/
+│   │   ├── accounts/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   └── service.py
+│   │   ├── auth/
+│   │   │   ├── __init__.py
+│   │   │   ├── dependencies.py
+│   │   │   ├── passwords.py
+│   │   │   ├── rate_limit.py
+│   │   │   ├── router.py
+│   │   │   └── sessions.py
+│   │   ├── competitions/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── router.py
+│   │   │   └── service.py
+│   │   ├── content/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── router.py
+│   │   │   ├── service.py
+│   │   │   └── storage.py
+│   │   ├── core/
+│   │   │   ├── __init__.py
+│   │   │   ├── config.py
+│   │   │   ├── database.py
+│   │   │   ├── datetimes.py
+│   │   │   ├── errors.py
+│   │   │   └── slugs.py
+│   │   ├── leaderboard/
+│   │   │   ├── __init__.py
+│   │   │   ├── router.py
+│   │   │   └── service.py
+│   │   ├── memberships/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── router.py
+│   │   │   └── service.py
+│   │   ├── scoring/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── readiness.py
+│   │   │   ├── service.py
+│   │   │   └── storage.py
+│   │   ├── submissions/
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── router.py
+│   │   │   └── service.py
+│   │   ├── __init__.py
+│   │   └── main.py
+│   ├── scripts/
+│   │   ├── create_admin.py
+│   │   └── import_accounts.py
+│   ├── tests/
+│   │   ├── __init__.py
+│   │   ├── conftest.py
+│   │   ├── helpers.py
+│   │   ├── test_admin_accounts.py
+│   │   ├── test_auth.py
+│   │   ├── test_competitions_admin.py
+│   │   ├── test_competitions_delete.py
+│   │   ├── test_competitions_public.py
+│   │   ├── test_content_storage.py
+│   │   ├── test_contents_admin.py
+│   │   ├── test_contents_public.py
+│   │   ├── test_create_admin.py
+│   │   ├── test_datetimes.py
+│   │   ├── test_health.py
+│   │   ├── test_memberships.py
+│   │   ├── test_passwords.py
+│   │   ├── test_results.py
+│   │   ├── test_scoring.py
+│   │   ├── test_scoring_admin.py
+│   │   └── test_submissions.py
+│   ├── .dockerignore
+│   ├── Dockerfile
+│   ├── pyproject.toml
+│   └── uv.lock
+├── deploy/
+│   ├── production.env.example
+│   ├── vku-backup.service
+│   └── vku-backup.timer
+├── docs/
+│   ├── API_CONTRACT.md
+│   ├── DATA_MODEL.md
+│   ├── DECISIONS.md
+│   ├── DEPLOYMENT.md
+│   ├── PROJECT_STATE.md
+│   └── TEST_MATRIX.md
+├── frontend/
+│   ├── public/
+│   │   ├── fonts/
+│   │   │   ├── inter-latin-ext.woff2
+│   │   │   ├── inter-latin.woff2
+│   │   │   ├── inter-vietnamese.woff2
+│   │   │   ├── jetbrains-mono-latin-ext.woff2
+│   │   │   ├── jetbrains-mono-latin.woff2
+│   │   │   └── jetbrains-mono-vietnamese.woff2
+│   │   ├── favicon.png
+│   │   ├── favicon.svg
+│   │   ├── icons.svg
+│   │   └── vku-logo.png
+│   ├── src/
+│   │   ├── api/
+│   │   │   ├── client.test.ts
+│   │   │   ├── client.ts
+│   │   │   ├── competitions.ts
+│   │   │   ├── contents.ts
+│   │   │   └── results.ts
+│   │   ├── auth/
+│   │   │   ├── AuthContext.tsx
+│   │   │   ├── RequireAuth.test.tsx
+│   │   │   ├── RequireAuth.tsx
+│   │   │   ├── returnTo.test.ts
+│   │   │   └── returnTo.ts
+│   │   ├── components/
+│   │   │   ├── AdminCompetitionManagement.test.tsx
+│   │   │   ├── AdminCompetitionManagement.tsx
+│   │   │   ├── CompetitionResources.tsx
+│   │   │   ├── JoinControl.test.tsx
+│   │   │   ├── JoinControl.tsx
+│   │   │   ├── Modal.tsx
+│   │   │   ├── ui.test.tsx
+│   │   │   └── ui.tsx
+│   │   ├── hooks/
+│   │   │   ├── useCountdown.test.tsx
+│   │   │   ├── useCountdown.ts
+│   │   │   ├── useDocumentTitle.ts
+│   │   │   └── useRouteFocus.ts
+│   │   ├── lib/
+│   │   │   ├── competitionResources.test.ts
+│   │   │   ├── competitionResources.ts
+│   │   │   ├── countdown.test.ts
+│   │   │   ├── countdown.ts
+│   │   │   └── vkuInfo.ts
+│   │   ├── markdown/
+│   │   │   ├── headingHierarchy.ts
+│   │   │   ├── MarkdownCodeBlock.test.tsx
+│   │   │   ├── MarkdownCodeBlock.tsx
+│   │   │   ├── MarkdownImage.tsx
+│   │   │   ├── MarkdownView.test.tsx
+│   │   │   ├── MarkdownView.tsx
+│   │   │   ├── resolveMarkdownAssetUrl.test.ts
+│   │   │   └── resolveMarkdownAssetUrl.ts
+│   │   ├── pages/
+│   │   │   ├── AboutPage.test.tsx
+│   │   │   ├── AboutPage.tsx
+│   │   │   ├── AdminAccountsPage.test.tsx
+│   │   │   ├── AdminAccountsPage.tsx
+│   │   │   ├── AdminCompetitionDetailPage.test.tsx
+│   │   │   ├── AdminCompetitionDetailPage.tsx
+│   │   │   ├── AdminCompetitionsPage.test.tsx
+│   │   │   ├── AdminCompetitionsPage.tsx
+│   │   │   ├── CompetitionContentPanel.tsx
+│   │   │   ├── CompetitionDetailPage.test.tsx
+│   │   │   ├── CompetitionDetailPage.tsx
+│   │   │   ├── CompetitionOverview.test.tsx
+│   │   │   ├── DashboardPage.test.tsx
+│   │   │   ├── DashboardPage.tsx
+│   │   │   ├── LeaderboardPage.test.tsx
+│   │   │   ├── LeaderboardPage.tsx
+│   │   │   ├── LoginPage.test.tsx
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── MySubmissionsPage.test.tsx
+│   │   │   ├── MySubmissionsPage.tsx
+│   │   │   ├── Placeholders.tsx
+│   │   │   ├── SubmissionPage.test.tsx
+│   │   │   ├── SubmissionPage.tsx
+│   │   │   ├── SupportPage.test.tsx
+│   │   │   └── SupportPage.tsx
+│   │   ├── test/
+│   │   │   ├── designSystemGuard.test.ts
+│   │   │   └── setup.ts
+│   │   ├── App.test.tsx
+│   │   ├── App.tsx
+│   │   ├── index.css
+│   │   └── main.tsx
+│   ├── .dockerignore
+│   ├── .gitignore
+│   ├── .oxlintrc.json
+│   ├── Dockerfile
+│   ├── index.html
+│   ├── nginx.conf
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── tsconfig.app.json
+│   ├── tsconfig.json
+│   ├── tsconfig.node.json
+│   ├── vite.config.ts
+│   └── vitest.config.ts
+├── scripts/
+│   ├── backup_prod.sh
+│   └── dev_up.sh
+├── .editorconfig
+├── .env.example
+├── .gitignore
+├── DESIGN.md
+├── docker-compose.prod.yml
+├── docker-compose.yml
+├── MARKDOWN_RENDERER_DESIGN.md
+└── README.md

@@ -234,51 +234,56 @@ sửa, kèm cả test tự động và (khi hành vi chỉ chứng minh được
 | Admin detail ở ≤767px: khối tiêu đề bám nội dung thay vì độn theo flex-basis 24rem (khoảng trống ~384px trước nhóm nút đã hết) | passing | Chromium headless 375/414/640/767/768/1280/1440 `/tmp/uiverify/w7-heading-gap.mjs` |
 | Tách `react-markdown`/`remark-gfm`/`rehype-sanitize` khỏi entry bundle: entry 597 kB → 437 kB, chunk `MarkdownView` riêng, nội dung vẫn render đúng sau Suspense | passing | `npm run build` + Chromium headless 375/1440 `/tmp/uiverify/w6-shots.mjs` |
 
-## 9d. Trang Hỗ trợ & Liên hệ (ADR-022)
+## 9d. Trang Hỗ trợ & Liên hệ (ADR-022, bố cục hai hàng theo ADR-024)
 
-Contract trình bày ở `SUPPORT_PAGE_DESIGN.md`; quyết định ở ADR-022 (`docs/DECISIONS.md`). Nguồn sự thật
-cho wording và dữ liệu liên hệ vẫn là `frontend/src/pages/SupportPage.tsx` và `frontend/src/lib/vkuInfo.ts`.
+Contract trình bày ở `SUPPORT_PAGE_DESIGN.md` (điều chỉnh của repo ghi ở §79); quyết định ở ADR-022 và
+ADR-024 (`docs/DECISIONS.md`). Nguồn sự thật cho wording và dữ liệu liên hệ vẫn là
+`frontend/src/pages/SupportPage.tsx` và `frontend/src/lib/vkuInfo.ts`.
 
 | Check | Status | Nguồn |
 |---|---|---|
 | Outline: đúng một `h1`, ba `h2` theo thứ tự `Các bước tham gia` → `Liên hệ` → `Câu hỏi thường gặp`; bước và FAQ dùng `h3` | passing | `frontend/src/pages/SupportPage.test.tsx` |
-| Timeline đủ 6 bước đúng thứ tự (`Đăng nhập`, `Chọn cuộc thi`, `Tham gia cuộc thi`, `Đọc đề bài`, `Nộp bài`, `Theo dõi kết quả`); bước 2 vẫn là link nội bộ về `/` | passing | `frontend/src/pages/SupportPage.test.tsx` |
-| Nhịp màu marker `data-tone` xoay vòng `blue,red,yellow` ×2 và chỉ mang tính trang trí, không suy ra trạng thái nghiệp vụ | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` (`rgb(9,105,232)｜rgb(211,11,35)｜rgb(245,184,0)`) |
+| Hàng 1 là `Các bước tham gia` chiếm trọn bề ngang (1376px@1440, bằng đúng bề ngang lưới); sáu bước trải thành lưới ô 1/2/3 cột theo mức màn, hàng cuối không hở ô | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
+| Lưới sáu bước đủ và đúng thứ tự (`Đăng nhập`, `Chọn cuộc thi`, `Tham gia cuộc thi`, `Đọc đề bài`, `Nộp bài`, `Theo dõi kết quả`); bước 2 vẫn là link nội bộ về `/` | passing | `frontend/src/pages/SupportPage.test.tsx` |
+| Nhịp màu số bước `data-tone` xoay vòng `blue,red,yellow` ×2 và chỉ mang tính trang trí, không suy ra trạng thái nghiệp vụ | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` (`rgb(9,105,232)｜rgb(211,11,35)｜rgb(245,184,0)`) |
+| Đường nối dọc giữa các marker đã bị bỏ cùng timeline: không còn pseudo-element `.support-step-marker::after` nào vẽ đường nối trong lưới bước | passing | `frontend/src/index.css`, Chromium headless `/tmp/uv2/verify.mjs` |
 | FAQ đủ 9 câu hỏi nguyên văn; panel cuối vẫn nội suy tên đơn vị từ `vkuInfo.ts` | passing | `frontend/src/pages/SupportPage.test.tsx` |
 | Accordion: 9 trigger là `button` native, mặc định `aria-expanded="false"`, `aria-controls` trỏ tới panel tồn tại, panel có `aria-labelledby` ngược lại và mang thuộc tính `hidden` | passing | `frontend/src/pages/SupportPage.test.tsx` |
 | Accordion single-open: mở mục khác thì mục cũ đóng, bấm lại thì đóng hết; Enter/Space hoạt động; đóng/mở lại đúng trên trình duyệt thật | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
 | Ba tầng liên hệ đúng thứ tự VKU → Phòng KHCN-HTQT → Hỗ trợ kỹ thuật, đúng `mailto:`/`tel:` và công khai đầu mối được uỷ quyền (Nguyễn Kết Đoàn) | passing | `frontend/src/pages/SupportPage.test.tsx` |
 | `mailto:`/`tel:` không mở tab mới; hai link website giữ `target="_blank"` + `rel="noopener noreferrer nofollow"` | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
 | Không còn block `Nguồn thông tin`, `Danh mục hỗ trợ`, `Cần hỗ trợ thêm?`; không `form`/`input`/`textarea`/`aside`/`nav` phụ; trang tĩnh không gọi API | passing | `frontend/src/pages/SupportPage.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Sau ADR-024 `/ho-tro` là trang thứ hai không còn khối `Nguồn thông tin`: nhãn nguồn `Giới thiệu Trường` và câu `truy cập ngày` không xuất hiện ở bất kỳ đâu trên trang | passing | `frontend/src/pages/SupportPage.test.tsx` |
 | Shell 1440px `.app-main-support` chỉ gắn cho đúng route `/ho-tro`; route khác không thừa hưởng | passing | `frontend/src/App.test.tsx` |
 | `/ho-tro/khong-co` vẫn rơi vào 404 (không có route con) | passing | `frontend/src/App.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` |
-| Thứ tự responsive: dưới 1200px một cột Hướng dẫn → Liên hệ → FAQ; từ 1200px Hướng dẫn và Liên hệ cùng hàng, FAQ nằm dưới Hướng dẫn; không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
-| Desktop gần 70/30: rail liên hệ 342px@1200 và 416px@1440, tỉ lệ hướng dẫn 0.678/0.680 (ngưỡng 0.65–0.75) | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
+| Thứ tự responsive: dưới 1200px Hướng dẫn → Liên hệ → FAQ xếp dọc; từ 1200px hàng 1 là `Các bước tham gia` full-width, hàng 2 là `Liên hệ` (trái) ｜ `Câu hỏi thường gặp` (phải); không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uv2/verify.mjs` |
+| Hàng 2 chia **đôi đều nhau** (`repeat(2, minmax(0, 1fr))`): đo được 556px ｜ 556px @1200 và 676px ｜ 676px @1440, lệch 0px; chiều cao hai khối 634px ｜ 611px @1440 | passing | Chromium headless `/tmp/uv2/verify.mjs` |
 | Hero không bị fixed header che ở mọi breakpoint (đỉnh hero 84px > đáy header 64px) | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
 | Focus ring 2px `solid` khi điều hướng bằng bàn phím; vùng chạm trigger FAQ và chip liên hệ ≥44px | passing | Chromium headless `/tmp/uiverify/support-verify.mjs` |
-| Regression: `/gioi-thieu` vẫn giữ khối `Nguồn thông tin`; `/`, `/admin/competitions`, `/admin/accounts` giữ nguyên hero/card và không có phần tử `.support-*` rò sang | passing | `frontend/src/pages/AboutPage.test.tsx`, `frontend/src/pages/{AdminCompetitionsPage,AdminAccountsPage,DashboardPage}.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` + `/tmp/uiverify/support-admin-regression.mjs` |
+| Regression: `/`, `/admin/competitions`, `/admin/accounts` giữ nguyên hero/card và không có phần tử `.support-*` rò sang | passing | `frontend/src/pages/{AdminCompetitionsPage,AdminAccountsPage,DashboardPage}.test.tsx`, Chromium headless `/tmp/uiverify/support-verify.mjs` + `/tmp/uiverify/support-admin-regression.mjs` |
 
-## 9e. Trang Giới thiệu (ADR-023)
+## 9e. Trang Giới thiệu (ADR-023, bố cục ba hàng theo ADR-024)
 
-Contract trình bày ở `ABOUT_PAGE_DESIGN.md`; quyết định ở ADR-023 (`docs/DECISIONS.md`). Nguồn sự thật
-cho wording, dữ kiện và nguồn vẫn là `frontend/src/lib/vkuInfo.ts` (page không hardcode dữ kiện).
+Contract trình bày ở `ABOUT_PAGE_DESIGN.md` (§A.2 đã thay thế, bố cục hiện hành ở §A.2.1); quyết định ở
+ADR-023 và ADR-024 (`docs/DECISIONS.md`). Nguồn sự thật cho wording và dữ kiện vẫn là
+`frontend/src/lib/vkuInfo.ts` (page không hardcode dữ kiện).
 
 | Check | Status | Nguồn |
 |---|---|---|
-| Outline: đúng một `h1` `Giới thiệu` và năm `h2` theo thứ tự `Về nền tảng AI Challenge` → `VKU - đơn vị chủ trì` → `Đơn vị và đầu mối hỗ trợ` → `Bắt đầu` → `Nguồn thông tin` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Outline: đúng một `h1` `Giới thiệu` và ba `h2` theo thứ tự `Về nền tảng AI Challenge` → `VKU - đơn vị chủ trì` → `Đơn vị và đầu mối hỗ trợ` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
+| Ba khối là ba hàng full-width - đo @1440 cả ba section rộng đúng 1376px bằng bề ngang `.about-grid`, không còn wrapper cột nửa `.about-col` để cân | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
+| Mỗi khối tự chia lưới con và hàng cuối luôn kín: feature 4 ô 4/2/1 cột, fact 5 ô 3/2/1 cột, unit 3 ô 3/2/1 cột; đo gap cuối hàng = 0px ở 375/640/768/1024/1199/1200/1440 | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
 | Platform card tách thành bốn feature item (`h3` + mô tả nguyên văn), giữ đủ bốn mô tả cũ | passing | `frontend/src/pages/AboutPage.test.tsx` |
-| VKU card giữ nguyên list có accessible name `Thông tin VKU` với đúng năm dữ kiện theo thứ tự; câu Quyết định 15/QĐ-TTg ngày 03/01/2020 còn nguyên một text node | passing | `frontend/src/pages/AboutPage.test.tsx` |
+| VKU card giữ nguyên list có accessible name `Thông tin VKU` với đúng năm dữ kiện theo thứ tự; câu Quyết định 15/QĐ-TTg ngày 03/01/2020 còn nguyên một text node; `Sứ mệnh` là dữ kiện duy nhất mang ô rộng (`span 2` cột: 880px = 2×434 + 12px gap @1440) | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
 | Ba đầu mối hỗ trợ đúng thứ tự VKU → Phòng KHCN-HTQT → Nguyễn Kết Đoàn; không lặp `mailto:`/`tel:` của `/ho-tro` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Không thêm slogan/CTA phụ/khối bịa: đúng sáu link (một nội bộ `/ho-tro`, một CTA `/`, bốn nguồn ngoài), không `form`/`input`/`textarea`/`aside`/`nav`, trang tĩnh không gọi API | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Không thêm slogan/CTA phụ/khối bịa: còn **đúng một** link trên toàn trang (nội bộ `/ho-tro`), không `form`/`input`/`textarea`/`aside`/`nav`, trang tĩnh không gọi API | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
+| Đã bỏ hẳn khối `Bắt đầu` và khối `Nguồn thông tin`: không còn `.about-cta*`/`.about-sources*` trong DOM, không còn chuỗi `Nguồn thông tin` hay `Xem danh sách cuộc thi` | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uv2/verify.mjs` |
+| Hệ quả dữ liệu của ADR-024: `VKU_SOURCES` thu về một hằng `VKU_DEPARTMENT_URL` (dùng cho chip `Trang đơn vị` ở `/ho-tro`); kiểu `VkuSource` và ba URL còn lại đã xoá | passing | `frontend/src/lib/vkuInfo.ts` |
 | Không còn markup giao diện cũ (`.page`/`.card`/`.ov-*`) lẫn phần tử `.support-*` của trang Hỗ trợ | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Nhịp màu viền trên `blue｜red｜yellow｜blue` (`rgb(9,105,232)｜rgb(236,22,49)｜rgb(245,184,0)｜rgb(9,105,232)`); thân card nền trắng; icon feature `blue,blue,red,yellow`; icon đầu mối hỗ trợ blue | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| `Nguồn thông tin` là card thứ năm, accent neutral bằng đúng viền card (không thêm màu thương hiệu thứ tư), full-width ở cuối lưới | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| CTA chính duy nhất dùng `.btn` VKU Blue 700 (`rgb(6,79,196)`), chữ trắng, tới `/`, cao 46px ≥44px; không có nút đen | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Bốn nguồn chính thức đúng URL/thứ tự (Giới thiệu Trường → Liên hệ → Phòng KHCN-HTQT → Đại học Đà Nẵng), giữ `target="_blank"` + `rel="noopener noreferrer nofollow"`, vùng chạm ≥44px | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Nhãn nguồn là tên ngắn ≤6 chữ, không dán URL; câu dẫn `tổng hợp từ các nguồn chính thức… truy cập ngày` đã bỏ hẳn khỏi trang | passing | `frontend/src/pages/AboutPage.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Toàn bộ 18 SVG đều `aria-hidden="true"` + `focusable="false"`; tab order khớp thứ tự DOM; focus ring 2px `solid` | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Thứ tự responsive: dưới 1200px một cột `Nền tảng → VKU → Hỗ trợ → Bắt đầu → Nguồn`; từ 1200px hai cột (`Nền tảng`+`VKU` ｜ `Hỗ trợ`+`Bắt đầu`) và `Nguồn` nằm full-width cuối lưới; không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
-| Mỗi cột xếp dọc độc lập ở desktop: khe giữa hai card cùng cột đúng 24px (16px ở màn hẹp), không phình theo hàng của lưới - chặn tái xuất khoảng trống lớn ở rail phải | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Nhịp màu viền trên ba khối `blue｜red｜yellow` (`rgb(9,105,232)｜rgb(236,22,49)｜rgb(245,184,0)`); thân card nền trắng; icon feature `blue,blue,red,yellow`; icon đầu mối hỗ trợ blue | passing | `frontend/src/index.css`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Toàn bộ 16 SVG đều `aria-hidden="true"` + `focusable="false"`; tab order khớp thứ tự DOM; focus ring 2px `solid` | passing | `frontend/src/index.css`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
+| Thứ tự responsive: một cột theo đúng thứ tự đọc `Nền tảng → VKU → Đầu mối hỗ trợ` ở mọi breakpoint (ba hàng full-width ở cả 375 và 1440); không tràn ngang ở 375/640/768/1024/1199/1200/1440 | passing | Chromium headless `/tmp/uv2/verify.mjs` |
+| Chiều cao ô trong cùng một lưới con đồng đều nên hàng không bị so le: feature 173px ×4, fact 102px ×5, unit 102px ×3 @1440 | passing | Chromium headless `/tmp/uv2/verify.mjs` |
 | Hero không bị fixed header che ở mọi breakpoint (đỉnh hero 84px > đáy header 64px) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | Shell 1440px `.app-main-about` chỉ gắn cho đúng route `/gioi-thieu`; `/ho-tro` và `/` không thừa hưởng, và không rò `about-*` sang route khác | passing | `frontend/src/App.test.tsx`, Chromium headless `/tmp/uiverify/about-verify.mjs` |
 | `/gioi-thieu/khong-co` vẫn rơi vào 404 (không có route con) | passing | Chromium headless `/tmp/uiverify/about-verify.mjs` |
@@ -454,26 +459,43 @@ dataset hay heading của bất kỳ cuộc thi nào.
 | Check | Kết quả | Nguồn |
 |---|---|---|
 | Resolver asset: 3 alias (`assets/`, `./assets/`, `../assets/`) normalize về cùng endpoint phẳng; ma trận reject đầy đủ (traversal, subpath, absolute, scheme, query/fragment, percent-encoding, backslash, control char, hidden name, extension ngoài allowlist) | passing (11 test) | `frontend/src/markdown/resolveMarkdownAssetUrl.test.ts` |
-| GFM/CommonMark: 4 cấp heading sau demotion (h2..h5, không tự đánh số), `strong`/`em`/`del`, list lồng `ul > li > ul` và `ol > li > ol`, task list (`disabled`, đúng checked, 2 `li.task-list-item`), autolink trần, table region, code, link, image | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
+| GFM/CommonMark: 6 cấp heading tác giả sau demotion (`#`..`######` → `H2,H3,H4,H5,H6,H6`, mức chặn dưới ở `h6`, không tự đánh số, giữ nguyên chữ), `strong`/`em`/`del`, list lồng `ul > li > ul` và `ol > li > ol`, task list (`disabled`, đúng checked, 2 `li.task-list-item`), autolink trần, table region, code, link, image | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
 | Ảnh: 3 alias render đúng `src` + `loading="lazy"`; external/`data:`/traversal/SVG tạo 0 `<img>` và 4 placeholder giữ alt; `fireEvent.error` chuyển ảnh lỗi sang placeholder | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
 | Code block: nhãn theo info string (`text`, `python`) và nhãn chung `Code`; `pre > code` giữ nguyên từng ký tự (`├── train.csv\n└── sample_submission.csv\n`); toolbar nằm ngoài `pre`; copy đúng text đã parse sau khi bỏ newline cuối; `role="status"` khi thành công, `role="alert"` + hướng dẫn sao chép thủ công khi clipboard reject/không tồn tại; state hai block độc lập; inline code không có toolbar | passing (6 test) | `frontend/src/markdown/MarkdownCodeBlock.test.tsx` |
 | Security: `script`/`iframe`/`onerror`/`javascript:` không sống sót; link ngoài `target="_blank" rel="noopener noreferrer"`, link nội bộ không bị ép mở tab; prop nội bộ `node` của react-markdown không rơi xuống DOM (`[node]` = null, không có `[object Object]`) | passing | `frontend/src/markdown/MarkdownView.test.tsx` |
-| Full frontend gate | passing | `npx vitest run --maxWorkers 1` → **332 passed (26 file)**; `npx vitest run src/markdown` → 33 passed (3 file); `npx tsc -b --force` → exit 0; `npm run lint` → 0 error, 22 warning có sẵn và **0** ở `src/markdown/`; `npm run build` → OK, chunk `MarkdownView-Dy0jAy_f.js` 162.87 kB vẫn tách riêng khỏi entry `index-DTs_LmLJ.js` 484.09 kB, CSS 167.23 kB |
+| Heading theo ngữ cảnh: đúng một root `#` → `h2.md-doc-title`; `##` → `h3.md-section`; cấp sâu nâng lần lượt; nhiều `#` giữ section mode; không có `#` không tự suy diễn; marker con nhận accent của section cha; inline code/`strong` và accessible name giữ nguyên | passing (5 test chuyên biệt) | `frontend/src/markdown/MarkdownView.test.tsx`, `frontend/src/markdown/headingHierarchy.ts` |
+| Full frontend gate (phần renderer) | passing | `npx vitest run src/markdown` → **38 passed (3 file)**; `npx tsc -b --force` → exit 0; `npm run lint` → 0 error, 22 warning có sẵn và **0** ở `src/markdown/`; `npm run build` → OK, chunk `MarkdownView-D36-iQcr.js` 164.24 kB vẫn tách riêng khỏi entry `index-D1Ct03Qn.js` 481.94 kB, CSS 167.77 kB |
+| Full suite `npx vitest run --maxWorkers 1` sau hierarchy mới | 329 passed, 5 failed | 5 lỗi nằm trọn trong `src/pages/CompetitionDetailPage.test.tsx` và **có sẵn từ commit `d224fa4`**, không phải hồi quy của renderer - xem ghi chú dưới |
 | Backend contract không đổi (asset allowlist/traversal/nosniff vẫn nguyên) | passing | `uv run pytest -q tests/test_content_storage.py tests/test_contents_public.py` → 13 passed |
 | Repo hygiene | passing | `git diff --check` → sạch |
 
+Ghi chú về 5 lỗi `CompetitionDetailPage.test.tsx`: commit `d224fa4` (phiên song song) đổi
+`{contents.length} mục` → `{contents.length}` trong `CompetitionDetailPage.tsx:394` và chuẩn hoá
+dấu gạch dài thành `-` trong chuỗi tiêu đề, nhưng không cập nhật assertion tương ứng ở
+`CompetitionDetailPage.test.tsx:98` (`/2\s*mục/`) và `:365` (`— AI Challenge`). Đã chạy đối chứng
+trên worktree sạch tại đúng `HEAD` (`/tmp/vku-head`, không có thay đổi nào của renderer): cùng
+5 tên test đổ, cùng `5 failed | 9 passed (14)`, nên đây không phải hồi quy của renderer. Việc sửa
+thuộc phạm vi commit đó, không nằm trong task này.
+
 ### Bằng chứng browser (Chromium headless, mock `/api`, 7 bề rộng)
 
-Script: `/tmp/uiverify/markdown-verify.mjs` → **110 check, 0 fail**; số đo ghi ở
-`/tmp/uiverify/markdown-verify.json`; ảnh `/tmp/uiverify/shots-markdown/article-{375,768,1440}.png`.
-Fixture Markdown generic: 4 cấp heading, nested/task list, `del`, autolink, 5 ảnh (3 hợp lệ, 1 trả 404,
-1 external), 2 fenced block (`text`, `python`), bảng 3 cột, blockquote, `---`.
+Script: `/tmp/uiverify/markdown-verify.mjs` → **152 check, 0 fail**; số đo ghi ở
+`/tmp/uiverify/markdown-verify.json`; ảnh `/tmp/uiverify/shots-markdown/article-{375,768,1440}.png`
+và `prose-{...}.png`; ảnh riêng từng thanh mục `section-{1,2,3}.png` + `ladder.png` do
+`/tmp/uiverify/shot-sections.mjs` chụp ở 1440 (deviceScaleFactor 2).
+Fixture Markdown generic: đúng 1 source `#` làm title, 3 source `##` làm section lam/đỏ/vàng,
+đủ `###`..`######`, nested/task list, `del`, autolink, 5 ảnh (3 hợp lệ, 1 trả 404, 1 external),
+2 fenced block (`text`, `python`), bảng 3 cột, blockquote, `---`.
 
 | Oracle | Số đo tại 375 / 390 / 640 / 768 / 1024 / 1200 / 1440 |
 |---|---|
 | `documentElement.scrollWidth === clientWidth` | đúng ở cả 7 bề rộng; danh sách phần tử tràn ngoài vùng cuộn rỗng |
 | Đúng một `h1` của trang | `h1=1 "AI Challenge 2026"`; heading tài liệu bắt đầu từ `H2` |
-| Thang heading nhìn khác rõ | desktop `H2:24px H3:20px H4:16px H5:14px`; mobile `H2:22px H3:18px H4:16px H5:14px` |
+| Title mode và cỡ tuyệt đối | đúng một `#` → title `H2`, đỏ `rgb(211,11,35)`, không badge; mobile `28/22/18/16/14/12px`, desktop `32/24/20/16/14/12px` lần lượt cho title/section/square/dash/sub/label |
+| Sub và label không render giống nhau | sub 14px, chữ thường; label 12px, uppercase và giãn chữ. Cả hai vẫn giữ semantic `h6` khi source là `#####`/`######` vì không còn bậc dưới |
+| Thanh mục source `##` | cả 3 section ở mọi bề rộng: badge **12×12px mobile / 14×14px desktop**, chỉ lớn hơn ô viền con 9px một ít; đường kẻ tới lề, `centered=true`, không chữ số, badge rỗng |
+| Màu section xoay lam → đỏ → vàng | `rgb(9,105,232)` / `rgb(236,22,49)` / `rgb(233,169,0)`; marker `###` nhận đúng ba màu tương ứng từ section cha, không fix cứng xanh |
+| Sáu vai trò heading có dấu hiệu khác nhau | title đỏ; section badge + leader; square 9×9px, viền computed 1px (CSS 1.5px rasterize); dash 10×2px; sub chữ thường 14px; label uppercase 12px |
 | Ba ảnh asset hợp lệ | `src` = `/api/competitions/ai-challenge-2026/assets/{ok,ok-2,ok-3}.png`, `loading="lazy"`, `naturalWidth=484` |
 | Ảnh 404 và ảnh external | 2 `.md-image-fallback`, text `Không tải được hình ảnh: Ảnh thiếu` / `Ảnh ngoài`; **không** request nào ra host lạ |
 | Hai code block | nội dung y nguyên `├── du-lieu.csv\n└── mau-nop-bai.csv\n` và `cot = mau_nop_bai["id"]\n` |
@@ -481,7 +503,7 @@ Fixture Markdown generic: 4 cấp heading, nested/task list, `del`, autolink, 5 
 | Task list | 2 checkbox thật, `{checked:true,disabled:true}` và `{checked:false,disabled:true}`; `ul=disc`, `ol=decimal`, `.task-list-item` = `none` |
 | Table | region `Bảng dữ liệu`, `tabindex=0`; wrap `border-top: 2px rgb(9,105,232)`, `th` nền `rgb(245,249,255)` |
 | Code panel | nền `rgb(16,36,70)`, `border-top: 3px rgb(255,197,27)`, radius 8px; `code-lang` 12px/600 |
-| Blockquote / `hr` / `h4::before` | gradient `rgb(245,249,255) → rgb(255,251,235)` + vạch trái `4px rgb(9,105,232)`; `hr` radius 999px; `h4::before` pill đỏ `rgb(236,22,49)` |
+| Blockquote / `hr` / marker dash | blockquote chỉ có gradient `rgb(245,249,255) → rgb(255,251,235)`, **không viền trái**; `hr` radius 999px; `.md-h-dash::before` 10×2px theo màu section cha |
 | Placeholder ảnh | nền `rgb(248,250,252)`, viền `1px rgb(203,213,225)` |
 | Tương tác copy (1440) | click block 2 → nhãn `Đã sao chép`, `role="status"` có nội dung, clipboard đọc lại đúng `cot = mau_nop_bai["id"]`; block 1 vẫn `Sao chép`; nhãn tự về sau ~2s |
 | Keyboard | 20 lần Tab tới được nút copy; outline `solid 2px`, `overflow: visible` và nằm trọn trong khối code (`inside=true`) |
@@ -492,11 +514,18 @@ Fixture Markdown generic: 4 cấp heading, nested/task list, `del`, autolink, 5 
 Ghi chú: browser evidence chạy trên `vite preview` với `/api/**` được mock, nên **không** phải live-asset
 E2E; contract asset phía server được chứng minh riêng bằng test backend ở bảng trên.
 
+Oracle so cỡ tuyệt đối vẫn giữ để chặn hồi quy specificity ở media query: mọi role được kiểm tra bằng
+class (`.md-doc-title`, `.md-section`, `.md-h-square`...) thay vì semantic tag. Điều này cần thiết vì
+title mode cố ý tách **vai trò thị giác** khỏi tag: ví dụ source `##` vẫn là semantic `h3` nhưng mang
+style section 22/24px.
+
 ### Sai lệch có chủ ý so với kế hoạch
 
 | Kế hoạch | Thực tế | Lý do |
 |---|---|---|
-| `h2` 28-32px, `h3` 22-24px | `h2` 22/24px, `h3` 18/20px | dùng lại token `--text-h2`, `--text-h2-desktop`, `--text-h3`, `--text-h4`; `DESIGN.md` §4 định nghĩa section title 22-24px nên cỡ mới sẽ phá thang bậc chung. Phân cấp được giữ bằng accent theo từng cấp (vạch lam / divider dưới / gạch đỏ / chữ nhỏ muted) |
+| Kế hoạch ban đầu coi mọi `#` là section 22/24px | Khi đúng một `#`, nó là title đỏ 28/32px; `##` được nâng thành section 22/24px. Nhiều `#` vẫn giữ section mode | hierarchy phụ thuộc cấu trúc tài liệu như người dùng chốt; semantic tag vẫn hạ một bậc nên contract một H1 không đổi |
+| Badge section ban đầu 28/32px | 12/14px; marker con 9px, viền CSS 1.5px | giảm độ lấn át; badge section chỉ lớn hơn marker con một ít nhưng vẫn là ô đặc và có leader để thể hiện cấp cao hơn |
+| Đánh số mục `1. 2. 3.` (chỉ có trong mockup, kế hoạch §7 đã xếp vào non-goals) | **Không** đánh số; ô màu là hình trang trí, không phải ô số | Chốt với người dùng: số trong mockup tượng trưng cho *kiểu định dạng* của `##`, không phải nội dung renderer phải sinh. Nếu tác giả muốn số thì tự viết số trong tiêu đề |
 | paragraph `line-height: 1.7` | `var(--leading-body)` = 1.65 | token có sẵn của hệ, không tạo giá trị thứ hai |
 
 ## 10. Production deploy (Sprint 08) - planned

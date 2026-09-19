@@ -18,7 +18,8 @@ radius, breakpoint và accessibility dùng nguyên `VKU_GLOBAL_DESIGN.md` §5–
 ```text
 ContentDetail.markdown  (string nguyên bản từ API)
   → ReactMarkdown                       react-markdown@10
-      remarkPlugins  = [remark-gfm]     bảng, task list, strikethrough, autolink
+      remarkPlugins  = [remark-gfm, remarkHeadingHierarchy]
+                       hierarchy chỉ đọc mdast, không sửa nội dung
       rehypePlugins  = [rehype-sanitize]  schema mặc định - KHÔNG rehype-raw
       urlTransform   = src  → resolveMarkdownAssetUrl(src, competitionSlug)
                        khác → defaultUrlTransform của react-markdown
@@ -34,7 +35,9 @@ dependency mới.
 
 | Markdown | HTML render | Class / ghi chú |
 |---|---|---|
-| `#` … `######` | `h2` … `h6` (hạ một bậc) | `.markdown-body h2..h6` |
+| đúng một `#` | `h2.md-doc-title` | title tổng màu đỏ, xem §3.1 |
+| nhiều `#` | mỗi `#` → `h2.md-section` > badge + text + lead | chế độ nhiều mục, xem §3.1 |
+| `##` … `######` | semantic `h3` … `h6` (hạ một bậc); class theo vai trò thị giác | `.md-section`, `.md-h-square`, `.md-h-dash`, `.md-h-sub`, `.md-h-label` |
 | paragraph | `p` | `.markdown-body p` |
 | `**bold**` / `*italic*` | `strong` / `em` | không đổi sang element khác |
 | `-` / `1.` | `ul`/`ol` > `li` | marker xanh cho `ul`, đỏ cho `ol` |
@@ -48,8 +51,36 @@ dependency mới.
 | `---` | `hr` | vạch ba màu |
 | link | `a` | xem §7 |
 
-Heading bị hạ một bậc là **bắt buộc**: H1 của trang là tên cuộc thi ở masthead. Vì vậy bốn cấp
-heading tác giả (`#`, `##`, `###`, `####`) lần lượt render thành `h2`, `h3`, `h4`, `h5`.
+Heading bị hạ một bậc là **bắt buộc**: H1 của trang là tên cuộc thi ở masthead. Vì vậy năm cấp
+heading tác giả (`#`, `##`, `###`, `####`, `#####`) lần lượt render thành `h2`, `h3`, `h4`, `h5`,
+`h6`. `######` giữ nguyên `h6` vì không còn bậc nào dưới.
+
+### 3.1 Thang bậc heading
+
+`remarkHeadingHierarchy` đếm heading depth 1 **ở root của mdast** (heading trong quote/list không
+quyết định mode). Nó chỉ đọc cây parser và lưu offset/role/màu; không quét source bằng regex, không
+sửa node, không thêm HTML. Có hai mode:
+
+| Source | Đúng một `#` (title mode) | Không có / nhiều `#` (section mode) |
+|---|---|---|
+| `#` | title đỏ `.md-doc-title`, 28/32px | thanh mục `.md-section`, 22/24px |
+| `##` | thanh mục `.md-section`, 22/24px | ô viền `.md-h-square`, 18/20px |
+| `###` | ô viền `.md-h-square`, 18/20px | gạch `.md-h-dash`, 16px |
+| `####` | gạch `.md-h-dash`, 16px | chữ nhỏ `.md-h-sub`, 14px |
+| `#####` | chữ nhỏ `.md-h-sub`, 14px | nhãn `.md-h-label`, 12px |
+| `######` | nhãn `.md-h-label`, 12px | nhãn `.md-h-label`, 12px |
+
+Thanh mục dùng ô đặc **12px mobile / 14px desktop** và đường kẻ tới lề phải. Marker cấp dưới là ô
+viền 9px, viền 1.5px; cấp kế là gạch 10×2px. Cả badge, ô viền, gạch và đường kẻ nhận màu của
+section cha gần nhất theo vòng **lam → đỏ → vàng**; vàng dùng `--vku-yellow-700` để marker mảnh còn
+đủ rõ trên nền trắng. Màu chỉ phân tách section, không mang nghĩa nghiệp vụ.
+
+Renderer tách chữ thanh mục vào `span.md-section-text` để flex có đúng ba mục và vẫn wrap khi có
+inline code hay `**bold**`. Badge và đường kẻ đều `aria-hidden="true"` và rỗng, nên `textContent`
+và accessible name vẫn đúng bằng chữ tác giả. Title không có badge/đường kẻ.
+
+**Renderer không đánh số mục và không chèn nhãn vào heading.** Ô màu là hình trang trí, không phải
+ô số; nếu tác giả muốn đánh số thì tự viết số trong tiêu đề.
 
 ## 4. Asset ảnh
 
@@ -107,7 +138,10 @@ thành card.
 
 ## 8. Accessibility
 
-- Đúng **một H1** mỗi trang (masthead cuộc thi); heading tài liệu bắt đầu từ H2.
+- Đúng **một H1** mỗi trang (masthead cuộc thi); title tài liệu nếu có vẫn render `h2`, section đầu
+  trong title mode là `h3`. Mọi heading source tiếp tục hạ đúng một semantic level.
+- Ô màu và đường kẻ của thanh mục là trang trí thuần (`aria-hidden`, rỗng) nên accessible name
+  chỉ còn đúng chữ tác giả viết; màu không phải tín hiệu duy nhất vì hình/cỡ chữ cũng khác nhau.
 - Semantic giữ nguyên: `table`, `pre > code`, `blockquote`, `ul/ol/li`.
 - Mọi ảnh có `alt`; placeholder giữ mô tả trong text hiển thị (không đọc icon hai lần).
 - Button copy là `<button type="button">` có tên truy cập, điều khiển được bằng bàn phím, focus
@@ -118,8 +152,8 @@ thành card.
 
 | Bề rộng | Quy tắc |
 |---|---|
-| base (≥ 375px) | padding gọn, heading nhỏ hơn, toolbar code không tràn |
-| ≥ 48rem | tăng cỡ heading và nhịp dọc |
+| base (≥ 375px) | title 28px, thanh mục 22px, badge 12px và gap 8px; toolbar code không tràn |
+| ≥ 48rem | title 32px, thanh mục 24px, badge 14px và gap 10px |
 | mọi bề rộng | `pre`/`.md-table-wrap` cuộn nội bộ; `img` `max-width: 100%`; `documentElement` không overflow |
 
 Surface tài liệu là `.card.comp-body` trong `.comp-page` (68rem) - không thêm card/container
