@@ -2,9 +2,9 @@
 
 ## 1. Current checkpoint
 - Date: 2026-09-19
-- Branch: `main`
-- Commit/working tree status: HEAD `5d5274f` (ADR-027: slug tự điền theo tiêu đề, mở lại cuộc thi đã kết thúc); thay đổi **chưa commit** trong working tree: đợt ADR-028 - artifact submission trên MinIO private + trang quản trị bài nộp toàn cục (51 file sửa, 14 file mới)
-- Overall state: **release candidate** - 266 backend test + 378 frontend test (30 file) + 154 assert của harness deployer pass; MinIO smoke trên Compose project cô lập PASS; browser smoke thật trên stack dev có MinIO 26/26 PASS; typecheck, lint, production build và `docker compose config` đều pass. **Chưa phần nào của đợt này chạy trên production**: MinIO chưa được bootstrap trên VM nên lượt deploy chạm artifact backend sẽ bị preflight dừng (fail closed, xem §3)
+- Branch: `main` (tích hợp), `release` = `0864b80` (đang chạy trên VM)
+- Commit/working tree status: HEAD `b1b66ea` (fix backup bucket rỗng + ngắt giữa đường). **ADR-028 đã lên production**: `release` `1cd5945` (artifact submission + trang quản trị bài nộp) rồi `0864b80` (fix backup). Working tree còn một đợt thay đổi **chưa commit và không thuộc đợt này** (backend + frontend: tên tải về `__`→`_`, sort/thống kê bảng toàn cục, tính năng starter notebook) - một thay đổi khác đang được viết song song, xem §11
+- Overall state: **đã rollout ADR-028 lên production** - 266 backend test + 378 frontend test (30 file) + 157 assert harness deployer + 27 case harness backup pass; MinIO đã bootstrap trên VM (bucket private, app credential least-privilege); smoke artifact 17/17 + legacy 7/7 + case âm 4/4 qua đúng đường người dùng (Worker → Tunnel → nginx → FastAPI); backup thật + restore drill chạy trọn trên đường production; `vku-deploy.timer` đang bật và đã deploy `0864b80` với `services=none`; `vku-backup.timer` cũng đang bật (hằng ngày ~03:20 UTC) và lượt chạy qua đúng unit systemd đã thành công với đủ 4 tệp
 
 ## 2. Implemented capabilities
 - Sprint 01-07: local Compose stack, auth Argon2id + server-side session, admin accounts, competition lifecycle, membership/join modes, safe Markdown content/assets, participant portal, scoring + ground truth private, submission policy/quota, my submissions, leaderboard, XLSX export, login rate limit + error envelope + CSP Report-Only
@@ -27,8 +27,8 @@
 - Trang quản trị bài nộp toàn cục `/admin/submissions`: lọc theo cuộc thi/account/status, sắp xếp theo thời gian/đội/điểm (default `created_at`/`desc`), phân trang server-side; BTC tải được artifact của bất kỳ đội nào. Tab kết quả theo từng cuộc thi giữ nguyên và dùng chung component tải artifact
 
 ## 3. Not implemented yet (đúng kế hoạch)
-- **MinIO chưa bootstrap trên VM production**: chưa có container `minio`/`minio-init` ở đó, nên release đầu tiên chạm artifact backend sẽ bị deployer dừng **trước khi** thay `api`/`web` và in lệnh bootstrap (fail closed, xem `docs/DEPLOYMENT.md` §3.1 và §12). Bootstrap là việc tay trên VM
-- Backup/restore/pilot - Sprint 09 (script đã có `minio-artifacts.tar.gz` nhưng **chưa diễn tập** restore MinIO trên VM)
+- **Pilot với người dùng thật chưa chạy**: hạ tầng đã sẵn sàng (MinIO bootstrapped, backup + drill đã kiểm), nhưng chưa có cuộc thi nào chạy thật với người dùng ngoài
+- **Chưa có snapshot ngoài máy**: backup nằm cùng boot disk với dữ liệu, chỉ cứu được lỗi thao tác - cần snapshot GCE hoặc bản sao ngoài (đã ghi ở đầu `scripts/backup_prod.sh`)
 - Named Tunnel: chưa có domain nên production tiếp tục dùng Quick Tunnel, hostname đổi mỗi lần `cloudflared` restart và lúc đó `API_ORIGIN` của Worker trỏ vào URL chết
 - Public/private leaderboard split - **tạm hoãn có chủ đích** (ADR-020); không giải quyết bằng cách nhân đôi competition
 
@@ -93,19 +93,30 @@
 - Đường VPS thật: timer đã bật và đã có một lượt deploy thật qua timer (probe `POST .../reopen` trả `401 UNAUTHORIZED` trong khi đường dẫn bịa trả `404 NOT_FOUND` ⇒ route mới đã live, xem ADR-026 "Rollout")
 - Browser smoke thật `node /tmp/uiverify/artifact-smoke.mjs` (Chromium headless trên stack dev có MinIO, đăng nhập thật, không mock `/api`) - **26/26 PASS** (2026-09-19): nộp hai tệp → `201` rồi tải lại đúng bytes, tên tệp `ai-challenge__Đội-01__submission-0009__{prediction.csv,notebook.ipynb}`, admin toàn cục `sort=primary_score`/`q=team1` đều gửi lên server và tải chéo được artifact của đội khác, không tràn ngang ở 1280 lẫn 375
 - Backup + restore drill trên stack dev (2026-09-19, quy trình §10 `docs/DEPLOYMENT.md`) - **PASS**: `mongodump` → `gzip -t` + `mongorestore --dryRun`; `app-data.tar.gz` đọc lại được CSV legacy theo `file_path` trong DB; `mc mirror` (đúng tag pin) → `minio-artifacts.tar.gz` 6 object; Mongo restore sang DB tạm (65 document, index unique còn nguyên) → bucket test private → mirror ngược → hai artifact đọc lại theo `object_key` **trùng sha256** với tệp gốc; bucket test + DB tạm đã dọn
+- Smoke artifact trên production (2026-09-19, qua `https://vku-ai-challenge-platform.ketdoannguyen.workers.dev`) - **17/17 + 7/7 + 4/4 PASS**: nộp multipart hai part rồi tải lại đúng byte cả hai artifact, đội khác `404 NOT_FOUND`, admin tải chéo được; đường legacy (tên tải 8 ký tự cuối ObjectId, notebook 404, shape `size_bytes: null`); case âm 422 không tạo submission nào
+- Backup thật trên VM production (2026-09-19) - **PASS**: `20260919T221818Z` đủ ba archive + MANIFEST sha256 khớp; sau đó bucket rỗng nên lượt `20260919T224501Z` cũng PASS với `minio-artifacts.tar.gz` 120 B. Lượt bị `SIGTERM` giữa đường trả exit 143 và **không** để lại thư mục dở dang
+- Restore drill trên **đường production** (2026-09-19, từ `20260919T221818Z`) - **PASS**: `mongorestore` sang DB tạm `ai_challenge_drill` (accounts=5, competitions=2, memberships=2, submissions=1), đọc `object_key` từ DB đã restore, dựng bucket drill private, mirror ngược rồi đọc lại hai artifact **trùng sha256** với tệp đã nộp (`f86105bb…` prediction 183 B, `559eb4ec…` notebook 550 B) và `ground_truth.csv` khớp byte với `/data/app` đang chạy; bucket drill + DB tạm đã xoá
+- `bash deploy/vps/tests/backup-prod.test.sh` - **27 ok, 0 fail** (docker giả; bucket có object/rỗng, mirror lỗi, ngắt giữa đường, retention, chạy chồng lấn)
+- `/api/health` khi container `minio` **đã dừng** (2026-09-19, production) - vẫn `200 {"status":"ok","mongo":"reachable"}`; MinIO bật lại lên `healthy`
+- Lượt backup qua **đúng unit systemd** trên production (`sudo systemctl start vku-backup.service`, không gọi tay script) - **Result=success**, exit 0, `20260919T225043Z` đủ `mongo.archive.gz`/`app-data.tar.gz`/`minio-artifacts.tar.gz`/`MANIFEST.txt`; đây là đường `vku-backup.timer` chạy nên nó kiểm luôn `ExecStart` đóng băng + env của unit
 
 ## 10. Tests currently passing
 - Backend: **266** - trong đó đợt ADR-028 thêm `test_submission_artifacts.py` (30), `test_submission_downloads.py` (11), `test_admin_submissions.py` (6) và các case artifact trong `test_submissions.py`, `test_competitions_delete.py`, `test_memberships.py`; `fake_minio.py` giữ unit suite không cần MinIO thật
 - Frontend: **378 (30 file)** - đợt ADR-028 thêm `ArtifactLinks.test.tsx` (3) và `AdminSubmissionsPage.test.tsx` (9), cùng các case hai-tệp trong `SubmissionPage.test.tsx`/`MySubmissionsPage.test.tsx`
-- Harness deployer: **154 assert**, gồm 3 case MinIO mới (chưa bootstrap / healthy / compose không có MinIO)
+- Harness deployer: **157 assert**, gồm 3 case MinIO (chưa bootstrap / healthy / compose không có MinIO) và case `.env.example` chỉ là file mẫu trong repo
+- Harness backup: **27 case** (`deploy/vps/tests/backup-prod.test.sh`), chạy trong `release-gate / deploy-script`
 - Ma trận đầy đủ theo chức năng: `docs/TEST_MATRIX.md` (§13 là đợt ADR-028)
 
 ## 11. Known issues / technical debt (non-blocking)
-- MinIO chưa bootstrap trên VM ⇒ mọi release chạm artifact backend sẽ dừng ở preflight cho tới khi chạy tay `docker compose up -d minio minio-init`. Deployer cố ý **không** ghi `last-failed-sha` trong trường hợp này (lỗi do thao tác vận hành, không phải commit xấu) nên lượt timer sau vẫn thử lại đúng SHA đó - hệ quả là log lặp mỗi phút cho tới khi bootstrap
+- **Working tree đang có một đợt thay đổi chưa commit không thuộc ADR-028, và nó vẫn đang được viết** (mtime các file backend/frontend rơi vào lúc phiên ADR-028 đang chạy, 22:35-22:50 ngày 2026-09-19; không có file nào trong số này do phiên ADR-028 sửa). Ba nhóm: (1) `submission_artifacts/naming.py` đổi dấu phân cách tên tải về từ `__` sang `_` đơn, kèm `submissions/service.py` + `admin_router.py` thêm sort `f1`/`precision`/`recall`/`competition` và một `$facet` đếm thống kê cho bảng toàn cục; (2) tính năng mới **starter notebook** (`competitions/starter_notebook.py` + `.ipynb` + route công khai trong `main.py`); (3) gom nội dung dùng chung `frontend/src/lib/submissionRequirements.ts` cho tab Nộp bài và trang Hướng dẫn. `main` lẫn `release` **không** chứa chúng, production vì vậy vẫn theo hợp đồng `__` đã ghi ở ADR-028 và `docs/API_CONTRACT.md`. **Rủi ro cụ thể**: nếu nhóm (1) vào release mà không đối chiếu lại hợp đồng tên tệp thì tên tải về đổi so với thứ đã smoke trên production - phải sửa cả `docs/API_CONTRACT.md`/`docs/TEST_MATRIX.md` và chạy lại smoke tải về
+- `mc` (bản pin trong compose) không có `grep`/`sed`/`wc`/`cmp`: mọi so sánh byte/sha256 khi diễn tập phải làm trên host, trong container chỉ kiểm mã thoát
+- Restore drill cần credential **root** để tạo bucket drill: credential app là least-privilege (chỉ bucket `submission-artifacts`, chỉ get/put/delete object) nên `mc mb` bằng app bị `Access Denied` - đúng thiết kế, không phải lỗi
+- `deploy/vps/install-auto-deploy.sh` chạy bằng root nên `git rev-parse` trong repo bị từ chối (`không đọc được git HEAD`): bản đóng băng vẫn được ghi và `cmp` khớp repo, nhưng log cài đặt không ghi lại SHA nguồn. Deployer truyền `-c safe.directory=*` cho từng lệnh git, installer thì chưa
+- `TS` của `scripts/backup_prod.sh` chỉ có độ phân giải giây: hai lượt chạy trong cùng một giây sẽ dùng chung tên thư mục (lượt sau ghi đè lượt trước). `flock` đã chặn chạy song song và timer chỉ chạy mỗi phút nên thực tế không xảy ra
 - Bảng toàn cục sắp theo `team` phải `$lookup` sang `accounts` nên không dùng được index; ở quy mô hiện tại (hàng nghìn bản ghi) chưa đáng lo, review nếu lớn hơn
 - Record legacy (CSV trên `DATA_DIR`) không có migration: chúng vẫn đọc được nhưng thiếu `submission_no` (tên tải về rơi về ObjectId ngắn) và không có notebook
 - Cờ `available` của bài legacy chỉ xét document có `file_path`, **không** stat đĩa: nếu tệp bị dọn tay khỏi `DATA_DIR` thì UI vẫn hiện nút tải và API trả 404, UI báo lỗi ngay trong dòng (bảng không hỏng). Bài nộp mới thì `available` phản ánh đúng vì object nằm trong MinIO
-- Restore drill đã chạy trọn trên stack dev (đủ ba phần, đối chiếu sha256 theo `object_key`), nhưng **chưa chạy trên đường production** - phải chờ MinIO bootstrap trên VM. Backup trên VM cũng chưa từng chạy thật; retention 14 ngày chỉ chạy sau khi cả Mongo, app-data và MinIO đều thành công (cố ý fail closed)
+- Restore drill đã chạy trọn trên **cả** stack dev lẫn đường production, đối chiếu sha256 theo `object_key`; retention 14 ngày chỉ chạy sau khi cả Mongo, app-data và MinIO đều thành công (cố ý fail closed). Chưa kiểm: restore **thật** vào database đang phục vụ (drill chỉ restore sang DB tạm) - cần một lần diễn tập trên môi trường không phục vụ người dùng
 - Limiter login process-local theo email (ADR-013): lockout 15 phút nếu kẻ xấu biết email; cần IP companion khi có Cloudflare trusted headers
 - Limit 200 cho admin members: vượt 200 dòng sẽ truncate (có hiển thị total); admin accounts đã có phân trang (`limit=50` + `offset`, backend bound `1..200`/`>=0`)
 - Leaderboard vẫn tính full ranking trong bộ nhớ: phù hợp 40-80 người; phân trang chỉ giảm payload/UI, không đổi độ phức tạp query
@@ -128,12 +139,13 @@
 - ADR-028: artifact submission (CSV + notebook) nằm trong MinIO private, tải qua FastAPI; notebook là bắt buộc; record legacy vẫn đọc được; `/api/health` không phụ thuộc MinIO. ADR-028 **thay thế một phần** ADR-003 (artifact), phần còn lại của ADR-003 giữ nguyên
 
 ## 13. Preconditions for next sprint
-- Bootstrap MinIO trên VM theo `docs/DEPLOYMENT.md` §3.1 (tạo `data/minio`, `up -d minio minio-init`, chạy `minio_smoke.sh`), rồi để lượt timer sau deploy tiếp - không cần push commit mới
-- Trước khi rollout nên chạy lại `scripts/minio_smoke.sh` và smoke artifact §8.4 `docs/DEPLOYMENT.md` (kể cả kiểm `/api/health` vẫn `200` khi endpoint artifact trả `503`)
-- Diễn tập restore MinIO (§10 `docs/DEPLOYMENT.md`) trước khi coi backup là dùng được
+- Backup định kỳ **đã bật sẵn** (`vku-backup.timer` `enabled`/`active`, chạy hằng ngày ~03:20 UTC, lượt kế tiếp 2026-09-20T03:20:05Z) nên không cần thao tác gì thêm. Điều còn phải theo dõi: lượt `03:21` ngày 2026-09-19 vẫn là bản **trước** ADR-028 (chỉ 3 archive, không có `minio-artifacts.tar.gz`), nên lượt rạng sáng 2026-09-20 là lượt timer đầu tiên chạy bản backup có MinIO - kiểm bằng `journalctl -u vku-backup.service` và `ls /srv/vku-ai-challenge/backups/<timestamp>`
+- Snapshot ngoài máy (GCE snapshot hoặc copy backup ra ngoài): backup cùng boot disk chỉ cứu được lỗi thao tác
+- Bật branch protection cho `release` (và `main`) trên GitHub - xem §11
+- Chốt đợt thay đổi đang viết dở trong working tree trước khi mở release tiếp theo (tên tải về `__`→`_`, starter notebook, nội dung dùng chung) - xem §11
 
 ## 14. Exact next sprint
-- Sprint 09: backup/restore/pilot - cài `vku-backup.timer` trên VM, chạy lượt backup thật đầu tiên có MinIO và diễn tập restore
+- Sprint 09: pilot - chạy một cuộc thi thật với người dùng ngoài, xác nhận lượt backup định kỳ đầu tiên có `minio-artifacts.tar.gz`, và diễn tập restore **vào môi trường không phục vụ người dùng**
 
 ## 15. Handoff notes for the next AI agent
 - Muốn "public/private leaderboard" thì đọc ADR-020 trước: **không** nhân đôi competition; hướng đúng là một ground truth có partition và một submission sinh hai score
