@@ -235,6 +235,26 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
   });
 });
 
+test("slug tự điền theo tên cuộc thi; gõ tay thì giá trị tay thắng", () => {
+  renderForm();
+
+  const name = screen.getByLabelText("Tên cuộc thi");
+  const slug = screen.getByLabelText("Slug") as HTMLInputElement;
+
+  fireEvent.change(name, { target: { value: "Cuộc thi AI 2026" } });
+  expect(slug).toHaveValue("cuoc-thi-ai-2026");
+
+  // Gõ tay vào slug: đổi tên tiếp cũng không ghi đè lựa chọn của admin.
+  fireEvent.change(slug, { target: { value: "vku-2026" } });
+  fireEvent.change(name, { target: { value: "Tên khác" } });
+  expect(slug).toHaveValue("vku-2026");
+
+  // Xoá trắng ô slug là bật lại tự điền.
+  fireEvent.change(slug, { target: { value: "" } });
+  fireEvent.change(name, { target: { value: "VKU Challenge" } });
+  expect(slug).toHaveValue("vku-challenge");
+});
+
 test("dialog tạo mới dùng validation tài nguyên chung và không phát POST khi link sai", async () => {
   mockApi(() => ({ body: BASE, status: 200 }));
   renderForm();

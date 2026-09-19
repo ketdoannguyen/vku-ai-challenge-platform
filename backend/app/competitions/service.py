@@ -1,7 +1,7 @@
 """Competition service: validation, tạo/tra cứu, public representation.
 
-Lifecycle (ADR-009): create -> draft; draft -> published; published -> closed.
-Closed là terminal - không reopen ở MVP.
+Lifecycle (ADR-009, ADR-027): create -> draft; draft -> published; published -> closed;
+closed -> published (reopen). Xoá được ở draft và closed, không xoá được published.
 """
 
 import logging

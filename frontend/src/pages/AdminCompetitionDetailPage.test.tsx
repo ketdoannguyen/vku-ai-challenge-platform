@@ -618,6 +618,85 @@ test("upload ground truth dùng endpoint private và form data", async () => {
   });
 });
 
+test("upload ground truth xong thì banner publish biến mất và nút Publish mở khóa", async () => {
+  const blocked = {
+    code: "GROUND_TRUTH_REQUIRED",
+    message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+  };
+  // Backend là bên quyết định: sau upload, detail trả readiness mới. Test bám vào đó để
+  // bắt lỗi panel cấu hình xong mà không đọc lại state trang.
+  let uploaded = false;
+  mockApi((url, init) => {
+    if (url.endsWith("/ground-truth") && init?.method === "PUT") {
+      uploaded = true;
+      return { body: SCORING, status: 200 };
+    }
+    if (url.endsWith("/scoring")) {
+      return {
+        body: { ...SCORING, ready: false, ground_truth: null, not_ready_reason: blocked },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return uploaded
+      ? {
+          body: { ...COMPETITION, status: "draft", publish_ready: true, publish_blocked_reason: null },
+          status: 200,
+        }
+      : {
+          body: { ...COMPETITION, status: "draft", publish_ready: false, publish_blocked_reason: blocked },
+          status: 200,
+        };
+  });
+  renderPage();
+
+  expect(await screen.findByText("Chưa thể publish.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV"), {
+    target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] },
+  });
+
+  await waitFor(() => {
+    expect(screen.queryByText("Chưa thể publish.")).toBeNull();
+  });
+  expect(screen.getByRole("button", { name: "Publish" })).not.toBeDisabled();
+});
+
+test("banner chặn vì thiếu mã tham gia mở tab Thành viên chứ không phải tab Chấm điểm", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        status: "draft",
+        join_code_configured: false,
+        publish_ready: false,
+        publish_blocked_reason: {
+          code: "JOIN_CODE_REQUIRED",
+          message: "Cần cấu hình mã tham gia trước khi publish cuộc thi.",
+        },
+      },
+      status: 200,
+    };
+  });
+  renderPage();
+
+  const banner = (await screen.findByText("Chưa thể publish.")).closest(
+    ".status-banner",
+  ) as HTMLElement;
+  fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Thành viên" }));
+
+  expect(screen.getByRole("tab", { name: "Thành viên & mã tham gia" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(await screen.findByText("Mã tham gia")).toBeTruthy();
+});
+
 test("nút upload ground truth là <button> thật nên Tab/Enter mở được picker", async () => {
   mockApi((url) => {
     if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
@@ -712,7 +791,7 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   });
 });
 
-test("header hiển thị action theo status: draft có Publish, published có Kết thúc, closed disable Sửa", async () => {
+test("header hiển thị action theo status: draft có Publish, published có Kết thúc, closed có Mở lại và Xóa", async () => {
   // 1. Published
   mockApi((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -724,6 +803,8 @@ test("header hiển thị action theo status: draft có Publish, published có K
   expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
   expect(within(headerActions).getByRole("button", { name: "Sửa" })).not.toBeDisabled();
   expect(screen.getByRole("button", { name: "Clone" })).toBeTruthy();
+  // Cuộc thi đang chạy phải Kết thúc trước khi xoá.
+  expect(within(headerActions).queryByRole("button", { name: "Xóa" })).toBeNull();
   unmount();
 
   // 2. Draft
@@ -746,10 +827,35 @@ test("header hiển thị action theo status: draft có Publish, published có K
   const renderClosed = renderPage();
   expect(await screen.findByRole("button", { name: "Clone" })).toBeTruthy();
   const closedHeaderActions = renderClosed.container.querySelector(".admin-detail-actions") as HTMLElement;
+  // Sửa vẫn khoá khi đã kết thúc - phải Mở lại trước.
   expect(within(closedHeaderActions).getByRole("button", { name: "Sửa" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
+  expect(within(closedHeaderActions).getByRole("button", { name: "Mở lại" })).toBeTruthy();
+  expect(within(closedHeaderActions).getByRole("button", { name: "Xóa" })).toBeTruthy();
   renderClosed.unmount();
+});
+
+test("closed: Mở lại gọi POST /reopen qua modal xác nhận", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/reopen") && init?.method === "POST") {
+      return { body: { ...COMPETITION, status: "published" }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "closed" }, status: 200 };
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Mở lại" }));
+  const dialog = screen.getByRole("dialog", { name: "Mở lại cuộc thi" });
+  // Chưa bấm xác nhận thì chưa được gọi API.
+  expect(calls.some((c) => c.url.endsWith("/reopen"))).toBe(false);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Mở lại" }));
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.endsWith("/reopen") && c.init?.method === "POST")).toBe(true);
+  });
+  expect(await screen.findByText("Đã mở lại cuộc thi.")).toBeTruthy();
 });
 
 test("header publish/close/clone gọi đúng endpoint modal xác nhận", async () => {
@@ -1029,7 +1135,7 @@ test("đếm thành viên tách người đang hoạt động khỏi người đ
   expect(await screen.findByText("1 đang hoạt động · 2 tổng cộng")).toBeTruthy();
 });
 
-test("chỉ draft mới có nút Xóa cuộc thi", async () => {
+test("draft có nút Xóa cuộc thi ở header", async () => {
   mockApi((url) =>
     url.includes("/contents")
       ? { body: CONTENTS, status: 200 }
@@ -1529,6 +1635,40 @@ test("tab Nội dung có heading khối mới và CTA mở đúng modal tạo tr
   expect(cta).not.toBeDisabled();
   fireEvent.click(cta);
   expect(screen.getByRole("dialog", { name: "Thêm trang nội dung" })).toBeTruthy();
+});
+
+test("modal thêm trang nội dung tự điền slug theo tiêu đề", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  fireEvent.click(screen.getByRole("button", { name: "Thêm trang nội dung" }));
+  const dialog = screen.getByRole("dialog", { name: "Thêm trang nội dung" });
+
+  fireEvent.change(within(dialog).getByLabelText("Tiêu đề"), {
+    target: { value: "Đề bài vòng 2" },
+  });
+  expect(within(dialog).getByLabelText("Slug")).toHaveValue("de-bai-vong-2");
+});
+
+test("sửa trang nội dung: slug cũ bị thay khi tiêu đề đổi", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const row = Array.from(document.querySelectorAll("tbody tr")).find((tr) =>
+    tr.textContent?.includes("problem"),
+  ) as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "Sửa" }));
+
+  const dialog = screen.getByRole("dialog", { name: /Sửa nội dung/ });
+  const slug = within(dialog).getByLabelText(/^Slug/) as HTMLInputElement;
+  expect(slug).toHaveValue("problem");
+
+  fireEvent.change(within(dialog).getByLabelText("Tiêu đề"), {
+    target: { value: "Đề bài vòng 2" },
+  });
+  expect(slug).toHaveValue("de-bai-vong-2");
 });
 
 test("cột Thứ tự đọc theo vị trí 1..n thay vì giá trị order thô của API", async () => {

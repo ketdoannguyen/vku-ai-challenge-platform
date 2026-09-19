@@ -44,7 +44,7 @@ Fields:
 - `slug` (unique) - format `[a-z0-9]+(-[a-z0-9]+)*`, tối đa 64 ký tự, immutable sau tạo
 - `name`
 - `short_description`
-- `status`: `draft` | `published` | `closed` - lifecycle: draft → published → closed (terminal), xem ADR-009
+- `status`: `draft` | `published` | `closed` - lifecycle: draft → published → closed ⇄ published (`/reopen`). Xoá được ở `draft` và `closed`. Xem ADR-009 + ADR-027
 - `start_at`, `end_at` (UTC, timezone-aware; API nhận ISO, trả ISO `...Z`)
 - `join_mode`: `open` | `code` | `invite_only`
 - `join_code_hash` (luôn None ở Sprint 03 - join là Sprint 04; không bao giờ trả về API)
@@ -151,8 +151,8 @@ Document tạo trước thay đổi này không có field; serializer trả `[]`
 
 Không dùng Mongo transaction (standalone). Thứ tự xoá luôn là con trước – cha sau để lỗi giữa đường vẫn còn bản ghi gốc cho lần gọi lại:
 
-- `DELETE /api/admin/competitions/{id}` (chỉ `draft`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>`. `accounts` và `sessions` không bị đụng.
+- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>`. `accounts` và `sessions` không bị đụng.
 - `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm file, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá - vướng thì trả 409 và dừng.
 - `POST /api/competitions/{slug}/leave`: chỉ `update` `active=false`, không xoá gì.
 
-Xoá competition/published/closed không có trong phạm vi: lịch sử thi là dữ liệu phải giữ.
+Xoá competition `published` không có trong phạm vi: cuộc thi đang chạy phải Kết thúc trước. `draft` và `closed` xoá được (cascade), nên "đã kết thúc" không phải là bảo đảm còn dữ liệu - muốn giữ lịch sử thi thì đừng xoá (ADR-027).

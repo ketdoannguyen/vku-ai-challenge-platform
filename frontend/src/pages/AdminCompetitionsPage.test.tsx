@@ -334,14 +334,14 @@ test("xóa draft: phải gõ đúng slug rồi mới gọi DELETE kèm confirm_s
   expect(await screen.findByText(/Đã xóa cuộc thi/)).toBeTruthy();
 });
 
-test("xóa draft thất bại: modal giữ nguyên và hiện lỗi từ API", async () => {
+test("xóa thất bại: modal giữ nguyên và hiện lỗi từ API", async () => {
   mockFetch((_url, init) =>
     init?.method === "DELETE"
       ? {
           body: {
             error: {
               code: "COMPETITION_NOT_DELETABLE",
-              message: "Chỉ xoá được cuộc thi ở trạng thái Nháp. Hãy Đóng cuộc thi để giữ lịch sử.",
+              message: "Cuộc thi đang chạy phải Kết thúc trước khi xoá.",
             },
           },
           status: 409,
@@ -361,7 +361,7 @@ test("xóa draft thất bại: modal giữ nguyên và hiện lỗi từ API", a
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Xóa vĩnh viễn" }));
 
-  expect(await screen.findByText(/Hãy Đóng cuộc thi để giữ lịch sử/)).toBeTruthy();
+  expect(await screen.findByText(/phải Kết thúc trước khi xoá/)).toBeTruthy();
   expect(screen.getByRole("dialog", { name: "Xóa cuộc thi" })).toBeTruthy();
 });
 
@@ -406,6 +406,30 @@ test("published không có hành động xóa", async () => {
   await openRowMenu();
   expect(await screen.findByRole("menuitem", { name: "Kết thúc" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Xóa" })).toBeNull();
+  expect(screen.queryByRole("menuitem", { name: "Mở lại" })).toBeNull();
+});
+
+test("đã kết thúc: menu có Mở lại và vẫn xoá được", async () => {
+  mockFetch((url, init) =>
+    url.endsWith("/reopen") && init?.method === "POST"
+      ? { body: { ...DRAFT, status: "published" }, status: 200 }
+      : { body: { competitions: [{ ...DRAFT, status: "closed" }] }, status: 200 },
+  );
+  renderPage();
+  await openRowMenu();
+  // Đã kết thúc vẫn xoá được: đóng là bước xác nhận có chủ đích trước khi mất lịch sử thi.
+  expect(await screen.findByRole("menuitem", { name: "Xóa" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("menuitem", { name: "Mở lại" }));
+  const dialog = screen.getByRole("dialog", { name: "Mở lại cuộc thi" });
+  expect(screen.queryByRole("menuitem", { name: "Xóa" })).toBeNull(); // menu đã đóng
+  fireEvent.click(within(dialog).getByRole("button", { name: "Mở lại" }));
+  await waitFor(() => {
+    const posts = (fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call) => String(call[0]).endsWith("/reopen") && call[1]?.method === "POST",
+    );
+    expect(posts).toHaveLength(1);
+  });
 });
 
 test("bốn ô thống kê là bốn card rời, số lấy từ dữ liệu thật", async () => {

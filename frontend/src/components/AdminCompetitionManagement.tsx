@@ -8,10 +8,43 @@ import {
   isoToLocalInput,
   localInputToIso,
 } from "../api/competitions";
+import { useAutoSlug } from "../hooks/useAutoSlug";
 import { cleanCompetitionResources } from "../lib/competitionResources";
+import { SLUG_MAX } from "../lib/slug";
 import { ConfirmModal, Modal } from "./Modal";
 
-export type CompetitionAction = "publish" | "close" | "clone";
+export type CompetitionAction = "publish" | "close" | "reopen" | "clone";
+
+/** Copy xác nhận theo từng action, tách khỏi component để khỏi lồng ternary bốn nhánh. */
+const CONFIRMATION: Record<
+  CompetitionAction,
+  (name: string) => { title: string; body: string; label: string; danger: boolean }
+> = {
+  publish: (name) => ({
+    title: "Publish cuộc thi",
+    body: `Publish "${name}" - thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
+    label: "Publish",
+    danger: false,
+  }),
+  close: (name) => ({
+    title: "Kết thúc cuộc thi",
+    body: `Kết thúc "${name}" - không nhận submission mới. Cuộc thi vẫn mở lại được sau đó.`,
+    label: "Kết thúc",
+    danger: true,
+  }),
+  reopen: (name) => ({
+    title: "Mở lại cuộc thi",
+    body: `Mở lại "${name}" - cuộc thi nhận bài trở lại nếu chưa quá thời gian kết thúc.`,
+    label: "Mở lại",
+    danger: false,
+  }),
+  clone: (name) => ({
+    title: "Clone cuộc thi",
+    body: `Clone "${name}" thành một bản nháp mới?`,
+    label: "Clone",
+    danger: false,
+  }),
+};
 
 function Icon({
   children,
@@ -202,27 +235,7 @@ export function CompetitionActionConfirmModal({
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  const confirmation =
-    action === "publish"
-      ? {
-          title: "Publish cuộc thi",
-          body: `Publish "${competition.name}" - thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
-          label: "Publish",
-          danger: false,
-        }
-      : action === "close"
-        ? {
-            title: "Kết thúc cuộc thi",
-            body: `Kết thúc "${competition.name}" - không nhận submission mới, cuộc thi không thể mở lại.`,
-            label: "Kết thúc",
-            danger: true,
-          }
-        : {
-            title: "Clone cuộc thi",
-            body: `Clone "${competition.name}" thành một bản nháp mới?`,
-            label: "Clone",
-            danger: false,
-          };
+  const confirmation = CONFIRMATION[action](competition.name);
 
   async function confirm() {
     if (action === "clone") {
@@ -250,7 +263,7 @@ export function CompetitionActionConfirmModal({
   );
 }
 
-/** Xoá cuộc thi nháp: backend cascade nội dung/thành viên/bài nộp nên phải gõ đúng slug mới cho bấm. */
+/** Xoá cuộc thi (nháp hoặc đã kết thúc): backend cascade nội dung/thành viên/bài nộp nên phải gõ đúng slug mới cho bấm. */
 export function CompetitionDeleteModal({
   competition,
   onDeleted,
@@ -359,7 +372,11 @@ export function CompetitionFormModal({
 }) {
   const isEdit = competition !== undefined;
   const [name, setName] = useState(competition?.name ?? "");
-  const [slug, setSlug] = useState(competition?.slug ?? "");
+  // Sửa cuộc thi thì slug bị khoá nên không bám theo tên: backend bỏ qua field này khi PATCH.
+  const { slug, onTitleChange: onNameChange, onSlugChange } = useAutoSlug(
+    competition?.slug ?? "",
+    !isEdit,
+  );
   const [description, setDescription] = useState(
     competition?.short_description ?? "",
   );
@@ -475,7 +492,10 @@ export function CompetitionFormModal({
                 id="comp-name"
                 className="ac-form-control"
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  onNameChange(event.target.value);
+                }}
                 required
                 autoFocus
               />
@@ -494,9 +514,10 @@ export function CompetitionFormModal({
                   id="comp-slug"
                   className="ac-form-control"
                   value={slug}
-                  onChange={(event) => setSlug(event.target.value)}
+                  onChange={(event) => onSlugChange(event.target.value)}
                   pattern="[a-z0-9]+(-[a-z0-9]+)*"
                   title="Chỉ a-z, 0-9 và dấu gạch ngang"
+                  maxLength={SLUG_MAX}
                   disabled={isEdit}
                   required
                 />
@@ -504,6 +525,7 @@ export function CompetitionFormModal({
               </div>
               <small>
                 Slug dùng làm URL định danh: /competitions/{slug || "slug-cuoc-thi"}
+                {!isEdit && " - tự điền theo tên cuộc thi, gõ tay để đổi."}
               </small>
             </div>
 

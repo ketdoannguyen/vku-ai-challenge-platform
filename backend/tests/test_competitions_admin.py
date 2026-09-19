@@ -1,4 +1,4 @@
-"""Admin competitions API: guard, create/validate, edit rules, publish/close, clone."""
+"""Admin competitions API: guard, create/validate, edit rules, publish/close/reopen, clone."""
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -41,6 +41,7 @@ def test_admin_competition_endpoints_require_login(client):
         client.patch("/api/admin/competitions/abc", json={}),
         client.post("/api/admin/competitions/abc/publish"),
         client.post("/api/admin/competitions/abc/close"),
+        client.post("/api/admin/competitions/abc/reopen"),
         client.post("/api/admin/competitions/abc/clone"),
     ):
         assert resp.status_code == 401
@@ -355,20 +356,44 @@ def test_edit_closed_rejected(client):
     assert resp.status_code == 422
 
 
-def test_publish_close_transitions(client):
+def test_publish_close_reopen_transitions(client):
     _login(client)
     cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
-    # draft -> closed trực tiếp bị chặn
+    # draft -> closed/reopen trực tiếp bị chặn (chưa từng publish)
     assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 422
+    assert client.post(f"/api/admin/competitions/{cid}/reopen").status_code == 422
     assert publish_competition(client, cid).status_code == 200
     assert client.get(f"/api/admin/competitions/{cid}").json()["status"] == "published"
-    # published -> publish lại bị chặn
+    # published -> publish lại và reopen đều bị chặn
     assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 422
+    assert client.post(f"/api/admin/competitions/{cid}/reopen").status_code == 422
     assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 200
     assert client.get(f"/api/admin/competitions/{cid}").json()["status"] == "closed"
-    # closed -> mọi transition bị chặn
+    # closed -> publish/close bị chặn, chỉ reopen đi được
     assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 422
     assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 422
+    reopened = client.post(f"/api/admin/competitions/{cid}/reopen")
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "published"
+    assert client.get(f"/api/admin/competitions/{cid}").json()["status"] == "published"
+    # reopen lần hai khi đang published bị chặn
+    assert client.post(f"/api/admin/competitions/{cid}/reopen").status_code == 422
+
+
+def test_edit_allowed_again_after_reopen(client):
+    """Reopen là hoàn tác việc đóng, nên quyền sửa phải quay lại - nhưng chỉ ở mức của published."""
+    _login(client)
+    cid = client.post("/api/admin/competitions", json=_body()).json()["id"]
+    assert publish_competition(client, cid).status_code == 200
+    assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 200
+    assert client.patch(f"/api/admin/competitions/{cid}", json={"name": "Sai"}).status_code == 422
+
+    assert client.post(f"/api/admin/competitions/{cid}/reopen").status_code == 200
+    edited = client.patch(f"/api/admin/competitions/{cid}", json={"name": "Tên mới"})
+    assert edited.status_code == 200
+    assert edited.json()["name"] == "Tên mới"
+    # Khoá primary_metric là của published, không phải của reopen - mở lại không gỡ được.
+    assert client.patch(f"/api/admin/competitions/{cid}", json={"primary_metric": "recall"}).status_code == 422
 
 
 def test_clone_copies_config_not_status_dates_submissions(client):
@@ -452,6 +477,22 @@ def test_join_code_requirement_wins_over_readiness(client):
     _login(client)
     cid = _draft(client, join_mode="code")
     assert _publish_error(client, cid)["code"] == "JOIN_CODE_REQUIRED"
+
+
+def test_admin_detail_reports_join_code_blocker(client):
+    """Banner phải thấy đúng cổng mà endpoint publish enforce, nếu không nút Publish bấm được rồi mới vỡ."""
+    _login(client)
+    cid = _draft(client, join_mode="code")
+    blocked = client.get(f"/api/admin/competitions/{cid}").json()
+    assert blocked["publish_ready"] is False
+    assert blocked["publish_blocked_reason"]["code"] == "JOIN_CODE_REQUIRED"
+
+    client.put(f"/api/admin/competitions/{cid}/join-code", json={"join_code": "secret-2026"})
+    # Hết cổng mã tham gia thì rơi xuống cổng kế tiếp, không nhảy thẳng sang trạng thái sẵn sàng.
+    assert (
+        client.get(f"/api/admin/competitions/{cid}").json()["publish_blocked_reason"]["code"]
+        == "SCORING_CONFIG_REQUIRED"
+    )
 
 
 def test_admin_detail_reports_publish_readiness(client):
