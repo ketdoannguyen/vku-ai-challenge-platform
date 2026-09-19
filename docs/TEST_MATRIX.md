@@ -608,8 +608,13 @@ hạ tầng thật, chưa thực hiện lần nào.
 | Cú pháp shell của deployer + installer + harness | passing | `bash -n` trong `release-gate / deploy-script` |
 | Unit systemd hợp lệ và `ExecStart` trỏ đúng bản copy đóng băng | passing | `systemd-analyze verify` trên bản copy thay `ExecStart` + `grep -qx` đường dẫn thật |
 | Compose prod còn hợp lệ (base và base + override named tunnel) | passing | `docker compose config --quiet` với env giả trong `release-gate` |
+| Gate chạy trên push vào `main` | passing | Run `35440863656`: cả ba job `frontend`/`backend`/`deploy-script` xanh |
 | Gate frontend/backend chạy trên PR vào `release` | planned | Mở PR đầu tiên vào `release` và xem `release-gate / frontend`, `/ backend`, `/ deploy-script` xanh |
-| Actions deploy Worker khi push vào `release` | planned | Cần secret ở environment `production`; xem `docs/DEPLOYMENT.md` §5.1 |
+| Actions deploy Worker | passing | Run `35441083752` (dispatch trên `release`): upload 4 file, version `03c71a3f`, smoke tĩnh `/` và deep link `200 text/html`, `/api/health` `200` |
+| `keep_vars` giữ `API_ORIGIN` qua deploy | passing | Sau run `35441083752`, `/api/health` vẫn `{"status":"ok","mongo":"reachable"}` - nếu `--var` ghi đè thì API đã 502 |
+| Secret của environment `production` chỉ dùng được từ `release` | passing | `deployment_branch_policies` trả đúng một policy `release`; `gh workflow run --ref main` sẽ bị chặn |
+| Push tạo nhánh `release` ở cùng commit với `main` không kích hoạt deploy | passing | Quan sát thật: `release` tạo ở `6b86509` (trùng `main`) nên `paths: frontend/**` không khớp diff rỗng; dùng `workflow_dispatch` theo thiết kế break-glass. Push có diff thật sẽ chạy bình thường |
+| Smoke tĩnh fail thì workflow tự rollback Worker | planned | Chưa diễn tập - xem "Failure drills" trong plan |
 | Smoke tĩnh fail thì workflow tự rollback Worker | planned | Chưa diễn tập - xem "Failure drills" trong plan |
 | Timer kéo commit mới về VM trong ~1 phút | planned | Cần bootstrap trên VM; xem `docs/DEPLOYMENT.md` §7.1 |
 | Deploy lỗi trên VM tự rollback về image cũ | planned | Diễn tập bằng một commit cố tình hỏng |
