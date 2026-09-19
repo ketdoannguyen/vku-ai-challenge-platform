@@ -18,9 +18,18 @@ class Settings(BaseSettings):
     mongo_password: str = ""
 
     max_upload_mb: int = 10
+    max_notebook_mb: int = 20
     max_content_mb: int = 2
     max_asset_mb: int = 2
     data_dir: str = "./data"
+
+    # Artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private; ground truth,
+    # Markdown và assets vẫn ở `data_dir` (ADR-003 vẫn đúng cho các loại đó).
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = ""
+    minio_secret_key: str = ""
+    minio_bucket: str = "submission-artifacts"
+    minio_secure: bool = False
 
     session_secret: str = ""
     session_lifetime_hours: int = 24
