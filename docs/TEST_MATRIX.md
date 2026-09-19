@@ -561,20 +561,29 @@ tồn tại. undici đi kèm Node 22.23.2 nhận nó là blob-like rồi gọi `
 hiện, Node 22.22.1 cũng pass - chỉ từ 22.23.2 mới đổ. Vì vậy đối chiếu Node phải dùng đúng bản CI chạy
 (`node-version: 22` resolve thành 22.23.2), không phải bản có sẵn trên máy.
 
-## 10. Production deploy (Sprint 08) - planned
+## 10. Production deploy (Sprint 08)
 
 | Check | Status |
 |---|---|
-| Docker Compose prod chạy trên GCE | planned |
-| Cloudflare Tunnel serve HTTPS | planned |
-| Smoke test production | planned |
+| Docker Compose prod chạy trên GCE | passing |
+| Cloudflare Tunnel serve HTTPS | passing |
+| Smoke test production | passing |
+
+Kiểm 2026-09-19 trên VM production: `api`/`web`/`mongo`/`minio`/`cloudflared` đều `healthy` ở
+`0864b80c913b`, `/api/health` trả `200 {"status":"ok","mongo":"reachable"}` qua
+`https://vku-ai-challenge-platform.ketdoannguyen.workers.dev` (HTTPS của Cloudflare), và smoke
+artifact/legacy/case âm đã chạy trọn qua đúng đường đó (chi tiết ở §13).
 
 ## 11. Backup/restore & pilot (Sprint 09) - planned
 
 | Check | Status |
 |---|---|
-| Backup + restore Mongo + /data | planned |
+| Backup + restore Mongo + /data | passing |
 | Runbook pilot | planned |
+
+Backup + restore đã chạy thật trên VM ngày 2026-09-19, gồm cả mirror bucket MinIO và restore drill
+(chi tiết ở §13). Backup định kỳ cũng đã bật sẵn: `vku-backup.timer` ở trạng thái `enabled`/`active`,
+chạy hằng ngày ~03:20 UTC. Riêng "Runbook pilot" (chạy với người dùng thật) vẫn chưa diễn ra.
 
 ## 12. Auto-deploy (Sprint 08, ADR-026)
 
@@ -738,6 +747,9 @@ API trả 404 và UI báo lỗi ngay trong dòng, không làm hỏng bảng (đ�
 | Compose file không khai báo MinIO thì preflight không chặn deploy | passing | harness case "compose không có MinIO: không chặn deploy" |
 | Cú pháp shell của deployer/backup/init/smoke + unit systemd + `docker compose config` (có biến MinIO) | passing | `release-gate / deploy-script` (`bash -n`, harness, `systemd-analyze verify`, `docker compose config --quiet` với env giả) |
 | Backup đủ ba phần và restore drill đọc lại được **cả** CSV legacy **lẫn** CSV/notebook mới | passing | Diễn tập trên stack dev 2026-09-19 (đúng quy trình §10 `docs/DEPLOYMENT.md`): `mongodump` → `gzip -t` + `mongorestore --dryRun`; `app-data.tar.gz` giải nén ra đọc được CSV legacy tại `file_path` trong DB (183 B, 15 dòng); `mc mirror` bucket bằng tag `mc` mà compose pin → `minio-artifacts.tar.gz` (6 object); Mongo restore vào DB tạm `ai_challenge_drill` (65 document, index `submission_no_unique` còn nguyên) → lấy `object_key` thật của submission `0009` → dựng bucket test private (`anonymous set none` → `private`) → mirror ngược → đọc lại hai artifact theo đúng key đó: **trùng sha256** với tệp đã nộp (`d7b9c730…` prediction, `b74a1f2b…` notebook). Bucket test và DB tạm đã xoá sau khi kiểm; bucket thật còn nguyên 6 object |
-| `scripts/backup_prod.sh` chạy trọn trên VM, `MANIFEST.txt` có sha256, và lượt dở dang bị xoá thay vì để lại bản thiếu dữ liệu | planned | Diễn tập trên VM: `sudo scripts/backup_prod.sh`, kiểm `tar -tzf` + `MANIFEST.txt`, rồi ngắt giữa đường để xem `DEST` bị dọn |
-| Restore drill trên **đường production** (backup thật trên VM → bucket test) | planned | Sau khi bootstrap MinIO trên VM: chạy lại quy trình đã kiểm ở dòng trên với `PROD_DATA_ROOT`/`.env` thật |
-| Nộp + tải artifact thật trên production (API → MinIO trong compose prod) | planned | Sau khi bootstrap MinIO trên VM: smoke §8.4 `docs/DEPLOYMENT.md`; kiểm luôn health vẫn 200 khi artifact endpoint 503 |
+| `scripts/backup_prod.sh` chạy trọn trên VM, `MANIFEST.txt` có sha256, và lượt dở dang bị xoá thay vì để lại bản thiếu dữ liệu | passing | Chạy thật trên VM 2026-09-19: `20260919T224501Z` đủ ba archive + `MANIFEST.txt` ba dòng sha256 (`sha256sum -c` khớp); lượt bị `SIGTERM` giữa đường (`20260919T224533Z`) trả exit 143, in "Backup dở dang - đã xoá …" ra stderr và **không** để lại thư mục nào. Cộng thêm harness `deploy/vps/tests/backup-prod.test.sh` (27 case) chạy trong `release-gate` |
+| Backup chạy qua **đúng unit systemd** (đường `vku-backup.timer`), không phải gọi tay script | passing | `sudo systemctl start vku-backup.service` trên VM 2026-09-19: `Result=success`/`ExecMainStatus=0`, `20260919T225043Z` đủ `mongo.archive.gz`/`app-data.tar.gz`/`minio-artifacts.tar.gz`/`MANIFEST.txt`, `mongorestore --dryRun` đọc lại archive. Đây chính là đường timer chạy nên nó kiểm luôn `ExecStart=/usr/local/sbin/vku-backup-prod` (bản đóng băng) và env của unit. Timer đang `enabled`/`active`, lượt kế tiếp 2026-09-20T03:20:05Z; lượt `03:21` ngày 2026-09-19 còn là bản **trước** ADR-028 nên chỉ có 3 archive - lượt rạng sáng 2026-09-20 là lượt timer đầu tiên phải có `minio-artifacts.tar.gz` |
+| Bucket `submission-artifacts` **rỗng**: backup vẫn thành công với archive MinIO rỗng hợp lệ | passing | Harness case "bucket rỗng"; và chạy thật trên VM khi production chưa có submission nào: `20260919T224501Z/minio-artifacts.tar.gz` (120 B, chỉ có entry `minio-artifacts/`), exit 0 |
+| Chạy chồng lấn bị bỏ qua, và retention chỉ chạy SAU khi backup mới thành công | passing | Harness hai case tương ứng: lượt thứ hai in "Đã có tiến trình backup khác đang chạy" và không tạo thư mục nào; bản quá hạn chỉ bị xoá ở lượt thành công, còn nguyên ở lượt mirror lỗi |
+| Restore drill trên **đường production** (backup thật trên VM → bucket test) | passing | Diễn tập 2026-09-19 từ `20260919T221818Z`: `mongorestore --nsFrom/--nsTo` vào DB tạm `ai_challenge_drill` (accounts=5, competitions=2, memberships=2, submissions=1); đọc `object_key` từ DB đã restore; dựng bucket drill private (`anonymous get` → `private`); mirror ngược rồi đọc lại **cả hai** artifact: `prediction.csv` 183 B sha256 `f86105bb…` và `notebook.ipynb` 550 B sha256 `559eb4ec…`, **trùng** bản trong backup và trùng tệp gốc đã nộp. `ground_truth.csv` trong `app-data.tar.gz` khớp byte với `/srv/vku-ai-challenge/data/app/...` đang chạy. Bucket drill + DB tạm đã xoá, bucket thật còn nguyên |
+| Nộp + tải artifact thật trên production (API → MinIO trong compose prod) | passing | Smoke qua đúng đường người dùng (Worker → Tunnel → nginx → FastAPI) ngày 2026-09-19: 17/17 case artifact (nộp multipart hai part, participant tải lại đúng byte, đội khác 404 `NOT_FOUND`, admin tải được artifact đội khác), 7/7 case đường legacy (tên tải 8 ký tự cuối ObjectId, notebook 404, shape `size_bytes: null`), 4/4 case âm (422 `VALIDATION_ERROR`/`INVALID_NOTEBOOK_TYPE`/`NOTEBOOK_INVALID`, không tạo submission nào). Health vẫn `200 {"status":"ok","mongo":"reachable"}` khi **dừng hẳn** container `minio` (nhánh artifact 503 đã có ở test backend, production lúc đó không còn submission nào để gọi) |
