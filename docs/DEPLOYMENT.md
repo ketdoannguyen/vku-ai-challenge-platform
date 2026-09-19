@@ -2,9 +2,8 @@
 
 Status: **Sprint 08** - backend/MongoDB/Nginx chạy trên GCE bằng `docker-compose.prod.yml`, public
 tạm qua Cloudflare **Quick Tunnel**; frontend đã có thêm public entry trên **Cloudflare Workers
-Static Assets** (ADR-025) nhưng **chưa rollout** - xem §5-§6.
-
-Hướng dẫn truy cập máy chủ từ Linux, macOS, WSL và Windows: [`VPS_PRODUCTION_ACCESS.md`](VPS_PRODUCTION_ACCESS.md).
+Static Assets** (ADR-025). Đường deploy tự động (`release` → Actions deploy Worker + timer kéo về VM,
+ADR-026) đã có code và test nhưng **chưa bật trên production** - xem §5-§7.
 
 ## 1. Kiến trúc và nguyên tắc same-origin
 
@@ -102,9 +101,11 @@ openssl rand -hex 24    # -> MONGO_PASSWORD
 `APP_ENV=production`, `DATA_DIR=/data` và `MONGO_HOST=mongo` do compose đặt cứng, không khai trong `.env`.
 `SESSION_SECRET` trong `.env.example` là config chết (ADR-008) - không dùng, không cần sinh.
 
-`.env` chỉ vào Compose qua `--env-file`, **không** mount vào container: Settings của backend đặt
-`extra="forbid"` nên biến chỉ dành cho Compose sẽ làm API chết lúc khởi động. Vì vậy `TUNNEL_TOKEN`
-chỉ được truyền cho service `cloudflared` trong file override, không truyền cho `api`.
+`.env` chỉ vào Compose qua `--env-file`, **không** mount vào container. Settings của backend bỏ qua
+khoá lạ, nên `env_file:` sẽ không làm API chết; lý do không dùng là quyền tối thiểu - `.env` chứa
+credential của thành phần khác (`MONGO_*`, `CLOUDFLARE_TUNNEL_TOKEN`) và biến chỉ dành cho Compose,
+không nên có mặt trong tiến trình API. Vì vậy `TUNNEL_TOKEN` chỉ được truyền cho service `cloudflared`
+trong file override, không truyền cho `api`.
 
 Kiểm tra cú pháp compose mà không in secret:
 
@@ -167,24 +168,44 @@ uv run pytest
 
 ## 5. Deploy frontend lên Cloudflare Workers
 
-### 5.1 Cấu hình Workers Builds (build & deploy tự động)
+### 5.1 Deploy tự động bằng GitHub Actions
 
-Trong Cloudflare Dashboard → Workers & Pages → chọn Worker `vku-ai-challenge-platform` → Settings →
-Build:
+`.github/workflows/deploy-worker.yml` là **cơ chế deploy Worker duy nhất** (ADR-026). **Không** bật
+thêm Workers Builds trong Dashboard: hai đường deploy cùng ghi vào một Worker sẽ tranh nhau version và
+làm mất provenance của Git SHA.
 
-| Trường | Giá trị |
-|---|---|
-| Git repository | `ketdoannguyen/vku-ai-challenge-platform` |
-| Production branch | `main` |
-| Root directory | `frontend` |
-| Build command | `npm run build` |
-| Deploy command | `npx wrangler deploy` |
-| Build variables | **để trống** (không có biến build nào) |
-| Watch paths (tuỳ chọn) | `frontend/**` |
-| Access policy | **OFF** - bật Access sẽ chặn cả người dùng cuối |
+| Trigger | Điều kiện | Kết quả |
+|---|---|---|
+| `push` vào `release` | có file đổi trong `frontend/**` hoặc chính file workflow | chạy gate frontend rồi deploy |
+| `workflow_dispatch` | bấm tay trên nhánh bất kỳ | deploy lại đúng commit đang có (break-glass) |
+| PR vào `release` | mọi PR | **chỉ** chạy `release-gate`; không deploy |
 
-Build command phải chạy trước deploy vì `wrangler.jsonc` trỏ `assets.directory` vào `./dist`. Nếu
-build log báo Node quá cũ, thêm build variable `NODE_VERSION=22` (wrangler 4 yêu cầu Node >= 22).
+Trình tự trong job deploy: kiểm tra cấu hình (thiếu secret thì fail **trước** khi đụng production) →
+`npm ci` → `lint` → `vitest` → `build` → đọc version đang nhận traffic → `wrangler deploy --keep-vars
+--tag release-<sha12> --message "release <sha>"` → smoke tĩnh → rollback nếu smoke tĩnh fail. Gate được
+lặp lại ngay trước deploy vì push thẳng vào `release` không đi qua PR.
+
+Cấu hình một lần trên GitHub (Settings → Environments → `production`):
+
+| Loại | Tên | Giá trị |
+|---|---|---|
+| Secret | `CLOUDFLARE_API_TOKEN` | Token tối thiểu quyền **Workers Scripts: Edit** (My Profile → API Tokens) |
+| Variable | `CLOUDFLARE_ACCOUNT_ID` | `793cbf09a7355d16f35bac9abccd5fc4` |
+| Variable | `WORKER_URL` | `https://vku-ai-challenge-platform.ketdoannguyen.workers.dev` |
+
+- Giới hạn deployment branch của environment `production` là `release` để secret không dùng được từ
+  nhánh khác.
+- Branch protection của `release` đặt required check `release-gate / frontend`, `release-gate / backend`
+  và `release-gate / deploy-script`. Đổi `name:` của workflow hoặc của job sẽ làm check cũ không bao giờ
+  xanh lại và **chặn mọi PR vào `release`** - đổi tên thì phải cập nhật branch protection cùng lúc.
+- Access policy của Worker phải **OFF**: bật Cloudflare Access sẽ chặn cả người dùng cuối.
+- Token **không** bao giờ dán vào chat/log/issue. Nghi ngờ lộ thì thu hồi ngay (My Profile → API
+  Tokens → Revoke) rồi tạo token mới - token cũ đã lộ thì mọi thứ khác đều vô nghĩa.
+
+Smoke tĩnh của workflow chỉ kiểm `/` và một deep link SPA phải trả `200` + `text/html`. `/api/health`
+trong workflow chỉ là **diagnostic**: `API_ORIGIN` đi qua tunnel nên tunnel chết làm API lỗi trong khi
+static vẫn khoẻ, và rollback Worker không sửa được tunnel - vì vậy nó không bao giờ được dùng để quyết
+định rollback.
 
 ### 5.2 Runtime variable `API_ORIGIN`
 
@@ -214,7 +235,7 @@ Quy tắc:
 - Thiếu hoặc sai `API_ORIGIN` thì Worker trả `500` với body `{"error":{"code":"INTERNAL_ERROR",...}}`
   và **không** gọi upstream - fail closed, không lộ giá trị cấu hình.
 
-### 5.3 Deploy thủ công (khi chưa bật Workers Builds)
+### 5.3 Deploy thủ công (break-glass)
 
 ```bash
 cd frontend
@@ -300,6 +321,74 @@ curl -sI  https://origin-api.<DOMAIN>/ | head -n 8           # 5 header bảo m�
 đó là hành vi mong đợi chứ không phải lỗi.
 
 ## 7. Deploy một release (backend + Nginx)
+
+### 7.1 Đường tự động: push vào `release`
+
+`release` là cổng duy nhất: push vào `release` nghĩa là "đưa commit này lên production". Một lần push
+cập nhật **cả hai phía**, và hai phía deploy độc lập chứ không phải một giao dịch nguyên tử - Worker
+thường lên trước vì build image chậm hơn. Hợp đồng same-origin `/api` là thứ giữ cho khoảng lệch đó vô
+hại; thay đổi API phá vỡ tương thích ngược phải tách thành hai lần release.
+
+Luồng thường ngày: PR `main` → `release` (chờ `release-gate` xanh) → merge → Actions deploy Worker,
+timer trên VM kéo commit về trong khoảng 1 phút.
+
+**VM: cài đặt một lần**
+
+```bash
+# Trên VM, từ commit đã duyệt trên nhánh release
+cd /srv/vku-ai-challenge/repo
+sudo git fetch origin release && sudo git checkout --detach origin/release
+sudo git status --short                       # phải trống
+sudo deploy/vps/install-auto-deploy.sh        # copy deployer + unit, KHÔNG bật timer
+sudo /usr/local/sbin/vku-auto-deploy --bootstrap-current   # ghi mốc SHA đang chạy
+sudo /usr/local/sbin/vku-auto-deploy --dry-run             # xem sẽ deploy gì, không đổi gì
+sudo systemctl enable --now vku-deploy.timer               # bật
+```
+
+`--bootstrap-current` bắt buộc chạy trước: chưa có mốc thì deployer từ chối deploy để không build lại
+toàn bộ stack ngoài kế hoạch.
+
+**VM: vận hành**
+
+```bash
+systemctl list-timers vku-deploy.timer     # lần chạy kế tiếp
+systemctl status vku-deploy.service        # lượt gần nhất
+journalctl -u vku-deploy.service -n 100 --no-pager
+sudo systemctl stop vku-deploy.timer       # tạm dừng auto-deploy
+sudo systemctl start vku-deploy.service    # chạy một lượt ngay
+cat /var/lib/vku-deploy/history.log        # lịch sử mọi lượt (SHA, kết quả, service)
+```
+
+Deployer giữ state ở `/var/lib/vku-deploy` (quyền `0700`): `last-success-sha`, `last-failed-sha`,
+`history.log`, `last-failure.txt`, `quick-tunnel-url` và hai file override sinh tự động. **Không sửa state bằng tay** -
+muốn thử lại một SHA đã lỗi thì push commit mới (mỗi SHA lỗi chỉ thử một lần để timer không quay lại
+build cùng một commit hỏng mỗi phút).
+
+Một điểm cần biết trước: `last-success-sha` là mốc **state**, không phải bằng chứng có image trên máy.
+Commit chỉ đổi `docs/` tiến mốc mà không build image nào, nên ngay sau đó có thể **không có image để
+rollback**. Gặp trường hợp đó deployer **từ chối rollback** và báo `không có image của <sha>` - cố ý,
+vì `docker compose up` tự build khi image vắng mặt, và build lúc này là build **source mới** dưới tag
+của SHA cũ, tạo ra một container mang nhãn bản cũ nhưng chạy code mới. Khi thấy thông báo đó: dừng
+timer, deploy lại commit trước bằng đường thủ công (§7.2).
+
+Commit chỉ đổi `docs/`, `.github/`, `plans/`, `scripts/` không chạm container: deployer chỉ tiến mốc
+state rồi thoát, không build. Đường dẫn chưa được phân loại thì deployer **dừng và báo tên file** -
+đó là chủ ý, để thêm một thư mục mới là quyết định có ý thức chứ không phải mặc định.
+
+Vì production đang chạy **Quick Tunnel** (§6 mục điều kiện), mỗi lượt deployer còn đọc log container
+`cloudflared` để phát hiện hostname `*.trycloudflare.com` thay đổi. Hostname đó đổi mỗi khi container
+`cloudflared` khởi động lại (VPS reboot, Docker daemon restart), và lúc đó `API_ORIGIN` của Worker trỏ
+vào URL đã chết ⇒ mọi `/api/*` trả `502`. Deployer **chỉ báo, không tự sửa**: nó ghi ra
+`CẢNH BÁO: Quick Tunnel URL đã đổi` kèm URL cũ, URL mới và đường dẫn Dashboard cần sửa, đồng thời ghi
+một dòng `result=tunnel-url-changed` vào `history.log`. Tự sửa đòi hỏi một token quản trị Worker
+thường trú trên VPS - nhân bản quyền Cloudflare sang máy thứ hai chỉ để phục vụ một sự kiện hiếm, nên
+đây là chủ ý. Đọc log là thao tác chỉ đọc: watchdog không bao giờ đổi trạng thái `cloudflared`.
+
+Sửa deployer trong repo **không** tự áp dụng lên VM: phải chạy lại `install-auto-deploy.sh` từ commit
+đã duyệt. Bản chạy thật là copy root-owned ở `/usr/local/sbin/vku-auto-deploy`, không phải file trong
+repo - một commit xấu không được phép tự thay cơ chế recovery của chính nó.
+
+### 7.2 Đường thủ công (break-glass)
 
 Nguyên tắc: chỉ deploy một commit đã qua release gate, không build từ working tree bẩn.
 
@@ -502,7 +591,11 @@ pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script d�
 Từng tầng rollback độc lập:
 
 **Worker (frontend):** Dashboard → Workers & Pages → `vku-ai-challenge-platform` → Deployments → chọn
-bản deploy trước → **Rollback**. Không cần đụng tới VPS và không ảnh hưởng API.
+bản deploy trước → **Rollback**. Không cần đụng tới VPS và không ảnh hưởng API. Workflow deploy cũng
+tự rollback khi smoke tĩnh fail; rollback bằng tay cần thiết khi lỗi chỉ lộ ra sau khi smoke đã qua.
+
+Revert frontend bằng Git cũng là một đường rollback hợp lệ và để lại dấu vết: `git revert <sha>` rồi
+merge vào `release`; Actions deploy lại bản đã revert.
 
 **`API_ORIGIN`:** nếu origin mới lỗi, sửa runtime variable về giá trị cũ (ví dụ hostname Quick Tunnel)
 trong Settings → Variables and Secrets. Đổi biến không cần build lại.
@@ -514,7 +607,18 @@ sudo docker compose --env-file /srv/vku-ai-challenge/.env \
   -f docker-compose.prod.yml up -d cloudflared
 ```
 
-**Backend/Nginx:**
+**Backend/Nginx (đường tự động):** deployer tự rollback trong lượt deploy hỏng - nó đưa container về
+**image cũ đã build** của SHA trước, không build lại source cũ (build lại là phép toán không xác định
+đúng lúc production đang lỗi). Mọi lệnh `up` đều có `--no-build` và rollback kiểm tra image cũ tồn tại
+trước khi đụng vào container, nên không có đường nào dựng lại source mới dưới nhãn SHA cũ. Rollback chỉ
+được coi là xong sau khi deployer đã xác minh label revision của container khớp SHA cũ, nên "rollback
+thành công" là trạng thái đã kiểm chứng, không phải suy đoán.
+
+Khi deployer báo **rollback cũng thất bại**, phải can thiệp tay: xem `last-failure.txt` và
+`history.log` trong `/var/lib/vku-deploy`, rồi deploy lại commit trước bằng đường thủ công ở §7.2.
+Dừng timer (`systemctl stop vku-deploy.timer`) trước khi sửa tay để timer không giành quyền chạy.
+
+**Backend/Nginx (thủ công):**
 
 ```bash
 cd /srv/vku-ai-challenge/repo
@@ -540,7 +644,12 @@ database và không sửa trực tiếp dữ liệu để "ép chạy". Chạy b
 | Redirect `307` trỏ về hostname origin | Client gọi path có dấu `/` cuối bị FastAPI redirect | Gọi đúng `/api/...` không dấu `/` cuối |
 | Static thiếu header bảo mật | `dist/_headers` không có trong bundle đã deploy | Chạy `npm run build` rồi kiểm `dist/_headers`, sau đó deploy lại |
 | Asset cũ vẫn được phục vụ | Cache `immutable` cho file **không** có hash | Chỉ đặt cache immutable cho `/assets/*`; file trong `public/` phải có hash hoặc không cache |
-| Build trên Workers Builds lỗi Node | Node mặc định của runner quá cũ cho wrangler 4 | Thêm build variable `NODE_VERSION=22` |
+| Deploy Worker fail ngay ở bước "Kiểm tra cấu hình" | Thiếu secret/variable ở environment `production`, hoặc `WORKER_URL` không phải `https://...` | Đối chiếu bảng ở §5.1; đây là fail có chủ ý để production chưa bị đụng tới |
+| Push vào `release` mà VPS không cập nhật | Timer bị dừng, hoặc SHA đó đã lỗi một lần nên bị bỏ qua | `systemctl status vku-deploy.timer`; xem `history.log`; SHA lỗi thì push commit mới |
+| Deployer báo "working tree production đang bẩn" | Có ai đó sửa trực tiếp file trong `/srv/vku-ai-challenge/repo` | Sửa bằng commit rồi `git checkout --detach origin/release`, không sửa tay trên VM |
+| Deployer báo đường dẫn "chưa được phân loại" | Commit đổi thư mục mà deployer chưa biết nên map vào service nào | Thêm vào `map_changed_paths` trong `auto-deploy.sh` rồi chạy lại `install-auto-deploy.sh`; deployer dừng là đúng, không phải lỗi |
+| Deployer báo rollback cũng thất bại | Cả bản mới lẫn bản cũ đều không lên được | Dừng timer, đọc `last-failure.txt`, deploy lại commit trước bằng đường thủ công (§7.2) |
+| `/api/*` trả `502` sau khi VPS reboot | Quick Tunnel cấp hostname mới, `API_ORIGIN` của Worker vẫn trỏ URL cũ | `journalctl -u vku-deploy.service \| grep 'CẢNH BÁO'` để lấy URL mới, sửa `API_ORIGIN` (§5.2). Đăng nhập lại vì cookie host-only không còn khớp origin |
 
 Không bao giờ dán `CLOUDFLARE_TUNNEL_TOKEN`, mật khẩu Mongo, mật khẩu admin hay session token vào
 chat/log/issue.

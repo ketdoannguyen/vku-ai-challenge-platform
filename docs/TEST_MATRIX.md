@@ -528,6 +528,21 @@ style section 22/24px.
 | Đánh số mục `1. 2. 3.` (chỉ có trong mockup, kế hoạch §7 đã xếp vào non-goals) | **Không** đánh số; ô màu là hình trang trí, không phải ô số | Chốt với người dùng: số trong mockup tượng trưng cho *kiểu định dạng* của `##`, không phải nội dung renderer phải sinh. Nếu tác giả muốn số thì tự viết số trong tiêu đề |
 | paragraph `line-height: 1.7` | `var(--leading-body)` = 1.65 | token có sẵn của hệ, không tạo giá trị thứ hai |
 
+### Flake: panel markdown nạp lazy dưới tải
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `findBy*` chờ `MarkdownView` (nạp bằng `React.lazy` + dynamic `import()`) không hết giờ chờ khi máy bận | passing | `asyncUtilTimeout: 5000` trong `frontend/src/test/setup.ts`. Flake có thật, bắt được ngày 2026-09-19: `CompetitionDetailPage.test.tsx` fail ở 1047ms với `Unable to find role heading`, đúng mốc hết giờ 1000ms mặc định |
+
+Nguyên nhân không phải race của sản phẩm: `React.lazy` chỉ trễ, không tranh chấp, và trong browser thật
+chunk được tải một lần rồi cache. Cái sai là ngân sách 1000ms của môi trường test không tính tới việc
+Vite phải transform cả nhánh module markdown ở lần render đầu.
+
+Số đo để chọn mốc mới, trên máy 4 core chạy 4 vòng lặp CPU bận song song (nặng hơn CI thật): test mất
+**932 / 1039 / 1142 / 1195 ms**. Mốc cũ 1000ms nằm giữa phân bố đó, nên flake xảy ra thưa chứ không
+phải luôn luôn. Mốc 5000ms cho khoảng đệm ~4x so với đỉnh quan sát được, và vẫn là một cận có ý nghĩa:
+phần tử không bao giờ xuất hiện thì vẫn fail, chỉ chậm hơn.
+
 ## 10. Production deploy (Sprint 08) - planned
 
 | Check | Status |
@@ -542,3 +557,46 @@ style section 22/24px.
 |---|---|
 | Backup + restore Mongo + /data | planned |
 | Runbook pilot | planned |
+
+## 12. Auto-deploy (Sprint 08, ADR-026)
+
+`passing` = có test/kiểm tra chạy được ở local hoặc trong `release-gate`; `planned` = phải chạy trên
+hạ tầng thật, chưa thực hiện lần nào.
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Deployer không chạy khi chưa bootstrap | passing | `deploy/vps/tests/auto-deploy.test.sh` case "chưa bootstrap: từ chối deploy tip" |
+| Đúng SHA đang chạy thì không fetch/build | passing | harness case "up-to-date" |
+| Commit chỉ đổi docs/CI không chạm container | passing | harness case "docs-only" |
+| `backend/**` deploy **cả** `api` và `web` (nginx giữ IP của `api`) | passing | harness case "backend-only": assert `build api web` + `up ... api web` |
+| `frontend/**` chỉ deploy `web` | passing | harness case "frontend-only": assert không có `build api` |
+| Đường dẫn chưa phân loại thì fail closed | passing | harness case "đường dẫn lạ" |
+| Working tree bẩn thì từ chối deploy | passing | harness case "working tree bẩn" |
+| Hai lượt deploy không chồng lấn (flock) | passing | harness case "flock" |
+| `--dry-run` không đổi state/HEAD/worktree | passing | harness case "dry-run" |
+| Build lỗi thì production giữ nguyên bản cũ | passing | harness case "build lỗi" (`FAKE_FAIL_BUILD`) |
+| SHA lỗi chỉ thử một lần | passing | harness case "SHA lỗi" + "SHA mới sau SHA lỗi" |
+| Revision label sai sau `up` → rollback bằng image cũ, **không** build lại | passing | harness case "revision sai sau up" (`FAKE_BAD_LABEL`) + assert chỉ có một lệnh `build` |
+| `up` lỗi giữa chừng → rollback ngay trong cùng lượt | passing | harness case "up lỗi" (`FAKE_FAIL_UP`) |
+| Không có image cũ → **từ chối** rollback, không build bù source mới dưới nhãn cũ | passing | harness case "không có image cũ" (`FAKE_NO_OLD_IMAGE`) + assert không có lệnh `up` của rollback |
+| Mọi lệnh `up` đều có `--no-build` | passing | harness case "audit lệnh Compose" |
+| Health hỏng sau `up` → rollback | passing | harness case "health hỏng" (`FAKE_HEALTH_FAIL`) |
+| Rollback cũng hỏng → chỉ chỗ can thiệp tay, không chết vì biến chưa gán | passing | harness case "health hỏng": assert nhắc `history.log` |
+| Mọi lệnh Compose có `--env-file` + base `-f` + override `-f` | passing | harness case "audit lệnh Compose" |
+| Không có lệnh Compose nào chạm `mongo`/`down`/`volume`/`prune`, và không lệnh nào đổi trạng thái `cloudflared` | passing | harness case "audit lệnh Compose" (chỉ cấm mutate; watchdog đọc `cloudflared` là hợp lệ) |
+| Giữ image của SHA đang chạy và SHA trước, xoá tag cũ hơn, giữ `:prod` | passing | harness case "audit lệnh Compose" |
+| Deployer từ chối chạy khi không phải root | passing | harness case "an toàn: không phải root" |
+| Watchdog phát hiện hostname Quick Tunnel đổi và in URL cũ/mới + chỗ sửa | passing | harness case "watchdog Quick Tunnel: phát hiện URL đổi" |
+| URL tunnel không đổi thì watchdog im lặng (không spam mỗi phút) | passing | harness case "watchdog Quick Tunnel": lượt thứ hai assert không có `CẢNH BÁO` |
+| Log `cloudflared` mất dòng URL thì giữ giá trị cũ, không báo động giả | passing | harness case "watchdog: log mất URL" |
+| Không có container `cloudflared` (named tunnel) thì watchdog không ghi state | passing | harness case "watchdog: không có container cloudflared" |
+| `--dry-run` không để watchdog ghi state | passing | harness case "watchdog: dry-run và bootstrap không ghi state" |
+| Cú pháp shell của deployer + installer + harness | passing | `bash -n` trong `release-gate / deploy-script` |
+| Unit systemd hợp lệ và `ExecStart` trỏ đúng bản copy đóng băng | passing | `systemd-analyze verify` trên bản copy thay `ExecStart` + `grep -qx` đường dẫn thật |
+| Compose prod còn hợp lệ (base và base + override named tunnel) | passing | `docker compose config --quiet` với env giả trong `release-gate` |
+| Gate frontend/backend chạy trên PR vào `release` | planned | Mở PR đầu tiên vào `release` và xem `release-gate / frontend`, `/ backend`, `/ deploy-script` xanh |
+| Actions deploy Worker khi push vào `release` | planned | Cần secret ở environment `production`; xem `docs/DEPLOYMENT.md` §5.1 |
+| Smoke tĩnh fail thì workflow tự rollback Worker | planned | Chưa diễn tập - xem "Failure drills" trong plan |
+| Timer kéo commit mới về VM trong ~1 phút | planned | Cần bootstrap trên VM; xem `docs/DEPLOYMENT.md` §7.1 |
+| Deploy lỗi trên VM tự rollback về image cũ | planned | Diễn tập bằng một commit cố tình hỏng |
+| Trần thời gian `TimeoutStartSec=1800` đủ cho một lượt deploy thật | planned | Đo bằng `systemd-analyze`/`journalctl` ở lượt deploy thật đầu tiên |

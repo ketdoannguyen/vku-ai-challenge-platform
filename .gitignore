@@ -27,3 +27,8 @@ coverage/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Tài liệu vận hành nội bộ: chứa địa chỉ và username SSH của production nên không đưa lên repo public.
+# File vẫn nằm trong working tree để dùng hằng ngày; đây không phải chỗ chứa secret (private key và
+# credential production không bao giờ được nằm trong repo).
+docs/VPS_PRODUCTION_ACCESS.md
