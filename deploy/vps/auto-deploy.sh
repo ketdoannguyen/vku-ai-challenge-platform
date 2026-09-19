@@ -111,10 +111,12 @@ write_override() {
 # Đường dẫn không cần dựng lại container: chỉ là tài liệu, cấu hình CI, hoặc chính bộ deployer.
 # `scripts/backup_prod.sh` nằm trong đây vì bản production đã được đóng băng ở
 # /usr/local/sbin/vku-backup-prod - sửa file trong repo chỉ có hiệu lực khi operator chạy lại installer.
+# `.env.example` chỉ là mẫu tham chiếu trong repo; stack production đọc `/srv/vku-ai-challenge/.env`,
+# không đọc file này, nên đổi nó không thể đòi dựng lại container nào.
 is_no_container_path() {
   case "$1" in
     .github/*|docs/*|plans/*|deploy/*|scripts/*) return 0 ;;
-    PROJECT_TREE.txt|docker-compose.yml|*.md) return 0 ;;
+    .env.example|PROJECT_TREE.txt|docker-compose.yml|*.md) return 0 ;;
     *) return 1 ;;
   esac
 }
