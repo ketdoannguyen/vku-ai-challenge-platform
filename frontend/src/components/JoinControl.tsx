@@ -73,11 +73,14 @@ export function JoinControl({
   competition,
   onMembershipChange,
   showLeave = true,
+  showEnter = true,
 }: {
   competition: Competition;
   onMembershipChange: (membership: Membership) => void;
   /** Danh sách chỉ mời vào cuộc thi; rời cuộc thi là thao tác ở trang chi tiết. */
   showLeave?: boolean;
+  /** Masthead trang chi tiết đã nằm trong cuộc thi nên link vào cuộc thi là thừa. */
+  showEnter?: boolean;
 }) {
   const membership = competition.membership;
   const auth = useOptionalAuth();
@@ -96,10 +99,12 @@ export function JoinControl({
           </span>
           <strong>Đã tham gia</strong>
         </span>
-        <Link className="btn" to={`/competitions/${competition.slug}`}>
-          Vào cuộc thi
-          <IconArrow />
-        </Link>
+        {showEnter && (
+          <Link className="btn" to={`/competitions/${competition.slug}`}>
+            Vào cuộc thi
+            <IconArrow />
+          </Link>
+        )}
         {showLeave && (
           <button
             className="btn btn-danger-ghost"

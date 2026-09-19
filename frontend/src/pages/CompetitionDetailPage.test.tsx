@@ -85,6 +85,8 @@ test("load competition + sidebar sắp theo order, dừng ở Tổng quan và ta
   expect(screen.getByText("Cần mã tham gia")).toBeTruthy();
   expect(screen.getByText("7 lượt/ngày")).toBeTruthy();
   expect(screen.getByText("Đã tham gia")).toBeTruthy(); // JoinControl đã join
+  // Masthead nằm ngay trong cuộc thi nên link "Vào cuộc thi" trỏ về chính trang đang mở.
+  expect(screen.queryByRole("link", { name: "Vào cuộc thi" })).toBeNull();
   // Danh sách đã bỏ nút rời (showLeave=false); trang chi tiết vẫn phải giữ thao tác này.
   expect(screen.getByRole("button", { name: "Rời cuộc thi" })).toBeTruthy();
   const nav = await screen.findByRole("navigation", { name: "Nội dung cuộc thi" });
@@ -219,6 +221,37 @@ test("deep-link content/:contentSlug render markdown panel", async () => {
   expect(await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 2 })).toBeTruthy();
   expect(screen.getByText("quan trọng")).toBeTruthy();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+});
+
+test("header nội dung chỉ còn tiêu đề", async () => {
+  apiMock((url) => {
+    if (url.endsWith("/contents/problem")) {
+      return {
+        body: {
+          ...CONTENTS.contents[0],
+          visibility: "members",
+          markdown: "Nội dung tài liệu.",
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+
+  renderAt("/competitions/ai-challenge-2026/content/problem");
+
+  const title = await screen.findByRole("heading", { name: "Đề bài", level: 2 });
+  const header = title.closest("header");
+  expect(header).toHaveClass("article-head");
+  // Ngày cập nhật và nhãn visibility đều đã bỏ, header chỉ còn đúng một tiêu đề.
+  expect(header?.children).toHaveLength(1);
+  expect(header?.querySelector("time")).toBeNull();
+  // Nền sọc chéo là lớp trang trí thuần CSS, không tiêu tốn phần tử DOM nào.
+  expect(header?.querySelector(".vku-accent")).toBeNull();
+  expect(within(header as HTMLElement).queryByText(/^Cập nhật /)).toBeNull();
+  expect(within(header as HTMLElement).queryByText("Chỉ thành viên cuộc thi")).toBeNull();
+  expect(within(header as HTMLElement).queryByText("Mọi thí sinh")).toBeNull();
 });
 
 test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an toàn", async () => {

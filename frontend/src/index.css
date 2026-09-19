@@ -3249,32 +3249,52 @@ select.input {
   scroll-margin-top: calc(var(--header-band) + var(--space-md));
 }
 
+/* Header bài viết dùng đúng công thức nền của `.comp-masthead` (panel đầu trang dùng
+   chung): gradient chéo trắng → xanh rất nhạt, cộng dải chéo xanh/đỏ/vàng ở góc phải.
+   Không dựng viền/bo góc: header là dải nền mở, ngăn với nội dung bằng đường kẻ dưới. */
 .article-head {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-bottom: var(--space-lg);
+  position: relative;
+  padding: var(--space-lg);
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--vku-blue-50) 100%);
+}
+
+/* Dải chéo ba màu nhạt ở góc phải, y hệt `.comp-masthead`. Thuần trang trí. */
+.article-head::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: min(360px, 45%);
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    transparent 0 44%,
+    var(--vku-blue-100) 44% 58%,
+    var(--vku-red-50) 58% 70%,
+    var(--vku-yellow-50) 70% 82%,
+    transparent 82%
+  );
+  pointer-events: none;
+}
+
+/* Lớp trang trí là phần tử định vị nên phải nâng nội dung lên trên nó. */
+.article-head > * {
+  position: relative;
 }
 
 .article-title {
   margin: 0;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: var(--text-h1);
-  font-weight: 600;
-  line-height: var(--leading-h1);
-  letter-spacing: var(--tracking-h1);
-}
-
-.article-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: var(--text-body-sm);
+  font-size: var(--text-h2);
+  font-weight: 700;
+  line-height: var(--leading-h2);
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .article-empty {
@@ -8799,7 +8819,14 @@ button:focus-visible {
     --page-padding-inline: 2rem;
   }
 
-  .article-title,
+  .article-head {
+    padding: var(--space-xl);
+  }
+
+  .article-title {
+    font-size: var(--text-h2-desktop);
+  }
+
   .sub-result-title {
     font-size: var(--text-h1-desktop);
   }

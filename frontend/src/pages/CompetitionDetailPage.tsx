@@ -320,6 +320,7 @@ export function CompetitionDetailPage() {
           <div className="comp-masthead-actions">
             <JoinControl
               competition={c}
+              showEnter={false}
               onMembershipChange={(membership: Membership) => {
                 setCompetition({ ...c, membership });
                 // Quota chỉ xuất hiện sau khi join - tải lại để chỗ nộp bài biết còn bao nhiêu lượt.

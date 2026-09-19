@@ -230,10 +230,6 @@ export function CompetitionContentPanel() {
     <article className="article" ref={articleRef}>
       <header className="article-head">
         <h2 className="article-title">{content.title}</h2>
-        <p className="article-meta">
-          <span className="chip">{VISIBILITY_LABEL[content.visibility]}</span>
-          <span>Cập nhật {formatLocal(content.updated_at)}</span>
-        </p>
       </header>
 
       {markdown.trim() === "" ? (
