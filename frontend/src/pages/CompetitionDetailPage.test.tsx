@@ -97,7 +97,9 @@ test("load competition + sidebar sắp theo order, dừng ở Tổng quan và ta
   expect(items[1].textContent).toBe("Rules");
   // Chip chỉ gắn cho tài liệu công khai, nên mục "Rules" (members) không có nhãn này.
   expect(nav.textContent).not.toContain("Chỉ thành viên cuộc thi");
-  expect(screen.getByText(/2\s*mục/)).toBeTruthy();
+  // Badge đếm của mục lục chỉ còn đúng con số, không còn hậu tố "mục"; scope vào
+  // section chứa nav để không dính badge của block Tài nguyên cùng class.
+  expect(within(nav.closest("section") as HTMLElement).getByText("2")).toBeTruthy();
   // Tổng quan là đích dừng thật: không tự chuyển sang tài liệu đầu tiên.
   expect(await screen.findByRole("heading", { name: "Tổng quan", level: 2 })).toBeTruthy();
   expect(screen.queryByRole("heading", { name: "Đề bài chi tiết" })).toBeNull();
@@ -284,7 +286,9 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
   expect(resourceSection).toHaveClass("content-card-vku", "content-card-resources");
   expect(resourceSection).toHaveAttribute("aria-labelledby", "competition-resources-title");
   expect(resources).toHaveAttribute("id", "competition-resources-title");
-  expect(screen.getByText("2", { selector: ".content-card-count" })).toBeTruthy();
+  // Đếm tài nguyên phải scope vào chính section này: mục lục nội dung dùng cùng class
+  // `.content-card-count` và cũng đang hiện "2" nên query toàn cục sẽ khớp hai phần tử.
+  expect(within(resourceSection as HTMLElement).getByText("2")).toBeTruthy();
 
   const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
@@ -362,12 +366,12 @@ test("tiêu đề tab theo khu vực đang mở và giữ đúng khi đổi rout
   const overview = renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
   // Title do cuộc thi đã fetch quyết định; effect ghi title chạy sau commit nên phải chờ.
-  await waitFor(() => expect(document.title).toBe("AI Challenge 2026 — AI Challenge"));
+  await waitFor(() => expect(document.title).toBe("AI Challenge 2026 - AI Challenge"));
   overview.unmount();
 
   renderAt("/competitions/ai-challenge-2026/leaderboard");
   await screen.findByTestId("workspace-leaderboard");
-  expect(document.title).toBe("Bảng xếp hạng — AI Challenge");
+  expect(document.title).toBe("Bảng xếp hạng - AI Challenge");
 });
 
 test("route nội dung tự đặt tiêu đề theo tài liệu, khung cuộc thi không ghi đè", async () => {
@@ -381,7 +385,7 @@ test("route nội dung tự đặt tiêu đề theo tài liệu, khung cuộc th
 
   renderAt("/competitions/ai-challenge-2026/content/problem");
   await screen.findByRole("heading", { name: "Đề bài chi tiết", level: 2 });
-  await waitFor(() => expect(document.title).toBe("Đề bài — AI Challenge"));
+  await waitFor(() => expect(document.title).toBe("Đề bài - AI Challenge"));
   // H1 duy nhất trên trang là tên cuộc thi, không phải heading do tác giả viết.
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
 });
@@ -395,5 +399,5 @@ test("trang lỗi có H1 mô tả trạng thái và tiêu đề tab tương ứn
 
   expect(await screen.findByRole("heading", { level: 1, name: "Không tìm thấy cuộc thi" })).toBeTruthy();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-  await waitFor(() => expect(document.title).toBe("Không tìm thấy cuộc thi — AI Challenge"));
+  await waitFor(() => expect(document.title).toBe("Không tìm thấy cuộc thi - AI Challenge"));
 });
