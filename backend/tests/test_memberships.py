@@ -357,6 +357,31 @@ def _insert_completed_submission(client, competition_id: str, account_id: str, s
     return submission_id
 
 
+def _insert_pending_submission(client, competition_id: str, account_id: str) -> list[str]:
+    """Bài nộp dở (status != completed) có artifact trên object storage."""
+    submission_id = ObjectId()
+    prefix = f"competitions/{competition_id}/accounts/{account_id}/submissions/{submission_id}"
+    keys = [f"{prefix}/prediction.csv", f"{prefix}/notebook.ipynb"]
+
+    async def insert():
+        await client.app.state.mongo.db[SUBMISSIONS_COLLECTION].insert_one(
+            {
+                "_id": submission_id,
+                "competition_id": ObjectId(competition_id),
+                "account_id": ObjectId(account_id),
+                "status": "failed",
+                "artifacts": {
+                    "prediction": {"object_key": keys[0], "original_filename": "a.csv"},
+                    "notebook": {"object_key": keys[1], "original_filename": "n.ipynb"},
+                },
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
+
+    asyncio.run(insert())
+    return keys
+
+
 def _submission_count(client, competition_id: str) -> int:
     async def count():
         return await client.app.state.mongo.db[SUBMISSIONS_COLLECTION].count_documents(
@@ -456,6 +481,25 @@ def test_admin_hard_delete_member_only_without_completed_submission(client):
     missing = client.delete(f"/api/admin/competitions/{competition['id']}/members/{ObjectId()}")
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "NOT_FOUND"
+
+
+def test_admin_hard_delete_member_removes_pending_submission_artifacts(
+    client, fake_artifact_storage
+):
+    """Xoá cứng thành viên chỉ được đụng bài chưa hoàn thành - và phải dọn cả object trên MinIO."""
+    competition = _create_competition(client, "invite-cup", "invite_only")
+    _login(client)
+    account_id = client.post(
+        f"/api/admin/competitions/{competition['id']}/members",
+        json={"email": "thi.sinh@vku.vn"},
+    ).json()["member"]["account_id"]
+    keys = _insert_pending_submission(client, competition["id"], account_id)
+    fake_artifact_storage.objects.update({key: b"data" for key in keys})
+
+    deleted = client.delete(f"/api/admin/competitions/{competition['id']}/members/{account_id}")
+    assert deleted.status_code == 200
+    assert fake_artifact_storage.objects == {}
+    assert _submission_count(client, competition["id"]) == 0
 
 
 def test_member_counts_split_active_and_inactive(client):

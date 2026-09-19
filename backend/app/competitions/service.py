@@ -256,6 +256,7 @@ def _submission_config(competition: dict, *, include_pos_label: bool) -> dict:
         "prediction_column": config["prediction_column"] if config else None,
         "average": config["average"] if config else None,
         "max_upload_mb": get_settings().max_upload_mb,
+        "max_notebook_mb": get_settings().max_notebook_mb,
     }
     if include_pos_label:
         payload["pos_label"] = config.get("pos_label") if config else None
@@ -332,8 +333,13 @@ def competition_file_roots(competition_id) -> list[Path]:
     ]
 
 
-def remove_competition_files(competition_id) -> bool:
-    """Dọn file sau khi DB đã xoá xong; lỗi chỉ được log và báo partial, không phục hồi DB."""
+async def remove_competition_files(competition_id) -> bool:
+    """Dọn file sau khi DB đã xoá xong; lỗi chỉ được log và báo partial, không phục hồi DB.
+
+    Gồm cả thư mục local cũ (submission CSV legacy, content, assets) và prefix artifact trên MinIO.
+    """
+    from app.submission_artifacts import storage as artifact_storage
+
     cleaned = True
     for path in competition_file_roots(competition_id):
         try:
@@ -343,4 +349,8 @@ def remove_competition_files(competition_id) -> bool:
         except OSError:
             logger.warning("Cannot remove competition files at %s", path, exc_info=True)
             cleaned = False
+    if not await artifact_storage.remove_prefix(
+        artifact_storage.competition_prefix(competition_id)
+    ):
+        cleaned = False
     return cleaned

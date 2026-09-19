@@ -106,6 +106,7 @@ def _admin_detail(competition: dict) -> dict:
         # đọc tại thời điểm request để UI hiển thị đúng giá trị đang áp dụng.
         "upload_limits": {
             "submission_mb": settings.max_upload_mb,
+            "notebook_mb": settings.max_notebook_mb,
             "content_mb": settings.max_content_mb,
             "asset_mb": settings.max_asset_mb,
         },
@@ -158,7 +159,7 @@ async def delete_competition(
         raise api_error(422, "CONFIRM_SLUG_MISMATCH", "Slug xác nhận không khớp với cuộc thi cần xoá.")
 
     await service.delete_competition_cascade(db, competition)
-    files_removed = service.remove_competition_files(competition["_id"])
+    files_removed = await service.remove_competition_files(competition["_id"])
     logger.info(
         "Admin %s deleted competition %s (files_removed=%s)", admin["email"], competition["slug"], files_removed
     )

@@ -1,6 +1,7 @@
 """Xoá cuộc thi: draft/closed (không published), xác nhận bằng slug, cascade con trước cha sau và dọn file best-effort."""
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 import mongomock
@@ -211,10 +212,69 @@ def test_delete_keeps_competition_when_child_cleanup_fails(client, monkeypatch, 
     assert competition_root.exists()
 
     # Gọi lại sau khi DB lành: lần này xoá sạch và dọn luôn file.
-    monkeypatch.undo()
+    # Chỉ gỡ đúng patch delete_many - `monkeypatch.undo()` sẽ gỡ luôn cả MinIO giả ở conftest.
+    monkeypatch.setattr(mongomock.Collection, "delete_many", original)
     retry = client.delete(f"/api/admin/competitions/{competition_id}?confirm_slug=cuoc-thi-nhap")
     assert retry.status_code == 200
     assert retry.json()["files_removed"] is True
     assert _count(client, COMPETITIONS_COLLECTION, {"_id": ObjectId(competition_id)}) == 0
     assert not competition_root.exists()
     assert not submission_root.exists()
+
+
+def _seed_artifact_objects(client, competition_id: str, keys: list[str]) -> None:
+    """Artifact của submission giờ nằm trên object storage: xoá cuộc thi phải dọn theo prefix."""
+    db = _db(client)
+    account = asyncio.run(db[ACCOUNTS_COLLECTION].find_one({"email": "thi.sinh@vku.vn"}))
+    documents = []
+    for key in keys:
+        submission_id = ObjectId()
+        documents.append(
+            {
+                "_id": submission_id,
+                "competition_id": ObjectId(competition_id),
+                "account_id": account["_id"],
+                "status": "completed",
+                "metrics": None,
+                "primary_score": 0.5,
+                "created_at": datetime.now(timezone.utc),
+                "artifacts": {
+                    "prediction": {
+                        "object_key": key,
+                        "original_filename": "answers.csv",
+                        "size_bytes": 4,
+                    }
+                },
+            }
+        )
+    asyncio.run(db[SUBMISSIONS_COLLECTION].insert_many(documents))
+
+
+def test_delete_removes_artifact_objects_under_competition_prefix(client, fake_artifact_storage):
+    competition_id = _create_draft(client, slug="co-artifact")
+    other_id = _create_draft(client, slug="khong-dinh-xoa")
+    mine = f"competitions/{competition_id}/accounts/a1/submissions/s1/prediction.csv"
+    theirs = f"competitions/{other_id}/accounts/a1/submissions/s1/prediction.csv"
+    fake_artifact_storage.objects.update({mine: b"data", theirs: b"data"})
+    _seed_artifact_objects(client, competition_id, [mine])
+
+    resp = client.delete(f"/api/admin/competitions/{competition_id}?confirm_slug=co-artifact")
+    assert resp.status_code == 200
+    assert resp.json()["files_removed"] is True
+    assert mine not in fake_artifact_storage.objects
+    assert theirs in fake_artifact_storage.objects
+
+
+def test_delete_reports_partial_cleanup_when_storage_is_unavailable(client, fake_artifact_storage):
+    """Storage hỏng không được chặn xoá cuộc thi: DB xoá trước, file chỉ được báo là dọn chưa xong."""
+    competition_id = _create_draft(client, slug="co-artifact-hong")
+    key = f"competitions/{competition_id}/accounts/a1/submissions/s1/prediction.csv"
+    fake_artifact_storage.objects[key] = b"data"
+    _seed_artifact_objects(client, competition_id, [key])
+    fake_artifact_storage.unavailable = True
+
+    resp = client.delete(f"/api/admin/competitions/{competition_id}?confirm_slug=co-artifact-hong")
+    assert resp.status_code == 200
+    assert resp.json()["files_removed"] is False
+    assert _count(client, COMPETITIONS_COLLECTION, {"_id": ObjectId(competition_id)}) == 0
+    assert _count(client, SUBMISSIONS_COLLECTION, {"competition_id": ObjectId(competition_id)}) == 0

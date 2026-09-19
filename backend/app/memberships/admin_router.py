@@ -17,6 +17,7 @@ from app.content import storage
 from app.core.config import get_settings
 from app.core.errors import api_error
 from app.memberships import service
+from app.submission_artifacts import storage as artifact_storage
 from app.submissions import service as submissions_service
 
 logger = logging.getLogger(__name__)
@@ -201,14 +202,17 @@ async def _delete_incomplete_submissions(db, competition_id, account_id) -> int:
     ]
     for record in records:
         relative = record.get("file_path")
-        if not relative:
-            continue
-        try:
-            storage.ensure_within(Path(get_settings().data_dir), Path(relative)).unlink(
-                missing_ok=True
-            )
-        except (OSError, ValueError):
-            logger.warning("Cannot remove submission file %s", relative)
+        if relative:
+            try:
+                storage.ensure_within(Path(get_settings().data_dir), Path(relative)).unlink(
+                    missing_ok=True
+                )
+            except (OSError, ValueError):
+                logger.warning("Cannot remove submission file %s", relative)
+        for entry in (record.get("artifacts") or {}).values():
+            object_key = entry.get("object_key") if isinstance(entry, dict) else None
+            if object_key:
+                await artifact_storage.remove_object(object_key)
     if records:
         await db[submissions_service.SUBMISSIONS_COLLECTION].delete_many(
             {"_id": {"$in": [record["_id"] for record in records]}}
