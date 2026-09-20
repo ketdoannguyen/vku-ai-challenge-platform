@@ -13,7 +13,10 @@ from app.core.config import get_settings
 from app.submission_artifacts import storage as artifact_storage
 from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.helpers import (
+    PARTICIPANT_CREDENTIALS,
     VALID_NOTEBOOK,
+    account_id_by_email,
+    account_slug_by_email,
     login,
     login_participant,
     notebook_bytes,
@@ -63,9 +66,18 @@ def test_valid_submission_scores_and_stores_both_artifacts(
     documents = submission_documents(client)
     assert len(documents) == 1
     stored = documents[0]
-    prefix = f"competitions/{competition['id']}/accounts/{stored['account_id']}/submissions/{stored['_id']}"
+    # Key đọc được bằng mắt: slug cuộc thi + slug account + số thứ tự (ADR-033).
+    participant_slug = account_slug_by_email(client, PARTICIPANT_CREDENTIALS[0])
+    assert participant_slug is not None
+    prefix = (
+        f"competitions/{competition['slug']}/accounts/{participant_slug}"
+        f"/submissions/submission-0001"
+    )
     assert stored["artifacts"]["prediction"]["object_key"] == f"{prefix}/prediction.csv"
     assert stored["artifacts"]["notebook"]["object_key"] == f"{prefix}/notebook.ipynb"
+    # Không còn ObjectId nào lọt vào đường dẫn.
+    assert str(stored["account_id"]) not in prefix
+    assert competition["id"] not in prefix
     assert stored["artifacts"]["prediction"]["original_filename"] == "team-result.csv"
     assert stored["competition_id"] == ObjectId(competition["id"])
     assert stored["status"] == "completed"
@@ -383,7 +395,7 @@ def test_insert_failure_removes_both_objects(client, fake_artifact_storage, monk
     assert fake_artifact_storage.objects == {}
 
 
-def test_submission_sequence_increments_and_ignores_legacy_gaps(client, fake_artifact_storage):
+def test_submission_sequence_ignores_records_without_a_number(client, fake_artifact_storage):
     competition = ready_competition(client)
     valid = b"id,prediction\n1,1\n2,0\n3,0\n4,0\n"
     first = submit(client, competition["id"], valid)
@@ -391,10 +403,9 @@ def test_submission_sequence_increments_and_ignores_legacy_gaps(client, fake_art
     assert first.json()["submission_no"] == 1
     assert second.json()["submission_no"] == 2
 
-    # 10 record legacy không có submission_no: đẩy số kế tiếp lên total + 1 nhưng nằm ngoài ngày hiện tại
-    # nên không tiêu tốn quota.
-    existing = submission_documents(client)
-    account_id = existing[0]["account_id"]
+    # 10 record legacy không có submission_no: không chiếm số nào nên counter chạy tiếp 3 chứ không nhảy.
+    # Chúng nằm ngoài ngày hiện tại nên cũng không tiêu tốn quota.
+    account_id = submission_documents(client)[0]["account_id"]
     asyncio.run(
         client.app.state.mongo.db[SUBMISSIONS_COLLECTION].insert_many(
             [
@@ -414,7 +425,34 @@ def test_submission_sequence_increments_and_ignores_legacy_gaps(client, fake_art
     )
     third = submit(client, competition["id"], valid)
     assert third.status_code == 201
-    assert third.json()["submission_no"] == 13
+    assert third.json()["submission_no"] == 3
+
+
+def test_submission_sequence_is_seeded_from_numbers_issued_before_the_counter(
+    client, fake_artifact_storage
+):
+    """Account đã nộp từ trước ADR-033 (membership chưa có counter) phải nộp tiếp số lớn nhất + 1.
+
+    Không seed thì counter bắt đầu lại từ 1 và đâm vào unique index `submission_no`.
+    """
+    competition = ready_competition(client)
+    asyncio.run(
+        client.app.state.mongo.db[SUBMISSIONS_COLLECTION].insert_one(
+            {
+                "competition_id": ObjectId(competition["id"]),
+                "account_id": account_id_by_email(client, PARTICIPANT_CREDENTIALS[0]),
+                "submission_no": 5,
+                "status": "completed",
+                "metrics": None,
+                "primary_score": 0.1,
+                "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+            }
+        )
+    )
+
+    response = submit(client, competition["id"], b"id,prediction\n1,1\n2,0\n3,0\n4,0\n")
+    assert response.status_code == 201
+    assert response.json()["submission_no"] == 6
 
 
 def test_submission_sequence_is_per_account_and_competition(client, fake_artifact_storage):

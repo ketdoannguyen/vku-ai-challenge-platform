@@ -1,4 +1,4 @@
-"""Tên file khi tải xuống và header `Content-Disposition` an toàn.
+"""Token object key, tên file khi tải xuống và header `Content-Disposition` an toàn.
 
 Tên download CHUẨN hoá theo slug cuộc thi + tên account + số thứ tự submission; tên file gốc người
 dùng upload chỉ được hiển thị trong metadata, không bao giờ trở thành tên tải xuống (tránh path
@@ -9,7 +9,7 @@ import re
 import unicodedata
 from urllib.parse import quote
 
-from app.core.slugs import SLUG_MAX
+from app.core.slugs import SLUG_MAX, VIETNAMESE_ASCII_FALLBACK
 
 PREDICTION_ARTIFACT = "prediction"
 NOTEBOOK_ARTIFACT = "notebook"
@@ -32,14 +32,15 @@ _TOTAL_MAX = 180
 _ACCOUNT_MAX = 60
 _ASCII_FALLBACK = "submission-artifact"
 
-# `Đ`/`đ` không có phân rã NFKD nên `encode("ascii", "ignore")` sẽ nuốt mất chữ cái đầu của tên
-# tiếng Việt ("Đội" -> "oi"). Các nguyên âm còn lại (ă â ê ô ơ ư) tự tách được qua NFKD.
-_VIETNAMESE_FALLBACK = str.maketrans({"Đ": "D", "đ": "d"})
-
 
 def short_id(value: str) -> str:
     """8 ký tự cuối của ObjectId - cùng quy ước hiển thị với lịch sử bài nộp."""
     return str(value)[-8:]
+
+
+def submission_token(submission_no: int) -> str:
+    """Token dùng chung cho thư mục trên MinIO và tên file tải về, để hai chỗ không thể lệch nhau."""
+    return f"submission-{submission_no:04d}"
 
 
 def sanitize_segment(value: str, *, fallback: str, max_length: int) -> str:
@@ -58,9 +59,13 @@ def download_filename(
     submission_id: str,
     submission_no: int | None,
 ) -> str:
-    token = f"{submission_no:04d}" if isinstance(submission_no, int) else short_id(submission_id)
+    token = (
+        submission_token(submission_no)
+        if isinstance(submission_no, int)
+        else f"submission-{short_id(submission_id)}"
+    )
     head = f"{sanitize_segment(competition_slug, fallback='competition', max_length=SLUG_MAX)}_"
-    tail = f"_submission-{token}_{ARTIFACT_FILENAMES[artifact]}"
+    tail = f"_{token}_{ARTIFACT_FILENAMES[artifact]}"
     budget = max(_TOTAL_MAX - len(head) - len(tail), 12)
     account = sanitize_segment(
         account_name,
@@ -78,7 +83,7 @@ def content_disposition(filename: str) -> str:
 
 def _ascii_filename(filename: str) -> str:
     stripped = (
-        unicodedata.normalize("NFKD", filename.translate(_VIETNAMESE_FALLBACK))
+        unicodedata.normalize("NFKD", filename.translate(VIETNAMESE_ASCII_FALLBACK))
         .encode("ascii", "ignore")
         .decode("ascii")
     )

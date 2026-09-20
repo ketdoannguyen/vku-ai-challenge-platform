@@ -632,7 +632,7 @@ hạ tầng thật, chưa thực hiện lần nào.
 | Deploy lỗi trên VM tự rollback về image cũ | planned | Diễn tập bằng một commit cố tình hỏng |
 | Trần thời gian `TimeoutStartSec=1800` đủ cho một lượt deploy thật | planned | Đo bằng `systemd-analyze`/`journalctl` ở lượt deploy thật đầu tiên |
 
-## 13. Artifact submission trên MinIO (ADR-028)
+## 13. Artifact submission trên MinIO (ADR-028, key theo slug từ ADR-033)
 
 Cùng quy ước với §12: `passing` = có test/kiểm tra chạy được ở local, `planned` = phải chạy trên hạ
 tầng thật.
@@ -652,7 +652,10 @@ trên VM.
 | Validate notebook bằng `json` stdlib, không import/execute/render nội dung | passing | `backend/app/submission_artifacts/validation.py` chỉ `json.loads` + duyệt dict; test ở trên không dựng kernel nào |
 | Trần riêng cho từng slot: CSV `MAX_UPLOAD_MB`, notebook `MAX_NOTEBOOK_MB` | passing | `test_submissions.py::test_submission_rejects_extension_and_size_limits` |
 | Upload lỗi giữa đường → xoá object đã put; insert lỗi → xoá cả hai object | passing | `test_submissions.py::test_storage_failure_rolls_back_uploaded_artifacts`, `::test_insert_failure_removes_both_objects` |
-| `submission_no` tăng dần theo `(competition_id, account_id)`, bỏ qua khoảng trống của record legacy, chịu được nộp đua | passing | `test_submissions.py::test_submission_sequence_increments_and_ignores_legacy_gaps`, `::test_submission_sequence_is_per_account_and_competition`, `::test_concurrent_submissions_get_distinct_numbers` |
+| Object key ghép từ **slug** cuộc thi + slug account + số thứ tự, không còn ObjectId nào trong đường dẫn | passing | `test_submissions.py::test_valid_submission_scores_and_stores_both_artifacts` (khẳng định `competitions/<slug>/accounts/<slug>/submissions/submission-0001`), `test_submission_artifacts.py::test_object_keys_are_built_from_slugs_and_sequence` |
+| Key trên MinIO và token trong tên file tải về lấy từ **cùng một hàm** `submission_token`, không thể lệch | passing | `test_submission_artifacts.py::test_key_prefix_and_download_filename_share_the_submission_token` |
+| `submission_no` cấp **trước** khi upload, nguyên tử từ counter `submission_seq` của membership; membership cũ seed bằng số lớn nhất đã cấp nên không cấp lại số cũ; chịu được nộp đua | passing | `test_submissions.py::test_submission_sequence_ignores_records_without_a_number`, `::test_submission_sequence_is_seeded_from_numbers_issued_before_the_counter`, `::test_submission_sequence_is_per_account_and_competition`, `::test_concurrent_submissions_get_distinct_numbers` |
+| Slug account sinh tự động từ `name` (bỏ dấu tiếng Việt, kể cả `Đ`/`đ`), bất biến sau lần sinh đầu; va chạm → hậu tố 3 ký tự random; tên không còn ký tự ASCII → fallback `team` | passing | `backend/tests/test_account_slugs.py::test_slugify_normalises_free_text`, `::test_slugify_returns_empty_when_nothing_survives`, `::test_slugify_is_bounded_and_always_a_valid_slug`, `::test_slug_is_generated_once_and_never_regenerated`, `::test_slug_appends_random_suffix_when_base_is_taken`, `::test_slug_falls_back_for_names_without_ascii` |
 | Log lượt nộp bị từ chối chỉ chứa mã lỗi, không chứa giá trị người dùng nộp | passing | `test_submissions.py::test_rejected_submission_log_contains_code_but_not_uploaded_values` |
 
 ### Backend - tải artifact
@@ -673,7 +676,7 @@ trên VM.
 | **MinIO hỏng không làm `/api/health` đổi trạng thái** (health là oracle rollback của auto-deploy) | passing | `test_submission_downloads.py::test_storage_outage_does_not_break_health` |
 | Trần bytes khi đọc lại vẫn áp theo settings, không tin `size_bytes` trong DB | passing | `test_submission_downloads.py::test_download_uses_stored_oversized_limit_from_settings`, `test_submission_artifacts.py::test_get_rejects_object_larger_than_limit_without_reading_all` |
 | Response tải artifact không lộ `account_id` hay `object_key` | passing | `test_submission_downloads.py::test_download_route_does_not_leak_account_ids` |
-| Put/get/remove đi qua storage module, lỗi SDK map thành lỗi nghiệp vụ; bucket sai/thiếu credential = không khả dụng | passing | `test_submission_artifacts.py::test_object_keys_are_built_from_immutable_ids`, `::test_put_then_get_roundtrip_closes_response`, `::test_get_missing_object_raises_not_found`, `::test_storage_errors_map_to_unavailable`, `::test_unknown_bucket_is_treated_as_upload_failure`, `::test_missing_credentials_are_unavailable` |
+| Put/get/remove đi qua storage module, lỗi SDK map thành lỗi nghiệp vụ; bucket sai/thiếu credential = không khả dụng | passing | `test_submission_artifacts.py::test_put_then_get_roundtrip_closes_response`, `::test_get_missing_object_raises_not_found`, `::test_remove_object_and_prefix_are_best_effort`, `::test_storage_errors_map_to_unavailable`, `::test_unknown_bucket_is_treated_as_upload_failure`, `::test_missing_credentials_are_unavailable` |
 
 ### Backend - quản trị và dọn dẹp
 
@@ -685,7 +688,7 @@ trên VM.
 | Tham số `sort`/`order`/`limit`/`offset` sai → 422 chứ không im lặng dùng default | passing | `test_admin_submissions.py::test_global_list_rejects_invalid_params` |
 | Cuộc thi hoặc account đã xoá thì bảng vẫn trả về (không 500) | passing | `test_admin_submissions.py::test_global_list_survives_deleted_competition_and_account` |
 | Row của bài mới trả metadata artifact (tên file + cờ `available`), không trả `object_key` | passing | `test_admin_submissions.py::test_global_list_reports_artifact_metadata_for_new_submissions` |
-| Xoá cuộc thi dọn prefix `competitions/<id>/` trên MinIO | passing | `backend/tests/test_competitions_delete.py::test_delete_removes_artifact_objects_under_competition_prefix` |
+| Xoá cuộc thi dọn **cả hai** prefix `competitions/<slug>/` (bài từ ADR-033) và `competitions/<id>/` (bài cũ), không đụng cuộc thi khác | passing | `backend/tests/test_competitions_delete.py::test_delete_removes_artifact_objects_under_both_competition_prefixes` |
 | MinIO không tới được lúc xoá cuộc thi → DB đã xoá xong nhưng `files_removed:false`, không kéo theo lỗi 500 | passing | `test_competitions_delete.py::test_delete_reports_partial_cleanup_when_storage_is_unavailable` |
 | Xoá cứng member dọn object của bài chưa `completed`, bài `completed` thì 409 và không xoá gì | passing | `backend/tests/test_memberships.py::test_admin_hard_delete_member_only_without_completed_submission`, `::test_admin_hard_delete_member_removes_pending_submission_artifacts` |
 
@@ -743,6 +746,8 @@ API trả 404 và UI báo lỗi ngay trong dòng, không làm hỏng bảng (đ�
 | MinIO không publish port ra host | passing | Cùng smoke: `docker port` trên container `minio` rỗng |
 | MinIO không có route qua Nginx | passing | `frontend/nginx.conf` không có `location` nào trỏ `minio:9000`; service chỉ nằm trong network nội bộ của compose |
 | Nginx cho phép body 32 MiB (đủ 20 MiB notebook + 10 MiB CSV + overhead multipart) | passing | `grep client_max_body_size frontend/nginx.conf` → `32m`; review §11 `docs/DEPLOYMENT.md` khi đổi trần |
+| Object key mới ghi đúng layout slug trên MinIO **thật**; slug đội sinh tự động; số thứ tự seed từ bài cũ | passing | Diễn tập trên stack dev 2026-09-20 (`docker compose up -d --build api`, nộp hai lượt qua nginx `:8080` bằng `team1@vku.vn`, đọc bucket bằng `mc ls --recursive` với credential root): hai lượt nhận `submission_no` **11** rồi **12** dù membership chưa có counter (seed đúng từ số lớn nhất đã cấp là 10), object nằm ở `competitions/ai-challenge/accounts/doi-01/submissions/submission-0011|0012/{prediction.csv,notebook.ipynb}`, `accounts.slug` = `doi-01` sinh từ tên `Đội 01`, `membership.submission_seq` = 12 |
+| Layout trộn không cần migration: bài cũ dưới key ObjectId vẫn tải được sau khi đổi layout | passing | Cùng diễn tập: object cũ (`competitions/<id>/accounts/<id>/submissions/<id>/…`) vẫn nằm nguyên trong bucket và tải qua route admin trả `200` đúng bytes, song song với object mới; tải bốn artifact của hai lượt mới đều `200`, tên `ai-challenge_Đội-01_submission-0011_{prediction.csv,notebook.ipynb}` |
 | Auto-deploy **dừng trước khi** thay `api`/`web` khi `minio`/`minio-init` chưa bootstrap, in lệnh bootstrap, và **không** khoá SHA mục tiêu lại | passing | `deploy/vps/tests/auto-deploy.test.sh` case "MinIO chưa bootstrap: dừng trước khi thay api/web" (3 nhánh: không có container/không healthy/`minio-init` exit ≠ 0) |
 | MinIO đã bootstrap → deploy chạy bình thường, không build/up container MinIO | passing | harness case "MinIO healthy: deploy bình thường" |
 | Compose file không khai báo MinIO thì preflight không chặn deploy | passing | harness case "compose không có MinIO: không chặn deploy" |

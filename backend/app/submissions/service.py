@@ -5,10 +5,12 @@ from datetime import datetime
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo import ReturnDocument
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.datetimes import iso_z, utc_day_bounds
+from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
 SUBMISSIONS_COLLECTION = "submissions"
@@ -110,22 +112,39 @@ async def quota_status(
     }
 
 
-async def next_submission_no(db, competition_id, account_id) -> int:
-    """Ứng viên số thứ tự kế tiếp: lớn hơn cả bề rộng lịch sử và số lớn nhất đã cấp.
+async def allocate_submission_no(db, membership: dict) -> int:
+    """Cấp số thứ tự kế tiếp, nguyên tử, từ counter `submission_seq` trên membership (ADR-033).
 
-    Chốt chống trùng là unique index chứ không phải hàm này - hai request đồng thời cùng đọc ra một
-    ứng viên, một request sẽ nhận DuplicateKeyError rồi tính lại.
+    Số phải biết TRƯỚC khi upload vì nó nằm trong object key; `$inc` trên đúng document membership
+    (unique theo cặp cuộc thi/account) cho hai request đồng thời hai số khác nhau nên không còn
+    đường ghi đè object của nhau. Đổi lại, số nhảy cách nếu upload fail sau khi đã cấp.
     """
-    query = {"competition_id": competition_id, "account_id": account_id}
-    collection = db[SUBMISSIONS_COLLECTION]
-    history = await collection.count_documents(query)
-    latest = await collection.find_one(
-        {**query, "submission_no": {"$exists": True}},
+    collection = db[MEMBERSHIPS_COLLECTION]
+    if "submission_seq" not in membership:
+        await collection.update_one(
+            {"_id": membership["_id"], "submission_seq": {"$exists": False}},
+            {"$set": {"submission_seq": await _highest_submission_no(db, membership)}},
+        )
+    updated = await collection.find_one_and_update(
+        {"_id": membership["_id"]},
+        {"$inc": {"submission_seq": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return updated["submission_seq"]
+
+
+async def _highest_submission_no(db, membership: dict) -> int:
+    """Số lớn nhất đã cấp cho cặp này trước khi có counter - mốc seed để không cấp lại số cũ."""
+    latest = await db[SUBMISSIONS_COLLECTION].find_one(
+        {
+            "competition_id": membership["competition_id"],
+            "account_id": membership["account_id"],
+            "submission_no": {"$exists": True},
+        },
         {"submission_no": 1},
         sort=[("submission_no", -1)],
     )
-    highest = latest["submission_no"] if latest else 0
-    return max(history, highest) + 1
+    return latest["submission_no"] if latest else 0
 
 
 def artifact_metadata(submission: dict) -> dict:

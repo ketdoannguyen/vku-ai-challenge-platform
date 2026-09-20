@@ -240,10 +240,10 @@ def test_download_uses_stored_oversized_limit_from_settings(client, monkeypatch,
     submission = _submit_one(client, competition["id"])
     monkeypatch.setenv("MAX_UPLOAD_MB", "1")
     get_settings.cache_clear()
-    fake_artifact_storage.objects[
-        f"competitions/{competition['id']}/accounts/{submission['account_id']}"
-        f"/submissions/{submission['_id']}/prediction.csv"
-    ] = b"x" * (1024 * 1024 + 1)
+    # Ghi đè đúng object mà document trỏ tới - test này soi trần bytes lúc đọc, không quan tâm hình dạng key.
+    fake_artifact_storage.objects[submission["artifacts"]["prediction"]["object_key"]] = (
+        b"x" * (1024 * 1024 + 1)
+    )
 
     response = client.get(
         f"/api/competitions/{competition['id']}/submissions/{submission['_id']}/prediction"

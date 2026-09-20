@@ -3,6 +3,11 @@
 Bucket không public và không expose qua Nginx/Cloudflare: mọi upload/download đều đi qua FastAPI để
 enforce quota và authorization (ADR-028). Module này chỉ là lớp mỏng trên MinIO SDK; SDK là sync nên
 mọi call network được đẩy sang threadpool để không chặn event loop.
+
+Key ghép từ slug cuộc thi, slug account và số thứ tự submission nên đọc được bằng mắt
+(ADR-033): `competitions/<slug cuộc thi>/accounts/<slug account>/submissions/submission-0001/…`.
+Object của bài nộp cũ vẫn nằm dưới key theo ObjectId - `object_key` được lưu nguyên văn trong
+document nên không có migration nào là bắt buộc.
 """
 
 import logging
@@ -15,6 +20,7 @@ from minio.error import S3Error
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
+from app.submission_artifacts.naming import submission_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,23 +37,23 @@ class ArtifactStorageUnavailable(Exception):
     """MinIO không tới được hoặc trả lỗi khác - map thành 503 ở tầng API."""
 
 
-def submission_prefix(competition_id, account_id, submission_id) -> str:
+def submission_prefix(competition_slug, account_slug, submission_no) -> str:
     return (
-        f"competitions/{competition_id}/accounts/{account_id}"
-        f"/submissions/{submission_id}"
+        f"competitions/{competition_slug}/accounts/{account_slug}"
+        f"/submissions/{submission_token(submission_no)}"
     )
 
 
-def competition_prefix(competition_id) -> str:
-    return f"competitions/{competition_id}/"
+def competition_prefix(competition_slug) -> str:
+    return f"competitions/{competition_slug}/"
 
 
-def prediction_key(competition_id, account_id, submission_id) -> str:
-    return f"{submission_prefix(competition_id, account_id, submission_id)}/{PREDICTION_OBJECT_NAME}"
+def prediction_key(competition_slug, account_slug, submission_no) -> str:
+    return f"{submission_prefix(competition_slug, account_slug, submission_no)}/{PREDICTION_OBJECT_NAME}"
 
 
-def notebook_key(competition_id, account_id, submission_id) -> str:
-    return f"{submission_prefix(competition_id, account_id, submission_id)}/{NOTEBOOK_OBJECT_NAME}"
+def notebook_key(competition_slug, account_slug, submission_no) -> str:
+    return f"{submission_prefix(competition_slug, account_slug, submission_no)}/{NOTEBOOK_OBJECT_NAME}"
 
 
 @lru_cache(maxsize=4)

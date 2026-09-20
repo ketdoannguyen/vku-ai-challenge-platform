@@ -12,6 +12,10 @@ from app.submission_artifacts import naming, storage, validation
 # Fixture autouse thay `storage._client` bằng fake; giữ bản thật để kiểm tra guard credential.
 _real_client = storage._client
 
+COMPETITION_SLUG = "vku-cup-2026"
+ACCOUNT_SLUG = "doi-a"
+SUBMISSION_NO = 3
+
 
 def _run(coro):
     import asyncio
@@ -22,15 +26,36 @@ def _run(coro):
 # --- storage ---------------------------------------------------------------
 
 
-def test_object_keys_are_built_from_immutable_ids(fake_artifact_storage):
-    prefix = storage.submission_prefix("cid", "aid", "sid")
-    assert prefix == "competitions/cid/accounts/aid/submissions/sid"
-    assert storage.prediction_key("cid", "aid", "sid") == f"{prefix}/prediction.csv"
-    assert storage.notebook_key("cid", "aid", "sid") == f"{prefix}/notebook.ipynb"
+def test_object_keys_are_built_from_slugs_and_sequence(fake_artifact_storage):
+    prefix = storage.submission_prefix(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
+    assert prefix == "competitions/vku-cup-2026/accounts/doi-a/submissions/submission-0003"
+    assert (
+        storage.prediction_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
+        == f"{prefix}/prediction.csv"
+    )
+    assert (
+        storage.notebook_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
+        == f"{prefix}/notebook.ipynb"
+    )
+
+
+def test_key_prefix_and_download_filename_share_the_submission_token():
+    """Thư mục trên MinIO và tên file tải về phải cùng một token, không thể trôi khỏi nhau."""
+    token = naming.submission_token(7)
+    assert token == "submission-0007"
+    assert token in storage.submission_prefix(COMPETITION_SLUG, ACCOUNT_SLUG, 7)
+    assert token in naming.download_filename(
+        competition_slug=COMPETITION_SLUG,
+        account_name="Đội A",
+        account_id="507f1f77bcf86cd799439011",
+        artifact=naming.PREDICTION_ARTIFACT,
+        submission_id="507f1f77bcf86cd799439012",
+        submission_no=7,
+    )
 
 
 def test_put_then_get_roundtrip_closes_response(fake_artifact_storage):
-    key = storage.prediction_key("cid", "aid", "sid")
+    key = storage.prediction_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
     _run(storage.put_bytes(key, b"id,prediction\n", "text/csv; charset=utf-8"))
     assert fake_artifact_storage.content_types[key] == "text/csv; charset=utf-8"
 
@@ -41,11 +66,15 @@ def test_put_then_get_roundtrip_closes_response(fake_artifact_storage):
 
 def test_get_missing_object_raises_not_found(fake_artifact_storage):
     with pytest.raises(storage.ArtifactNotFound):
-        _run(storage.get_bytes(storage.notebook_key("cid", "aid", "sid"), 1024))
+        _run(
+            storage.get_bytes(
+                storage.notebook_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO), 1024
+            )
+        )
 
 
 def test_get_rejects_object_larger_than_limit_without_reading_all(fake_artifact_storage):
-    key = storage.prediction_key("cid", "aid", "sid")
+    key = storage.prediction_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
     fake_artifact_storage.objects[key] = b"x" * 4096
     with pytest.raises(storage.ArtifactStorageUnavailable):
         _run(storage.get_bytes(key, max_bytes=1024))
@@ -77,16 +106,16 @@ def test_missing_credentials_are_unavailable(monkeypatch):
 
 
 def test_remove_object_and_prefix_are_best_effort(fake_artifact_storage):
-    key = storage.prediction_key("cid", "aid", "sid")
+    key = storage.prediction_key(COMPETITION_SLUG, ACCOUNT_SLUG, SUBMISSION_NO)
     fake_artifact_storage.objects[key] = b"data"
-    fake_artifact_storage.objects["competitions/cid/accounts/aid/submissions/other/x"] = b"data"
+    fake_artifact_storage.objects[f"competitions/{COMPETITION_SLUG}/accounts/other/x"] = b"data"
 
     assert _run(storage.remove_object(key)) is True
     assert key not in fake_artifact_storage.objects
     # Xoá object không tồn tại vẫn là thành công: cleanup không được che lỗi gốc của request.
     assert _run(storage.remove_object(key)) is True
 
-    assert _run(storage.remove_prefix(storage.competition_prefix("cid"))) is True
+    assert _run(storage.remove_prefix(storage.competition_prefix(COMPETITION_SLUG))) is True
     assert fake_artifact_storage.objects == {}
 
     fake_artifact_storage.unavailable = True

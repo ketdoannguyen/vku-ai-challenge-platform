@@ -7,8 +7,8 @@ from pathlib import Path
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, File, Query, Request, Response, UploadFile
-from pymongo.errors import DuplicateKeyError
 
+from app.accounts import service as accounts_service
 from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
 from app.core.config import get_settings
@@ -29,9 +29,6 @@ from app.submissions import service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/competitions")
-
-# Hai request đồng thời có thể cùng đọc ra một số thứ tự; unique index là chốt, đây là số lần tính lại.
-_SEQUENCE_ATTEMPTS = 3
 
 
 @router.post("/{competition_id}/submissions", status_code=201)
@@ -129,12 +126,16 @@ async def submit_submission(
         )
         raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
 
+    # Số thứ tự phải có trước khi upload vì nó nằm trong object key (ADR-033); cấp số đặt sau
+    # validate/score/quota nên bài không hợp lệ không tiêu số.
+    account_slug = await accounts_service.ensure_account_slug(db, account)
+    submission_no = await service.allocate_submission_no(db, membership)
     submission_id = ObjectId()
     prediction_key = artifact_storage.prediction_key(
-        competition["_id"], account["_id"], submission_id
+        competition["slug"], account_slug, submission_no
     )
     notebook_key = artifact_storage.notebook_key(
-        competition["_id"], account["_id"], submission_id
+        competition["slug"], account_slug, submission_no
     )
     await _upload(
         prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
@@ -147,13 +148,14 @@ async def submit_submission(
         logger.exception(
             "Notebook upload failed competition=%s account=%s", competition["_id"], account["_id"]
         )
-        await artifact_storage.remove_object(prediction_key)
+        await _cleanup(prediction_key)
         raise _storage_unavailable()
 
     document = {
         "_id": submission_id,
         "competition_id": competition["_id"],
         "account_id": account["_id"],
+        "submission_no": submission_no,
         "artifacts": {
             PREDICTION_ARTIFACT: {
                 "object_key": prediction_key,
@@ -173,48 +175,24 @@ async def submit_submission(
         "primary_score": result.primary_score,
         "created_at": now,
     }
-    await _insert_with_sequence(db, document, prediction_key, notebook_key, competition, account)
+    try:
+        await db[service.SUBMISSIONS_COLLECTION].insert_one(document)
+    except Exception:
+        logger.exception(
+            "Cannot persist submission competition=%s account=%s",
+            competition["_id"],
+            account["_id"],
+        )
+        await _cleanup(prediction_key, notebook_key)
+        raise api_error(500, "SUBMISSION_SAVE_FAILED", "Không thể lưu kết quả bài nộp.")
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
         account["_id"],
         submission_id,
-        document["submission_no"],
+        submission_no,
     )
     return service.public_submission(document, max(quota - completed_today - 1, 0))
-
-
-async def _insert_with_sequence(
-    db, document: dict, prediction_key: str, notebook_key: str, competition: dict, account: dict
-) -> None:
-    """Insert với `submission_no` tính lại khi trùng; object đã upload không bị đụng giữa các retry."""
-    collection = db[service.SUBMISSIONS_COLLECTION]
-    for _ in range(_SEQUENCE_ATTEMPTS):
-        document["submission_no"] = await service.next_submission_no(
-            db, document["competition_id"], document["account_id"]
-        )
-        try:
-            await collection.insert_one(document)
-            return
-        except DuplicateKeyError:
-            # Chỉ trùng số thứ tự mới tới đây; upload giữ nguyên, tính lại rồi thử tiếp.
-            continue
-        except Exception:
-            logger.exception(
-                "Cannot persist submission competition=%s account=%s",
-                competition["_id"],
-                account["_id"],
-            )
-            await _cleanup(prediction_key, notebook_key)
-            raise api_error(500, "SUBMISSION_SAVE_FAILED", "Không thể lưu kết quả bài nộp.")
-    logger.error(
-        "Cannot allocate submission_no after %s attempts competition=%s account=%s",
-        _SEQUENCE_ATTEMPTS,
-        competition["_id"],
-        account["_id"],
-    )
-    await _cleanup(prediction_key, notebook_key)
-    raise api_error(500, "SUBMISSION_SAVE_FAILED", "Không thể lưu kết quả bài nộp.")
 
 
 async def _upload(key: str, data: bytes, content_type: str, competition: dict, account: dict) -> None:

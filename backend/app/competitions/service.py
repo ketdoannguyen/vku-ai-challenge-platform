@@ -345,10 +345,11 @@ def competition_file_roots(competition_id) -> list[Path]:
     ]
 
 
-async def remove_competition_files(competition_id) -> bool:
+async def remove_competition_files(competition_id, competition_slug: str) -> bool:
     """Dọn file sau khi DB đã xoá xong; lỗi chỉ được log và báo partial, không phục hồi DB.
 
     Gồm cả thư mục local cũ (submission CSV legacy, content, assets) và prefix artifact trên MinIO.
+    Artifact nằm ở HAI prefix: theo slug cho bài nộp từ ADR-033 trở đi, theo ObjectId cho bài cũ.
     """
     from app.submission_artifacts import storage as artifact_storage
 
@@ -361,8 +362,10 @@ async def remove_competition_files(competition_id) -> bool:
         except OSError:
             logger.warning("Cannot remove competition files at %s", path, exc_info=True)
             cleaned = False
-    if not await artifact_storage.remove_prefix(
-        artifact_storage.competition_prefix(competition_id)
+    for prefix in (
+        artifact_storage.competition_prefix(competition_slug),
+        artifact_storage.competition_prefix(competition_id),
     ):
-        cleaned = False
+        if not await artifact_storage.remove_prefix(prefix):
+            cleaned = False
     return cleaned
