@@ -7,6 +7,7 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.accounts.service import ACCOUNTS_COLLECTION
+from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.datetimes import iso_z, utc_day_bounds
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
@@ -19,8 +20,13 @@ _PUBLIC_ERROR_MESSAGES = {
 LEGACY_FILENAME_FALLBACK = "submission.csv"
 
 # Allowlist sort/order của bảng quản trị: không bao giờ nội suy trực tiếp từ query vào `$sort`.
-SORT_FIELDS = ("created_at", "team", "primary_score")
+# Bảng theo một cuộc thi không có cột cuộc thi nên không nhận `competition` - sort đó vô nghĩa ở đó.
+SCOPED_SORT_FIELDS = ("created_at", "team", "primary_score", "f1", "precision", "recall")
+SORT_FIELDS = (*SCOPED_SORT_FIELDS, "competition")
 SORT_ORDERS = ("asc", "desc")
+# Sort theo chỉ số đọc từ `metrics.*`; sort theo tên account/cuộc thi phải lookup mới có khoá.
+METRIC_SORT_FIELDS = ("f1", "precision", "recall")
+LOOKUP_SORT_FIELDS = ("team", "competition")
 DEFAULT_SORT = "created_at"
 DEFAULT_ORDER = "desc"
 
@@ -215,46 +221,127 @@ def sort_spec(sort: str, order: str) -> list[tuple[str, int]]:
             ("created_at", direction),
             ("_id", direction),
         ]
+    if sort == "competition":
+        return [
+            ("_competition_name", direction),
+            ("_competition_slug", direction),
+            ("created_at", direction),
+            ("_id", direction),
+        ]
+    if sort in METRIC_SORT_FIELDS:
+        # Record lỗi chấm điểm không có `metrics`: Mongo xếp null/missing lên đầu khi tăng dần.
+        return [
+            (f"metrics.{sort}", direction),
+            ("created_at", direction),
+            ("_id", direction),
+        ]
     if sort == "primary_score":
         return [("primary_score", direction), ("created_at", direction), ("_id", direction)]
     return [("created_at", direction), ("_id", direction)]
 
 
+def _lookup_stages(sort: str) -> list[dict]:
+    """Tên account/cuộc thi không lưu trên submission nên phải join mới sắp xếp được."""
+    if sort == "competition":
+        return [
+            {
+                "$lookup": {
+                    "from": COMPETITIONS_COLLECTION,
+                    "localField": "competition_id",
+                    "foreignField": "_id",
+                    "as": "_competition",
+                }
+            },
+            {
+                "$addFields": {
+                    "_competition_name": {
+                        "$ifNull": [{"$arrayElemAt": ["$_competition.name", 0]}, ""]
+                    },
+                    "_competition_slug": {
+                        "$ifNull": [{"$arrayElemAt": ["$_competition.slug", 0]}, ""]
+                    },
+                }
+            },
+        ]
+    return [
+        {
+            "$lookup": {
+                "from": ACCOUNTS_COLLECTION,
+                "localField": "account_id",
+                "foreignField": "_id",
+                "as": "_account",
+            }
+        },
+        {
+            "$addFields": {
+                "_account_name": {"$ifNull": [{"$arrayElemAt": ["$_account.name", 0]}, ""]},
+                "_account_email": {
+                    "$ifNull": [{"$arrayElemAt": ["$_account.email", 0]}, ""]
+                },
+            }
+        },
+    ]
+
+
 async def list_admin_submissions(
     db, query: dict, *, sort: str, order: str, limit: int, offset: int
-) -> tuple[list[dict], int]:
-    """Trang submission cho quản trị; `team` cần tên account nên phải lookup trong aggregation."""
+) -> list[dict]:
+    """Một trang submission cho quản trị; `team`/`competition` cần lookup nên phải aggregation."""
     collection = db[SUBMISSIONS_COLLECTION]
-    total = await collection.count_documents(query)
-    if sort == "team":
+    if sort in LOOKUP_SORT_FIELDS:
         cursor = collection.aggregate(
             [
                 {"$match": query},
-                {
-                    "$lookup": {
-                        "from": ACCOUNTS_COLLECTION,
-                        "localField": "account_id",
-                        "foreignField": "_id",
-                        "as": "_account",
-                    }
-                },
-                {
-                    "$addFields": {
-                        "_account_name": {
-                            "$ifNull": [{"$arrayElemAt": ["$_account.name", 0]}, ""]
-                        },
-                        "_account_email": {
-                            "$ifNull": [{"$arrayElemAt": ["$_account.email", 0]}, ""]
-                        },
-                    }
-                },
+                *_lookup_stages(sort),
                 {"$sort": dict(sort_spec(sort, order))},
                 {"$skip": offset},
                 {"$limit": limit},
             ]
         )
-        return [document async for document in cursor], total
+        return [document async for document in cursor]
     cursor = (
         collection.find(query).sort(sort_spec(sort, order)).skip(offset).limit(limit)
     )
-    return [document async for document in cursor], total
+    return [document async for document in cursor]
+
+
+def _facet_count(rows: list[dict]) -> int:
+    """`$count` sau `$group` không trả document nào khi tập rỗng nên phải quy về 0."""
+    return rows[0]["value"] if rows else 0
+
+
+async def submission_stats(db, query: dict) -> dict:
+    """Bốn số tổng quan của bảng toàn cục, tính trên cùng bộ lọc đang xem chứ không phải trang.
+
+    Một lượt `$facet` thay cho bốn truy vấn riêng; `total` ở đây cũng là `total` của phân trang
+    nên route gọi hàm này không cần đếm thêm lần nữa.
+    """
+    cursor = db[SUBMISSIONS_COLLECTION].aggregate(
+        [
+            {"$match": query},
+            {
+                "$facet": {
+                    "total": [{"$count": "value"}],
+                    "competitions": [
+                        {"$group": {"_id": "$competition_id"}},
+                        {"$count": "value"},
+                    ],
+                    "teams": [
+                        {"$group": {"_id": "$account_id"}},
+                        {"$count": "value"},
+                    ],
+                    "completed": [
+                        {"$match": {"status": "completed"}},
+                        {"$count": "value"},
+                    ],
+                }
+            },
+        ]
+    )
+    facets = (await cursor.to_list(length=1))[0]
+    return {
+        "total": _facet_count(facets["total"]),
+        "competitions": _facet_count(facets["competitions"]),
+        "teams": _facet_count(facets["teams"]),
+        "completed": _facet_count(facets["completed"]),
+    }

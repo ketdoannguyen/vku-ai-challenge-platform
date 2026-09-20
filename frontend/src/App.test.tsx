@@ -105,6 +105,14 @@ test("khách vào trang nộp bài bị đẩy về /login", async () => {
   await waitFor(() => expect(screen.queryByRole("heading", { level: 1, name: "Cuộc thi" })).toBeNull());
 });
 
+test("khách mở trang Hướng dẫn của cuộc thi, không bị đẩy về /login", async () => {
+  mockGuestApi();
+  renderAt("/competitions/ai-challenge-2026/huong-dan");
+  expect(await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 })).toBeTruthy();
+  expect(screen.queryByLabelText("Mật khẩu")).toBeNull();
+  expect(document.title).toBe("Hướng dẫn - AI Challenge");
+});
+
 test("đăng nhập xong quay lại đúng trang nộp bài đã bị chặn", async () => {
   mockGuestApi();
   renderAt("/competitions/ai-challenge-2026/submit");

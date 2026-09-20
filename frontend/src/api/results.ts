@@ -44,8 +44,23 @@ export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], st
 };
 
 /** Cột sắp xếp bảng submission của admin - khớp `SORT_FIELDS` phía backend. */
-export type AdminSortField = "created_at" | "team" | "primary_score";
+export type AdminSortField =
+  | "created_at"
+  | "competition"
+  | "team"
+  | "primary_score"
+  | "f1"
+  | "precision"
+  | "recall";
 export type AdminSortOrder = "asc" | "desc";
+
+/** Tổng quan bảng bài nộp toàn cục, tính trên cả bộ lọc đang xem chứ không phải trang hiện tại. */
+export interface AdminSubmissionStats {
+  total: number;
+  competitions: number;
+  teams: number;
+  completed: number;
+}
 
 /** Dòng submission phía admin: thêm định danh tài khoản mà endpoint participant cố ý bỏ. */
 export interface AdminSubmissionItem extends SubmissionHistoryItem {
@@ -65,6 +80,8 @@ export interface AdminSubmissionsResponse {
   offset: number;
   sort: AdminSortField;
   order: AdminSortOrder;
+  /** Chỉ endpoint toàn cục trả về - bảng theo một cuộc thi không có thẻ thống kê. */
+  stats?: AdminSubmissionStats;
 }
 
 export interface LeaderboardEntry {

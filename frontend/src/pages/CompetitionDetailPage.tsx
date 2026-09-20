@@ -20,6 +20,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 /** Tiêu đề tab theo khu vực đang mở; `content/*` để panel nội dung tự đặt theo tài liệu. */
 const WORKSPACE_TITLE: { suffix: string; title: string }[] = [
+  { suffix: "/huong-dan", title: "Hướng dẫn" },
   { suffix: "/submit", title: "Nộp bài" },
   { suffix: "/submissions", title: "Bài đã nộp" },
   { suffix: "/leaderboard", title: "Bảng xếp hạng" },
@@ -72,6 +73,17 @@ const TABS: { to: string; end: boolean; label: string; icon: React.ReactNode }[]
         <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
         <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
         <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      </>
+    ),
+  },
+  {
+    to: "huong-dan",
+    end: false,
+    label: "Hướng dẫn",
+    icon: (
+      <>
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
       </>
     ),
   },
@@ -235,10 +247,9 @@ export function CompetitionDetailPage() {
             </div>
           </div>
           <div className="comp-skel-tabs">
-            <span className="comp-skel-line comp-skel-tab" />
-            <span className="comp-skel-line comp-skel-tab" />
-            <span className="comp-skel-line comp-skel-tab" />
-            <span className="comp-skel-line comp-skel-tab" />
+            {TABS.map((tab) => (
+              <span className="comp-skel-line comp-skel-tab" key={tab.to} />
+            ))}
           </div>
           <div className="comp-skel-grid">
             <span className="comp-skel-line comp-skel-aside" />

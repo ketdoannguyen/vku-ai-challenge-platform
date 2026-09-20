@@ -846,6 +846,13 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
   expect(within(region).queryByRole("columnheader", { name: "Cuộc thi" })).toBeNull();
   expect(calls.some((call) => call.url.includes("/api/admin/submissions?"))).toBe(false);
 
+  // Không có thẻ thống kê toàn cục và không còn nút Lọc; cột Điểm chính vẫn được nhấn.
+  expect(screen.queryByRole("region", { name: "Tổng quan bài nộp" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Lọc" })).toBeNull();
+  expect(within(region).getByRole("columnheader", { name: /Điểm chính/ }).className).toContain(
+    "primary-col",
+  );
+
   // Sắp xếp vẫn chạy phía server, qua chính endpoint của cuộc thi.
   fireEvent.click(within(screen.getByRole("columnheader", { name: /Đội/ })).getByRole("button"));
   await waitFor(() => {
@@ -853,6 +860,29 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
       (call) => new URL(call.url, "http://localhost").searchParams.get("sort") === "team",
     );
     expect(sorted?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
+  });
+
+  for (const field of ["f1", "precision", "recall"]) {
+    fireEvent.click(
+      within(
+        within(region).getByRole("columnheader", { name: new RegExp(`^${field}$`, "i") }),
+      ).getByRole("button"),
+    );
+    await waitFor(() => {
+      const sorted = calls.find(
+        (call) => new URL(call.url, "http://localhost").searchParams.get("sort") === field,
+      );
+      expect(sorted?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
+    });
+  }
+
+  // Lọc trạng thái áp dụng ngay, không cần bấm nút.
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái"), { target: { value: "rejected" } });
+  await waitFor(() => {
+    const filtered = calls.find(
+      (call) => new URL(call.url, "http://localhost").searchParams.get("status") === "rejected",
+    );
+    expect(filtered?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
   });
 });
 

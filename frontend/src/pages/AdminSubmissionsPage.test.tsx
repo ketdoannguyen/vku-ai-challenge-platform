@@ -19,6 +19,8 @@ const ROW: GlobalSubmissionItem = {
   competition: { id: "c1", slug: "cup-1", name: "Cup 1" },
 };
 
+const STATS = { total: 3, competitions: 2, teams: 2, completed: 2 };
+
 /** Một trang bài nộp; tên đội nhúng offset để nhận ra trang đang hiển thị. */
 function page(offset: number, total: number): AdminSubmissionsResponse {
   return {
@@ -34,6 +36,7 @@ function page(offset: number, total: number): AdminSubmissionsResponse {
     offset,
     sort: "created_at",
     order: "desc",
+    stats: STATS,
   };
 }
 
@@ -84,6 +87,10 @@ function renderPage() {
 /** Query string của request bảng bài nộp gần nhất. */
 function lastParams(urls: string[]): URLSearchParams {
   return new URL(urls.at(-1) as string, "http://localhost").searchParams;
+}
+
+function statsRegion() {
+  return screen.getByRole("region", { name: "Tổng quan bài nộp" });
 }
 
 afterEach(() => {
@@ -148,58 +155,159 @@ test("nút tải artifact gọi route admin toàn cục của đúng bài nộp"
   anchorClick.mockRestore();
 });
 
-test("gửi bộ lọc lên server và đưa bảng về trang đầu", async () => {
-  const { urls } = mockApi((url) => jsonResponse(page(Number(new URL(url, "http://localhost").searchParams.get("offset")), 120)));
+test("đổi bộ lọc cuộc thi và trạng thái áp dụng ngay, không còn nút Lọc", async () => {
+  const { urls } = mockApi((url) =>
+    jsonResponse(page(Number(new URL(url, "http://localhost").searchParams.get("offset")), 120)),
+  );
   renderPage();
   await screen.findByText("Đội 0");
+
+  expect(screen.queryByRole("button", { name: "Lọc" })).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
   await screen.findByText("Đội 50");
 
   fireEvent.change(screen.getByLabelText("Lọc theo cuộc thi"), { target: { value: "c2" } });
-  fireEvent.change(screen.getByLabelText("Lọc theo đội"), { target: { value: "  Đội 50  " } });
-  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái"), { target: { value: "rejected" } });
-  fireEvent.click(screen.getByRole("button", { name: "Lọc" }));
-
   await waitFor(() => expect(lastParams(urls).get("competition_id")).toBe("c2"));
-  // Khoảng trắng thừa bị cắt trước khi gửi, và bộ lọc mới luôn bắt đầu từ trang đầu.
-  expect(lastParams(urls).get("q")).toBe("Đội 50");
-  expect(lastParams(urls).get("status")).toBe("rejected");
+  // Bộ lọc mới luôn bắt đầu từ trang đầu.
+  expect(lastParams(urls).get("offset")).toBe("0");
+
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái"), { target: { value: "rejected" } });
+  await waitFor(() => expect(lastParams(urls).get("status")).toBe("rejected"));
+  expect(lastParams(urls).get("competition_id")).toBe("c2");
   expect(lastParams(urls).get("offset")).toBe("0");
 });
 
-test("sắp xếp theo tiêu đề cột: mặc định của từng cột rồi đảo chiều khi bấm lại", async () => {
+test("gõ tìm kiếm chỉ gọi server sau khi ngừng gõ, Enter áp dụng ngay", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+  const before = urls.length;
+
+  const input = screen.getByLabelText("Lọc theo đội");
+  fireEvent.change(input, { target: { value: "Đ" } });
+  fireEvent.change(input, { target: { value: "Đội" } });
+  expect(urls.length).toBe(before);
+
+  await waitFor(() => expect(lastParams(urls).get("q")).toBe("Đội"));
+  expect(urls.length).toBe(before + 1);
+
+  // Enter bỏ qua debounce; khoảng trắng thừa bị cắt trước khi gửi.
+  fireEvent.change(input, { target: { value: "  Đội 1  " } });
+  fireEvent.submit(input.closest("form") as HTMLFormElement);
+  await waitFor(() => expect(lastParams(urls).get("q")).toBe("Đội 1"));
+  expect(lastParams(urls).get("offset")).toBe("0");
+});
+
+test("bảy cột sắp xếp được với thứ tự mặc định riêng của từng cột", async () => {
   const { urls } = mockApi();
   renderPage();
   await screen.findByText("Đội 0");
 
-  const teamHeader = screen.getByRole("columnheader", { name: /Đội/ });
-  expect(screen.getByRole("columnheader", { name: /Thời gian/ })).toHaveAttribute(
+  // Mặc định ban đầu: hàng mới nhất trước.
+  expect(screen.getByRole("columnheader", { name: /^Thời gian/ })).toHaveAttribute(
     "aria-sort",
     "descending",
   );
 
-  fireEvent.click(within(teamHeader).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("team"));
-  // Tên đội đọc xuôi là thứ tự dễ tra nhất, nên cột này mặc định tăng dần.
-  expect(lastParams(urls).get("order")).toBe("asc");
-  expect(screen.getByRole("columnheader", { name: /Đội/ })).toHaveAttribute(
-    "aria-sort",
-    "ascending",
-  );
+  const columns: Array<[RegExp, string, string]> = [
+    [/^Cuộc thi/, "competition", "asc"],
+    [/^Đội/, "team", "asc"],
+    [/^F1$/, "f1", "desc"],
+    [/^Precision/, "precision", "desc"],
+    [/^Recall/, "recall", "desc"],
+    [/Điểm chính/, "primary_score", "desc"],
+    [/^Thời gian/, "created_at", "desc"],
+  ];
 
-  fireEvent.click(within(screen.getByRole("columnheader", { name: /Đội/ })).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("order")).toBe("desc"));
+  for (const [label, field, order] of columns) {
+    fireEvent.click(within(screen.getByRole("columnheader", { name: label })).getByRole("button"));
+    await waitFor(() => expect(lastParams(urls).get("sort")).toBe(field));
+    expect(lastParams(urls).get("order")).toBe(order);
+    expect(lastParams(urls).get("offset")).toBe("0");
+    expect(screen.getByRole("columnheader", { name: label })).toHaveAttribute(
+      "aria-sort",
+      order === "asc" ? "ascending" : "descending",
+    );
+  }
 
-  fireEvent.click(
-    within(screen.getByRole("columnheader", { name: /Điểm chính/ })).getByRole("button"),
-  );
+  // Bấm lại cột đang chọn thì đảo chiều; rời cột rồi quay lại thì về lại mặc định của cột.
+  const primaryHeader = () => screen.getByRole("columnheader", { name: /Điểm chính/ });
+  fireEvent.click(within(primaryHeader()).getByRole("button"));
   await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
   expect(lastParams(urls).get("order")).toBe("desc");
+
+  fireEvent.click(within(primaryHeader()).getByRole("button"));
+  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
+
+  fireEvent.click(within(screen.getByRole("columnheader", { name: /^Đội/ })).getByRole("button"));
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("team"));
+  fireEvent.click(within(primaryHeader()).getByRole("button"));
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
+  expect(lastParams(urls).get("order")).toBe("desc");
+
   // Cột không sắp xếp được thì không được mang trạng thái aria-sort.
   expect(screen.getByRole("columnheader", { name: "Trạng thái" })).not.toHaveAttribute(
     "aria-sort",
   );
+  expect(screen.getByRole("columnheader", { name: "Tệp đã nộp" })).not.toHaveAttribute(
+    "aria-sort",
+  );
+});
+
+test("chỉ cột Điểm chính được đánh dấu nổi bật", async () => {
+  mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const primary = screen.getByRole("columnheader", { name: /Điểm chính/ });
+  expect(primary.className).toContain("primary-col");
+  expect(screen.getByRole("columnheader", { name: /^F1$/ }).className).not.toContain("primary-col");
+
+  const cells = within(screen.getByText("Đội 0").closest("tr") as HTMLElement).getAllByRole("cell");
+  // Điểm chính là cột cuối; F1 đứng ngay sau cột trạng thái.
+  expect(cells[cells.length - 1].className).toContain("primary-score");
+  expect(cells[cells.length - 1].className).toContain("primary-col");
+  expect(cells[cells.length - 4].className).not.toContain("primary-col");
+});
+
+test("hiện bốn thẻ thống kê theo bộ lọc hiện tại", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const stats = statsRegion();
+  expect(within(stats).getByText("Tổng bài nộp")).toBeTruthy();
+  expect(within(stats).getByText("Cuộc thi")).toBeTruthy();
+  expect(within(stats).getByText("Đội đã nộp")).toBeTruthy();
+  expect(within(stats).getByText("Đã chấm điểm")).toBeTruthy();
+  expect(within(stats).getByText("3")).toBeTruthy();
+  expect(within(stats).getAllByText("2").length).toBe(3);
+
+  // Thẻ thống kê không được đổi thứ tự sắp xếp hay phân trang đang xem.
+  fireEvent.change(screen.getByLabelText("Lọc theo cuộc thi"), { target: { value: "c2" } });
+  await waitFor(() => expect(lastParams(urls).get("competition_id")).toBe("c2"));
+  expect(lastParams(urls).get("sort")).toBe("created_at");
+});
+
+test("chưa có dữ liệu thì thẻ thống kê để chỗ trống thay vì số 0 giả", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mockApi(async () => {
+    await gate;
+    return jsonResponse(page(0, 1));
+  });
+  renderPage();
+
+  const stats = statsRegion();
+  expect(within(stats).queryByText("0")).toBeNull();
+  expect(within(stats).getAllByText("Đang tải thống kê").length).toBe(4);
+
+  release();
+  expect(await screen.findByText("Đội 0")).toBeTruthy();
+  expect(within(statsRegion()).getByText("3")).toBeTruthy();
 });
 
 test("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới", async () => {
@@ -269,7 +377,7 @@ test("lỗi tải danh sách hiện thông báo và nút thử lại gọi lại
   expect(urls.length).toBe(2);
 });
 
-test("bộ lọc không khớp thì hiện empty state và xóa bộ lọc được", async () => {
+test("bộ lọc không khớp thì hiện empty state và xóa bộ lọc không gọi trùng request", async () => {
   const { urls } = mockApi((url) =>
     jsonResponse(
       url.includes("status=rejected") ? { ...page(0, 0), submissions: [] } : page(0, 1),
@@ -279,15 +387,18 @@ test("bộ lọc không khớp thì hiện empty state và xóa bộ lọc đư�
   await screen.findByText("Đội 0");
 
   fireEvent.change(screen.getByLabelText("Lọc theo trạng thái"), { target: { value: "rejected" } });
-  fireEvent.click(screen.getByRole("button", { name: "Lọc" }));
-
   expect(await screen.findByText("Không có bài nộp phù hợp.")).toBeTruthy();
+
   // Hai nút cùng tên: một ở thanh lọc, một ở empty state; bấm nút trong empty state.
   const clearButtons = screen.getAllByRole("button", { name: "Xóa bộ lọc" });
   fireEvent.click(clearButtons[clearButtons.length - 1]);
-
   expect(await screen.findByText("Đội 0")).toBeTruthy();
+
+  const requests = urls.length;
   expect(lastParams(urls).has("status")).toBe(false);
+  // Debounce của ô tìm kiếm không được bắn thêm request khi từ khóa đã đúng như đang áp dụng.
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(urls.length).toBe(requests);
 });
 
 test("không tải được danh sách cuộc thi thì báo rõ thay vì để ô lọc trống", async () => {

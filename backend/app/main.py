@@ -16,6 +16,7 @@ from app.content import service as content_service
 from app.content.admin_router import router as admin_content_router
 from app.content.router import router as content_router
 from app.competitions.router import router as competitions_router
+from app.competitions.starter_notebook import router as starter_notebook_router
 from app.memberships import service as memberships_service
 from app.memberships.admin_router import router as admin_memberships_router
 from app.memberships.router import router as memberships_router
@@ -116,6 +117,7 @@ app.include_router(leaderboard_router)
 app.include_router(memberships_router)
 app.include_router(content_router)
 app.include_router(competitions_router)
+app.include_router(starter_notebook_router)
 
 
 @app.get("/api/health")

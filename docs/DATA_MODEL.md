@@ -95,6 +95,10 @@ Indexes:
 
 `<DATA_DIR>/competitions/<competition_id>/assets/<uuid4>.<ext>` - PNG/JPEG/GIF/WebP ≤2 MiB (sniff magic bytes, không SVG). List bằng cách đọc directory (số lượng nhỏ); serve qua API có authz + `nosniff`.
 
+## 5c. Starter notebook (asset đóng gói, không có collection)
+
+`backend/app/competitions/starter_notebook.ipynb` là **một** tệp cố định nằm trong image backend (Dockerfile `COPY app ./app`), phục vụ ở `/api/starter-notebook`. Không có document Mongo, không có bản sao theo cuộc thi, không ghi vào `competitions.resources` và admin không sửa được qua API - đổi notebook là đổi code rồi deploy (ADR-030). Không chạy/không render nội dung này ở server.
+
 ## 6. submissions - implemented (Sprint 05; artifact trên MinIO từ ADR-028)
 
 Fields:
@@ -126,7 +130,9 @@ Indexes:
 - `(created_at DESC, _id DESC)` - trang `/admin/submissions` toàn cục sắp xếp không kèm `competition_id`
 - `(primary_score DESC, created_at DESC, _id DESC)` - sắp xếp theo điểm ở trang toàn cục
 
-Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_score` dùng index ở trên; `team` sắp theo **tên account** nên phải `$lookup` sang `accounts` trong aggregation - `total` vẫn đếm bằng `count_documents` trên cùng query.
+Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_score` dùng index ở trên; `team` sắp theo **tên account** nên phải `$lookup` sang `accounts`, `competition` sắp theo tên rồi slug nên `$lookup` sang `competitions` (ADR-029). Hai metric còn lại (`f1`, `precision`, `recall`) sắp trực tiếp trên `metrics.<field>` và không có index riêng: đây là đường quản trị phụ, thêm ba index nữa không đáng so với chi phí ghi. Mọi kiểu sort đều kết thúc bằng tie-break `created_at` rồi `_id` để phân trang không trùng/mất dòng.
+
+`stats` của trang toàn cục là **derived**, không lưu DB và không có collection riêng: một aggregation `$facet` trên cùng query filter trả về `total`, số `competition_id` khác nhau, số `account_id` khác nhau và số document `status=completed`. Route theo một cuộc thi vẫn dùng `count_documents` và không chạy aggregation này.
 
 Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record `completed`, nhất quán với ADR-011.
 

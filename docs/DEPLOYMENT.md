@@ -559,8 +559,18 @@ curl -sI -b /tmp/aic.jar $HOST/api/competitions/<id>/submissions/<submission_id>
   | grep -i 'content-disposition\|content-type\|cache-control'
 curl -sI -b /tmp/aic.jar $HOST/api/admin/submissions/<submission_id>/notebook | head -n 1
 
-# Bảng toàn cục của admin
-curl -s -b /tmp/aic.jar "$HOST/api/admin/submissions?limit=5&sort=team&order=asc" | head -c 300
+# Bảng toàn cục của admin (ADR-029): sort theo cuộc thi/điểm, kèm stats của cả bộ lọc
+curl -s -b /tmp/aic.jar "$HOST/api/admin/submissions?limit=5&sort=competition&order=asc" | head -c 300
+curl -s -b /tmp/aic.jar "$HOST/api/admin/submissions?limit=1" | grep -o '"stats":{[^}]*}'
+```
+
+Notebook khung dùng chung (ADR-030) - endpoint công khai, **không** cần cookie và không truy vấn DB:
+
+```bash
+curl -sI $HOST/api/starter-notebook | grep -i 'content-type\|content-disposition\|cache-control\|nosniff'
+# Phải là application/x-ipynb+json, tên cố định starter-notebook.ipynb, và tải về mở được bằng Jupyter
+curl -s $HOST/api/starter-notebook -o /tmp/starter.ipynb && python3 -c \
+  "import json;nb=json.load(open('/tmp/starter.ipynb'));print(nb['nbformat'], len(nb['cells']))"
 ```
 
 `/api/health` **không** được đỏ vì MinIO (ADR-028). Kiểm tra đúng chỗ: dừng `minio` rồi gọi

@@ -76,7 +76,7 @@ def test_owner_downloads_both_artifacts_with_safe_headers(client):
     assert prediction.headers["content-length"] == str(len(PREDICTION))
     disposition = prediction.headers["content-disposition"]
     assert 'filename="submission-cup-Thi-Sinh-submission-0001-prediction.csv"' in disposition
-    assert "filename*=UTF-8''submission-cup__Th%C3%AD-Sinh__submission-0001__prediction.csv" in disposition
+    assert "filename*=UTF-8''submission-cup_Th%C3%AD-Sinh_submission-0001_prediction.csv" in disposition
 
     notebook = client.get(
         f"/api/competitions/{competition['id']}/submissions/{submission['_id']}/notebook"
@@ -84,7 +84,7 @@ def test_owner_downloads_both_artifacts_with_safe_headers(client):
     assert notebook.status_code == 200
     assert notebook.content == VALID_NOTEBOOK
     assert notebook.headers["content-type"] == "application/x-ipynb+json"
-    assert "__submission-0001__notebook.ipynb" in notebook.headers["content-disposition"]
+    assert "_submission-0001_notebook.ipynb" in notebook.headers["content-disposition"]
 
 
 def test_download_requires_auth_and_ownership(client):
@@ -149,7 +149,7 @@ def test_legacy_submission_is_still_downloadable(client, isolated_data_dir):
     assert prediction.status_code == 200
     assert prediction.content.startswith(b"id,prediction")
     # Không có submission_no thì tên tải dùng 8 ký tự cuối của ObjectId.
-    assert f"__submission-{str(document['_id'])[-8:]}__prediction.csv" in prediction.headers[
+    assert f"_submission-{str(document['_id'])[-8:]}_prediction.csv" in prediction.headers[
         "content-disposition"
     ]
     assert prediction.headers["content-disposition"].startswith('attachment; filename="')

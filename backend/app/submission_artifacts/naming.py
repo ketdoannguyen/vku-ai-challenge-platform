@@ -59,8 +59,8 @@ def download_filename(
     submission_no: int | None,
 ) -> str:
     token = f"{submission_no:04d}" if isinstance(submission_no, int) else short_id(submission_id)
-    head = f"{sanitize_segment(competition_slug, fallback='competition', max_length=SLUG_MAX)}__"
-    tail = f"__submission-{token}__{ARTIFACT_FILENAMES[artifact]}"
+    head = f"{sanitize_segment(competition_slug, fallback='competition', max_length=SLUG_MAX)}_"
+    tail = f"_submission-{token}_{ARTIFACT_FILENAMES[artifact]}"
     budget = max(_TOTAL_MAX - len(head) - len(tail), 12)
     account = sanitize_segment(
         account_name,

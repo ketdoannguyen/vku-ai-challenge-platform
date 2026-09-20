@@ -3039,6 +3039,19 @@ select.input {
   text-decoration: none;
 }
 
+/* Notebook khung là thao tác tải tại chỗ nên dùng <button>; reset lại mặc định của button. */
+button.resource-link {
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.resource-link:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
 .resource-link svg {
   flex: none;
   color: var(--text-muted);
@@ -3239,6 +3252,21 @@ select.input {
   color: var(--text-secondary);
   font-size: var(--text-body-sm);
   font-style: italic;
+}
+
+/* --- Hướng dẫn nộp bài (.guide) --- */
+/* Trang dùng lại nhịp khối `.ov-*` của Tổng quan; chỉ thêm khối mã ví dụ của riêng hướng dẫn. */
+.guide-code {
+  margin: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-body-sm);
+  line-height: 1.7;
+  overflow-x: auto;
 }
 
 /* --- S05 Content Panel Article (.article) --- */
@@ -5876,9 +5904,10 @@ select.input {
   border-radius: var(--radius-md);
 }
 
+/* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": ba cột cho tìm kiếm, trạng thái và nút xóa. */
 .results-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) auto auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) auto;
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px;
@@ -5957,6 +5986,26 @@ select.input {
    (F1/Precision/Recall) giữ nguyên để không metric nào bị đọc nhầm là primary. */
 .admin-detail-page .primary-score {
   color: var(--vku-blue-700);
+}
+
+/* Nền vàng + vạch kẻ trái đánh dấu cột Điểm chính ở cả hai bảng bài nộp. Ý nghĩa không
+   chỉ nằm ở màu: cột vẫn có tiêu đề chữ riêng và đứng cuối bảng. */
+.results-table th.primary-col,
+.results-table td.primary-col {
+  background: var(--vku-yellow-50);
+}
+
+.results-table th.primary-col {
+  box-shadow: inset 3px 0 0 var(--vku-yellow-600);
+}
+
+.results-table td.primary-col {
+  box-shadow: inset 3px 0 0 var(--vku-yellow-100);
+}
+
+/* Hàng đang hover vẫn phải nhận ra được ở cột đã tô nền riêng. */
+.results-table tbody tr:hover td.primary-col {
+  background: var(--vku-yellow-100);
 }
 
 /* Huy chương nhẹ cho top 3; badge luôn kèm số hạng nên màu chỉ là phụ trợ. */
@@ -6088,7 +6137,7 @@ select.input {
 /* Bảng bài nộp toàn cục có thêm ô lọc cuộc thi nên lưới rộng hơn lưới hai bộ lọc của
    tab kết quả; dưới 48rem vẫn thừa hưởng nhánh một cột của `.results-filters`. */
 .admin-submissions-filters {
-  grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 200px) auto auto;
+  grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 200px) auto;
 }
 
 .admin-submissions-error {
@@ -8926,17 +8975,24 @@ button:focus-visible {
   }
 
   /* Ô search giãn hết phần trống nên hàng toolbar chạm đúng mép phải panel - trùng
-     mép phải của ô thống kê "Đã tham gia" ở khối trên. */
+     mép phải của ô thống kê "Đã tham gia" ở khối trên. Hàng cho phép wrap vì đã có bốn
+     điều khiển: ép một hàng sẽ bóp search tới mức không dùng được ở dải tablet hẹp. */
   .dash-toolbar-left {
     flex: 1 1 auto;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
 
-  /* Bỏ bề rộng 18rem cố định: search tự co giãn, ba nút lọc giữ nguyên cỡ và dồn về
+  /* Bỏ bề rộng 18rem cố định: search tự co giãn, các nút lọc giữ nguyên cỡ và dồn về
      mép phải. `min-width: 0` sẵn có cho phép co xuống ở dải 768–870px. */
   .dash-search {
     flex: 1 1 auto;
     width: auto;
+  }
+
+  /* Cân lại `align-self: flex-start` của nhánh cột mobile và đẩy nút Lọc về mép phải. */
+  .dash-filter-trigger {
+    align-self: center;
+    margin-left: auto;
   }
 
   .comp-list {

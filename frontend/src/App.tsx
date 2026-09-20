@@ -13,6 +13,7 @@ import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
 import { AdminSubmissionsPage } from "./pages/AdminSubmissionsPage";
 import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
 import { CompetitionContentPanel, CompetitionOverview } from "./pages/CompetitionContentPanel";
+import { CompetitionGuidePage } from "./pages/CompetitionGuidePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SubmissionPage } from "./pages/SubmissionPage";
@@ -407,6 +408,8 @@ export function App() {
           <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
             <Route index element={<CompetitionOverview />} />
             <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
+            {/* Hướng dẫn nộp bài là kiến thức chung, đọc được trước khi đăng nhập. */}
+            <Route path="huong-dan" element={<CompetitionGuidePage />} />
             <Route
               path="submit"
               element={

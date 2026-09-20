@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
 import { CompetitionDetailPage } from "./CompetitionDetailPage";
+import { CompetitionGuidePage } from "./CompetitionGuidePage";
 
 const COMPETITION = {
   id: "1",
@@ -55,6 +56,7 @@ function renderAt(path: string) {
         <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
           <Route index element={<CompetitionOverview />} />
           <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
+          <Route path="huong-dan" element={<CompetitionGuidePage />} />
           <Route path="submit" element={<div data-testid="workspace-submit">Trang nộp bài</div>} />
           <Route path="submissions" element={<div data-testid="workspace-submissions">Trang bài đã nộp</div>} />
           <Route path="leaderboard" element={<div data-testid="workspace-leaderboard">Trang bảng xếp hạng</div>} />
@@ -170,6 +172,36 @@ test("mục lục cuộc thi là điều hướng route, không giả lập tab"
   const leaderboardNav = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
   expect(within(leaderboardNav).getByRole("link", { name: "Bảng xếp hạng" }).getAttribute("aria-current")).toBe("page");
   expect(within(leaderboardNav).getByRole("link", { name: "Tổng quan" }).getAttribute("aria-current")).toBeNull();
+});
+
+test("mục Hướng dẫn đứng ngay sau Tổng quan, mở được và không cần đăng nhập", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+
+  const nav = await screen.findByRole("navigation", { name: "Mục lục cuộc thi" });
+  const labels = Array.from(nav.querySelectorAll(".comp-tab")).map((tab) =>
+    (tab.textContent ?? "").trim(),
+  );
+  expect(labels).toEqual(["Tổng quan", "Hướng dẫn", "Nộp bài", "Bài đã nộp", "Bảng xếp hạng"]);
+  expect(within(nav).getByRole("link", { name: "Hướng dẫn" }).getAttribute("aria-current")).toBeNull();
+});
+
+test("trang Hướng dẫn mở công khai ở route riêng, không hiện sidebar mục lục nội dung", async () => {
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, membership: { active: false, joined_at: null } }, status: 200 };
+  });
+  renderAt("/competitions/ai-challenge-2026/huong-dan");
+  await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 });
+
+  // Khách chưa tham gia vẫn đọc được hướng dẫn; đây là trang workspace nên không có rail trái.
+  expect(screen.queryByRole("navigation", { name: "Nội dung cuộc thi" })).toBeNull();
+  const nav = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
+  expect(within(nav).getByRole("link", { name: "Hướng dẫn" }).getAttribute("aria-current")).toBe("page");
+  await waitFor(() => expect(document.title).toBe("Hướng dẫn - AI Challenge"));
 });
 
 test("slug sai: chỉ gọi chi tiết cuộc thi, không gọi mục lục nội dung", async () => {
@@ -288,7 +320,8 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
   expect(resources).toHaveAttribute("id", "competition-resources-title");
   // Đếm tài nguyên phải scope vào chính section này: mục lục nội dung dùng cùng class
   // `.content-card-count` và cũng đang hiện "2" nên query toàn cục sẽ khớp hai phần tử.
-  expect(within(resourceSection as HTMLElement).getByText("2")).toBeTruthy();
+  // Hai link Drive hợp lệ + notebook khung built-in.
+  expect(within(resourceSection as HTMLElement).getByText("3")).toBeTruthy();
 
   const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
@@ -296,7 +329,9 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
   expect(dataset.getAttribute("rel")).toBe("noopener noreferrer nofollow");
   // Host ngoài Drive bị lọc trước khi render nên không tạo thành link sống.
   expect(screen.queryByText("Link lạ")).toBeNull();
-  expect(document.querySelectorAll(".resource-link")).toHaveLength(2);
+  expect(document.querySelectorAll(".resource-link")).toHaveLength(3);
+  // Notebook khung là thao tác tải tại chỗ nên phải là button, không phải link ra ngoài.
+  expect(screen.getByRole("button", { name: /Notebook khởi đầu/ })).toBeTruthy();
 });
 
 test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nháy skeleton", async () => {
@@ -341,7 +376,7 @@ test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nh�
   expect(screen.queryByText("Đang tải cuộc thi…")).toBeNull();
 });
 
-test("không có tài nguyên hợp lệ thì không render block tài nguyên", async () => {
+test("cuộc thi không có link ngoài vẫn thấy block tài nguyên với notebook khung", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return {
@@ -354,7 +389,66 @@ test("không có tài nguyên hợp lệ thì không render block tài nguyên",
   });
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
-  expect(screen.queryByText("Tài nguyên")).toBeNull();
+
+  const resources = await screen.findByText("Tài nguyên");
+  const resourceSection = resources.closest("section") as HTMLElement;
+  expect(within(resourceSection).getByText("1")).toBeTruthy();
+  // Link sai giao thức vẫn bị lọc, nhưng notebook khung là tài nguyên built-in nên luôn có.
+  expect(screen.queryByText("Link hỏng")).toBeNull();
+  expect(within(resourceSection).getByRole("button", { name: /Notebook khởi đầu/ })).toBeTruthy();
+});
+
+test("tải notebook khung gọi đúng endpoint và báo lỗi tại chỗ khi máy chủ từ chối", async () => {
+  const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  URL.createObjectURL = vi.fn(() => "blob:starter");
+  URL.revokeObjectURL = vi.fn();
+  const downloads: string[] = [];
+  let fail = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/starter-notebook")) {
+        downloads.push(url);
+        if (fail) {
+          return new Response(
+            JSON.stringify({ error: { code: "STARTER_NOTEBOOK_MISSING", message: "Thiếu tệp." } }),
+            { status: 500, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response("notebook-bytes", {
+          status: 200,
+          headers: {
+            "Content-Type": "application/x-ipynb+json",
+            "Content-Disposition": 'attachment; filename="starter-notebook.ipynb"',
+          },
+        });
+      }
+      if (url.includes("/contents")) {
+        return new Response(JSON.stringify(CONTENTS), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify(COMPETITION), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+
+  fireEvent.click(screen.getByRole("button", { name: /Notebook khởi đầu/ }));
+  await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
+  expect(downloads).toEqual(["/api/starter-notebook"]);
+
+  // Lỗi tải hiện ngay trong block, không làm mất các link tài nguyên còn lại.
+  fail = true;
+  fireEvent.click(screen.getByRole("button", { name: /Notebook khởi đầu/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Thiếu tệp.");
+  expect(screen.getByRole("button", { name: /Notebook khởi đầu/ })).not.toBeDisabled();
+  anchorClick.mockRestore();
 });
 
 test("tiêu đề tab theo khu vực đang mở và giữ đúng khi đổi route", async () => {
