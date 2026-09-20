@@ -2462,6 +2462,121 @@ select.input {
   color: #fff;
 }
 
+/* Nút Lọc đứng cạnh hàng pill; `align-self` giữ nó không giãn hết bề ngang ở cột mobile. */
+.dash-filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+}
+
+.dash-filter-trigger:hover,
+.dash-filter-trigger[aria-expanded="true"] {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+}
+
+/* Đang áp bộ lọc khác mặc định: viền đậm + badge số, không chỉ truyền đạt bằng màu. */
+.dash-filter-trigger[data-active="true"] {
+  border-color: var(--vku-blue-700);
+  color: var(--vku-blue-700);
+}
+
+.dash-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--vku-blue-700);
+  color: #fff;
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* Panel neo theo viewport (position: fixed) vì `.page-hero` có `overflow: hidden`. */
+.dash-filter-panel {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 232px;
+  max-width: calc(100vw - 16px);
+  padding: var(--space-sm);
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.16);
+}
+
+.dash-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dash-filter-legend {
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Mỗi lựa chọn là một hàng radio native: hợp đồng bàn phím của trình duyệt giữ nguyên. */
+.dash-filter-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.dash-filter-option:hover {
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+}
+
+.dash-filter-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--vku-blue-700);
+  cursor: inherit;
+}
+
+.dash-filter-group:disabled .dash-filter-option {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.dash-filter-group:disabled .dash-filter-option:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.dash-filter-hint {
+  margin: 2px 0 0;
+  padding: 0 10px;
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+}
+
 .dash-count,
 .ac-table-head-count {
   margin: 0;

@@ -60,6 +60,9 @@ Fields:
 Indexes:
 - unique trên `slug` - tạo idempotent ở app startup (`ensure_indexes`)
 
+Derived field (không lưu DB):
+- `submission_count` - **không** là field của document. `GET /api/competitions` chạy một aggregation `$match competition_id` + `$group _id` trên `submissions` cho cả trang rồi gắn vào từng item (ADR-032). Đếm mọi document submission đã persist, không phụ thuộc `status`, nên bài bị reject (không tạo document) không được tính. Không migration, không index mới: index có prefix `competition_id` của `submissions` (§6) đã phục vụ `$match` này. Detail và endpoint admin không dùng lại field này - admin đã có `submission_count` từ `activity_counts`.
+
 ## 4. competition_memberships - implemented (Sprint 04)
 
 Fields:

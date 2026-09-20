@@ -1,6 +1,16 @@
 /** Dashboard participant: danh sách competition đang mở/đã kết thúc (draft luôn ẩn ở backend). */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, CompetitionsResponse, Membership } from "../api/competitions";
@@ -19,12 +29,61 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCountdown } from "../lib/countdown";
 
 type StatusFilter = "all" | "published" | "closed";
+type CompetitionSort = "name" | "ending_soon" | "hottest";
+type ParticipationFilter = "all" | "joined" | "not_joined";
 
 const FILTERS: { id: StatusFilter; label: string }[] = [
   { id: "all", label: "Tất cả" },
   { id: "published", label: "Đang diễn ra" },
   { id: "closed", label: "Đã kết thúc" },
 ];
+
+const SORTS: { id: CompetitionSort; label: string }[] = [
+  { id: "name", label: "Tên A–Z" },
+  { id: "ending_soon", label: "Sắp kết thúc" },
+  { id: "hottest", label: "Nhiều lượt nộp nhất" },
+];
+
+const PARTICIPATION: { id: ParticipationFilter; label: string }[] = [
+  { id: "all", label: "Tất cả" },
+  { id: "joined", label: "Đã tham gia" },
+  { id: "not_joined", label: "Chưa tham gia" },
+];
+
+// Collator đặt ở module scope: dựng một lần, không tạo mới mỗi lần render.
+const nameCollator = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
+
+/** So tên tiếng Việt rồi tới slug/id để mọi kiểu sort đều có tie-break tất định. */
+function compareByName(a: Competition, b: Competition): number {
+  return nameCollator.compare(a.name, b.name) || a.slug.localeCompare(b.slug) || a.id.localeCompare(b.id);
+}
+
+/** Mốc hạn hợp lệ; ngày lỗi/thiếu trả null để bị đẩy xuống cuối nhóm thay vì phá thứ tự. */
+function endAtMillis(competition: Competition): number | null {
+  const millis = Date.parse(competition.end_at);
+  return Number.isNaN(millis) ? null : millis;
+}
+
+const COMPARATORS: Record<CompetitionSort, (a: Competition, b: Competition) => number> = {
+  name: compareByName,
+  /**
+   * Cuộc thi đang mở lên trước và gần hạn nhất đứng đầu; đã kết thúc xếp sau, mới đóng gần đây
+   * trước. Nhóm theo `status` chứ không so với đồng hồ trang để thứ tự không đổi theo thời gian.
+   */
+  ending_soon: (a, b) => {
+    if (a.status !== b.status) return a.status === "published" ? -1 : 1;
+    const first = endAtMillis(a);
+    const second = endAtMillis(b);
+    if (first === null || second === null) {
+      if (first !== second) return first === null ? 1 : -1;
+      return compareByName(a, b);
+    }
+    if (first !== second) return a.status === "published" ? first - second : second - first;
+    return compareByName(a, b);
+  },
+  hottest: (a, b) =>
+    (b.submission_count ?? 0) - (a.submission_count ?? 0) || compareByName(a, b),
+};
 
 /**
  * Màu thẻ theo VỊ TRÍ trong lưới đang render, không theo trạng thái cuộc thi:
@@ -53,6 +112,25 @@ function IconSearch() {
     >
       <circle cx="11" cy="11" r="7" />
       <path d="M20 20l-3.5-3.5" />
+    </svg>
+  );
+}
+
+function IconFilter() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={16}
+      height={16}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M4 6h16M7 12h10M10 18h4" />
     </svg>
   );
 }
@@ -252,6 +330,167 @@ function IconEmptyState({ kind }: { kind: "search" | "trophy" }) {
   );
 }
 
+/**
+ * Nút Lọc gom sắp xếp và lọc tham gia vào một panel. Hai nhóm dùng radio native trong
+ * `fieldset` nên hợp đồng bàn phím/đọc màn hình là của trình duyệt, không phải tự dựng.
+ * Panel neo theo viewport qua portal vì `.page-hero` có `overflow: hidden` sẽ cắt dropdown.
+ */
+function CompetitionFilterDropdown({
+  sort,
+  onSortChange,
+  participation,
+  onParticipationChange,
+  participationLocked,
+  activeCount,
+}: {
+  sort: CompetitionSort;
+  onSortChange: (value: CompetitionSort) => void;
+  participation: ParticipationFilter;
+  onParticipationChange: (value: ParticipationFilter) => void;
+  /** Khách chưa đăng nhập: nhóm tham gia hiện nhưng khóa, vì mọi membership đều rỗng. */
+  participationLocked: boolean;
+  /** Số nhóm đang khác mặc định - hiện badge để trạng thái không chỉ truyền đạt bằng màu. */
+  activeCount: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<CSSProperties | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const ids = useId();
+
+  const close = useCallback((refocus = false) => {
+    setOpen(false);
+    setPosition(null);
+    if (refocus) triggerRef.current?.focus();
+  }, []);
+
+  // Đặt panel dưới nút nhưng lật lên trên nếu chạm đáy viewport; kẹp ngang để không tràn.
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current;
+    const panel = panelRef.current;
+    if (!open || !trigger || !panel) return;
+    const rect = trigger.getBoundingClientRect();
+    const openUp = rect.bottom + panel.offsetHeight + 8 > window.innerHeight;
+    const right = Math.max(
+      Math.min(window.innerWidth - rect.right, window.innerWidth - panel.offsetWidth - 8),
+      8,
+    );
+    setPosition({
+      top: openUp ? Math.max(rect.top - panel.offsetHeight - 4, 8) : rect.bottom + 4,
+      right,
+    });
+  }, [open]);
+
+  // Chỉ focus được sau khi có toạ độ: lúc chưa đo panel còn `visibility: hidden`.
+  useEffect(() => {
+    if (open && position) {
+      panelRef.current?.querySelector<HTMLInputElement>('input[type="radio"]:checked')?.focus();
+    }
+  }, [open, position]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target as Node;
+      if (panelRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      close();
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      close(true);
+    }
+
+    function onViewportChange() {
+      close();
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, [open, close]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="dash-filter dash-filter-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label="Lọc và sắp xếp cuộc thi"
+        data-active={activeCount > 0}
+        onClick={() => (open ? close(true) : setOpen(true))}
+      >
+        <IconFilter />
+        Lọc
+        {activeCount > 0 && (
+          <span className="dash-filter-badge" aria-hidden="true">
+            {activeCount}
+          </span>
+        )}
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            ref={panelRef}
+            className="dash-filter-panel"
+            role="dialog"
+            aria-label="Lọc và sắp xếp cuộc thi"
+            style={position ?? { top: 0, right: 0, visibility: "hidden" }}
+          >
+            <fieldset className="dash-filter-group">
+              <legend className="dash-filter-legend">Sắp xếp</legend>
+              {SORTS.map((option) => (
+                <label key={option.id} className="dash-filter-option" htmlFor={`${ids}-sort-${option.id}`}>
+                  <input
+                    type="radio"
+                    id={`${ids}-sort-${option.id}`}
+                    name={`${ids}-sort`}
+                    value={option.id}
+                    checked={sort === option.id}
+                    onChange={() => onSortChange(option.id)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </fieldset>
+
+            <fieldset className="dash-filter-group" disabled={participationLocked}>
+              <legend className="dash-filter-legend">Tham gia</legend>
+              {PARTICIPATION.map((option) => (
+                <label key={option.id} className="dash-filter-option" htmlFor={`${ids}-participation-${option.id}`}>
+                  <input
+                    type="radio"
+                    id={`${ids}-participation-${option.id}`}
+                    name={`${ids}-participation`}
+                    value={option.id}
+                    checked={participation === option.id}
+                    onChange={() => onParticipationChange(option.id)}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+              {participationLocked && (
+                <p className="dash-filter-hint">Đăng nhập để lọc theo tham gia.</p>
+              )}
+            </fieldset>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 export function DashboardPage() {
   const auth = useOptionalAuth();
   const [data, setData] = useState<CompetitionsResponse | null>(null);
@@ -259,6 +498,8 @@ export function DashboardPage() {
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [sort, setSort] = useState<CompetitionSort>("name");
+  const [participation, setParticipation] = useState<ParticipationFilter>("all");
   useDocumentTitle("Cuộc thi");
 
   const load = useCallback(async () => {
@@ -289,16 +530,24 @@ export function DashboardPage() {
   );
   const now = useDeadlineClock(publishedDeadlines);
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return (competitions ?? []).filter((item) => {
-      if (filter !== "all" && item.status !== filter) return false;
-      return needle === "" || item.name.toLowerCase().includes(needle);
-    });
-  }, [competitions, filter, query]);
-
   // Ngoài AuthProvider (test dựng component lẻ) coi như không phải khách để giữ hành vi cũ.
   const isGuest = auth !== null && !auth.loading && auth.account === null;
+
+  const filtered = useMemo(() => {
+    // Khách không có membership nào nên ép về "tất cả": state cũ không thể làm rỗng danh sách
+    // khi phiên đăng nhập kết thúc giữa chừng.
+    const participationFilter = isGuest ? "all" : participation;
+    const needle = query.trim().toLocaleLowerCase("vi");
+    const rows = (competitions ?? []).filter((item) => {
+      if (filter !== "all" && item.status !== filter) return false;
+      if (participationFilter === "joined" && !item.membership.active) return false;
+      if (participationFilter === "not_joined" && item.membership.active) return false;
+      return needle === "" || item.name.toLocaleLowerCase("vi").includes(needle);
+    });
+    // `sort` trả về mảng mới nên không đụng tới mảng của state.
+    return rows.sort(COMPARATORS[sort]);
+  }, [competitions, filter, isGuest, participation, query, sort]);
+
   const activeCount = (competitions ?? []).filter((item) => item.status === "published").length;
   const closedCount = (competitions ?? []).filter((item) => item.status === "closed").length;
   const joinedCount = (competitions ?? []).filter((item) => item.membership.active).length;
@@ -378,6 +627,16 @@ export function DashboardPage() {
                 </button>
               ))}
             </div>
+            <CompetitionFilterDropdown
+              sort={sort}
+              onSortChange={setSort}
+              // Truyền giá trị đang thực sự áp dụng, để nhóm bị khóa của khách không hiển thị
+              // một lựa chọn khác với danh sách đang render.
+              participation={isGuest ? "all" : participation}
+              onParticipationChange={setParticipation}
+              participationLocked={isGuest}
+              activeCount={(sort === "name" ? 0 : 1) + (participation === "all" || isGuest ? 0 : 1)}
+            />
           </div>
         </div>
       </header>
@@ -431,7 +690,7 @@ export function DashboardPage() {
             <IconEmptyState kind="search" />
           </div>
           <h2>Không tìm thấy cuộc thi phù hợp</h2>
-          <p>Thử từ khóa khác hoặc bỏ bộ lọc trạng thái.</p>
+          <p>Thử từ khóa khác hoặc bỏ bớt bộ lọc.</p>
         </div>
       ) : (
         <div className="card empty-state">

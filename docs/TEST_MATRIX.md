@@ -213,7 +213,7 @@ Contract đầy đủ ở `DESIGN.md`. Quy tắc gốc: màu thẻ theo **vị t
 | Focus ring 2px trên search/link/CTA; touch target 44px; reduced-motion tắt translate; hover thường `translateY(-2px)`; `color-scheme: light` | passing | Chromium headless |
 | Navbar: logo `/vku-logo.png` đúng tỉ lệ 58×30, header cao đúng 64px, nav active xanh VKU; route khác vẫn trần 1280px | passing | Chromium headless |
 | Danh sách không có nút "Rời cuộc thi": thẻ đã tham gia chỉ còn "Đã tham gia" + link "Vào cuộc thi" (`showLeave={false}`); trang chi tiết giữ nút rời dạng danger-ghost đỏ và modal xác nhận danger | passing | `frontend/src/pages/{DashboardPage,CompetitionDetailPage}.test.tsx`, `frontend/src/components/JoinControl.test.tsx` |
-| Hàng toolbar giãn hết bề ngang panel từ 48rem: mép phải ba nút lọc trùng mép phải ô thống kê "Đã tham gia" ở 375/768/1024/1200/1440/1920, không tràn ngang | passing | Chromium headless, `/tmp/uiverify/vku-toolbar.mjs` |
+| Hàng toolbar giãn hết bề ngang panel từ 48rem: mép phải **ba** nút lọc trùng mép phải ô thống kê "Đã tham gia" ở 375/768/1024/1200/1440/1920, không tràn ngang | hết hiệu lực từ ADR-032 | Oracle `/tmp/uiverify/vku-toolbar.mjs` giờ **crash** ở `.dash-hero` (class đã đổi tên thành `.page-hero`), và bất biến nó đo cũng không còn đúng: toolbar có **bốn** điều khiển và điều khiển cuối là nút `Lọc`. Thay bằng §15 với phép đo mới |
 
 ## 9c. Remediation audit 2026-09-17 (P0/P1/P2)
 
@@ -842,3 +842,104 @@ sau mỗi lượt `artifact-smoke.mjs` nộp thật, nên con số cứng cũ đ
 | Luồng cũ không vỡ sau batch này (§13): nộp hai tệp, tải lại đúng bytes, admin tải chéo được, lọc đội tức thời, empty state | passing | `artifact-smoke.mjs` 26/26 PASS, gồm 3 case mobile 375 |
 | Notebook khung tải bằng HTTP trên hạ tầng thật | passing (local) | Qua nginx của compose dev: `200`, `content-type: application/x-ipynb+json`, `content-length: 7056`, `nosniff`, `cache-control: public, max-age=3600`, `attachment; filename="starter-notebook.ipynb"` |
 | Notebook khung tải từ **production** mở được bằng nbformat | planned | `curl -sI https://<host>/api/starter-notebook` → 200 + `application/x-ipynb+json`, rồi parse JSON kiểm `nbformat == 4` |
+
+## 15. Tìm kiếm, sắp xếp và lọc danh sách cuộc thi (ADR-032)
+
+Đợt này **mở rộng** trang `/` chứ không dựng lại: ô tìm kiếm theo tên (cập nhật từng ký tự, không nút
+submit) và ba status pill `Tất cả / Đang diễn ra / Đã kết thúc` đã có từ trước và giữ nguyên. Phần thêm
+mới là aggregate công khai `submission_count` (chỉ để sắp xếp, **không** hiển thị trên thẻ) và một nút
+`Lọc` mở panel gồm hai nhóm: sắp xếp (`Tên A–Z` mặc định / `Sắp kết thúc` / `Nhiều lượt nộp nhất`) và
+tham gia (`Tất cả` / `Đã tham gia` / `Chưa tham gia`). Toàn bộ search/filter/sort chạy phía client vì
+endpoint trả nguyên list và chưa phân trang.
+
+### Backend - aggregate công khai
+
+| Check | Status | Nguồn |
+|---|---|---|
+| `GET /api/competitions` trả `submission_count` cho mọi item, competition chưa có bài nhận `0` | passing | `backend/tests/test_competitions_public.py::test_public_list_exposes_submission_count_without_admin_counts` |
+| Count đếm **mọi** document submission đã persist, không lọc theo `status` (2 document `completed` + `failed` → `2`) | passing | cùng test - seed hai document với hai status khác nhau |
+| Khách và participant nhận **cùng** `submission_count`, nhưng payload khách vẫn không có `member_count`/`inactive_member_count` | passing | cùng test - so hai lượt gọi trước/sau `POST /api/auth/logout` |
+| Detail `GET /api/competitions/{slug}` **không** có `submission_count` (không chạy aggregation riêng cho mỗi lần mở detail) | passing | `backend/tests/test_competitions_public.py::test_public_detail_by_slug` |
+| Hình dạng response admin list/detail không đổi sau khi tách helper `submission_counts` khỏi `activity_counts` | passing | `backend/tests/test_competitions_admin.py` (51 case của hai file chạy chung một lượt) |
+
+### Frontend - pipeline search / sort / filter
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Mặc định sắp tên A–Z theo `Intl.Collator("vi", {sensitivity:"base", numeric:true})`: `Cuộc thi 1, 2, 10` chứ không phải `1, 10, 2` | passing | `frontend/src/pages/DashboardPage.test.tsx::mặc định sắp tên A–Z theo số tự nhiên` |
+| `Nhiều lượt nộp nhất` giảm dần theo `submission_count`; count bằng nhau (và field vắng mặt) rơi về A–Z | passing | `DashboardPage.test.tsx::dropdown sắp cuộc thi hot theo tổng lượt nộp và fallback A–Z` |
+| `Sắp kết thúc` đặt `published` trước và gần hạn trước, `closed` sau và mới đóng trước; `end_at` không parse được xếp cuối nhóm chứ không phá render | passing | `DashboardPage.test.tsx::sắp kết thúc ưu tiên cuộc thi đang mở gần hạn, rồi cuộc thi đã đóng gần đây` |
+| Lọc tham gia (`Đã tham gia`/`Chưa tham gia`) áp độc lập với status pill; pill nằm ngoài panel nên phải mở lại panel trước khi đổi tiếp | passing | `DashboardPage.test.tsx::lọc tham gia kết hợp độc lập với bộ lọc trạng thái` |
+| Khách thấy nhóm tham gia cùng lời nhắc đăng nhập nhưng radio **bị `disabled`**; nhóm sắp xếp vẫn dùng được | passing | `DashboardPage.test.tsx::khách thấy bộ lọc tham gia bị khóa nhưng vẫn sắp xếp được` (`toBeDisabled()` trên radio) |
+| Panel đóng bằng `Escape` và bằng click ngoài, sau đó trả focus về trigger | passing | `DashboardPage.test.tsx::dropdown đóng bằng Escape, click ngoài và trả focus đúng chỗ` (`document.activeElement === trigger`) |
+| Search vẫn lọc theo tên khi gõ từng ký tự, không có nút submit | passing | `DashboardPage.test.tsx` (case search/filter hiện có, chạy lại sau khi pipeline đổi) |
+| Màu thẻ vẫn theo **vị trí render** sau sort/filter (fixture đổi sang `Alpha/Beta/Gamma` để thẻ `closed` vẫn ở index 1 dưới thứ tự A–Z mặc định) | passing | `DashboardPage.test.tsx::màu card độc lập với status…`, `::lọc còn một kết quả: card tính lại theme theo vị trí mới` |
+| Count "Hiển thị N cuộc thi" và empty state phản ánh tập kết quả cuối; copy empty state nói chung về "bộ lọc" | passing | `DashboardPage.test.tsx::bộ lọc không khớp…`, `::danh sách có tiêu đề khối kèm số lượng…` |
+
+### Bằng chứng browser (Chromium headless, `vite preview` trên bản `dist` vừa build, mock `/api`)
+
+Chạy 2026-09-20: `LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node /tmp/uiverify/adr032-smoke.mjs`
+- **27/27 PASS**. Ba bề rộng 375/768/1280, hai chế độ participant và khách.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Panel không bị `.page-hero { overflow: hidden }` cắt | passing | `elementFromPoint` tại tâm panel trả về phần tử **thuộc** panel ở cả 375/768/1280 (panel là portal `position: fixed`) |
+| Panel nằm trong viewport, không tràn ngang trang | passing | 375: panel `left=8 right=240`; 768: `479→711`; 1280: `991→1223`; `scrollWidth == innerWidth` ở cả ba |
+| Điều khiển **cuối** toolbar chạm đúng mép phải ô thống kê ở desktop | passing | 1280: toolbar `1223` == stats `1223`. Ở 768 cũng trùng (`711`); ở 375 toolbar xếp dòng nên mép phải không so được (điều khiển cuối `115`, thống kê `340`) - oracle cũ cũng chỉ assert từ 1200px |
+| Mặc định sắp tên A–Z | passing | `AI Challenge 2026, Khối thi đã kết thúc, Robotics 2026, Thị giác máy tính, Xử lý ngôn ngữ tự nhiên` |
+| Search áp từng ký tự, không nút submit | passing | gõ `robo` → còn đúng `Robotics 2026` |
+| Sort hot theo `submission_count`, hòa thì A–Z | passing | `9, 9, 3, 1, 0` → `AI Challenge 2026, Xử lý ngôn ngữ tự nhiên, Robotics 2026, Khối thi đã kết thúc, Thị giác máy tính` |
+| `Sắp kết thúc` đặt published gần hạn trước, closed sau | passing | `Thị giác máy tính (10-01), AI Challenge, Robotics, Xử lý ngôn ngữ tự nhiên, Khối thi đã kết thúc` |
+| Trigger báo đang áp bộ lọc khác mặc định | passing | `aria-expanded="true"` khi mở, `data-active="true"` + badge `1` sau khi đổi sort |
+| `Tab` không bị trap; panel vẫn mở khi focus rời | passing | 8 lần `Tab`: `inside=[10000000]`, panel còn nguyên |
+| `Escape` đóng panel và trả focus về trigger | passing | panel biến mất, `document.activeElement` có `aria-label="Lọc và sắp xếp cuộc thi"` |
+| Panel giữ mở khi chọn tiếp trong cùng lượt | passing | đổi sort rồi đổi participation không phải mở lại |
+| Click ngoài đóng panel | passing | click ở góc trang → panel biến mất |
+| Lọc `Chưa tham gia` lọc đúng `membership.active` | passing | loại đúng thẻ `Thị giác máy tính` |
+| Khách: nhóm Tham gia **hiện nhưng bị khóa**, có lời nhắc đăng nhập | passing | `fieldset.disabled=true`, radio khớp `:disabled` = `true`, hint `Đăng nhập để lọc theo tham gia.` hiển thị |
+| Khách: nhóm khóa hiển thị đúng lựa chọn đang áp dụng | passing | radio `checked` = `all` (không phải state cũ của phiên trước) |
+| Khách: bấm nhãn trong nhóm khóa không tạo kết quả sai | passing | click thật vào nhãn `Đã tham gia` → `checked` vẫn `all`, danh sách không đổi |
+| Khách: nhóm Sắp xếp vẫn dùng được | passing | `Sắp kết thúc` vẫn đổi thứ tự đúng như participant |
+
+**Ghi chú kỹ thuật**: `input.disabled` của radio trong fieldset bị khóa trả `false` trên Chromium thật (IDL chỉ phản ánh attribute của chính phần tử); trạng thái vô hiệu hóa do fieldset cha truyền xuống chỉ hiện qua `:disabled`. jsdom lại cho `toBeDisabled()` = `true`. Đây là khác biệt giữa jsdom và trình duyệt, không phải lỗi sản phẩm - oracle dùng `matches(":disabled")` cộng thêm một lần click thật.
+
+### Bằng chứng stack thật (không mock `/api`)
+
+Chạy 2026-09-20 trên đúng compose dev (`nginx :8080` → FastAPI → Mongo) build từ working tree này:
+`LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node /tmp/uiverify/adr032-real-stack.mjs`
+- **9/9 PASS**.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Mọi competition trong payload thật có `submission_count` dạng số | passing | 7 item: `ai-challenge=17`, `ai-challenge-2=0`, `ai-challenge-6=0`, `ai-challenge-7=0`, `ai21=0`, hai cuộc thi smoke `0` và `2` |
+| Count khớp dữ liệu Mongo | passing | `mongosh` trên cùng DB: `6aa929d95fd64fd5aab0a7db → 17`, `6aa97c664d642e776a9a8f6f → 2`; API trả đúng hai con số đó |
+| Payload **khách** không lộ `member_count`/`inactive_member_count`/`created_by` | passing | cả 7 item |
+| Detail `GET /api/competitions/ai-challenge` không có `submission_count` (lẫn `member_count`/`created_by`) | passing | curl trực tiếp trên container `api` |
+| Trang render đủ 7 thẻ theo API, đã sắp A–Z mặc định bằng collator tiếng Việt | passing | `AI Challenge \| AI Challenge \| AI Challenge 6 \| AI Challenge 7 \| AI21 \| Hidden … \| Smoke S6 …` |
+| Khách: nhóm Tham gia khóa kèm lời nhắc | passing | `fieldset.disabled=true`, radio khớp `:disabled`, hint đúng |
+| `Sắp kết thúc`: mọi cuộc thi đã kết thúc nằm sau cuộc thi đang mở | passing | badge trên dữ liệu thật |
+| Search theo tên thật lọc đúng | passing | `"AI Cha"` → 4/7 thẻ, tất cả đều chứa chuỗi đó |
+| `[375]` panel không tràn viewport, trang không tràn ngang | passing | `overflowX=0`, panel `8→240` trên `vw=375` |
+
+### Chưa kiểm
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Focus ring của trigger/radio nhìn thấy được | **chưa kiểm** | Oracle hiện chỉ kiểm focus **đến đúng chỗ**, chưa đo `outline`/`box-shadow` |
+| `submission_count` với participant đã đăng nhập trên stack thật | **chưa kiểm** | Đã có ở mức unit (khách và participant cùng count, `test_competitions_public.py`) và ở browser mock; lượt stack thật chạy bằng phiên khách |
+
+### Bằng chứng tự động đã chạy (2026-09-20, working tree có cả đợt ADR-029→ADR-031 chưa commit)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **276 passed** (trước đợt này 275; +1 case `submission_count`) |
+| `cd backend && uv run pytest -q tests/test_competitions_public.py tests/test_competitions_admin.py` | **51 passed** |
+| `cd frontend && npm test -- src/pages/DashboardPage.test.tsx` | **24 passed** (trước đợt này 18; +6 case sort/filter/panel) |
+| `cd frontend && npm test` | **398 passed (32 files)**. Một lượt chạy trước đó có 2 case `AdminCompetitionDetailPage.test.tsx` đỏ do quá hạn chờ dưới tải jsdom (`jsdom was created 32 times`); file đó chạy riêng **62 passed** và không nằm trong phạm vi đợt này |
+| `cd frontend && npm run lint` | 0 error, chỉ warning có sẵn; không warning nào ở `DashboardPage.tsx` |
+| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
+
+**Điểm cần theo dõi khi release**: nút `Lọc` là điều khiển thứ tư của `.dash-toolbar-left`, nên bất biến
+"mép phải trùng mép phải ô thống kê" ở §9b giờ được đo trên **điều khiển cuối** (nút `Lọc`) thay vì trên
+`.dash-filters`; oracle cũ `/tmp/uiverify/vku-toolbar.mjs` đã hỏng vì `.dash-hero` được đổi tên thành
+`.page-hero` và không còn dùng được. Lượt đo mới nằm ở `adr032-smoke.mjs`.

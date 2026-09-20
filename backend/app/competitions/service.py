@@ -263,10 +263,27 @@ def _submission_config(competition: dict, *, include_pos_label: bool) -> dict:
     return payload
 
 
+async def submission_counts(db, competition_ids: list) -> dict:
+    """Đếm mọi submission đã persist theo competition, không phụ thuộc status."""
+    from app.submissions.service import SUBMISSIONS_COLLECTION
+
+    counts = {competition_id: 0 for competition_id in competition_ids}
+    if not counts:
+        return counts
+    cursor = db[SUBMISSIONS_COLLECTION].aggregate(
+        [
+            {"$match": {"competition_id": {"$in": competition_ids}}},
+            {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+        ]
+    )
+    async for row in cursor:
+        counts[row["_id"]] = row["total"]
+    return counts
+
+
 async def activity_counts(db, competition_ids: list) -> dict:
     """member_count là thành viên ĐANG hoạt động; người đã rời/bị vô hiệu hóa đếm riêng."""
     from app.memberships.service import MEMBERSHIPS_COLLECTION
-    from app.submissions.service import SUBMISSIONS_COLLECTION
 
     counts = {
         competition_id: {
@@ -296,14 +313,9 @@ async def activity_counts(db, competition_ids: list) -> dict:
     async for row in cursor:
         field = "member_count" if row["_id"]["active"] else "inactive_member_count"
         counts[row["_id"]["competition_id"]][field] = row["total"]
-    cursor = db[SUBMISSIONS_COLLECTION].aggregate(
-        [
-            {"$match": {"competition_id": {"$in": competition_ids}}},
-            {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
-        ]
-    )
-    async for row in cursor:
-        counts[row["_id"]]["submission_count"] = row["total"]
+    submissions = await submission_counts(db, competition_ids)
+    for competition_id, total in submissions.items():
+        counts[competition_id]["submission_count"] = total
     return counts
 
 

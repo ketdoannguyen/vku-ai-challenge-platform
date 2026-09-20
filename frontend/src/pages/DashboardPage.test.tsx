@@ -220,6 +220,131 @@ function renderedThemes(articles: HTMLElement[]) {
   return articles.map((el) => el.getAttribute("data-theme"));
 }
 
+function renderedCompetitionNames() {
+  return screen
+    .getAllByRole("article")
+    .map((article) => within(article).getByRole("heading", { level: 3 }).textContent);
+}
+
+test("mặc định sắp tên A–Z theo số tự nhiên", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "10", slug: "cup-10", name: "Cuộc thi 10" },
+      { ...PUBLISHED, id: "2", slug: "cup-2", name: "Cuộc thi 2" },
+      { ...PUBLISHED, id: "1", slug: "cup-1", name: "Cuộc thi 1" },
+    ],
+  });
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  expect(renderedCompetitionNames()).toEqual(["Cuộc thi 1", "Cuộc thi 2", "Cuộc thi 10"]);
+});
+
+test("dropdown sắp cuộc thi hot theo tổng lượt nộp và fallback A–Z", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "alpha", name: "Alpha", submission_count: 2 },
+      { ...PUBLISHED, id: "b", slug: "beta", name: "Beta", submission_count: 7 },
+      { ...PUBLISHED, id: "c", slug: "charlie", name: "Charlie", submission_count: 7 },
+      { ...PUBLISHED, id: "d", slug: "delta", name: "Delta" },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  const trigger = screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" });
+  await user.click(trigger);
+  const dialog = screen.getByRole("dialog", { name: "Lọc và sắp xếp cuộc thi" });
+  await user.click(within(dialog).getByLabelText("Nhiều lượt nộp nhất"));
+
+  expect(renderedCompetitionNames()).toEqual(["Beta", "Charlie", "Alpha", "Delta"]);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("sắp kết thúc ưu tiên cuộc thi đang mở gần hạn, rồi cuộc thi đã đóng gần đây", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "far", slug: "far", name: "Mở xa", end_at: "2026-12-01T00:00:00Z" },
+      { ...PUBLISHED, id: "near", slug: "near", name: "Mở gần", end_at: "2026-10-01T00:00:00Z" },
+      { ...PUBLISHED, id: "invalid", slug: "invalid", name: "Mở thiếu hạn", end_at: "không-hợp-lệ" },
+      { ...CLOSED, id: "old", slug: "closed-old", name: "Đóng cũ", end_at: "2026-07-01T00:00:00Z" },
+      { ...CLOSED, id: "recent", slug: "closed-recent", name: "Đóng gần", end_at: "2026-09-01T00:00:00Z" },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  await user.click(screen.getByLabelText("Sắp kết thúc"));
+
+  expect(renderedCompetitionNames()).toEqual(["Mở gần", "Mở xa", "Mở thiếu hạn", "Đóng gần", "Đóng cũ"]);
+});
+
+test("lọc tham gia kết hợp độc lập với bộ lọc trạng thái", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "open-joined", slug: "open-joined", name: "Mở đã tham gia", membership: JOINED.membership },
+      { ...PUBLISHED, id: "open-new", slug: "open-new", name: "Mở chưa tham gia" },
+      { ...CLOSED, id: "closed-joined", slug: "closed-joined", name: "Đóng đã tham gia", membership: JOINED.membership },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  const trigger = screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" });
+  await user.click(trigger);
+  await user.click(within(screen.getByRole("group", { name: "Tham gia" })).getByLabelText("Đã tham gia"));
+  // Pill trạng thái nằm ngoài panel nên click vào đó đóng panel - mở lại khi cần đổi tiếp.
+  await user.click(screen.getByRole("button", { name: "Đang diễn ra" }));
+
+  expect(renderedCompetitionNames()).toEqual(["Mở đã tham gia"]);
+  expect(screen.getByText("Hiển thị 1 cuộc thi")).toBeTruthy();
+
+  await user.click(trigger);
+  await user.click(within(screen.getByRole("group", { name: "Tham gia" })).getByLabelText("Chưa tham gia"));
+  expect(renderedCompetitionNames()).toEqual(["Mở chưa tham gia"]);
+});
+
+test("khách thấy bộ lọc tham gia bị khóa nhưng vẫn sắp xếp được", async () => {
+  mockApi({ competitions: [CLOSED, PUBLISHED], account: null });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  const participation = screen.getByRole("group", { name: "Tham gia" }) as HTMLFieldSetElement;
+  expect(participation.disabled).toBe(true);
+  expect(within(participation).getByLabelText("Đã tham gia")).toBeDisabled();
+  expect(screen.getByText("Đăng nhập để lọc theo tham gia.")).toBeTruthy();
+  // Nhóm khóa phải hiển thị đúng lựa chọn đang áp dụng, không phải state cũ của phiên trước.
+  expect((within(participation).getByLabelText("Tất cả") as HTMLInputElement).checked).toBe(true);
+
+  await user.click(screen.getByLabelText("Sắp kết thúc"));
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Old Cup"]);
+});
+
+test("dropdown đóng bằng Escape, click ngoài và trả focus đúng chỗ", async () => {
+  mockApi({ competitions: [PUBLISHED] });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findByRole("article");
+
+  const trigger = screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  await user.click(trigger);
+  expect(await screen.findByRole("dialog", { name: "Lọc và sắp xếp cuộc thi" })).toBeTruthy();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog", { name: "Lọc và sắp xếp cuộc thi" })).toBeNull();
+  expect(document.activeElement).toBe(trigger);
+
+  await user.click(trigger);
+  await user.click(document.body);
+  expect(screen.queryByRole("dialog", { name: "Lọc và sắp xếp cuộc thi" })).toBeNull();
+});
+
 test("màu card theo vị trí render: blue → red → yellow lặp lại, không thêm card lấp ô trống", async () => {
   mockApi({ competitions: makeMany(5) });
   renderDashboard();
@@ -230,7 +355,13 @@ test("màu card theo vị trí render: blue → red → yellow lặp lại, khô
 });
 
 test("màu card độc lập với status: cuộc thi đã kết thúc ở vị trí 1 vẫn đỏ, chỉ badge xám", async () => {
-  mockApi({ competitions: [PUBLISHED, CLOSED, JOINED] });
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "alpha", name: "Alpha" },
+      { ...CLOSED, id: "b", slug: "beta", name: "Beta" },
+      { ...JOINED, id: "c", slug: "gamma", name: "Gamma" },
+    ],
+  });
   renderDashboard();
   const cards = await screen.findAllByRole("article");
   const ended = cards[1];

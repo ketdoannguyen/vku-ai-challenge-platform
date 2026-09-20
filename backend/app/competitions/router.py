@@ -27,15 +27,19 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         .find({"status": {"$in": ["published", "closed"]}})
         .sort("name", 1)
     ]
+    competition_ids = [competition["_id"] for competition in competitions]
     # Khách không có phiên thì không cần truy vấn membership - public_membership(None) đã đủ.
     memberships = (
-        await memberships_by_competition(db, [c["_id"] for c in competitions], account["_id"])
-        if account
-        else {}
+        await memberships_by_competition(db, competition_ids, account["_id"]) if account else {}
     )
+    submission_counts = await service.submission_counts(db, competition_ids)
     return {
         "competitions": [
-            service.public_competition(c, memberships.get(c["_id"])) for c in competitions
+            {
+                **service.public_competition(competition, memberships.get(competition["_id"])),
+                "submission_count": submission_counts[competition["_id"]],
+            }
+            for competition in competitions
         ]
     }
 
