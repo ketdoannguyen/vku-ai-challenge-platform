@@ -106,7 +106,8 @@ def test_download_filename_uses_sequence_number_and_sanitized_segments():
         submission_id="507f1f77bcf86cd799439012",
         submission_no=7,
     )
-    assert name == "vku-cup-2026__Đội-Thi-Sinh__submission-0007__prediction.csv"
+    assert name == "vku-cup-2026_Đội-Thi-Sinh_submission-0007_prediction.csv"
+    assert "__" not in name
 
 
 def test_download_filename_falls_back_to_short_id_for_legacy_submissions():
@@ -118,7 +119,7 @@ def test_download_filename_falls_back_to_short_id_for_legacy_submissions():
         submission_id="507f1f77bcf86cd799439012",
         submission_no=None,
     )
-    assert name.endswith("__submission-99439012__notebook.ipynb")
+    assert name.endswith("_submission-99439012_notebook.ipynb")
 
 
 def test_download_filename_strips_path_traversal_from_user_controlled_parts():
@@ -131,7 +132,8 @@ def test_download_filename_strips_path_traversal_from_user_controlled_parts():
         submission_no=1,
     )
     assert "/" not in name and "\\" not in name and '"' not in name
-    assert name == "..-..-etc-passwd__;-rm-rf__submission-0001__prediction.csv"
+    assert name == "..-..-etc-passwd_;-rm-rf_submission-0001_prediction.csv"
+    assert "__" not in name
 
 
 def test_download_filename_is_bounded_for_long_names():
@@ -144,7 +146,7 @@ def test_download_filename_is_bounded_for_long_names():
         submission_no=12,
     )
     assert len(name) <= 180
-    assert name.endswith("__submission-0012__prediction.csv")
+    assert name.endswith("_submission-0012_prediction.csv")
 
 
 def test_download_filename_empty_account_name_falls_back_to_account_id():
@@ -156,17 +158,39 @@ def test_download_filename_empty_account_name_falls_back_to_account_id():
         submission_id="507f1f77bcf86cd799439012",
         submission_no=1,
     )
-    assert name == "cup__account-99439011__submission-0001__prediction.csv"
+    assert name == "cup_account-99439011_submission-0001_prediction.csv"
 
 
 def test_content_disposition_keeps_unicode_name_and_ascii_fallback():
-    filename = "cup__Đội-Thi-Sinh__submission-0001__prediction.csv"
+    filename = "cup_Đội-Thi-Sinh_submission-0001_prediction.csv"
     header = naming.content_disposition(filename)
     assert header.startswith(
         'attachment; filename="cup-Doi-Thi-Sinh-submission-0001-prediction.csv"'
     )
-    assert "filename*=UTF-8''cup__%C4%90%E1%BB%99i-Thi-Sinh" in header
+    assert "filename*=UTF-8''cup_%C4%90%E1%BB%99i-Thi-Sinh_submission-0001_prediction.csv" in header
     assert "\r" not in header and "\n" not in header
+
+
+def test_download_filename_never_emits_double_underscore():
+    """Regression: ba dấu phân cách luôn là một `_`, kể cả khi input chứa `_`/`__`/space."""
+    cases = (
+        ("cup__a", "Đội__Thi_Sinh"),
+        ("cup a", "đội  thi"),
+        ("__cup__", "__đội__"),
+        ("cup", "đội-hai"),
+    )
+    for slug, account in cases:
+        name = naming.download_filename(
+            competition_slug=slug,
+            account_name=account,
+            account_id="507f1f77bcf86cd799439011",
+            artifact=naming.PREDICTION_ARTIFACT,
+            submission_id="507f1f77bcf86cd799439012",
+            submission_no=1,
+        )
+        assert "__" not in name, (slug, account, name)
+        assert name.count("_") == 3, name
+        assert name.endswith("_submission-0001_prediction.csv")
 
 
 def test_content_disposition_falls_back_when_ascii_is_empty():

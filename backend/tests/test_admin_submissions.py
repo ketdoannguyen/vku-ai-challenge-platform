@@ -262,11 +262,132 @@ def test_global_list_sorts_and_paginates(client):
     assert [row["id"] for row in tail["submissions"]] == [str(seeded["newest"])]
 
 
+def test_global_list_sorts_by_competition_name(client):
+    seeded = _seed_portfolio(client)
+
+    by_competition = _list(client, sort="competition", order="asc")
+    assert [row["competition"]["name"] for row in by_competition["submissions"]] == [
+        "Cup A",
+        "Cup A",
+        "Cup B",
+    ]
+
+    reversed_rows = _list(client, sort="competition", order="desc")
+    assert [row["competition"]["name"] for row in reversed_rows["submissions"]] == [
+        "Cup B",
+        "Cup A",
+        "Cup A",
+    ]
+
+    # Cuộc thi đã xoá vẫn sort được: tên rỗng nằm đầu khi tăng, cuối khi giảm.
+    _run(client.app.state.mongo.db[COMPETITIONS_COLLECTION].delete_one({"_id": seeded["cup_a"]}))
+    orphans = _list(client, sort="competition", order="asc")["submissions"]
+    assert [row["competition"]["name"] for row in orphans] == [
+        "Cuộc thi đã xóa",
+        "Cuộc thi đã xóa",
+        "Cup B",
+    ]
+
+
+def test_global_list_sorts_by_metrics_with_stable_pagination(client):
+    participant = _account_id(client, "thi.sinh@vku.vn")
+    cup = _create_competition(client, "cup-metrics", "Cup Metrics")
+    low = _submission(client, cup, participant, score=0.3, created_at=BASE, submission_no=1)
+    high = _submission(
+        client, cup, participant, score=0.8, created_at=BASE + timedelta(hours=1), submission_no=2
+    )
+    failed = _submission(
+        client,
+        cup,
+        participant,
+        score=0.0,
+        created_at=BASE + timedelta(hours=2),
+        submission_no=3,
+        status="failed",
+    )
+    # Record lỗi chấm điểm không có metrics: vẫn phải nằm trong kết quả sort, không làm 500.
+    _run(
+        client.app.state.mongo.db[SUBMISSIONS_COLLECTION].update_one(
+            {"_id": failed}, {"$unset": {"metrics": "", "primary_score": ""}}
+        )
+    )
+    _login(client)
+
+    descending = _list(client, sort="precision", order="desc")
+    assert [row["id"] for row in descending["submissions"]] == [
+        str(high),
+        str(low),
+        str(failed),
+    ]
+
+    ascending = _list(client, sort="recall", order="asc")
+    assert [row["id"] for row in ascending["submissions"]] == [
+        str(failed),
+        str(low),
+        str(high),
+    ]
+
+    # Phân trang trên cột metric không được trùng hoặc mất dòng.
+    first = _list(client, sort="f1", order="desc", limit=2, offset=0)["submissions"]
+    second = _list(client, sort="f1", order="desc", limit=2, offset=2)["submissions"]
+    assert [row["id"] for row in first] == [str(high), str(low)]
+    assert [row["id"] for row in second] == [str(failed)]
+
+
+def test_global_list_returns_stats_for_current_filter(client):
+    seeded = _seed_portfolio(client)
+
+    body = _list(client)
+    assert body["stats"] == {
+        "total": 3,
+        "competitions": 2,
+        "teams": 2,
+        "completed": 2,
+    }
+    # `total` và `stats.total` luôn là cùng một con số.
+    assert body["total"] == body["stats"]["total"]
+
+    by_competition = _list(client, competition_id=str(seeded["cup_a"]))
+    assert by_competition["stats"] == {
+        "total": 2,
+        "competitions": 1,
+        "teams": 2,
+        "completed": 2,
+    }
+
+    by_account = _list(client, q="đội khác")
+    assert by_account["stats"] == {
+        "total": 1,
+        "competitions": 1,
+        "teams": 1,
+        "completed": 1,
+    }
+
+    # Lọc trạng thái rejected: không còn bài completed nào trong tập kết quả.
+    rejected = _list(client, status="rejected")
+    assert rejected["stats"] == {
+        "total": 1,
+        "competitions": 1,
+        "teams": 1,
+        "completed": 0,
+    }
+
+    combined = _list(client, competition_id=str(seeded["cup_a"]), q="Thí Sinh")
+    assert combined["stats"] == {
+        "total": 1,
+        "competitions": 1,
+        "teams": 1,
+        "completed": 1,
+    }
+
+
 def test_global_list_rejects_invalid_params(client):
     _login(client)
     for params in (
         {"status": "unknown"},
         {"sort": "file_path"},
+        {"sort": "metrics.f1"},
+        {"sort": "competition_name"},
         {"order": "random"},
         {"competition_id": "khong-phai-objectid"},
         {"limit": 0},
@@ -276,6 +397,23 @@ def test_global_list_rejects_invalid_params(client):
         response = client.get(GLOBAL_URL, params=params)
         assert response.status_code == 422, params
         assert response.json()["error"]["code"] in {"VALIDATION_ERROR", "REQUEST_VALIDATION_ERROR"}
+
+
+def test_competition_scoped_list_has_no_stats_and_rejects_competition_sort(client):
+    """Bảng theo cuộc thi giữ nguyên shape: không thẻ thống kê, không sort theo cột cuộc thi."""
+    from tests.helpers import ready_competition
+
+    competition = ready_competition(client)
+    _login(client)
+    url = f"/api/admin/competitions/{competition['id']}/submissions"
+
+    body = client.get(url).json()
+    assert "stats" not in body
+    assert body["total"] == 0
+
+    for field in ("f1", "precision", "recall"):
+        assert client.get(url, params={"sort": field}).status_code == 200
+    assert client.get(url, params={"sort": "competition"}).status_code == 422
 
 
 def test_global_list_survives_deleted_competition_and_account(client):

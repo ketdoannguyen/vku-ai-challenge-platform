@@ -7,6 +7,7 @@ import pytest
 from bson import ObjectId
 
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.helpers import VALID_NOTEBOOK, publish_competition
 
 
@@ -64,6 +65,34 @@ def test_public_list_hides_draft(seeded):
         assert "join_code_hash" not in c
 
 
+def test_public_list_exposes_submission_count_without_admin_counts(seeded):
+    """Count là aggregate công khai; dữ liệu membership/admin vẫn không được lộ."""
+
+    async def insert_submissions():
+        db = seeded.app.state.mongo.db
+        open_competition = await db[COMPETITIONS_COLLECTION].find_one({"slug": "open-cup"})
+        await db[SUBMISSIONS_COLLECTION].insert_many(
+            [
+                {"competition_id": open_competition["_id"], "status": "completed"},
+                {"competition_id": open_competition["_id"], "status": "failed"},
+            ]
+        )
+
+    asyncio.run(insert_submissions())
+    participant_items = seeded.get("/api/competitions").json()["competitions"]
+    seeded.post("/api/auth/logout")
+    guest_items = seeded.get("/api/competitions").json()["competitions"]
+
+    participant_by_slug = {item["slug"]: item for item in participant_items}
+    guest_by_slug = {item["slug"]: item for item in guest_items}
+    assert participant_by_slug["open-cup"]["submission_count"] == 2
+    assert participant_by_slug["closed-cup"]["submission_count"] == 0
+    assert guest_by_slug["open-cup"]["submission_count"] == 2
+    for item in guest_items:
+        assert "member_count" not in item
+        assert "inactive_member_count" not in item
+
+
 def test_public_detail_by_slug(seeded):
     resp = seeded.get("/api/competitions/open-cup")
     assert resp.status_code == 200
@@ -71,6 +100,7 @@ def test_public_detail_by_slug(seeded):
     assert body["name"] == "Open Cup"
     assert body["status"] == "published"
     assert "join_code" not in body
+    assert "submission_count" not in body
 
 
 def test_public_detail_draft_returns_404(seeded):

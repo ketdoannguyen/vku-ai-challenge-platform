@@ -213,7 +213,7 @@ Contract đầy đủ ở `DESIGN.md`. Quy tắc gốc: màu thẻ theo **vị t
 | Focus ring 2px trên search/link/CTA; touch target 44px; reduced-motion tắt translate; hover thường `translateY(-2px)`; `color-scheme: light` | passing | Chromium headless |
 | Navbar: logo `/vku-logo.png` đúng tỉ lệ 58×30, header cao đúng 64px, nav active xanh VKU; route khác vẫn trần 1280px | passing | Chromium headless |
 | Danh sách không có nút "Rời cuộc thi": thẻ đã tham gia chỉ còn "Đã tham gia" + link "Vào cuộc thi" (`showLeave={false}`); trang chi tiết giữ nút rời dạng danger-ghost đỏ và modal xác nhận danger | passing | `frontend/src/pages/{DashboardPage,CompetitionDetailPage}.test.tsx`, `frontend/src/components/JoinControl.test.tsx` |
-| Hàng toolbar giãn hết bề ngang panel từ 48rem: mép phải ba nút lọc trùng mép phải ô thống kê "Đã tham gia" ở 375/768/1024/1200/1440/1920, không tràn ngang | passing | Chromium headless, `/tmp/uiverify/vku-toolbar.mjs` |
+| Hàng toolbar giãn hết bề ngang panel từ 48rem: mép phải **ba** nút lọc trùng mép phải ô thống kê "Đã tham gia" ở 375/768/1024/1200/1440/1920, không tràn ngang | hết hiệu lực từ ADR-032 | Oracle `/tmp/uiverify/vku-toolbar.mjs` giờ **crash** ở `.dash-hero` (class đã đổi tên thành `.page-hero`), và bất biến nó đo cũng không còn đúng: toolbar có **bốn** điều khiển và điều khiển cuối là nút `Lọc`. Thay bằng §15 với phép đo mới |
 
 ## 9c. Remediation audit 2026-09-17 (P0/P1/P2)
 
@@ -663,7 +663,8 @@ trên VM.
 | Chưa đăng nhập / không phải chủ bài → từ chối | passing | `test_submission_downloads.py::test_download_requires_auth_and_ownership` |
 | Admin tải được bài của mọi đội; participant thì không | passing | `test_submission_downloads.py::test_admin_downloads_any_team_artifact_but_participant_cannot` |
 | Bài của cuộc thi khác không tải chéo được | passing | `test_submission_downloads.py::test_download_rejects_submission_of_another_competition` |
-| Tên file `{slug}__{account}__submission-NNNN__{prediction.csv,notebook.ipynb}`, fallback ObjectId ngắn cho record legacy | passing | `test_submission_artifacts.py::test_download_filename_uses_sequence_number_and_sanitized_segments`, `::test_download_filename_falls_back_to_short_id_for_legacy_submissions` |
+| Tên file `{slug}_{account}_submission-NNNN_{prediction.csv,notebook.ipynb}` (một `_` mỗi phân cách, ADR-031), fallback ObjectId ngắn cho record legacy | passing | `test_submission_artifacts.py::test_download_filename_uses_sequence_number_and_sanitized_segments`, `::test_download_filename_falls_back_to_short_id_for_legacy_submissions` |
+| Slug/account chứa space, `_`, `__`, ký tự nguy hiểm → tên kết quả **không bao giờ** có `__`, luôn đúng ba dấu `_` | passing | `test_submission_artifacts.py::test_download_filename_never_emits_double_underscore` (regression ADR-031, 4 cặp input) |
 | Tên file chống traversal, có cận độ dài, tên account rỗng thì lấy `account_id` | passing | `test_submission_artifacts.py::test_download_filename_strips_path_traversal_from_user_controlled_parts`, `::test_download_filename_is_bounded_for_long_names`, `::test_download_filename_empty_account_name_falls_back_to_account_id` |
 | `filename*=UTF-8''…` giữ tên Unicode, `filename=` fallback ASCII, không bao giờ rỗng | passing | `test_submission_artifacts.py::test_content_disposition_keeps_unicode_name_and_ascii_fallback`, `::test_content_disposition_falls_back_when_ascii_is_empty` |
 | Bài legacy (chỉ CSV trên disk) vẫn tải được, không cần migration | passing | `test_submission_downloads.py::test_legacy_submission_is_still_downloadable` |
@@ -719,10 +720,10 @@ Chạy lại: `docker compose up -d minio minio-init api web` rồi
 | Form nộp: nút nộp khoá khi chưa có tệp, vẫn khoá khi mới có CSV, mở khi đủ hai tệp | passing | `disabled` đúng ở cả ba trạng thái; form có đúng 2 slot `input[type=file]` |
 | Chọn tệp xong slot đổi thành thẻ tệp (tên + dung lượng) và hiện trần riêng từng slot | passing | Hint hiển thị `10 MiB` cho CSV và `20 MiB` cho notebook |
 | Nộp thật qua API → MinIO → chấm điểm, màn kết quả hiện điểm | passing | Nhận `201`, màn kết quả hiện F1 `0.571429` |
-| Lịch sử participant: hàng mới nhất có nút `CSV` và `Notebook`, tải về đúng bytes đã nộp | passing | Tên tệp `ai-challenge__Đội-01__submission-0009__notebook.ipynb` / `…__prediction.csv`; bytes khớp tệp nguồn |
+| Lịch sử participant: hàng mới nhất có nút `CSV` và `Notebook`, tải về đúng bytes đã nộp | passing | Lượt chạy lại 2026-09-19 trên code ADR-031: `ai-challenge_Đội-01_submission-0010_notebook.ipynb` / `…_prediction.csv` (một `_` mỗi phân cách); bytes khớp tệp nguồn |
 | Admin toàn cục: đủ cột cuộc thi/đội/tệp/trạng thái/điểm, có dữ liệu thật nhiều cuộc thi | passing | 17 dòng ở trang đầu |
 | Admin toàn cục: sắp xếp và lọc chạy phía server | passing | Bấm "Điểm chính" → request `?…&sort=primary_score`; cột điểm giảm dần `1.000000 → 0.000000`; lọc đội → `?…&q=team1` và bảng chỉ còn team1 |
-| Admin toàn cục: tải được artifact của đội khác bằng route admin | passing | `ai-challenge__Đội-01__submission-0009__prediction.csv` |
+| Admin toàn cục: tải được artifact của đội khác bằng route admin | passing | `ai-challenge_Đội-01_submission-0010_prediction.csv` (lượt chạy lại 2026-09-19 trên code ADR-031) |
 | Admin toàn cục: bộ lọc không khớp thì bảng unmount và hiện empty state | passing | `Không có bài nộp phù hợp.` + nút "Xóa bộ lọc"; không còn `tbody tr` nào |
 | Không tràn ngang ở desktop 1280 cho form/lịch sử/admin | passing | `scrollWidth == innerWidth == 1280` cả ba màn |
 | Không tràn ngang ở mobile 375 cho form/lịch sử/admin | passing | `scrollWidth == innerWidth == 375` cả ba màn |
@@ -753,3 +754,192 @@ API trả 404 và UI báo lỗi ngay trong dòng, không làm hỏng bảng (đ�
 | Chạy chồng lấn bị bỏ qua, và retention chỉ chạy SAU khi backup mới thành công | passing | Harness hai case tương ứng: lượt thứ hai in "Đã có tiến trình backup khác đang chạy" và không tạo thư mục nào; bản quá hạn chỉ bị xoá ở lượt thành công, còn nguyên ở lượt mirror lỗi |
 | Restore drill trên **đường production** (backup thật trên VM → bucket test) | passing | Diễn tập 2026-09-19 từ `20260919T221818Z`: `mongorestore --nsFrom/--nsTo` vào DB tạm `ai_challenge_drill` (accounts=5, competitions=2, memberships=2, submissions=1); đọc `object_key` từ DB đã restore; dựng bucket drill private (`anonymous get` → `private`); mirror ngược rồi đọc lại **cả hai** artifact: `prediction.csv` 183 B sha256 `f86105bb…` và `notebook.ipynb` 550 B sha256 `559eb4ec…`, **trùng** bản trong backup và trùng tệp gốc đã nộp. `ground_truth.csv` trong `app-data.tar.gz` khớp byte với `/srv/vku-ai-challenge/data/app/...` đang chạy. Bucket drill + DB tạm đã xoá, bucket thật còn nguyên |
 | Nộp + tải artifact thật trên production (API → MinIO trong compose prod) | passing | Smoke qua đúng đường người dùng (Worker → Tunnel → nginx → FastAPI) ngày 2026-09-19: 17/17 case artifact (nộp multipart hai part, participant tải lại đúng byte, đội khác 404 `NOT_FOUND`, admin tải được artifact đội khác), 7/7 case đường legacy (tên tải 8 ký tự cuối ObjectId, notebook 404, shape `size_bytes: null`), 4/4 case âm (422 `VALIDATION_ERROR`/`INVALID_NOTEBOOK_TYPE`/`NOTEBOOK_INVALID`, không tạo submission nào). Health vẫn `200 {"status":"ok","mongo":"reachable"}` khi **dừng hẳn** container `minio` (nhánh artifact 503 đã có ở test backend, production lúc đó không còn submission nào để gọi) |
+
+## 14. Bảng bài nộp toàn cục, hướng dẫn nộp bài và notebook khung (ADR-029 → ADR-031)
+
+Cùng quy ước §12/§13: `passing` = đã chạy ở local, `planned` = phải chạy trên hạ tầng thật. Ba ADR
+này còn là thay đổi **chưa lên production** (xem §1 `docs/PROJECT_STATE.md`).
+
+### Backend - sort và thống kê
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `sort=competition` sắp theo **tên** cuộc thi rồi slug (qua `$lookup`), cuộc thi đã xoá không làm endpoint lỗi | passing | `backend/tests/test_admin_submissions.py::test_global_list_sorts_by_competition_name` |
+| `sort=f1\|precision\|recall` chạy cả `asc` lẫn `desc`, chịu được record thiếu `metrics`, phân trang không trùng/mất dòng (tie-break `created_at` → `_id`) | passing | `test_admin_submissions.py::test_global_list_sorts_by_metrics_with_stable_pagination` |
+| Giá trị `sort` ngoài allowlist → 422 | passing | `test_admin_submissions.py::test_global_list_rejects_invalid_params` |
+| Route theo một cuộc thi **không** nhận `sort=competition` và **không** trả `stats` (shape cũ giữ nguyên) | passing | `test_admin_submissions.py::test_competition_scoped_list_has_no_stats_and_rejects_competition_sort` |
+| `stats` tính bằng **một** `$facet` trên đúng bộ lọc đang xem; `stats.total === total`; `competitions`/`teams`/`completed` đếm theo `competition_id`/`account_id`/`status=completed` | passing | `test_admin_submissions.py::test_global_list_returns_stats_for_current_filter` (không lọc, và kết hợp `competition_id`/`q`/`status`) |
+| Cuộc thi/account đã xoá vẫn trả hàng với tên cũ thay vì 500 | passing | `test_admin_submissions.py::test_global_list_survives_deleted_competition_and_account` |
+| Hành vi cũ không đổi: phân trang, lọc chéo cuộc thi, metadata artifact, chặn non-admin | passing | `test_admin_submissions.py::test_global_list_sorts_and_paginates`, `::test_global_list_spans_competitions_with_filters`, `::test_global_list_reports_artifact_metadata_for_new_submissions`, `::test_global_list_requires_admin` |
+| **Không** thêm index Mongo nào cho batch này | passing | `docs/DATA_MODEL.md` §6 ghi rõ metric sort là đường quản trị phụ; review code `backend/app/submissions/service.py` không có `create_index` mới |
+
+### Frontend - bảng bài nộp
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Bảy cột sắp xếp được, mỗi cột có thứ tự mặc định riêng (`competition`/`team` asc, các điểm và `created_at` desc), `aria-sort` khớp chiều đang xem, `offset` về 0 | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::bảy cột sắp xếp được với thứ tự mặc định riêng của từng cột` |
+| Bấm lại cột đang chọn thì đảo chiều; rời cột rồi quay lại thì về mặc định của cột; cột không sắp xếp được (Trạng thái, Tệp đã nộp) **không** mang `aria-sort` | passing | Cùng test trên |
+| Đổi bộ lọc cuộc thi/trạng thái gọi lại API **ngay**, không còn nút `Lọc` | passing | `AdminSubmissionsPage.test.tsx::đổi bộ lọc cuộc thi và trạng thái áp dụng ngay, không còn nút Lọc` |
+| Gõ tìm kiếm chỉ gọi server sau debounce, Enter áp dụng ngay | passing | `AdminSubmissionsPage.test.tsx::gõ tìm kiếm chỉ gọi server sau khi ngừng gõ, Enter áp dụng ngay` |
+| Xoá bộ lọc không phát request trùng và hiện empty state đúng | passing | `AdminSubmissionsPage.test.tsx::bộ lọc không khớp thì hiện empty state và xóa bộ lọc không gọi trùng request` |
+| Bốn thẻ thống kê đọc theo bộ lọc hiện tại và **không** đổi sort/phân trang đang xem | passing | `AdminSubmissionsPage.test.tsx::hiện bốn thẻ thống kê theo bộ lọc hiện tại` |
+| Lần tải đầu để chỗ trống + "Đang tải thống kê", không hiện số 0 giả | passing | `AdminSubmissionsPage.test.tsx::chưa có dữ liệu thì thẻ thống kê để chỗ trống thay vì số 0 giả` |
+| Chỉ cột `Điểm chính` mang class nổi bật (`primary-col` ở header, `primary-score` ở cell), các cột điểm khác không | passing | `AdminSubmissionsPage.test.tsx::chỉ cột Điểm chính được đánh dấu nổi bật` |
+| Panel `Kết quả` trong cuộc thi: không ô lọc/cột Cuộc thi, không gọi endpoint toàn cục, không thẻ thống kê, không nút `Lọc`; metric sort vẫn chạy qua endpoint của cuộc thi; lọc trạng thái áp dụng ngay; cột Điểm chính vẫn nổi bật | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở` |
+| Đổi trang giữ hàng cũ rồi thay bằng trang mới; lỗi tải có thông báo + nút thử lại; cuộc thi xoá hiện tên không có link | passing | `AdminSubmissionsPage.test.tsx::đổi trang giữ bảng cũ, báo đang bận rồi render trang mới`, `::lỗi tải danh sách hiện thông báo và nút thử lại gọi lại đúng trang`, `::cuộc thi đã xóa hiện tên nhưng không có link để mở` |
+| CSS nằm trong `frontend/src/index.css`, không thêm utility/Tailwind | passing | `frontend/src/test/designSystemGuard.test.ts` (suite frontend) |
+
+### Notebook khung và trang Hướng dẫn
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Khách **chưa đăng nhập** tải được `/api/starter-notebook`: `application/x-ipynb+json`, `nosniff`, `cache-control: public, max-age=3600`, `Content-Disposition` an toàn và **không** chứa `__` | passing | `backend/tests/test_starter_notebook.py::test_anonymous_visitor_can_download` |
+| Body là notebook **v4 hợp lệ** qua đúng `validate_notebook()` dùng cho bài sinh viên nộp; có bước khai báo thư viện (`numpy`, `pandas`), `SEED = 42` + `random.seed(SEED)`/`np.random.seed(SEED)`, hai bước `TODO` của thí sinh (`# 5. TIỀN XỬ LÝ DỮ LIỆU`, `# 6. HUẤN LUYỆN MÔ HÌNH`), scaffold `to_csv(OUTPUT_FILE, index=False)` và cả cell markdown lẫn cell code (không phải stub rỗng) | passing | `test_starter_notebook.py::test_body_is_a_valid_v4_scaffold_with_imports_seed_and_student_todo_steps` |
+| Khung **không** còn "Checklist tái lập kết quả" lẫn bảng "Lỗi thường gặp" (kể cả `PYTHONHASHSEED`, `pip freeze`) | passing | `test_starter_notebook.py::test_scaffold_drops_reproducibility_checklist_and_error_table` |
+| Asset nằm trong `app/competitions/` (để `COPY app ./app` mang theo); thiếu asset lúc deploy → 500 `STARTER_NOTEBOOK_MISSING` chứ không phải 404 HTML | passing | `test_starter_notebook.py::test_asset_lives_inside_the_package` |
+| Endpoint không truy vấn Mongo/MinIO, không cần auth, không tạo bản sao theo cuộc thi | passing | `backend/app/competitions/starter_notebook.py` chỉ đọc file module + `lru_cache`; test trên chạy được khi không có Mongo/MinIO |
+| Trang Hướng dẫn dựng **đúng bốn khối** bằng cấu hình thật của cuộc thi (`id_column`, `prediction_column`, `average`, `pos_label`, hai trần dung lượng) | passing | `frontend/src/pages/CompetitionGuidePage.test.tsx::bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi` (đếm toàn bộ heading cấp 3, nên khối thừa cũng làm đỏ) |
+| Ví dụ CSV đúng tên cột của cuộc thi; cuộc thi chưa cấu hình rơi về `id,prediction` và **không** lộ `null`/`undefined` | passing | `CompetitionGuidePage.test.tsx::cuộc thi chưa cấu hình chấm điểm vẫn đọc được hướng dẫn, không lộ null/undefined` |
+| Trang Hướng dẫn **không** còn khối seed/tái lập và khối lỗi thường gặp (chúng chỉ còn ở tab `Nộp bài`) | passing | Cùng test trên - danh sách heading cấp 3 phải bằng đúng bốn tên khối |
+| CTA tải notebook khung gọi endpoint công khai và báo lỗi bằng `role="alert"` tại chỗ, nút bật lại sau lỗi | passing | `CompetitionGuidePage.test.tsx::CTA tải notebook khung gọi endpoint công khai và báo lỗi bằng alert` |
+| Nội dung hướng dẫn và trang `Nộp bài` dùng **cùng** một nguồn (`frontend/src/lib/submissionRequirements.ts`), không có hai bản mô tả lệch nhau | passing | `frontend/src/lib/submissionRequirements.test.ts` (3 test: config đầy đủ, fallback rỗng, mọi pitfall có mã + mô tả; chỉ `VALUE_OUT_OF_RANGE` mang tone cảnh báo) |
+| Mục `Hướng dẫn` đứng **ngay sau** `Tổng quan`, mở được và không cần đăng nhập; nav vẫn là link route + `aria-current`, không giả `role=tab` | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx::mục Hướng dẫn đứng ngay sau Tổng quan, mở được và không cần đăng nhập` |
+| Trang Hướng dẫn là route riêng, không hiện sidebar mục lục nội dung, đặt đúng tiêu đề tab | passing | `CompetitionDetailPage.test.tsx::trang Hướng dẫn mở công khai ở route riêng, không hiện sidebar mục lục nội dung` |
+| Khách mở `/competitions/<slug>/huong-dan` **không** bị đẩy về `/login` | passing | `frontend/src/App.test.tsx::khách mở trang Hướng dẫn của cuộc thi, không bị đẩy về /login` |
+| Block `Tài nguyên` luôn có notebook khung built-in, count = `1 + số link ngoài hợp lệ`; cuộc thi **không** có link ngoài vẫn thấy block | passing | `CompetitionDetailPage.test.tsx::cuộc thi không có link ngoài vẫn thấy block tài nguyên với notebook khung` + test tài nguyên hiện có (count `3`, 3 `.resource-link`) |
+| Tải notebook khung gọi đúng endpoint; lỗi tại chỗ không làm mất các link Drive đã lọc an toàn | passing | `CompetitionDetailPage.test.tsx::tải notebook khung gọi đúng endpoint và báo lỗi tại chỗ khi máy chủ từ chối` |
+| `competitions.resources` **không** chứa URL nội bộ; allowlist Drive/Docs và form tạo/sửa tài nguyên không đổi | passing | `frontend/src/components/CompetitionResources.tsx` chỉ thêm item built-in ngoài danh sách đã lọc `isSafeResourceUrl`; test tài nguyên cũ vẫn xanh |
+| Trang Hướng dẫn dùng lại nhịp khối `.ov-*` của Tổng quan, chỉ thêm `.guide-code` | passing | `frontend/src/index.css` (comment tại chỗ nêu rõ lý do tái dùng); `.guide-steps` đã xoá cùng khối seed/tái lập |
+
+### Smoke browser trên stack dev (chạy thật 2026-09-20, image build từ chính working tree này)
+
+Hai script, đều chạy trên `docker compose up -d --build api web` (không mock `/api`, có Mongo + MinIO
+thật): `node /tmp/uiverify/adr029-smoke.mjs` cho batch này và `node /tmp/uiverify/artifact-smoke.mjs`
+(§13, đã cập nhật sang hợp đồng mới) để chắc luồng nộp/tải cũ không vỡ. Kết quả: **46/46 PASS**
+(43/43 ở lượt 2026-09-19, thêm ba case cho nội dung Hướng dẫn/notebook mới) và **26/26 PASS**. Ảnh
+ở `/tmp/vku-shots/adr029-smoke` và `/tmp/vku-shots/artifact-smoke`. Sau lượt 2026-09-20, case thống
+kê đối chiếu với chính `stats` của response thay vì con số cứng 18/2/2/18 - DB dev tăng một bài nộp
+sau mỗi lượt `artifact-smoke.mjs` nộp thật, nên con số cứng cũ đã lỗi thời chứ không phải hồi quy.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Khách chưa đăng nhập mở `/competitions/ai-challenge/huong-dan`: không bị đẩy về `/login`, không có ô mật khẩu | passing | URL giữ nguyên `/huong-dan`; `input[type=password]` = 0 |
+| Hướng dẫn đúng **bốn khối**, đã bỏ khối seed/tái lập và khối lỗi thường gặp; ví dụ CSV dùng đúng cột của cuộc thi | passing | `Hai tệp bắt buộc trong mỗi lượt nộp / Định dạng tệp prediction.csv / Notebook tái lập (.ipynb) / Notebook khởi đầu`; toàn văn `section.guide` không còn chữ `seed` lẫn `lỗi thường gặp`; code block mở đầu bằng `id,prediction` |
+| Đã bỏ câu "Hệ thống chỉ kiểm tra cấu trúc… **không được thực thi** trên máy chủ" | passing | Toàn văn `section.guide` không chứa chuỗi `không được thực thi` |
+| Menu cuộc thi đúng thứ tự và mục đang mở có `aria-current` | passing | `Tổng quan \| Hướng dẫn \| Nộp bài \| Bài đã nộp \| Bảng xếp hạng`, `aria-current="page"` ở `Hướng dẫn` |
+| CTA tải notebook khung chạy thật cho khách | passing | Tên tệp `starter-notebook.ipynb`, body parse JSON, `nbformat == 4`, có `SEED = 42`, `import numpy as np`, `import pandas as pd`, hai bước `# 5. TIỀN XỬ LÝ DỮ LIỆU`/`# 6. HUẤN LUYỆN MÔ HÌNH`; không còn `Checklist tái lập kết quả` lẫn `Lỗi thường gặp` |
+| Hướng dẫn không tràn ngang ở 1280 và 375 | passing | `scrollWidth == innerWidth` ở cả hai bề rộng |
+| Cuộc thi **không** có link ngoài (`ai-challenge-6`) vẫn thấy block `Tài nguyên` | passing | Count `1`, đúng một `button.resource-link` là `Notebook khởi đầu (.ipynb)`, tải được |
+| Admin toàn cục: không còn nút `Lọc`; đúng bảy cột mang `aria-sort` | passing | 0 nút `Lọc`; 7 `th[aria-sort]` (`Trạng thái`/`Tệp đã nộp` không có) |
+| Bảy cột gửi đúng `sort`/`order`/`offset` lên server và đổi `aria-sort` tại chỗ | passing | `competition`/`team` → `order=asc`; `f1`/`precision`/`recall`/`primary_score`/`created_at` → `order=desc`; mọi lượt `offset=0`, `aria-sort` khớp chiều |
+| Chỉ cột `Điểm chính` được nhấn nổi bật | passing | `th.primary-col` = 1, nhãn `ĐIỂM CHÍNH`; các cột F1/Precision/Recall không có |
+| Bốn thẻ thống kê khớp `stats` của response và tính lại theo bộ lọc | passing | Lượt 2026-09-20: không lọc `19/2/2/19` (khớp `stats` của response); sau khi lọc một cuộc thi `17/1/2/17` |
+| Đổi ô lọc cuộc thi gọi server **ngay** và quay về trang đầu | passing | Request phát ngay với `competition_id=…&offset=0`, không cần bấm nút |
+| Tên artifact tải thật chỉ còn **một** `_` mỗi phân cách | passing | `ai-challenge_Admin_submission-0007_prediction.csv`, `ai-challenge_Đội-01_submission-0010_{prediction.csv,notebook.ipynb}` - không tên nào chứa `__` |
+| Panel `Kết quả` của cuộc thi: không thẻ thống kê, không cột Cuộc thi, không nút `Lọc`, không gọi endpoint toàn cục | passing | Header chỉ còn `thời gian đội tệp đã nộp trạng thái f1 precision recall điểm chính`; request duy nhất đi vào `/api/admin/competitions/<id>/submissions` |
+| Panel `Kết quả`: sort metric qua endpoint của cuộc thi, lọc trạng thái áp dụng ngay | passing | `?limit=50&offset=0&sort=f1&order=desc` rồi `…&status=completed`, cùng path scoped |
+| Không tràn ngang ở 1280 và 375 cho `/admin/submissions` | passing | `scrollWidth == innerWidth` ở cả hai bề rộng |
+| Luồng cũ không vỡ sau batch này (§13): nộp hai tệp, tải lại đúng bytes, admin tải chéo được, lọc đội tức thời, empty state | passing | `artifact-smoke.mjs` 26/26 PASS, gồm 3 case mobile 375 |
+| Notebook khung tải bằng HTTP trên hạ tầng thật | passing (local) | Qua nginx của compose dev: `200`, `content-type: application/x-ipynb+json`, `content-length: 7056`, `nosniff`, `cache-control: public, max-age=3600`, `attachment; filename="starter-notebook.ipynb"` |
+| Notebook khung tải từ **production** mở được bằng nbformat | planned | `curl -sI https://<host>/api/starter-notebook` → 200 + `application/x-ipynb+json`, rồi parse JSON kiểm `nbformat == 4` |
+
+## 15. Tìm kiếm, sắp xếp và lọc danh sách cuộc thi (ADR-032)
+
+Đợt này **mở rộng** trang `/` chứ không dựng lại: ô tìm kiếm theo tên (cập nhật từng ký tự, không nút
+submit) và ba status pill `Tất cả / Đang diễn ra / Đã kết thúc` đã có từ trước và giữ nguyên. Phần thêm
+mới là aggregate công khai `submission_count` (chỉ để sắp xếp, **không** hiển thị trên thẻ) và một nút
+`Lọc` mở panel gồm hai nhóm: sắp xếp (`Tên A–Z` mặc định / `Sắp kết thúc` / `Nhiều lượt nộp nhất`) và
+tham gia (`Tất cả` / `Đã tham gia` / `Chưa tham gia`). Toàn bộ search/filter/sort chạy phía client vì
+endpoint trả nguyên list và chưa phân trang.
+
+### Backend - aggregate công khai
+
+| Check | Status | Nguồn |
+|---|---|---|
+| `GET /api/competitions` trả `submission_count` cho mọi item, competition chưa có bài nhận `0` | passing | `backend/tests/test_competitions_public.py::test_public_list_exposes_submission_count_without_admin_counts` |
+| Count đếm **mọi** document submission đã persist, không lọc theo `status` (2 document `completed` + `failed` → `2`) | passing | cùng test - seed hai document với hai status khác nhau |
+| Khách và participant nhận **cùng** `submission_count`, nhưng payload khách vẫn không có `member_count`/`inactive_member_count` | passing | cùng test - so hai lượt gọi trước/sau `POST /api/auth/logout` |
+| Detail `GET /api/competitions/{slug}` **không** có `submission_count` (không chạy aggregation riêng cho mỗi lần mở detail) | passing | `backend/tests/test_competitions_public.py::test_public_detail_by_slug` |
+| Hình dạng response admin list/detail không đổi sau khi tách helper `submission_counts` khỏi `activity_counts` | passing | `backend/tests/test_competitions_admin.py` (51 case của hai file chạy chung một lượt) |
+
+### Frontend - pipeline search / sort / filter
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Mặc định sắp tên A–Z theo `Intl.Collator("vi", {sensitivity:"base", numeric:true})`: `Cuộc thi 1, 2, 10` chứ không phải `1, 10, 2` | passing | `frontend/src/pages/DashboardPage.test.tsx::mặc định sắp tên A–Z theo số tự nhiên` |
+| `Nhiều lượt nộp nhất` giảm dần theo `submission_count`; count bằng nhau (và field vắng mặt) rơi về A–Z | passing | `DashboardPage.test.tsx::dropdown sắp cuộc thi hot theo tổng lượt nộp và fallback A–Z` |
+| `Sắp kết thúc` đặt `published` trước và gần hạn trước, `closed` sau và mới đóng trước; `end_at` không parse được xếp cuối nhóm chứ không phá render | passing | `DashboardPage.test.tsx::sắp kết thúc ưu tiên cuộc thi đang mở gần hạn, rồi cuộc thi đã đóng gần đây` |
+| Lọc tham gia (`Đã tham gia`/`Chưa tham gia`) áp độc lập với status pill; pill nằm ngoài panel nên phải mở lại panel trước khi đổi tiếp | passing | `DashboardPage.test.tsx::lọc tham gia kết hợp độc lập với bộ lọc trạng thái` |
+| Khách thấy nhóm tham gia cùng lời nhắc đăng nhập nhưng radio **bị `disabled`**; nhóm sắp xếp vẫn dùng được | passing | `DashboardPage.test.tsx::khách thấy bộ lọc tham gia bị khóa nhưng vẫn sắp xếp được` (`toBeDisabled()` trên radio) |
+| Panel đóng bằng `Escape` và bằng click ngoài, sau đó trả focus về trigger | passing | `DashboardPage.test.tsx::dropdown đóng bằng Escape, click ngoài và trả focus đúng chỗ` (`document.activeElement === trigger`) |
+| Search vẫn lọc theo tên khi gõ từng ký tự, không có nút submit | passing | `DashboardPage.test.tsx` (case search/filter hiện có, chạy lại sau khi pipeline đổi) |
+| Màu thẻ vẫn theo **vị trí render** sau sort/filter (fixture đổi sang `Alpha/Beta/Gamma` để thẻ `closed` vẫn ở index 1 dưới thứ tự A–Z mặc định) | passing | `DashboardPage.test.tsx::màu card độc lập với status…`, `::lọc còn một kết quả: card tính lại theme theo vị trí mới` |
+| Count "Hiển thị N cuộc thi" và empty state phản ánh tập kết quả cuối; copy empty state nói chung về "bộ lọc" | passing | `DashboardPage.test.tsx::bộ lọc không khớp…`, `::danh sách có tiêu đề khối kèm số lượng…` |
+
+### Bằng chứng browser (Chromium headless, `vite preview` trên bản `dist` vừa build, mock `/api`)
+
+Chạy 2026-09-20: `LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node /tmp/uiverify/adr032-smoke.mjs`
+- **27/27 PASS**. Ba bề rộng 375/768/1280, hai chế độ participant và khách.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Panel không bị `.page-hero { overflow: hidden }` cắt | passing | `elementFromPoint` tại tâm panel trả về phần tử **thuộc** panel ở cả 375/768/1280 (panel là portal `position: fixed`) |
+| Panel nằm trong viewport, không tràn ngang trang | passing | 375: panel `left=8 right=240`; 768: `479→711`; 1280: `991→1223`; `scrollWidth == innerWidth` ở cả ba |
+| Điều khiển **cuối** toolbar chạm đúng mép phải ô thống kê ở desktop | passing | 1280: toolbar `1223` == stats `1223`. Ở 768 cũng trùng (`711`); ở 375 toolbar xếp dòng nên mép phải không so được (điều khiển cuối `115`, thống kê `340`) - oracle cũ cũng chỉ assert từ 1200px |
+| Mặc định sắp tên A–Z | passing | `AI Challenge 2026, Khối thi đã kết thúc, Robotics 2026, Thị giác máy tính, Xử lý ngôn ngữ tự nhiên` |
+| Search áp từng ký tự, không nút submit | passing | gõ `robo` → còn đúng `Robotics 2026` |
+| Sort hot theo `submission_count`, hòa thì A–Z | passing | `9, 9, 3, 1, 0` → `AI Challenge 2026, Xử lý ngôn ngữ tự nhiên, Robotics 2026, Khối thi đã kết thúc, Thị giác máy tính` |
+| `Sắp kết thúc` đặt published gần hạn trước, closed sau | passing | `Thị giác máy tính (10-01), AI Challenge, Robotics, Xử lý ngôn ngữ tự nhiên, Khối thi đã kết thúc` |
+| Trigger báo đang áp bộ lọc khác mặc định | passing | `aria-expanded="true"` khi mở, `data-active="true"` + badge `1` sau khi đổi sort |
+| `Tab` không bị trap; panel vẫn mở khi focus rời | passing | 8 lần `Tab`: `inside=[10000000]`, panel còn nguyên |
+| `Escape` đóng panel và trả focus về trigger | passing | panel biến mất, `document.activeElement` có `aria-label="Lọc và sắp xếp cuộc thi"` |
+| Panel giữ mở khi chọn tiếp trong cùng lượt | passing | đổi sort rồi đổi participation không phải mở lại |
+| Click ngoài đóng panel | passing | click ở góc trang → panel biến mất |
+| Lọc `Chưa tham gia` lọc đúng `membership.active` | passing | loại đúng thẻ `Thị giác máy tính` |
+| Khách: nhóm Tham gia **hiện nhưng bị khóa**, có lời nhắc đăng nhập | passing | `fieldset.disabled=true`, radio khớp `:disabled` = `true`, hint `Đăng nhập để lọc theo tham gia.` hiển thị |
+| Khách: nhóm khóa hiển thị đúng lựa chọn đang áp dụng | passing | radio `checked` = `all` (không phải state cũ của phiên trước) |
+| Khách: bấm nhãn trong nhóm khóa không tạo kết quả sai | passing | click thật vào nhãn `Đã tham gia` → `checked` vẫn `all`, danh sách không đổi |
+| Khách: nhóm Sắp xếp vẫn dùng được | passing | `Sắp kết thúc` vẫn đổi thứ tự đúng như participant |
+
+**Ghi chú kỹ thuật**: `input.disabled` của radio trong fieldset bị khóa trả `false` trên Chromium thật (IDL chỉ phản ánh attribute của chính phần tử); trạng thái vô hiệu hóa do fieldset cha truyền xuống chỉ hiện qua `:disabled`. jsdom lại cho `toBeDisabled()` = `true`. Đây là khác biệt giữa jsdom và trình duyệt, không phải lỗi sản phẩm - oracle dùng `matches(":disabled")` cộng thêm một lần click thật.
+
+### Bằng chứng stack thật (không mock `/api`)
+
+Chạy 2026-09-20 trên đúng compose dev (`nginx :8080` → FastAPI → Mongo) build từ working tree này:
+`LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node /tmp/uiverify/adr032-real-stack.mjs`
+- **9/9 PASS**.
+
+| Check | Status | Kết quả đo được |
+|---|---|---|
+| Mọi competition trong payload thật có `submission_count` dạng số | passing | 7 item: `ai-challenge=17`, `ai-challenge-2=0`, `ai-challenge-6=0`, `ai-challenge-7=0`, `ai21=0`, hai cuộc thi smoke `0` và `2` |
+| Count khớp dữ liệu Mongo | passing | `mongosh` trên cùng DB: `6aa929d95fd64fd5aab0a7db → 17`, `6aa97c664d642e776a9a8f6f → 2`; API trả đúng hai con số đó |
+| Payload **khách** không lộ `member_count`/`inactive_member_count`/`created_by` | passing | cả 7 item |
+| Detail `GET /api/competitions/ai-challenge` không có `submission_count` (lẫn `member_count`/`created_by`) | passing | curl trực tiếp trên container `api` |
+| Trang render đủ 7 thẻ theo API, đã sắp A–Z mặc định bằng collator tiếng Việt | passing | `AI Challenge \| AI Challenge \| AI Challenge 6 \| AI Challenge 7 \| AI21 \| Hidden … \| Smoke S6 …` |
+| Khách: nhóm Tham gia khóa kèm lời nhắc | passing | `fieldset.disabled=true`, radio khớp `:disabled`, hint đúng |
+| `Sắp kết thúc`: mọi cuộc thi đã kết thúc nằm sau cuộc thi đang mở | passing | badge trên dữ liệu thật |
+| Search theo tên thật lọc đúng | passing | `"AI Cha"` → 4/7 thẻ, tất cả đều chứa chuỗi đó |
+| `[375]` panel không tràn viewport, trang không tràn ngang | passing | `overflowX=0`, panel `8→240` trên `vw=375` |
+
+### Chưa kiểm
+
+| Check | Status | Nguồn |
+|---|---|---|
+| Focus ring của trigger/radio nhìn thấy được | **chưa kiểm** | Oracle hiện chỉ kiểm focus **đến đúng chỗ**, chưa đo `outline`/`box-shadow` |
+| `submission_count` với participant đã đăng nhập trên stack thật | **chưa kiểm** | Đã có ở mức unit (khách và participant cùng count, `test_competitions_public.py`) và ở browser mock; lượt stack thật chạy bằng phiên khách |
+
+### Bằng chứng tự động đã chạy (2026-09-20, working tree có cả đợt ADR-029→ADR-031 chưa commit)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **276 passed** (trước đợt này 275; +1 case `submission_count`) |
+| `cd backend && uv run pytest -q tests/test_competitions_public.py tests/test_competitions_admin.py` | **51 passed** |
+| `cd frontend && npm test -- src/pages/DashboardPage.test.tsx` | **24 passed** (trước đợt này 18; +6 case sort/filter/panel) |
+| `cd frontend && npm test` | **398 passed (32 files)**. Một lượt chạy trước đó có 2 case `AdminCompetitionDetailPage.test.tsx` đỏ do quá hạn chờ dưới tải jsdom (`jsdom was created 32 times`); file đó chạy riêng **62 passed** và không nằm trong phạm vi đợt này |
+| `cd frontend && npm run lint` | 0 error, chỉ warning có sẵn; không warning nào ở `DashboardPage.tsx` |
+| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
+
+**Điểm cần theo dõi khi release**: nút `Lọc` là điều khiển thứ tư của `.dash-toolbar-left`, nên bất biến
+"mép phải trùng mép phải ô thống kê" ở §9b giờ được đo trên **điều khiển cuối** (nút `Lọc`) thay vì trên
+`.dash-filters`; oracle cũ `/tmp/uiverify/vku-toolbar.mjs` đã hỏng vì `.dash-hero` được đổi tên thành
+`.page-hero` và không còn dùng được. Lượt đo mới nằm ở `adr032-smoke.mjs`.

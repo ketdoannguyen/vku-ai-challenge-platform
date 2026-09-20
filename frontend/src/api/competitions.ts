@@ -50,6 +50,8 @@ export interface Competition {
   resources: CompetitionResource[];
   membership: Membership;
   submission_config: SubmissionConfig;
+  /** Aggregate chỉ được bảo đảm trên public/admin list; detail không chạy thêm query này. */
+  submission_count?: number;
   /** Vắng mặt với guest, người chưa join, member bị vô hiệu hóa và cuộc thi đã đóng. */
   quota?: QuotaStatus;
 }

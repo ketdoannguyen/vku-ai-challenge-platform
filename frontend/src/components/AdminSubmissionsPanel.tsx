@@ -1,12 +1,12 @@
 /**
  * Bảng bài nộp dành cho admin, dùng chung cho hai chỗ:
- * - Trang toàn cục `/admin/submissions`: bộ lọc và cột cuộc thi đều bật.
- * - Tab Kết quả của một cuộc thi: đã khóa vào cuộc thi hiện tại nên ẩn cả hai.
+ * - Trang toàn cục `/admin/submissions`: thẻ thống kê, bộ lọc và cột cuộc thi đều bật.
+ * - Tab Kết quả của một cuộc thi: đã khóa vào cuộc thi hiện tại nên ẩn cả ba.
  *
  * Lọc, sắp xếp và phân trang đều chạy phía server để tổng số luôn khớp bộ lọc.
  */
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { formatLocal } from "../api/competitions";
@@ -21,6 +21,8 @@ import { ArtifactLinks } from "./ArtifactLinks";
 import { ErrorBox, Loading } from "./ui";
 
 const PAGE_SIZE = 50;
+/** Gõ xong mới gọi server; Enter trong ô tìm kiếm thì áp dụng ngay. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 const STATUS_OPTIONS = [
   { value: "", label: "Mọi trạng thái" },
@@ -29,11 +31,15 @@ const STATUS_OPTIONS = [
   { value: "failed", label: "Lỗi chấm điểm" },
 ];
 
-/** Thứ tự mặc định khi chuyển sang một cột: điểm/thời gian mới nhất trước, tên đội A→Z. */
+/** Thứ tự mặc định khi chuyển sang một cột: điểm/thời gian mới nhất trước, tên A→Z. */
 const DEFAULT_ORDER: Record<AdminSortField, AdminSortOrder> = {
   created_at: "desc",
+  competition: "asc",
   team: "asc",
   primary_score: "desc",
+  f1: "desc",
+  precision: "desc",
+  recall: "desc",
 };
 
 interface Filters {
@@ -44,7 +50,7 @@ interface Filters {
 
 const NO_FILTERS: Filters = { competition_id: "", q: "", status: "" };
 
-/** Bộ lọc + sắp xếp + trang đang xem; chỉ đổi khi người dùng bấm "Lọc" hoặc đổi trang. */
+/** Bộ lọc + sắp xếp + trang đang xem; đổi bất kỳ phần nào cũng gọi lại server. */
 interface Query extends Filters {
   sort: AdminSortField;
   order: AdminSortOrder;
@@ -71,7 +77,7 @@ export function AdminSubmissionsPanel({
   title,
   tableLabel,
 }: {
-  /** Có cuộc thi thì bảng khóa vào cuộc thi đó: ẩn bộ lọc và cột cuộc thi. */
+  /** Có cuộc thi thì bảng khóa vào cuộc thi đó: ẩn bộ lọc, cột cuộc thi và thẻ thống kê. */
   competitionId?: string;
   title: string;
   tableLabel: string;
@@ -82,7 +88,7 @@ export function AdminSubmissionsPanel({
   const [error, setError] = useState<unknown>(null);
   const [competitions, setCompetitions] = useState<CompetitionOption[]>([]);
   const [competitionsError, setCompetitionsError] = useState(false);
-  const [draft, setDraft] = useState<Filters>(NO_FILTERS);
+  const [search, setSearch] = useState("");
   const [query, setQuery] = useState<Query>(INITIAL_QUERY);
   const requestSequence = useRef(0);
   const hasData = useRef(false);
@@ -152,6 +158,16 @@ export function AdminSubmissionsPanel({
     void load(query, hasData.current);
   }, [load, query]);
 
+  /** Từ khóa chỉ vào query sau khi ngừng gõ, để mỗi ký tự không thành một request. */
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setQuery((current) =>
+        current.q === search.trim() ? current : { ...current, q: search.trim(), offset: 0 },
+      );
+    }, SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
   /** Đổi trang/làm mới đi qua đây để nút đang giữ focus không bị unmount. */
   const requestPage = useCallback((nextOffset: number) => {
     setQuery((current) => ({
@@ -175,18 +191,30 @@ export function AdminSubmissionsPanel({
     }));
   }
 
-  function applyFilters(event: FormEvent) {
+  /** Bộ lọc áp dụng ngay khi đổi; trả về chính object cũ khi không có gì đổi để khỏi gọi trùng. */
+  function changeFilters(next: Partial<Filters>) {
+    setQuery((current) => {
+      const changed = (Object.keys(next) as (keyof Filters)[]).some(
+        (key) => current[key] !== next[key],
+      );
+      if (!changed && current.offset === 0) return current;
+      return { ...current, ...next, offset: 0 };
+    });
+  }
+
+  /** Enter trong ô tìm kiếm: bỏ qua debounce, trừ khi từ khóa đã đúng như đang áp dụng. */
+  function applySearch(event: FormEvent) {
     event.preventDefault();
-    setQuery((current) => ({ ...current, ...draft, q: draft.q.trim(), offset: 0 }));
+    changeFilters({ q: search.trim() });
   }
 
   function clearFilters() {
-    setDraft(NO_FILTERS);
-    setQuery((current) => ({ ...current, ...NO_FILTERS, offset: 0 }));
+    setSearch("");
+    changeFilters(NO_FILTERS);
   }
 
   const busy = loading || refreshing;
-  const hasFilters = Boolean(query.competition_id || query.q || query.status);
+  const hasFilters = Boolean(query.competition_id || query.status || search.trim());
   const shownFrom = data ? data.offset + 1 : 0;
   const shownTo = data ? Math.min(data.offset + PAGE_SIZE, data.total) : 0;
   const hasNext = data ? shownTo < data.total : false;
@@ -226,19 +254,19 @@ export function AdminSubmissionsPanel({
         </div>
       </div>
 
+      {!competitionId && <SubmissionStats stats={data?.stats ?? null} pending={!data && !error} />}
+
       {/* Bảng khóa cuộc thi không có ô lọc cuộc thi nên giữ nguyên lưới hai bộ lọc gốc. */}
       <form
         className={`results-filters${competitionId ? "" : " admin-submissions-filters"}`}
-        onSubmit={applyFilters}
+        onSubmit={applySearch}
       >
         {!competitionId && (
           <select
             className="input"
             aria-label="Lọc theo cuộc thi"
-            value={draft.competition_id}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, competition_id: event.target.value }))
-            }
+            value={query.competition_id}
+            onChange={(event) => changeFilters({ competition_id: event.target.value })}
           >
             <option value="">Mọi cuộc thi</option>
             {competitions.map((competition) => (
@@ -253,14 +281,14 @@ export function AdminSubmissionsPanel({
           type="search"
           aria-label="Lọc theo đội"
           placeholder="Tên hoặc email đội"
-          value={draft.q}
-          onChange={(event) => setDraft((current) => ({ ...current, q: event.target.value }))}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
         />
         <select
           className="input"
           aria-label="Lọc theo trạng thái"
-          value={draft.status}
-          onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value }))}
+          value={query.status}
+          onChange={(event) => changeFilters({ status: event.target.value })}
         >
           {STATUS_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
@@ -268,9 +296,6 @@ export function AdminSubmissionsPanel({
             </option>
           ))}
         </select>
-        <button className="btn" type="submit">
-          Lọc
-        </button>
         {hasFilters && (
           <button className="btn btn-ghost" type="button" onClick={clearFilters}>
             Xóa bộ lọc
@@ -321,14 +346,14 @@ export function AdminSubmissionsPanel({
             <thead>
               <tr>
                 {sortableHeader("created_at", "Thời gian")}
-                {!competitionId && <th scope="col">Cuộc thi</th>}
+                {!competitionId && sortableHeader("competition", "Cuộc thi")}
                 {sortableHeader("team", "Đội")}
                 <th scope="col">Tệp đã nộp</th>
                 <th scope="col">Trạng thái</th>
-                <th scope="col" className="score-cell">F1</th>
-                <th scope="col" className="score-cell">Precision</th>
-                <th scope="col" className="score-cell">Recall</th>
-                {sortableHeader("primary_score", "Điểm chính", "score-cell")}
+                {sortableHeader("f1", "F1", "score-cell")}
+                {sortableHeader("precision", "Precision", "score-cell")}
+                {sortableHeader("recall", "Recall", "score-cell")}
+                {sortableHeader("primary_score", "Điểm chính", "score-cell primary-col")}
               </tr>
             </thead>
             <tbody>
@@ -372,7 +397,7 @@ export function AdminSubmissionsPanel({
                   <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.precision)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.recall)}</td>
-                  <td className="score-cell primary-score">
+                  <td className="score-cell primary-score primary-col">
                     {formatScore(submission.primary_score)}
                   </td>
                 </tr>
@@ -434,6 +459,89 @@ export function AdminSubmissionsPanel({
   );
 }
 
+const STAT_TONES = ["blue", "red", "yellow", "green"] as const;
+
+/** Bốn thẻ tổng quan của bảng toàn cục; `value` null nghĩa là chưa có dữ liệu. */
+function SubmissionStats({
+  stats,
+  pending,
+}: {
+  stats: AdminSubmissionsResponse["stats"] | null;
+  pending: boolean;
+}) {
+  return (
+    <section className="admin-accounts-stats" aria-label="Tổng quan bài nộp">
+      <StatCard
+        tone={STAT_TONES[0]}
+        label="Tổng bài nộp"
+        detail="Trong bộ lọc hiện tại"
+        value={stats?.total ?? null}
+        pending={pending}
+        glyph={<IconSubmission />}
+      />
+      <StatCard
+        tone={STAT_TONES[1]}
+        label="Cuộc thi"
+        detail="Có bài nộp trong bộ lọc"
+        value={stats?.competitions ?? null}
+        pending={pending}
+        glyph={<IconTrophy />}
+      />
+      <StatCard
+        tone={STAT_TONES[2]}
+        label="Đội đã nộp"
+        detail="Tài khoản có bài nộp"
+        value={stats?.teams ?? null}
+        pending={pending}
+        glyph={<IconTeam />}
+      />
+      <StatCard
+        tone={STAT_TONES[3]}
+        label="Đã chấm điểm"
+        detail="Bài nộp hợp lệ có điểm"
+        value={stats?.completed ?? null}
+        pending={pending}
+        glyph={<IconScored />}
+      />
+    </section>
+  );
+}
+
+/** `value` null nghĩa là chưa có dữ liệu - không được hiện số giả. */
+function StatCard({
+  tone,
+  label,
+  detail,
+  value,
+  pending,
+  glyph,
+}: {
+  tone: (typeof STAT_TONES)[number];
+  label: string;
+  detail: string;
+  value: number | null;
+  pending: boolean;
+  glyph: ReactNode;
+}) {
+  return (
+    <article className="admin-account-stat" data-tone={tone}>
+      <span className="admin-account-stat-icon" aria-hidden="true">{glyph}</span>
+      <div className="admin-account-stat-body">
+        <p className="admin-account-stat-label">{label}</p>
+        {value === null ? (
+          <>
+            <span className="admin-account-stat-placeholder" aria-hidden="true" />
+            <span className="sr-only">{pending ? "Đang tải thống kê" : "Chưa tải được thống kê"}</span>
+          </>
+        ) : (
+          <span className="admin-account-stat-value">{value}</span>
+        )}
+        <p className="admin-account-stat-detail">{detail}</p>
+      </div>
+    </article>
+  );
+}
+
 /** Mũi tên trạng thái sắp xếp; cột chưa chọn hiện hai chiều mờ. */
 function SortArrow({ active, descending }: { active: boolean; descending: boolean }) {
   const path = !active
@@ -463,6 +571,46 @@ function SortArrow({ active, descending }: { active: boolean; descending: boolea
 /** Dùng chung cho panel và panel tiêu đề của trang toàn cục. */
 export function IconSubmission({ className }: { className?: string }) {
   return (
+    <Glyph className={className}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+      <path d="M14 3v5h5" />
+      <path d="m9 14.5 2 2 4-4.5" />
+    </Glyph>
+  );
+}
+
+function IconTrophy({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" />
+      <path d="M7 5.5H4.5v1.2a3 3 0 0 0 2.7 3M17 5.5h2.5v1.2a3 3 0 0 1-2.7 3" />
+      <path d="M12 14v3.5M8.5 20.5h7l-.8-3h-5.4l-.8 3Z" />
+    </Glyph>
+  );
+}
+
+function IconTeam({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="9" cy="8" r="3.4" />
+      <path d="M3.5 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.4a4.3 4.3 0 0 1 4.3 4.3v1" />
+      <path d="M16.4 4.9a3.4 3.4 0 0 1 0 6.2M17.6 14.4a4.3 4.3 0 0 1 3.1 4.1v1" />
+    </Glyph>
+  );
+}
+
+function IconScored({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="m8.4 12.3 2.4 2.4 4.8-5.2" />
+    </Glyph>
+  );
+}
+
+/** Icon dùng chung khung SVG; mọi glyph đều decorative nên ẩn khỏi cây accessibility. */
+function Glyph({ className, children }: { className?: string; children: ReactNode }) {
+  return (
     <svg
       className={className}
       viewBox="0 0 24 24"
@@ -476,9 +624,7 @@ export function IconSubmission({ className }: { className?: string }) {
       aria-hidden="true"
       focusable="false"
     >
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
-      <path d="M14 3v5h5" />
-      <path d="m9 14.5 2 2 4-4.5" />
+      {children}
     </svg>
   );
 }

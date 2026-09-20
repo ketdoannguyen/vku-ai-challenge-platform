@@ -3,6 +3,11 @@ import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { ErrorBox, FileButton } from "../components/ui";
+import {
+  SAMPLE_ROWS,
+  SUBMISSION_PITFALLS,
+  submissionColumns,
+} from "../lib/submissionRequirements";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 interface SubmissionResult {
@@ -67,6 +72,8 @@ export function SubmissionPage() {
 
   const unavailableMessage = submissionUnavailableMessage(competition);
   const config = competition.submission_config;
+  // Tên cột hiển thị trong phần hướng dẫn nhanh; dùng chung với trang Hướng dẫn.
+  const columns = submissionColumns(config);
   // Chỉ có khi backend trả quota (thành viên đang hoạt động, cuộc thi đang mở).
   const quota = competition.quota;
   const quotaLabel = quota
@@ -502,15 +509,14 @@ export function SubmissionPage() {
           </p>
           <div className="sub-code-preview">
             <div className="sub-code-head">
-              <span>{config.id_column ?? "id"},{config.prediction_column ?? "prediction"}</span>
+              <span>{columns.id},{columns.prediction}</span>
               <span>Mẫu dữ liệu</span>
             </div>
             <div className="sub-code-sample">
-              <div><strong>{config.id_column ?? "id"}</strong>,<strong>{config.prediction_column ?? "prediction"}</strong></div>
-              <div>sample_0001,1</div>
-              <div>sample_0002,0</div>
-              <div>sample_0003,0</div>
-              <div>sample_0004,1</div>
+              <div><strong>{columns.id}</strong>,<strong>{columns.prediction}</strong></div>
+              {SAMPLE_ROWS.map(([id, prediction]) => (
+                <div key={id}>{id},{prediction}</div>
+              ))}
             </div>
           </div>
         </div>
@@ -531,53 +537,17 @@ export function SubmissionPage() {
             Các file gặp lỗi bên dưới sẽ bị hệ thống từ chối nộp trước khi trừ lượt quota của bạn.
           </p>
           <div className="sub-pitfalls-list">
-            <div className="sub-pitfall-item">
-              <div className="sub-pitfall-header">
-                <span className="sub-pitfall-code">SCHEMA_MISMATCH</span>
-                <span className="sub-pitfall-label">Lỗi định dạng</span>
+            {SUBMISSION_PITFALLS.map((pitfall) => (
+              <div className="sub-pitfall-item" key={pitfall.code}>
+                <div className="sub-pitfall-header">
+                  <span className={`sub-pitfall-code${pitfall.tone ? ` ${pitfall.tone}` : ""}`}>
+                    {pitfall.code}
+                  </span>
+                  <span className="sub-pitfall-label">{pitfall.label}</span>
+                </div>
+                <p className="sub-pitfall-desc">{pitfall.description(columns)}</p>
               </div>
-              <p className="sub-pitfall-desc">
-                Tên cột không đúng chữ thường (ví dụ <code>ID</code> thay vì <code>{config.id_column ?? "id"}</code>) hoặc thừa/thiếu cột phụ.
-              </p>
-            </div>
-            <div className="sub-pitfall-item">
-              <div className="sub-pitfall-header">
-                <span className="sub-pitfall-code warning">VALUE_OUT_OF_RANGE</span>
-                <span className="sub-pitfall-label">Sai nhãn dự đoán</span>
-              </div>
-              <p className="sub-pitfall-desc">
-                Giá trị cột prediction chứa định dạng không tương thích với cấu hình phân loại của cuộc thi.
-              </p>
-            </div>
-            <div className="sub-pitfall-item">
-              <div className="sub-pitfall-header">
-                <span className="sub-pitfall-code">MISSING_ROWS</span>
-                <span className="sub-pitfall-label">Thiếu ID bản ghi</span>
-              </div>
-              <p className="sub-pitfall-desc">
-                Số lượng dòng hoặc tập ID dự đoán không khớp chính xác với danh sách công bố của tập Test.
-              </p>
-            </div>
-            <div className="sub-pitfall-item">
-              <div className="sub-pitfall-header">
-                <span className="sub-pitfall-code">INVALID_NOTEBOOK_TYPE</span>
-                <span className="sub-pitfall-label">Sai loại tệp notebook</span>
-              </div>
-              <p className="sub-pitfall-desc">
-                Tệp thứ hai không có đuôi <code>.ipynb</code>. Bản xuất dạng ZIP, HTML hay PDF đều
-                bị từ chối.
-              </p>
-            </div>
-            <div className="sub-pitfall-item">
-              <div className="sub-pitfall-header">
-                <span className="sub-pitfall-code">NOTEBOOK_INVALID</span>
-                <span className="sub-pitfall-label">Notebook hỏng cấu trúc</span>
-              </div>
-              <p className="sub-pitfall-desc">
-                Notebook không phải JSON hợp lệ hoặc thiếu khoá bắt buộc (<code>nbformat</code>,{" "}
-                <code>metadata</code>, <code>cells</code>).
-              </p>
-            </div>
+            ))}
           </div>
         </div>
       </div>

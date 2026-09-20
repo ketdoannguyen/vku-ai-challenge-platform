@@ -1,6 +1,19 @@
-/** Block "Tài nguyên": link dataset/sample do BTC khai báo, nằm dưới Mục lục nội dung. */
+/**
+ * Block "Tài nguyên": notebook khung built-in của nền tảng + link dataset/sample do BTC khai báo.
+ * Notebook khung không nằm trong `competitions.resources` nên luôn có mặt ở mọi cuộc thi.
+ */
 
+import { useState } from "react";
 import { isSafeResourceUrl, type CompetitionResource } from "../api/competitions";
+import { downloadArtifact } from "../lib/downloadArtifact";
+import { ErrorBox } from "./ui";
+
+/** Tên file dự phòng khi backend không kèm `Content-Disposition`. */
+const STARTER_NOTEBOOK = {
+  path: "/starter-notebook",
+  filename: "starter-notebook.ipynb",
+  label: "Notebook khởi đầu (.ipynb)",
+};
 
 function Icon({ children }: { children: React.ReactNode }) {
   return (
@@ -27,7 +40,20 @@ export function CompetitionResources({
   resources: CompetitionResource[];
 }) {
   const safe = resources.filter((item) => isSafeResourceUrl(item.url));
-  if (safe.length === 0) return null;
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  async function downloadStarterNotebook() {
+    setDownloading(true);
+    setError(null);
+    try {
+      await downloadArtifact(STARTER_NOTEBOOK.path, STARTER_NOTEBOOK.filename);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <section
@@ -43,9 +69,24 @@ export function CompetitionResources({
           </Icon>
           Tài nguyên
         </span>
-        <span className="content-card-count">{safe.length}</span>
+        <span className="content-card-count">{1 + safe.length}</span>
       </div>
       <ul className="resource-list">
+        <li>
+          <button
+            type="button"
+            className="resource-link"
+            onClick={() => void downloadStarterNotebook()}
+            disabled={downloading}
+          >
+            <span className="resource-label">{STARTER_NOTEBOOK.label}</span>
+            <Icon>
+              <path d="M12 4v11" />
+              <path d="m8 11 4 4 4-4" />
+              <path d="M5 20h14" />
+            </Icon>
+          </button>
+        </li>
         {safe.map((item, index) => (
           <li key={`${item.url}-${index}`}>
             <a
@@ -64,6 +105,7 @@ export function CompetitionResources({
           </li>
         ))}
       </ul>
+      <ErrorBox error={error} />
     </section>
   );
 }

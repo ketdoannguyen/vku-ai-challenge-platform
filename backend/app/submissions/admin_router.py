@@ -43,11 +43,12 @@ async def list_submissions(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    _validate_query_params(status, sort, order)
+    _validate_query_params(status, sort, order, service.SCOPED_SORT_FIELDS)
 
     query: dict = {"competition_id": competition["_id"]}
     await _apply_filters(db, query, q, status)
-    submissions, total = await service.list_admin_submissions(
+    total = await db[service.SUBMISSIONS_COLLECTION].count_documents(query)
+    submissions = await service.list_admin_submissions(
         db, query, sort=sort, order=order, limit=limit, offset=offset
     )
     accounts = await _accounts_by_id(db, [item["account_id"] for item in submissions])
@@ -76,7 +77,7 @@ async def list_all_submissions(
     offset: int = Query(0, ge=0),
 ) -> dict:
     db = request.app.state.mongo.db
-    _validate_query_params(status, sort, order)
+    _validate_query_params(status, sort, order, service.SORT_FIELDS)
     query: dict = {}
     if competition_id:
         try:
@@ -85,7 +86,10 @@ async def list_all_submissions(
             raise api_error(422, "VALIDATION_ERROR", "Cuộc thi không hợp lệ.")
     await _apply_filters(db, query, q, status)
 
-    submissions, total = await service.list_admin_submissions(
+    # Bảng toàn cục cần cả bốn số tổng quan nên đếm trong một lượt `$facet`; `total` lấy từ đó.
+    stats = await service.submission_stats(db, query)
+    total = stats["total"]
+    submissions = await service.list_admin_submissions(
         db, query, sort=sort, order=order, limit=limit, offset=offset
     )
     accounts = await _accounts_by_id(db, [item["account_id"] for item in submissions])
@@ -105,6 +109,7 @@ async def list_all_submissions(
         "offset": offset,
         "sort": sort,
         "order": order,
+        "stats": stats,
     }
 
 
@@ -140,10 +145,12 @@ async def _admin_download(request: Request, submission_id: str, kind: str) -> Re
     return await artifacts_reader.artifact_response(submission, competition, account, kind)
 
 
-def _validate_query_params(status: str | None, sort: str, order: str) -> None:
+def _validate_query_params(
+    status: str | None, sort: str, order: str, sort_fields: tuple[str, ...]
+) -> None:
     if status is not None and status not in _STATUSES:
         raise api_error(422, "VALIDATION_ERROR", "Trạng thái submission không hợp lệ.")
-    if sort not in service.SORT_FIELDS:
+    if sort not in sort_fields:
         raise api_error(422, "VALIDATION_ERROR", "Tiêu chí sắp xếp không hợp lệ.")
     if order not in service.SORT_ORDERS:
         raise api_error(422, "VALIDATION_ERROR", "Thứ tự sắp xếp không hợp lệ.")
