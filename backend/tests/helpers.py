@@ -131,3 +131,13 @@ def account_id_by_email(client, email: str):
         return account["_id"]
 
     return asyncio.run(load())
+
+
+def account_slug_by_email(client, email: str) -> str | None:
+    """Slug sinh lazy ở lần nộp bài đầu tiên (ADR-033), None nếu account chưa từng nộp."""
+
+    async def load():
+        account = await client.app.state.mongo.db[ACCOUNTS_COLLECTION].find_one({"email": email})
+        return account.get("slug")
+
+    return asyncio.run(load())

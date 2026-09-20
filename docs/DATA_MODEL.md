@@ -7,7 +7,7 @@ Quy ước chung:
 - Motor đọc về naive datetime: mọi chỗ so sánh/format đi qua `backend/app/core/datetimes.py` (`as_utc`, `utc_day_bounds`, `iso_z`), naive được hiểu là UTC (ADR-016).
 - Naming snake_case.
 - Mọi dữ liệu nghiệp vụ gắn `competition_id` (ADR-005).
-- Files không nằm trong Mongo: content Markdown, asset và ground truth theo layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11; artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private (ADR-028).
+- Files không nằm trong Mongo: content Markdown, asset và ground truth theo layout `/data/` ở `plans/01_MASTER_CONTEXT.md` §11; artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private (ADR-028), key ghép từ slug theo ADR-033.
 
 ## 1. accounts - implemented (Sprint 02)
 
@@ -18,10 +18,12 @@ Fields:
 - `password_hash` (Argon2id, argon2-cffi defaults)
 - `role`: `admin` | `participant`
 - `active`: bool - khóa toàn nền tảng (disable hủy hiệu lực mọi session)
+- `slug` (str | absent ở account cũ) - dùng làm segment đường dẫn artifact trên MinIO (ADR-033). Sinh tự động từ `name` ở **lần nộp bài đầu tiên**, không nhập tay, không bao giờ sinh lại (đổi `name` không đổi slug). Trùng thì thêm `-` + 3 ký tự random. Không có trong representation nào trả về API.
 - `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
 - unique trên `email` - tạo idempotent ở app startup (`ensure_indexes`)
+- unique **sparse** trên `slug` - sparse để account cũ chưa có field này không cùng rơi vào giá trị null và chặn nhau (ADR-033)
 
 ## 2. sessions - implemented (Sprint 02)
 
@@ -72,6 +74,7 @@ Fields:
 - `active`: bool - khóa trong riêng một competition (participant không tự kích hoạt lại; admin reactivate giữ `joined_at`). Từ ADR-018, participant tự đặt `false` bằng `POST /leave` (soft deactivate); admin xoá cứng được bằng `DELETE .../members/{account_id}` **chỉ khi** account chưa có bài `completed` - document bị xoá hẳn trong trường hợp đó.
 - `joined_at` (UTC, timezone-aware)
 - `updated_at` (UTC, timezone-aware)
+- `submission_seq` (int | absent ở membership cũ) - counter cấp `submission_no` cho cặp (cuộc thi, account) này, tăng nguyên tử bằng `$inc` **trước** khi upload (ADR-033). Membership chưa có thì lần cấp đầu tiên seed bằng `submission_no` lớn nhất đã cấp cho cặp đó; số nhảy cách nếu upload fail sau khi đã cấp.
 
 Indexes:
 - unique compound `(competition_id, account_id)` - enforce race-safe idempotent join
@@ -108,7 +111,7 @@ Fields:
 - `_id`
 - `competition_id`
 - `account_id`
-- `submission_no` (int | absent ở record cũ) - số thứ tự thật của bài nộp theo `(competition_id, account_id)`, dùng làm token trong tên file khi tải. Record tạo trước ADR-028 không có field này.
+- `submission_no` (int | absent ở record cũ) - số thứ tự thật của bài nộp theo `(competition_id, account_id)`, dùng làm token trong tên file khi tải **và** trong object key trên MinIO. Từ ADR-033 số được cấp trước khi upload từ counter `submission_seq` của membership; record tạo trước ADR-028 không có field này.
 - `artifacts` (object | absent ở record cũ) - hai artifact của lượt nộp, mỗi kind một entry:
   - `prediction` / `notebook`: `{object_key, original_filename, size_bytes}`
   - `object_key` là đường dẫn trong bucket MinIO `submission-artifacts`, không bao giờ trả về API (chỉ `filename`/`size_bytes`/`available` đi ra qua `artifact_metadata`)
@@ -121,7 +124,7 @@ Fields:
 
 Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
 
-Artifact mới **không** nằm dưới `<DATA_DIR>`: object key là `competitions/<competition_id>/accounts/<account_id>/submissions/<submission_id>/prediction.csv|notebook.ipynb`, bucket private, chỉ FastAPI đọc/ghi (ADR-028). Xoá cuộc thi dọn prefix `competitions/<competition_id>/`; xoá member dọn object của các bài chưa `completed` - xem §10.
+Artifact mới **không** nằm dưới `<DATA_DIR>`: object key là `competitions/<slug cuộc thi>/accounts/<slug account>/submissions/submission-0001/prediction.csv|notebook.ipynb`, bucket private, chỉ FastAPI đọc/ghi (ADR-028, layout slug từ ADR-033). Token `submission-{no:04d}` sinh từ cùng một hàm với tên file tải về nên hai chỗ không lệch nhau. Record tạo trước ADR-033 giữ nguyên key theo ObjectId (`competitions/<id>/accounts/<id>/submissions/<id>/…`) vì `object_key` lưu nguyên văn trong document - **không có migration**, hai layout cùng tồn tại. Xoá cuộc thi dọn **cả hai** prefix `competitions/<slug>/` và `competitions/<id>/`; xoá member dọn object của các bài chưa `completed` - xem §10.
 
 Indexes:
 - unique partial `(competition_id, account_id, submission_no)` (`submission_no` tồn tại) - chốt số thứ tự, record legacy không tham gia ràng buộc
@@ -171,7 +174,7 @@ Document tạo trước thay đổi này không có field; serializer trả `[]`
 
 Không dùng Mongo transaction (standalone). Thứ tự xoá luôn là con trước – cha sau để lỗi giữa đường vẫn còn bản ghi gốc cho lần gọi lại:
 
-- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>` **và** dọn prefix MinIO `competitions/<id>/` (ADR-028). Một bước dọn lỗi ⇒ `files_removed:false`, DB đã xoá xong. `accounts` và `sessions` không bị đụng.
+- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `submissions` → `competition_memberships` → `competition_contents` → `competitions`, sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>` **và** dọn hai prefix MinIO `competitions/<slug>/` + `competitions/<id>/` (ADR-028, ADR-033). Một bước dọn lỗi ⇒ `files_removed:false`, DB đã xoá xong. `accounts` và `sessions` không bị đụng.
 - `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm object MinIO/file legacy, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá - vướng thì trả 409 và dừng.
 - `POST /api/competitions/{slug}/leave`: chỉ `update` `active=false`, không xoá gì.
 

@@ -250,19 +250,31 @@ def _seed_artifact_objects(client, competition_id: str, keys: list[str]) -> None
     asyncio.run(db[SUBMISSIONS_COLLECTION].insert_many(documents))
 
 
-def test_delete_removes_artifact_objects_under_competition_prefix(client, fake_artifact_storage):
+def test_delete_removes_artifact_objects_under_both_competition_prefixes(
+    client, fake_artifact_storage
+):
+    """Bài nộp cũ nằm dưới prefix theo ObjectId, bài từ ADR-033 nằm dưới prefix theo slug - dọn cả hai."""
     competition_id = _create_draft(client, slug="co-artifact")
     other_id = _create_draft(client, slug="khong-dinh-xoa")
-    mine = f"competitions/{competition_id}/accounts/a1/submissions/s1/prediction.csv"
-    theirs = f"competitions/{other_id}/accounts/a1/submissions/s1/prediction.csv"
-    fake_artifact_storage.objects.update({mine: b"data", theirs: b"data"})
-    _seed_artifact_objects(client, competition_id, [mine])
+    legacy = f"competitions/{competition_id}/accounts/a1/submissions/s1/prediction.csv"
+    fresh = "competitions/co-artifact/accounts/doi-a/submissions/submission-0001/prediction.csv"
+    theirs_by_id = f"competitions/{other_id}/accounts/a1/submissions/s1/prediction.csv"
+    theirs_by_slug = (
+        "competitions/khong-dinh-xoa/accounts/doi-b/submissions/submission-0001/prediction.csv"
+    )
+    fake_artifact_storage.objects.update(
+        {legacy: b"data", fresh: b"data", theirs_by_id: b"data", theirs_by_slug: b"data"}
+    )
+    _seed_artifact_objects(client, competition_id, [legacy, fresh])
 
     resp = client.delete(f"/api/admin/competitions/{competition_id}?confirm_slug=co-artifact")
     assert resp.status_code == 200
     assert resp.json()["files_removed"] is True
-    assert mine not in fake_artifact_storage.objects
-    assert theirs in fake_artifact_storage.objects
+    assert legacy not in fake_artifact_storage.objects
+    assert fresh not in fake_artifact_storage.objects
+    # Cuộc thi khác không bị đụng tới, dù dưới prefix theo id hay theo slug.
+    assert theirs_by_id in fake_artifact_storage.objects
+    assert theirs_by_slug in fake_artifact_storage.objects
 
 
 def test_delete_reports_partial_cleanup_when_storage_is_unavailable(client, fake_artifact_storage):

@@ -159,7 +159,9 @@ async def delete_competition(
         raise api_error(422, "CONFIRM_SLUG_MISMATCH", "Slug xác nhận không khớp với cuộc thi cần xoá.")
 
     await service.delete_competition_cascade(db, competition)
-    files_removed = await service.remove_competition_files(competition["_id"])
+    files_removed = await service.remove_competition_files(
+        competition["_id"], competition["slug"]
+    )
     logger.info(
         "Admin %s deleted competition %s (files_removed=%s)", admin["email"], competition["slug"], files_removed
     )

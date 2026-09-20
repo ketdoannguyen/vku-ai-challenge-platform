@@ -133,6 +133,11 @@ Không chạy `docker compose config` rồi lưu/chia sẻ output đầy đủ -
 Artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private, không có route Nginx, không
 publish port, không console public, không presigned URL - mọi lượt tải đi qua FastAPI.
 
+Object key đọc được bằng mắt (ADR-033): `competitions/<slug cuộc thi>/accounts/<slug đội>/submissions
+/submission-NNNN/<prediction.csv|notebook.ipynb>`, nên `mc ls` bucket là đủ để biết object thuộc cuộc
+thi/đội nào mà không phải tra Mongo. Bài nộp trước ADR-033 vẫn nằm dưới prefix theo ObjectId
+(`competitions/<id>/accounts/<id>/submissions/<id>/`) - hai layout cùng tồn tại, không có migration.
+
 Hai service mới trong `docker-compose.prod.yml`, **không** nằm trong cơ chế override theo SHA:
 
 | Service | Vai | Ghi chú |
