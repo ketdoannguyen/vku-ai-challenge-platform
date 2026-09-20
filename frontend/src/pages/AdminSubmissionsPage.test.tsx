@@ -401,6 +401,16 @@ test("bộ lọc không khớp thì hiện empty state và xóa bộ lọc khôn
   expect(urls.length).toBe(requests);
 });
 
+test("cuộc thi chưa có bài nộp nào thì báo chưa có dữ liệu, không phải bị lọc hết", async () => {
+  mockApi(() => jsonResponse({ ...page(0, 0), submissions: [] }));
+  renderPage();
+
+  expect(await screen.findByText("Chưa có bài nộp nào.")).toBeTruthy();
+  // Chưa có dữ liệu khác hẳn bị lọc hết: không được mời xóa bộ lọc khi chưa hề đặt bộ lọc.
+  expect(screen.queryByText("Không có bài nộp phù hợp.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Xóa bộ lọc" })).toBeNull();
+});
+
 test("không tải được danh sách cuộc thi thì báo rõ thay vì để ô lọc trống", async () => {
   mockApi(undefined, () =>
     jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500),

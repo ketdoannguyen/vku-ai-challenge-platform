@@ -10,8 +10,9 @@ from bson import ObjectId
 
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
+from app.core.datetimes import utc_day_key
 from app.submission_artifacts import storage as artifact_storage
-from app.submissions.service import SUBMISSIONS_COLLECTION
+from app.submissions.service import SUBMISSIONS_COLLECTION, reserve_quota_slot
 from tests.helpers import (
     PARTICIPANT_CREDENTIALS,
     VALID_NOTEBOOK,
@@ -19,6 +20,7 @@ from tests.helpers import (
     account_slug_by_email,
     login,
     login_participant,
+    membership_document,
     notebook_bytes,
     ready_competition,
     submission_documents,
@@ -245,6 +247,53 @@ def test_daily_quota_counts_completed_submissions_in_utc_day(client):
     assert len(submission_documents(client)) == 1
 
 
+def test_quota_counter_lives_on_membership(client):
+    competition = ready_competition(client, quota=2)
+    valid = b"id,prediction\n1,1\n2,0\n3,0\n4,0\n"
+    assert submit(client, competition["id"], valid).json()["quota_remaining"] == 1
+    assert submit(client, competition["id"], valid).json()["quota_remaining"] == 0
+    blocked = submit(client, competition["id"], valid)
+    assert blocked.status_code == 429
+    assert len(submission_documents(client)) == 2
+
+    membership = membership_document(client, competition["id"])
+    assert membership["quota_used"] == 2
+    assert membership["quota_day"] == utc_day_key(datetime.now(timezone.utc))
+
+
+def test_parallel_requests_cannot_exceed_daily_quota(client):
+    """6 request song song, quota 2: chỉ 2 lượt được giữ - đúng lỗi check-then-act đã tái hiện."""
+    competition = ready_competition(client, quota=2)
+    membership = membership_document(client, competition["id"])
+
+    async def reserve_six():
+        db = client.app.state.mongo.db
+        now = datetime.now(timezone.utc)
+        return await asyncio.gather(
+            *[reserve_quota_slot(db, membership, 2, now) for _ in range(6)]
+        )
+
+    granted = sorted(used for used in asyncio.run(reserve_six()) if used is not None)
+    assert granted == [1, 2]
+    assert membership_document(client, competition["id"])["quota_used"] == 2
+
+
+def test_failed_upload_gives_back_the_reserved_slot(client, fake_artifact_storage):
+    """Upload fail thì lượt đã giữ phải được trả lại, nếu không người dùng mất lượt oan."""
+    competition = ready_competition(client, quota=1)
+    valid = b"id,prediction\n1,1\n2,0\n3,0\n4,0\n"
+    fake_artifact_storage.unavailable = True
+    failed = submit(client, competition["id"], valid)
+    assert failed.status_code == 503
+    assert failed.json()["error"]["code"] == "ARTIFACT_STORAGE_UNAVAILABLE"
+    assert membership_document(client, competition["id"])["quota_used"] == 0
+
+    fake_artifact_storage.unavailable = False
+    retried = submit(client, competition["id"], valid)
+    assert retried.status_code == 201
+    assert retried.json()["quota_remaining"] == 0
+
+
 def test_submission_rejects_extension_and_size_limits(
     client, monkeypatch, fake_artifact_storage
 ):
@@ -298,6 +347,12 @@ def test_submission_rejects_extension_and_size_limits(
             "NOTEBOOK_INVALID",
         ),
         (b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [], "x": "\x00"}', "NOTEBOOK_INVALID"),
+        # Rỗng, và chỉ toàn cell không phải code: không chứng minh được cách tạo ra kết quả.
+        (b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}', "NOTEBOOK_INVALID"),
+        (
+            b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "markdown", "source": "# a"}]}',
+            "NOTEBOOK_INVALID",
+        ),
     ],
 )
 def test_notebook_validation_rejects_bad_notebooks(
@@ -321,6 +376,7 @@ def test_notebook_accepts_utf8_bom_and_crlf_sources(client, fake_artifact_storag
         cells=[
             {"cell_type": "markdown", "source": ["# Tiêu đề\n", "\n"]},
             {"cell_type": "raw", "source": "ghi chú"},
+            {"cell_type": "code", "source": ["print(1)\n"]},
         ]
     )
     windows_body = (

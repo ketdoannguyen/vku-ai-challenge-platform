@@ -24,6 +24,7 @@ import {
   MAX_COMPETITION_RESOURCES,
   METRIC_LABEL,
   STATUS_LABEL,
+  displayStatus,
   statusClass,
 } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
@@ -527,6 +528,8 @@ export function AdminCompetitionDetailPage() {
 
   const editDisabled = competition.status === "closed";
   const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
+  // Quá `end_at` thì hiển thị như đã kết thúc, khớp với việc thí sinh đã không vào được nữa.
+  const shownStatus = displayStatus(competition.status, competition.end_at);
   // Backend cũ chưa trả `upload_limits` - rơi về mặc định thay vì ẩn hint.
   const uploadLimits = competition.upload_limits ?? DEFAULT_UPLOAD_LIMITS;
   // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
@@ -558,9 +561,9 @@ export function AdminCompetitionDetailPage() {
               <div className="admin-detail-title-group">
                 <div className="admin-detail-title-line">
                   <h1 className="admin-detail-title page-title">{competition.name}</h1>
-                  <div className={`admin-detail-status status-badge ${statusClass(competition.status)}`}>
+                  <div className={`admin-detail-status status-badge ${statusClass(shownStatus)}`}>
                     <span className="admin-detail-status-dot" aria-hidden="true" />
-                    <span>{STATUS_LABEL[competition.status]}</span>
+                    <span>{STATUS_LABEL[shownStatus]}</span>
                   </div>
                 </div>
                 {competition.short_description && (

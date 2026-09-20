@@ -69,3 +69,9 @@ def validate_notebook(data: bytes) -> None:
             raise NotebookValidationError(
                 "NOTEBOOK_INVALID", "`source` của cell phải là chuỗi hoặc danh sách chuỗi."
             )
+    # Danh sách rỗng thoả vòng lặp trên một cách rỗng, nên phải chặn riêng: notebook không có
+    # cell code nào thì không chứng minh được cách tạo ra kết quả.
+    if not any(cell["cell_type"] == "code" for cell in cells):
+        raise NotebookValidationError(
+            "NOTEBOOK_INVALID", "Notebook phải có ít nhất một cell code."
+        )

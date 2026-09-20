@@ -204,6 +204,21 @@ test("hết hạn: thẻ vẫn hiện nhưng không còn chip đếm ngược", 
   expect(screen.queryByText(/còn /)).toBeNull();
 });
 
+test("hết hạn: badge đổi sang Đã kết thúc dù backend vẫn giữ status published", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "expired", slug: "expired", name: "Quá hạn", end_at: inSeconds(-60) },
+      { ...PUBLISHED, id: "open", slug: "open", name: "Còn hạn", end_at: inSeconds(3600) },
+    ],
+  });
+  renderDashboard();
+  const expiredCard = (await screen.findByRole("heading", { name: "Quá hạn" })).closest("article")!;
+  const openCard = screen.getByRole("heading", { name: "Còn hạn" }).closest("article")!;
+  expect(within(expiredCard).getByText("Đã kết thúc")).toBeTruthy();
+  expect(within(expiredCard).queryByText("Đang diễn ra")).toBeNull();
+  expect(within(openCard).getByText("Đang diễn ra")).toBeTruthy();
+});
+
 /** Sinh n competition khác nhau về id/slug/tên; giữ nguyên hình dạng dữ liệu API. */
 function makeMany(count: number, overrides: Record<string, unknown> = {}) {
   return Array.from({ length: count }, (_, i) => ({

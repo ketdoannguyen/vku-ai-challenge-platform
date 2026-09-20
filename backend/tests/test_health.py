@@ -75,6 +75,26 @@ def test_unhandled_exception_returns_safe_contract_error_without_traceback():
     assert "Traceback" not in response.text
 
 
+def test_validation_error_names_the_offending_fields():
+    with _client(True) as client:
+        response = client.post("/api/auth/login", json={})
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_ERROR"
+    assert [item["field"] for item in error["details"]] == ["identifier", "password"]
+    assert all(item["message"] for item in error["details"])
+
+
+def test_validation_error_does_not_echo_submitted_values():
+    with _client(True) as client:
+        response = client.post(
+            "/api/auth/login", json={"identifier": 12345, "password": "matkhau-bi-mat"}
+        )
+    assert response.status_code == 422
+    assert [item["field"] for item in response.json()["error"]["details"]] == ["identifier"]
+    assert "matkhau-bi-mat" not in response.text
+
+
 def test_ping_failure_returns_false_not_raise():
     """MongoContext.ping với client lỗi phải trả False (degraded), không raise."""
     with patch("app.core.database.AsyncIOMotorClient") as client_cls:

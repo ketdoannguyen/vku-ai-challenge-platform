@@ -5,7 +5,14 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type { AdminCompetition, AdminCompetitionsResponse, Competition } from "../api/competitions";
-import { JOIN_MODE_LABEL, METRIC_LABEL, STATUS_LABEL, formatLocal, statusClass } from "../api/competitions";
+import {
+  JOIN_MODE_LABEL,
+  METRIC_LABEL,
+  STATUS_LABEL,
+  displayStatus,
+  formatLocal,
+  statusClass,
+} from "../api/competitions";
 import {
   CompetitionActionConfirmModal,
   CompetitionDeleteModal,
@@ -576,6 +583,8 @@ function CompetitionRow({
   onDelete: (trigger: HTMLButtonElement | null) => void;
 }) {
   const c = competition;
+  // Dòng quá `end_at` không còn "Đang diễn ra": thí sinh đã không vào được nữa.
+  const shown = displayStatus(c.status, c.end_at);
 
   return (
     <tr>
@@ -595,9 +604,9 @@ function CompetitionRow({
       </td>
       <td>
         <div className="ac-status-cell">
-          <span className={`ac-status ${statusClass(c.status)}`}>
+          <span className={`ac-status ${statusClass(shown)}`}>
             <span aria-hidden="true" />
-            {STATUS_LABEL[c.status]}
+            {STATUS_LABEL[shown]}
           </span>
           {c.status === "draft" && <small>Chỉ admin thấy</small>}
         </div>

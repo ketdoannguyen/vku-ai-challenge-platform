@@ -75,6 +75,7 @@ Fields:
 - `joined_at` (UTC, timezone-aware)
 - `updated_at` (UTC, timezone-aware)
 - `submission_seq` (int | absent ở membership cũ) - counter cấp `submission_no` cho cặp (cuộc thi, account) này, tăng nguyên tử bằng `$inc` **trước** khi upload (ADR-033). Membership chưa có thì lần cấp đầu tiên seed bằng `submission_no` lớn nhất đã cấp cho cặp đó; số nhảy cách nếu upload fail sau khi đã cấp.
+- `quota_day` (str `YYYY-MM-DD` UTC | absent ở membership cũ) + `quota_used` (int | absent) - bộ đếm lượt nộp theo ngày, nguồn sự thật của hạn mức thay cho phép đếm submission (ADR-034). `quota_used` chỉ được tăng/giảm qua `find_one_and_update` có điều kiện nên không bao giờ vượt `quota_per_day`; sang ngày mới (hoặc membership chưa có field) thì seed lại từ số bài `completed` thật trong ngày. Bài không ghi được (upload/insert lỗi) được trả lại lượt.
 
 Indexes:
 - unique compound `(competition_id, account_id)` - enforce race-safe idempotent join
@@ -122,7 +123,7 @@ Fields:
 - `primary_score`
 - `created_at`
 
-Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
+Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Hạn mức/ngày đọc từ bộ đếm `quota_day`/`quota_used` trên membership (§4), seed từ số bài `completed` theo `created_at` trong ngày UTC khi sang ngày mới (ADR-034).
 
 Artifact mới **không** nằm dưới `<DATA_DIR>`: object key là `competitions/<slug cuộc thi>/accounts/<slug account>/submissions/submission-0001/prediction.csv|notebook.ipynb`, bucket private, chỉ FastAPI đọc/ghi (ADR-028, layout slug từ ADR-033). Token `submission-{no:04d}` sinh từ cùng một hàm với tên file tải về nên hai chỗ không lệch nhau. Record tạo trước ADR-033 giữ nguyên key theo ObjectId (`competitions/<id>/accounts/<id>/submissions/<id>/…`) vì `object_key` lưu nguyên văn trong document - **không có migration**, hai layout cùng tồn tại. Xoá cuộc thi dọn **cả hai** prefix `competitions/<slug>/` và `competitions/<id>/`; xoá member dọn object của các bài chưa `completed` - xem §10.
 

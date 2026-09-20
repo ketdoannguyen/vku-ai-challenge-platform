@@ -17,6 +17,25 @@ Quy ước chung:
 }
 ```
 
+- `VALIDATION_ERROR` (422, do FastAPI sinh ra) kèm `error.details` để người tích hợp biết **trường nào sai** thay vì phải đọc source:
+
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Dữ liệu gửi lên không hợp lệ.",
+    "details": [
+      {"field": "identifier", "message": "Field required"},
+      {"field": "password", "message": "Field required"}
+    ]
+  }
+}
+```
+
+  `field` là đường dẫn trong payload, đã bỏ tiền tố nguồn (`body`/`query`/`path`/`header`/`cookie`); lồng nhau thì nối bằng dấu chấm (`metrics.f1`). `details` chỉ có ở `VALIDATION_ERROR`; các mã khác giữ nguyên envelope hai khóa như trên.
+
+- Các route có path `{id}` dưới `/api/competitions/...` (nộp bài, leaderboard) nhận **cả** ObjectId lẫn slug; slug không tồn tại và id không tồn tại đều trả cùng một `404 NOT_FOUND`.
+
 ## 1. Health
 
 | Method | Path | Status | Mô tả |
@@ -47,7 +66,7 @@ Quy ước chung:
 
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
-| POST | `/api/competitions/{id}/submissions` | implemented (Sprint 05; hai artifact từ ADR-028) | Multipart **hai part bắt buộc**: `file` (CSV, chỉ `.csv` UTF-8/UTF-8 BOM ≤`MAX_UPLOAD_MB`=10 MiB, tối đa 1.000.000 dòng) và `notebook` (`.ipynb` ≤`MAX_NOTEBOOK_MB`=20 MiB). Thiếu một part → 422 `VALIDATION_ERROR` của FastAPI; sai đuôi notebook → 422 `INVALID_NOTEBOOK_TYPE`; notebook không hợp lệ → 422 `NOTEBOOK_INVALID`/`NOTEBOOK_UNSUPPORTED_VERSION`. Backend enforce published + active membership + `start_at <= now <= end_at` + scoring ready + quota completed/ngày UTC. Validate required columns, null, duplicate/missing/extra ID, prediction labels; align theo ID. Trả 201 `{id,competition_id,submission_no,status:"completed",metrics:{f1,precision,recall},primary_score,created_at,quota_remaining,artifacts:{prediction:{filename,size_bytes,available},notebook:{…}}}`. Mọi reject trả 422 **và không upload object nào, không tiêu quota**. MinIO không tới được → 503 `ARTIFACT_STORAGE_UNAVAILABLE` (object của lượt nộp dở đã được dọn). |
+| POST | `/api/competitions/{id}/submissions` | implemented (Sprint 05; hai artifact từ ADR-028) | Multipart **hai part bắt buộc**: `file` (CSV, chỉ `.csv` UTF-8/UTF-8 BOM ≤`MAX_UPLOAD_MB`=10 MiB, tối đa 1.000.000 dòng) và `notebook` (`.ipynb` ≤`MAX_NOTEBOOK_MB`=20 MiB). Thiếu một part → 422 `VALIDATION_ERROR` của FastAPI; sai đuôi notebook → 422 `INVALID_NOTEBOOK_TYPE`; notebook không hợp lệ → 422 `NOTEBOOK_INVALID`/`NOTEBOOK_UNSUPPORTED_VERSION` (bao gồm `"cells": []` và notebook chỉ toàn cell `markdown` — phải có **ít nhất một cell `code`**). Backend enforce published + active membership + `start_at <= now <= end_at` + scoring ready + quota completed/ngày UTC. Validate required columns, null, duplicate/missing/extra ID, prediction labels; align theo ID. Trả 201 `{id,competition_id,submission_no,status:"completed",metrics:{f1,precision,recall},primary_score,created_at,quota_remaining,artifacts:{prediction:{filename,size_bytes,available},notebook:{…}}}`. Mọi reject trả 422 **và không upload object nào, không tiêu quota**. MinIO không tới được → 503 `ARTIFACT_STORAGE_UNAVAILABLE` (object của lượt nộp dở đã được dọn). |
 | GET | `/api/competitions/{id}/submissions/me` | implemented (Sprint 06) | Query `limit` (1-200, default 50), `offset` (default 0). Chỉ trả lịch sử của account hiện tại trong đúng competition, newest first: `{submissions:[{id,competition_id,submission_no,status,metrics,primary_score,created_at,artifacts,error?}],total,limit,offset}`. `artifacts` là `{prediction, notebook}`, mỗi kind `{filename, size_bytes, available}` hoặc `null`; **không** trả `object_key`, backend lưu trữ hay `file_path`. `submission_no` là `null` với record tạo trước ADR-028. Record legacy chỉ có CSV vẫn hiện `artifacts.prediction` với `size_bytes: null`; `artifacts.notebook` là `null`. |
 | GET | `/api/competitions/{id}/submissions/{submission_id}/prediction` | implemented (ADR-028) | Tải CSV dự đoán **của chính mình** (kể cả sau khi rời cuộc thi); bài của đội khác → 404 `NOT_FOUND`. `Content-Disposition` dùng tên chuẩn hoá `{slug}_{account}_submission-{no:04d}_prediction.csv` (legacy thiếu `submission_no` dùng 8 ký tự cuối ObjectId), kèm `filename*=UTF-8''…`; `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`. Object mất → 404 `ARTIFACT_NOT_FOUND`; MinIO không tới được → 503 `ARTIFACT_STORAGE_UNAVAILABLE`. |
 | GET | `/api/competitions/{id}/submissions/{submission_id}/notebook` | implemented (ADR-028) | Tải notebook `.ipynb` của chính mình, cùng quy tắc authz/header như route `prediction` (tên `…_notebook.ipynb`). Record legacy không có notebook → 404 `ARTIFACT_NOT_FOUND`. Nội dung notebook **không bao giờ được render hay thực thi** ở server. |

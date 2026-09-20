@@ -4,7 +4,10 @@ import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
+from bson import ObjectId
+
 from app.accounts.service import ACCOUNTS_COLLECTION
+from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.submissions.service import SUBMISSIONS_COLLECTION
 
 ADMIN_CREDENTIALS = ("admin@vku.vn", "adminmatkhau1")
@@ -121,6 +124,17 @@ def submission_documents(client, query: dict | None = None) -> list[dict]:
     async def load():
         cursor = client.app.state.mongo.db[SUBMISSIONS_COLLECTION].find(query or {})
         return [document async for document in cursor]
+
+    return asyncio.run(load())
+
+
+def membership_document(client, competition_id: str) -> dict:
+    """Membership (chỉ có 1 participant trong test) - nơi giữ bộ đếm quota theo ngày."""
+
+    async def load():
+        return await client.app.state.mongo.db[MEMBERSHIPS_COLLECTION].find_one(
+            {"competition_id": ObjectId(competition_id)}
+        )
 
     return asyncio.run(load())
 

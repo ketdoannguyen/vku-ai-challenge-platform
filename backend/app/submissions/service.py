@@ -9,11 +9,15 @@ from pymongo import ReturnDocument
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.competitions.service import COMPETITIONS_COLLECTION
-from app.core.datetimes import iso_z, utc_day_bounds
+from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
 SUBMISSIONS_COLLECTION = "submissions"
+# Bộ đếm quota theo ngày nằm trên membership: `quota_day` là khoá ngày UTC, `quota_used` là số
+# lượt đã dùng trong ngày đó.
+QUOTA_DAY_FIELD = "quota_day"
+QUOTA_USED_FIELD = "quota_used"
 _PUBLIC_ERROR_MESSAGES = {
     "SCORING_FAILED": "Không thể chấm điểm bài nộp.",
     "SUBMISSION_REJECTED": "Bài nộp không hợp lệ.",
@@ -110,6 +114,64 @@ async def quota_status(
         "remaining": max(0, quota_per_day - used),
         "resets_at": iso_z(day_end),
     }
+
+
+async def reserve_quota_slot(
+    db, membership: dict, quota_per_day: int, now: datetime
+) -> int | None:
+    """Giữ chỗ một lượt nộp trong ngày UTC, nguyên tử; trả số lượt đã dùng sau khi giữ.
+
+    Đếm-rồi-kiểm tra để hai request song song cùng lọt qua giới hạn (đã tái hiện: quota còn 2 mà
+    6 request đồng thời đều được chấm). Bộ đếm nằm trên document membership - unique theo cặp
+    cuộc thi/account - và `$inc` kèm điều kiện `quota_used < quota_per_day` là một thao tác
+    nguyên tử trên một document, nên số lượt dùng không thể vượt `quota_per_day`.
+
+    Trả `None` khi đã hết lượt. Lượt đã giữ phải trả lại bằng `release_quota_slot` nếu upload
+    hoặc ghi DB thất bại.
+    """
+    collection = db[MEMBERSHIPS_COLLECTION]
+    day_key = utc_day_key(now)
+    await _seed_quota_day(db, membership, day_key, now)
+    updated = await collection.find_one_and_update(
+        {
+            "_id": membership["_id"],
+            QUOTA_DAY_FIELD: day_key,
+            QUOTA_USED_FIELD: {"$lt": quota_per_day},
+        },
+        {"$inc": {QUOTA_USED_FIELD: 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return updated[QUOTA_USED_FIELD] if updated else None
+
+
+async def release_quota_slot(db, membership: dict, now: datetime) -> None:
+    """Trả lại lượt đã giữ khi bài nộp không được ghi; không bao giờ để bộ đếm âm."""
+    await db[MEMBERSHIPS_COLLECTION].update_one(
+        {
+            "_id": membership["_id"],
+            QUOTA_DAY_FIELD: utc_day_key(now),
+            QUOTA_USED_FIELD: {"$gt": 0},
+        },
+        {"$inc": {QUOTA_USED_FIELD: -1}},
+    )
+
+
+async def _seed_quota_day(db, membership: dict, day_key: str, now: datetime) -> None:
+    """Mở ngày mới cho bộ đếm, lấy số lượt đã dùng thật làm mốc.
+
+    Membership tạo trước khi có bộ đếm (hoặc bài nộp trong ngày tạo bằng đường khác) vẫn được
+    tính đúng: mốc seed là số bài `completed` trong ngày. Chỉ update khi document còn ở ngày cũ
+    nên nhiều request đồng thời cùng seed cũng chỉ ghi một lần, cùng một giá trị.
+    """
+    if membership.get(QUOTA_DAY_FIELD) == day_key:
+        return
+    used = await completed_today_count(
+        db, membership["competition_id"], membership["account_id"], now
+    )
+    await db[MEMBERSHIPS_COLLECTION].update_one(
+        {"_id": membership["_id"], QUOTA_DAY_FIELD: {"$ne": day_key}},
+        {"$set": {QUOTA_DAY_FIELD: day_key, QUOTA_USED_FIELD: used}},
+    )
 
 
 async def allocate_submission_no(db, membership: dict) -> int:

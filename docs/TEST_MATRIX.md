@@ -116,6 +116,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Align theo ID; reorder giữ nguyên score | passing | `backend/tests/test_scoring.py`, `backend/tests/test_submissions.py` |
 | Auth + active membership + published/start/deadline enforce backend | passing | `backend/tests/test_submissions.py` |
 | Quota completed/ngày UTC + quota_remaining | passing | `backend/tests/test_submissions.py` |
+| Hạn mức là cổng chặn **nguyên tử**: 6 request song song khi còn 2 lượt → chỉ 2 lượt được cấp; `quota_used` không vượt `quota_per_day`; bài lỗi upload trả lại lượt | passing | `backend/tests/test_submissions.py` (bộ đếm `quota_day`/`quota_used` trên membership, ADR-034) |
+| Notebook phải có ≥ 1 cell `code`: `cells: []` và notebook chỉ markdown → `422 NOTEBOOK_INVALID` | passing | `backend/tests/test_submission_artifacts.py`, `backend/tests/test_submissions.py` |
 | Upload size dùng global `MAX_UPLOAD_MB`; filename không thành path | passing | `backend/tests/test_submissions.py` |
 | Validation reject không lưu record/file | passing | `backend/tests/test_submissions.py` |
 | Ground truth/config admin validate, metadata safe, lock sau score/closed | passing | `backend/tests/test_scoring_admin.py` |
@@ -133,6 +135,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Best completed submission mỗi account; competition isolation | passing | `backend/tests/test_results.py::test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time` |
 | Tie-break score DESC → best time ASC deterministic; current-user marker, không lộ email/account id | passing | `backend/tests/test_results.py::test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time` |
 | Hidden participant leaderboard trả 403 không data; admin vẫn xem được | passing | `backend/tests/test_results.py::test_hidden_leaderboard_denies_participant_but_admin_can_view` |
+| Leaderboard nhận **cả slug lẫn id** như các endpoint anh em (cùng body), slug/id lạ đều 404 | passing | `backend/tests/test_results.py::test_leaderboard_accepts_slug_like_its_sibling_endpoints` |
 | Admin submission list scope competition, filter team/status, không lộ server path | passing | `backend/tests/test_results.py::test_admin_submission_list_filters_and_never_exposes_server_path` |
 | XLSX mở được, đúng columns/rank/metrics/count; không email/formula/control-char crash | passing | `backend/tests/test_results.py::test_admin_xlsx_export_has_rank_values_counts_and_formula_safe_names` |
 | Participant My Submissions loading/data/failed reason/empty/error UI | passing | `frontend/src/pages/MySubmissionsPage.test.tsx` |
@@ -162,7 +165,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Cross-competition isolation (membership, ground truth, submissions) | passing | `backend/tests/test_submissions.py`, `backend/tests/test_results.py` (Sprint 05-06 giữ pass) |
 | Upload guards: extension/magic bytes/size 413/filename không thành path/symlink | passing | `backend/tests/test_contents_admin.py`, `backend/tests/test_content_storage.py`, `backend/tests/test_submissions.py` (giữ pass Sprint 04-05) |
 | Markdown malicious fixture không execute (script/javascript link) | passing | `frontend/src/markdown/MarkdownView.test.tsx` + live smoke: payload `<script>` render an toàn qua API |
-| Security headers qua Nginx: nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP Report-Only | passing | Live Sprint 07 smoke: `curl -I http://localhost:8080/` từng header |
+| Security headers qua Nginx: nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, **CSP enforce** (không còn Report-Only) + HSTS | passing | Live: `curl -I http://localhost:8080/` từng header; quét 15 route (ẩn danh/thí sinh/admin) bằng `/tmp/uiverify/csp-verify.mjs` → 15/15 có CSP + HSTS, **0 vi phạm CSP**, 0 lỗi JS, 0 request hỏng, không trang trắng |
+| `422 VALIDATION_ERROR` nêu tên trường sai trong `error.details`, không echo giá trị đã gửi | passing | `backend/tests/test_health.py::test_validation_error_names_the_offending_fields`, `::test_validation_error_does_not_echo_submitted_values` |
 | `/data/` không được Nginx serve; Mongo không publish public | passing | Live Sprint 07 smoke: `/data/` 404, `docker compose port mongo 27017` rỗng |
 | Private ground truth không reachable qua Nginx/participant API | passing | `backend/tests/test_scoring_admin.py` + live smoke: traversal asset path và unknown ground-truth route đều 404 |
 | Full E2E local MVP flow (login→create→config→GT→content→publish→join→submit→reject→quota→history→leaderboard→export) | passing | Isolated live smoke Sprint 07 qua Nginx + Mongo thật, cleanup sau chạy (xem PROJECT_STATE Commands verified) |
@@ -205,6 +209,7 @@ Contract đầy đủ ở `DESIGN.md`. Quy tắc gốc: màu thẻ theo **vị t
 |---|---|---|
 | Theme xoay vòng theo index render: `blue,red,yellow,blue,red`; 5 cuộc thi → đúng 5 card, không filler | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Theme độc lập status: cuộc thi `closed` ở index 1 vẫn `data-theme="red"`; root card không mang class trạng thái; badge vẫn `closed` + nhãn "Đã kết thúc" | passing | `frontend/src/pages/DashboardPage.test.tsx` |
+| Nhãn trạng thái suy từ `status` **và** `end_at` (`displayStatus`): cuộc thi `published` đã quá `end_at` hiện "Đã kết thúc" ở dashboard, trang chi tiết, bảng admin và cảnh báo admin - khớp với việc backend chặn thật | passing | `frontend/src/pages/{DashboardPage,AdminCompetitionsPage}.test.tsx`; live: cuộc thi QA `published` quá hạn → badge `status-badge-lg closed` ở dashboard và "Đã kết thúc" ở bảng admin, `POST /join` vẫn `422 JOIN_DEADLINE_PASSED` |
 | Search/filter còn 1 kết quả → theme tính lại theo vị trí mới (xanh); count theo `filtered.length` | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Vùng thống kê `aria-label="Thống kê cuộc thi"` lấy số từ dữ liệu API; khách ẩn ô "Đã tham gia" | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Outline tiêu đề: một `h1`, section `h2`, tiêu đề thẻ `h3`; trạng thái rỗng không sinh `article` | passing | `frontend/src/pages/DashboardPage.test.tsx` |
@@ -706,6 +711,7 @@ trên VM.
 | Bấm tiêu đề cột đổi `sort`/`order` gửi lên server (mặc định riêng của từng cột rồi đảo chiều) | passing | `AdminSubmissionsPage.test.tsx` ("sắp xếp theo tiêu đề cột…") |
 | Đổi trang giữ bảng cũ và báo đang bận thay vì để bảng trống | passing | `AdminSubmissionsPage.test.tsx` ("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới") |
 | Cuộc thi đã xoá hiện tên nhưng không có link; lỗi tải danh sách có nút thử lại; bộ lọc không khớp có empty state xoá được | passing | `AdminSubmissionsPage.test.tsx` (3 test còn lại) |
+| Trạng thái rỗng tách hai ngữ cảnh: chưa có bài nộp nào → "Chưa có bài nộp nào." (không mời xoá lọc); bị lọc hết → "Không có bài nộp phù hợp." + nút xoá lọc | passing | `AdminSubmissionsPage.test.tsx` ("cuộc thi chưa có bài nộp nào…", "bộ lọc không khớp…") |
 
 ### Browser smoke thật (stack dev: api + web + MinIO, không mock)
 

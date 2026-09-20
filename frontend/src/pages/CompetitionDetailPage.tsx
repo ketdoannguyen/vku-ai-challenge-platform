@@ -8,6 +8,7 @@ import {
   JOIN_MODE_LABEL,
   METRIC_LABEL,
   STATUS_LABEL,
+  displayStatus,
   formatLocal,
   statusClass,
 } from "../api/competitions";
@@ -283,6 +284,8 @@ export function CompetitionDetailPage() {
   const c = competition;
   // Chip chỉ có nghĩa với cuộc thi đang mở - cuộc thi đã đóng không đếm ngược nữa.
   const countdownLabel = c.status === "published" ? remaining : null;
+  // Quá `end_at` thì hiển thị như đã kết thúc, khớp với việc backend đã chặn nộp bài.
+  const shown = displayStatus(c.status, c.end_at);
   const currentPath = pathname.replace(/\/+$/, "");
   const basePath = `/competitions/${slug}`.replace(/\/+$/, "");
   const isOverview = currentPath === basePath || currentPath.startsWith(`${basePath}/content`);
@@ -301,9 +304,9 @@ export function CompetitionDetailPage() {
 
       <header className="comp-masthead">
         <div className="comp-badges">
-          <span className={`status-badge ${statusClass(c.status)}`}>
+          <span className={`status-badge ${statusClass(shown)}`}>
             <span className="chip-dot" aria-hidden="true" />
-            {STATUS_LABEL[c.status]}
+            {STATUS_LABEL[shown]}
           </span>
           {countdownLabel && (
             <span className="chip">

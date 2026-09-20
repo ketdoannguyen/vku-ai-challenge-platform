@@ -407,11 +407,16 @@ export function AdminSubmissionsPanel({
         </div>
       ) : (
         <div className="admin-results-empty">
-          <p>Không có bài nộp phù hợp.</p>
-          {hasFilters && (
-            <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>
-              Xóa bộ lọc
-            </button>
+          {/* Chưa có dữ liệu khác hẳn bị lọc hết: câu chữ "không phù hợp" ở đây gây hiểu nhầm. */}
+          {hasFilters ? (
+            <>
+              <p>Không có bài nộp phù hợp.</p>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>
+                Xóa bộ lọc
+              </button>
+            </>
+          ) : (
+            <p>Chưa có bài nộp nào.</p>
           )}
         </div>
       )}
