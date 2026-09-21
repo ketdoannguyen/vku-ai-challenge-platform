@@ -28,6 +28,13 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-app}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-appsecret}
       MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
+      # AI Notebook Review (ADR-036). Rỗng = tính năng tắt, KHÔNG phải app hỏng: allowlist rỗng
+      # chỉ có nghĩa là không bật được AI, còn mọi luồng nộp bài/chấm điểm vẫn nguyên vẹn.
+      LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
+      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
+      AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
+      AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
+      AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
     expose:
       - "8000" # internal only - truy cập qua Nginx same-origin
     depends_on:
@@ -35,6 +42,59 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+    restart: unless-stopped
+    volumes:
+      - data:/data
+
+  ai-review-worker:
+    # Cùng image backend với `api` (cùng build context): worker là TIẾN TRÌNH RIÊNG - một lượt gọi
+    # provider mất hàng chục giây và không được nằm trong vòng đời của API process.
+    build: ./backend
+    command: ["python", "-m", "app.ai_review.worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ai_challenge}
+      MONGO_USER: ${MONGO_USER:-changeme}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:-changeme}
+      DATA_DIR: /data
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-app}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-appsecret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
+      LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
+      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
+      AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
+      AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
+      AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
+      AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
+      AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
+      AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
+    # Không expose/publish port nào: worker chỉ nói chuyện với Mongo, MinIO và provider ra ngoài.
+    depends_on:
+      mongo:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    # SIGTERM dừng ở ranh giới job. Hết ân hạn thì job bị cắt, và lease hết hạn sẽ được
+    # `recover_expired` thu hồi ở lượt sau - chậm hơn, không sai.
+    stop_grace_period: 120s
+    healthcheck:
+      # Worker ghi file này mỗi vòng lặp kể cả khi hàng đợi rỗng (`worker.py:_touch`). Một lượt gọi
+      # provider tối đa 60s (AI_REVIEW_REQUEST_TIMEOUT_SECONDS) nên 300s là mốc "vòng lặp đã chết"
+      # chứ không phải "đang chạy job dài". Đổi AI_REVIEW_HEARTBEAT_FILE thì phải đổi cả đường dẫn ở đây.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,sys,time; p='/tmp/ai-review-worker.heartbeat'; m=os.stat(p).st_mtime if os.path.exists(p) else 0; sys.exit(0 if time.time()-m < 300 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     volumes:
       - data:/data

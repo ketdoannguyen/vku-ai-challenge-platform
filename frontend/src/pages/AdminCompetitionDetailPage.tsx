@@ -36,6 +36,7 @@ import {
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
 import { AdminSubmissionsPanel } from "../components/AdminSubmissionsPanel";
+import { AiReviewSettingsPanel, IconSparkle } from "../components/AiReviewSettingsPanel";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, FileButton, Loading } from "../components/ui";
 import { useAutoSlug } from "../hooks/useAutoSlug";
@@ -47,7 +48,7 @@ import {
 import { downloadArtifact } from "../lib/downloadArtifact";
 import { SLUG_MAX } from "../lib/slug";
 
-type Tab = "contents" | "assets" | "resources" | "scoring" | "members" | "results";
+type Tab = "contents" | "assets" | "resources" | "scoring" | "settings" | "members" | "results";
 
 type IconComponent = (props: { className?: string }) => ReactNode;
 
@@ -57,6 +58,9 @@ const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }
   { key: "assets", label: "Hình ảnh", Icon: IconImage },
   { key: "resources", label: "Tài nguyên", Icon: IconFolder },
   { key: "scoring", label: "Chấm điểm", Icon: IconGauge },
+  // Cấu hình AI là chuyện của từng cuộc thi, không phải thiết lập toàn hệ thống, nên đứng cạnh
+  // Chấm điểm thay vì tách sang trang riêng.
+  { key: "settings", label: "Cài đặt", Icon: IconSparkle },
   { key: "results", label: "Kết quả", Icon: IconTrophy },
   { key: "members", label: "Thành viên & mã tham gia", Icon: IconUsers },
 ];
@@ -761,6 +765,7 @@ export function AdminCompetitionDetailPage() {
           {tab === "scoring" && (
             <ScoringPanel competition={competition} onCompetitionChanged={load} />
           )}
+          {tab === "settings" && <AiReviewSettingsPanel competitionId={competition.id} />}
           {tab === "results" && <ResultsPanel competition={competition} />}
           {tab === "members" && (
             <MembersPanel competition={competition} onCompetitionChanged={load} />

@@ -4936,6 +4936,12 @@ button.resource-link:disabled {
   margin: 0;
 }
 
+/* Dòng báo lượt AI còn đang chờ, đứng dưới phần mô tả kết quả chấm điểm. */
+.sub-result-ai-note {
+  margin: 8px 0 0;
+  font-size: var(--text-body-sm);
+}
+
 .sub-result-cards {
   display: grid;
   grid-template-columns: 1fr;
@@ -5290,30 +5296,35 @@ button.resource-link:disabled {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
-  min-width: 860px;
+  min-width: 1000px;
   font-size: var(--text-body-sm);
 }
 
 /* Bề rộng/căn lề cột đặt theo tên cột để thay cho inline style trong JSX. */
 .subm-table .subm-col-id {
-  width: 24%;
+  width: 18%;
 }
 
 .subm-table .subm-col-file {
-  width: 22%;
-}
-
-.subm-table .subm-col-status {
   width: 16%;
 }
 
+.subm-table .subm-col-status {
+  width: 13%;
+}
+
+/* Cột AI chỉ xuất hiện khi cuộc thi công khai kết luận cho thí sinh. */
+.subm-table .subm-col-ai {
+  width: 18%;
+}
+
 .subm-table .subm-col-num {
-  width: 10%;
+  width: 8%;
   text-align: right;
 }
 
 .subm-table .subm-col-primary {
-  width: 14%;
+  width: 11%;
   text-align: right;
 }
 
@@ -6019,11 +6030,13 @@ button.resource-link:disabled {
   border-radius: var(--radius-md);
 }
 
-/* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": ba cột cho tìm kiếm, trạng thái và nút xóa. */
+/* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": mỗi bộ lọc một cột, nút xóa đứng cuối. */
 .results-filters {
   display: grid;
-  /* Ô tìm kiếm + hai bộ lọc (trạng thái chấm, trạng thái duyệt) + nút xóa bộ lọc. */
-  grid-template-columns: minmax(200px, 1fr) minmax(150px, 200px) minmax(150px, 200px) auto;
+  /* Ô tìm kiếm + ba bộ lọc độc lập (trạng thái chấm, trạng thái duyệt, kết luận AI) + nút xóa. */
+  grid-template-columns:
+    minmax(180px, 1fr) minmax(140px, 180px) minmax(140px, 180px) minmax(140px, 180px)
+    auto;
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px;
@@ -6047,9 +6060,9 @@ button.resource-link:disabled {
   min-width: 840px;
 }
 
-/* Hai cột xét duyệt/thao tác cộng vào nên bảng rộng hơn trước, vẫn cuộn ngang trong `table-wrap`. */
+/* Ba cột AI/xét duyệt/thao tác cộng vào nên bảng rộng hơn trước, vẫn cuộn ngang trong `table-wrap`. */
 .admin-submissions-table {
-  min-width: 1320px;
+  min-width: 1480px;
 }
 
 .results-table th {
@@ -6217,6 +6230,165 @@ button.resource-link:disabled {
   border-radius: 2px;
 }
 
+/* --- Panel cấu hình AI: field chiếm cả hai cột, checkbox có nhãn là cả dòng --- */
+.form-grid .ai-form-wide {
+  grid-column: 1 / -1;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  margin-bottom: 0;
+  font-weight: 400;
+}
+
+.checkbox-field input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--vku-blue-700);
+}
+
+/* Danh sách page sẽ được gửi cho AI: một dòng một page, badge nằm cuối dòng. */
+.ai-source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-source-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-source-item:last-child {
+  border-bottom: none;
+}
+
+.ai-source-item > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* --- Modal chi tiết kiểm tra AI: verdict, lịch sử lượt chạy, finding và bằng chứng --- */
+.ai-detail-disclaimer {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--vku-blue-700);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  font-size: 0.9rem;
+}
+
+.ai-detail-verdict {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ai-detail-verdict p {
+  margin: 0;
+}
+
+.ai-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.ai-detail-heading {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+/* Một lượt trong lịch sử: mỗi lượt là một khối tách bạch, lượt mới nhất đứng đầu. */
+.ai-run-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-run-item {
+  padding: 14px 0;
+  border-top: 1px solid var(--border);
+}
+
+.ai-run-head,
+.ai-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-run-meta {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.ai-run-item > p {
+  margin: 8px 0 0;
+}
+
+.ai-finding-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-finding {
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+}
+
+.ai-finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-finding-rule {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ai-finding > p {
+  margin: 6px 0 0;
+}
+
+.ai-evidence {
+  margin: 10px 0 0;
+}
+
+.ai-evidence pre {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 /* Ô tiêu đề sắp xếp được: nút giữ nguyên dáng của `th`, chỉ đổi màu khi cột đang áp dụng. */
 .admin-sort-button {
   display: inline-flex;
@@ -6255,8 +6427,8 @@ button.resource-link:disabled {
    tab kết quả; dưới 48rem vẫn thừa hưởng nhánh một cột của `.results-filters`. */
 .admin-submissions-filters {
   grid-template-columns:
-    minmax(180px, 1fr) minmax(160px, 1fr) minmax(150px, 200px) minmax(150px, 200px)
-    auto;
+    minmax(160px, 1fr) minmax(150px, 1fr) minmax(140px, 180px) minmax(140px, 180px)
+    minmax(140px, 180px) auto;
 }
 
 .admin-submissions-error {
@@ -6267,14 +6439,20 @@ button.resource-link:disabled {
   margin-bottom: 16px;
 }
 
-/* Cột xét duyệt: badge, lý do và người duyệt xếp dọc để lý do dài vẫn đọc được. */
+/* Cột AI/xét duyệt: badge, thời điểm, lý do và người duyệt xếp dọc để nội dung dài vẫn đọc được. */
+.subm-ai-cell,
 .subm-review-cell,
 .subm-action-cell {
   vertical-align: top;
 }
 
+.subm-ai-cell > *,
 .subm-review-cell > * {
   display: block;
+}
+
+.subm-ai-cell .btn {
+  margin-top: 4px;
 }
 
 .subm-review-note {
@@ -6293,6 +6471,18 @@ button.resource-link:disabled {
   max-width: 260px;
   overflow-wrap: anywhere;
   font-style: italic;
+}
+
+/* Cột AI của trang thí sinh: câu tóm tắt xuống dòng trong ô hẹp. */
+.subm-ai-cell .cell-secondary {
+  max-width: 240px;
+  overflow-wrap: anywhere;
+}
+
+/* Câu nhắc chỉ xuất hiện khi bảng thật sự có cột AI, nằm ngay dưới bảng. */
+.subm-ai-note {
+  margin: 10px 0 0;
+  font-size: var(--text-body-sm);
 }
 
 .admin-members {

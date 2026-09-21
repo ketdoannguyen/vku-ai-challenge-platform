@@ -51,7 +51,7 @@ docker_calls() { if [ -f "$ROOT/docker.log" ]; then wc -l <"$ROOT/docker.log"; e
 # container khi không có gì để deploy".
 docker_mutations() {
   if [ -f "$ROOT/docker.log" ]; then
-    grep -cE '^(compose .* (build|up|down|restart|stop|kill)|rmi|tag|pull)( |$)' "$ROOT/docker.log" || true
+    grep -cE '^(compose .* (build|up|down|restart|stop|kill|rm)|rmi|tag|pull)( |$)' "$ROOT/docker.log" || true
   else
     echo 0
   fi
@@ -59,6 +59,7 @@ docker_mutations() {
 state_read() { cat "$ROOT/state/$1" 2>/dev/null || true; }
 state_write() { printf '%s\n' "$2" >"$ROOT/state/$1"; }
 running_revision() { cat "$ROOT/state/running.$1.revision" 2>/dev/null || true; }
+running_image() { cat "$ROOT/state/running.$1.image" 2>/dev/null || true; }
 
 # Trạng thái Quick Tunnel mà watchdog nhìn thấy: container cloudflared "đang chạy" và nội dung log.
 tunnel_running() { : >"$ROOT/state/cloudflared.running"; }
@@ -254,9 +255,12 @@ begin() {
   unset FAKE_MINIO_HEALTH FAKE_MINIO_INIT_EXIT
   mkdir -p "$ROOT/bin" "$ROOT/state"
   : >"$ROOT/env"
-  cp "$REPO_ROOT/docker-compose.prod.yml" "$ROOT/compose.yml"
   git init --bare -q "$ROOT/origin.git"
   git init -q "$REPO_DIR"
+  # Compose nằm TRONG repo, đúng như production: deployer phải đọc được bản compose của một SHA cũ
+  # bằng `git show` để biết bản đó có khai `ai-review-worker` hay không (`release_defines_service`).
+  # `setup_base` commit nó ở commit nền nên mọi kịch bản đều có sẵn.
+  cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
   git -C "$REPO_DIR" config user.name harness
   git -C "$REPO_DIR" config user.email harness@test
   git -C "$REPO_DIR" remote add origin "$ROOT/origin.git"
@@ -319,7 +323,7 @@ run_deploy() {
       REPO="$REPO_DIR" \
       STATE_DIR="$ROOT/state" \
       ENV_FILE="$ROOT/env" \
-      COMPOSE_FILE="$ROOT/compose.yml" \
+      COMPOSE_FILE="$REPO_DIR/docker-compose.prod.yml" \
       GIT_URL="$ROOT/origin.git" \
       BRANCH=release \
       FAKE_DOCKER_LOG="$ROOT/docker.log" \
@@ -379,15 +383,23 @@ expect_status "chỉ đổi .env.example vẫn deploy được" 0
 expect_eq "state tiến sang SHA mới" "$(state_read last-success-sha)" "$ENV_EXAMPLE"
 expect_eq "không đụng container" "$(docker_mutations)" "0"
 
-begin "backend-only: deploy cả api và web (nginx giữ IP của api)"
+begin "backend-only: deploy api, worker và web (nginx giữ IP của api)"
 setup_deployed
 BE="$(advance "backend" backend/app.py)"
 run_deploy
 expect_status "deploy backend thành công" 0
-expect_in "build cả hai service" "$(docker_log)" "build api web"
-expect_in "up cả hai service" "$(docker_log)" "up -d --no-deps --no-build --wait --wait-timeout 180 api web"
+expect_in "build backend + web" "$(docker_log)" "build api web"
+# Worker dùng chung image backend với api, nên nó không bao giờ tự đứng ra build: một lệnh build duy
+# nhất cho cả hai service là điều kiện để "build một lần".
+expect_eq "chỉ một lệnh build" "$(grep -c '^compose .* build ' "$ROOT/docker.log")" "1"
+expect_in "up đủ ba service, api trước web" "$(docker_log)" \
+  "up -d --no-deps --no-build --wait --wait-timeout 180 api ai-review-worker web"
 expect_eq "revision api khớp SHA mục tiêu" "$(running_revision api)" "$BE"
+expect_eq "revision worker khớp SHA mục tiêu" "$(running_revision ai-review-worker)" "$BE"
 expect_eq "revision web khớp SHA mục tiêu" "$(running_revision web)" "$BE"
+# Worker KHÔNG có image riêng: nhãn revision giống api là hệ quả của việc dùng chung một image.
+expect_eq "worker dùng chung image với api" "$(running_image ai-review-worker)" "$(running_image api)"
+expect_eq "image backend đúng tag SHA" "$(running_image api)" "vku-challenge-api:${BE:0:12}"
 expect_eq "ghi last-success" "$(state_read last-success-sha)" "$BE"
 expect_eq "không xoá last-failed (chưa từng lỗi)" "$(state_read last-failed-sha)" ""
 
@@ -399,15 +411,17 @@ expect_status "deploy frontend thành công" 0
 expect_in "build đúng web" "$(docker_log)" "build web"
 expect_not_in "không build api" "$(docker_log)" "build api"
 expect_not_in "không up api" "$(docker_log)" "web api"
+expect_not_in "không đụng worker" "$(docker_log)" "ai-review-worker"
 expect_eq "revision web khớp SHA mục tiêu" "$(running_revision web)" "$FE"
 expect_eq "api không bị tạo lại nên không có state running" "$(running_revision api)" ""
 
-begin "docker-compose.prod.yml: deploy cả api và web"
+begin "docker-compose.prod.yml: deploy cả api, worker và web"
 setup_deployed
 COMPOSE_SHA="$(advance "compose" docker-compose.prod.yml)"
 run_deploy
 expect_status "đổi compose thì deploy thành công" 0
 expect_in "build api web" "$(docker_log)" "build api web"
+expect_eq "revision worker khớp SHA mục tiêu" "$(running_revision ai-review-worker)" "$COMPOSE_SHA"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$COMPOSE_SHA"
 
 # ADR-028: `minio`/`minio-init` nằm ngoài override theo SHA nên deployer phải tự kiểm. Điều đáng
@@ -420,7 +434,7 @@ FAKE_MINIO_HEALTH=none
 run_deploy
 expect_status "thiếu container minio thì dừng" 1
 expect_in "nói rõ không thấy minio" "$OUT" "không thấy container 'minio' đang chạy"
-expect_in "nói rõ production chưa bị chạm" "$OUT" "KHÔNG thay api/web"
+expect_in "nói rõ production chưa bị chạm" "$OUT" "KHÔNG thay api/worker/web"
 expect_in "in lệnh bootstrap" "$OUT" "up -d minio minio-init"
 expect_eq "không build, không up" "$(docker_mutations)" "0"
 
@@ -462,8 +476,11 @@ expect_not_in "không build/up container MinIO" \
 # lần chạy dưới đây sẽ dừng vì FAKE_MINIO_HEALTH=none.
 begin "compose không có MinIO: không chặn deploy"
 setup_deployed
+# Release không khai MinIO trong compose. Compose của bản này cố ý tối giản nhưng vẫn đủ ba service
+# deployer quản; nếu thiếu `needs_minio`, lượt chạy dưới đây sẽ dừng vì FAKE_MINIO_HEALTH=none.
+printf 'services:\n  api:\n    image: x\n  ai-review-worker:\n    image: x\n  web:\n    image: x\n' \
+  >"$REPO_DIR/docker-compose.prod.yml"
 BE="$(advance "backend" backend/app.py)"
-printf 'services:\n  api:\n    image: x\n' >"$ROOT/compose.yml"
 FAKE_MINIO_HEALTH=none
 run_deploy
 expect_status "không cần MinIO vẫn deploy được" 0
@@ -581,11 +598,14 @@ run_deploy
 expect_status "revision lệch thì thất bại" 1
 expect_in "nói rõ rollback" "$OUT" "ROLLBACK"
 expect_in "rollback về SHA cũ" "$OUT" "về image của ${BASE:0:12}"
+# Bản cũ CÓ khai worker (compose nền của harness là bản production thật), nên worker cũng phải quay về.
+expect_in "rollback đưa cả worker" "$OUT" "đưa api ai-review-worker web về image của"
 expect_eq "last-success không đổi" "$(state_read last-success-sha)" "$BASE"
 expect_eq "đánh dấu SHA lỗi" "$(state_read last-failed-sha)" "$TARGET"
 expect_eq "chỉ build một lần cho SHA mục tiêu (rollback không build lại)" \
   "$(grep -c '^compose .* build ' "$ROOT/docker.log")" "1"
 expect_eq "container chạy lại revision cũ" "$(state_read running.api.revision)" "$BASE"
+expect_eq "worker chạy lại revision cũ" "$(state_read running.ai-review-worker.revision)" "$BASE"
 expect_eq "worktree về bản đang chạy" "$(git -C "$REPO_DIR" rev-parse HEAD)" "$BASE"
 
 begin "không có image cũ: từ chối rollback, không build bù"
@@ -606,6 +626,30 @@ expect_eq "rollback không được build bù" "$(grep -c '^compose .* build ' "
 expect_eq "không có lệnh up nào của rollback" \
   "$(grep -c 'rollback-override.yml up' "$ROOT/docker.log")" "0"
 expect_eq "đánh dấu SHA lỗi để timer không thử lại" "$(state_read last-failed-sha)" "$TARGET"
+
+begin "rollback qua commit giới thiệu worker: bỏ worker, dọn container"
+# Bản cũ CHƯA biết worker: compose của BASE chỉ khai api và web. Đây là lượt rollback khó nhất - quay
+# về một image không hề có module `app.ai_review.worker`.
+printf 'services:\n  api:\n    image: x\n  web:\n    image: x\n' >"$REPO_DIR/docker-compose.prod.yml"
+setup_deployed
+state_write running.api.revision "$BASE"
+state_write running.web.revision "$BASE"
+# Release giới thiệu worker: thêm khối service vào compose prod và code backend đi kèm.
+cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
+TARGET="$(advance "them worker" backend/ai_review_worker.py)"
+FAKE_BAD_LABEL="$TARGET"
+run_deploy
+expect_status "deploy hỏng thì thất bại" 1
+expect_in "nói rõ vì sao bỏ worker" "$OUT" "chưa khai ai-review-worker"
+expect_in "rollback chỉ còn api và web" "$OUT" "đưa api web về image của ${BASE:0:12}"
+# Điểm mấu chốt: KHÔNG được đưa worker vào override rollback, vì `up` bằng image cũ sẽ crash-loop
+# (thiếu module) rồi làm `--wait` cháy hết thời gian chờ.
+expect_not_in "override rollback không khai worker" \
+  "$(cat "$ROOT/state/rollback-override.yml")" "ai-review-worker"
+expect_eq "dọn container worker còn sót của release hỏng" \
+  "$(grep -c 'rm -sf ai-review-worker' "$ROOT/docker.log")" "1"
+expect_eq "api chạy lại bản cũ" "$(running_revision api)" "$BASE"
+expect_eq "state vẫn ở bản cũ" "$(state_read last-success-sha)" "$BASE"
 
 begin "health hỏng sau up: rollback"
 setup_deployed
@@ -632,7 +676,8 @@ run_deploy
 expect_status "deploy thành công" 0
 LOG="$(docker_log)"
 expect_in "mọi lệnh compose đều có --env-file" "$LOG" "--env-file $ROOT/env"
-expect_in "mọi lệnh compose đều có base -f" "$LOG" "-f $ROOT/compose.yml"
+expect_in "mọi lệnh compose đều có base -f" "$LOG" "-f $REPO_DIR/docker-compose.prod.yml"
+expect_in "up đủ ba service" "$LOG" "up -d --no-deps --no-build --wait --wait-timeout 180 api ai-review-worker web"
 if grep -q '^compose ' <<<"$LOG" && ! grep -q '^compose --env-file ' <<<"$LOG"; then
   no "có lệnh compose thiếu --env-file"
 else
@@ -664,7 +709,7 @@ begin "an toàn: từ chối chạy khi không phải root"
 setup_base
 OUT="$(
   REPO="$REPO_DIR" STATE_DIR="$ROOT/state" ENV_FILE="$ROOT/env" \
-    COMPOSE_FILE="$ROOT/compose.yml" GIT_URL="$ROOT/origin.git" BRANCH=release \
+    COMPOSE_FILE="$REPO_DIR/docker-compose.prod.yml" GIT_URL="$ROOT/origin.git" BRANCH=release \
     FAKE_DOCKER_LOG="$ROOT/docker.log" FAKE_STATE="$ROOT/state" \
     PATH="$ROOT/bin:$PATH" bash "$SCRIPT" 2>&1
 )"

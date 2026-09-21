@@ -13,8 +13,12 @@ from openpyxl.styles import Font, PatternFill
 from pydantic import BaseModel
 
 from app.accounts.service import ACCOUNTS_COLLECTION
+from app.ai_review import constants as ai_constants
+from app.ai_review import service as ai_service
+from app.ai_review import serializers as ai_serializers
 from app.auth.dependencies import AdminAccount
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
@@ -29,6 +33,8 @@ global_router = APIRouter(prefix="/api/admin")
 _STATUSES = {"completed", "rejected", "failed"}
 _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _XLSX_ILLEGAL_CHARACTERS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+# Lịch sử kiểm tra của một bài nộp hiếm khi dài; cắt ở đây để response không phình theo số lần chạy lại.
+_AI_HISTORY_LIMIT = 50
 
 
 class ReviewBody(BaseModel):
@@ -44,6 +50,7 @@ async def list_submissions(
     q: str = "",
     status: str | None = None,
     review: str | None = None,
+    ai_review: str = ai_constants.FILTER_AI_ALL,
     sort: str = service.DEFAULT_SORT,
     order: str = service.DEFAULT_ORDER,
     limit: int = Query(50, ge=1, le=200),
@@ -51,10 +58,10 @@ async def list_submissions(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    _validate_query_params(status, review, sort, order, service.SCOPED_SORT_FIELDS)
+    _validate_query_params(status, review, ai_review, sort, order, service.SCOPED_SORT_FIELDS)
 
     query: dict = {"competition_id": competition["_id"]}
-    await _apply_filters(db, query, q, status, review)
+    await _apply_filters(db, query, q, status, review, ai_review)
     total = await db[service.SUBMISSIONS_COLLECTION].count_documents(query)
     submissions = await service.list_admin_submissions(
         db, query, sort=sort, order=order, limit=limit, offset=offset
@@ -84,20 +91,21 @@ async def list_all_submissions(
     q: str = "",
     status: str | None = None,
     review: str | None = None,
+    ai_review: str = ai_constants.FILTER_AI_ALL,
     sort: str = service.DEFAULT_SORT,
     order: str = service.DEFAULT_ORDER,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict:
     db = request.app.state.mongo.db
-    _validate_query_params(status, review, sort, order, service.SORT_FIELDS)
+    _validate_query_params(status, review, ai_review, sort, order, service.SORT_FIELDS)
     query: dict = {}
     if competition_id:
         try:
             query["competition_id"] = ObjectId(competition_id)
         except InvalidId:
             raise api_error(422, "VALIDATION_ERROR", "Cuộc thi không hợp lệ.")
-    await _apply_filters(db, query, q, status, review)
+    await _apply_filters(db, query, q, status, review, ai_review)
 
     # Bảng toàn cục cần cả bốn số tổng quan nên đếm trong một lượt `$facet`; `total` lấy từ đó.
     stats = await service.submission_stats(db, query)
@@ -185,6 +193,105 @@ async def set_submission_review(
     return {"submission": _admin_submission(updated, account, admin)}
 
 
+@global_router.get("/submissions/{submission_id}/ai-review")
+async def get_submission_ai_review(
+    submission_id: str, request: Request, admin: AdminAccount
+) -> dict:
+    """Chi tiết kiểm tra AI của một bài nộp: projection hiện tại, revision đã dùng, và lịch sử.
+
+    Không trả raw prompt, raw response, object key hay API key - chỉ host của provider, model,
+    phiên bản prompt và finding đã được backend kiểm lại bằng chứng.
+    """
+    db = request.app.state.mongo.db
+    submission = await _submission_or_404(db, submission_id)
+    competition = await db[COMPETITIONS_COLLECTION].find_one(
+        {"_id": submission["competition_id"]}
+    )
+    account = await db[ACCOUNTS_COLLECTION].find_one({"_id": submission["account_id"]})
+    return {
+        "submission": {
+            "id": str(submission["_id"]),
+            "submission_no": submission.get("submission_no"),
+            "status": submission["status"],
+            "created_at": iso_z(submission["created_at"]),
+            "account": {
+                "id": str(submission["account_id"]),
+                "name": account["name"] if account else "Tài khoản đã xóa",
+                "email": account["email"] if account else "",
+            },
+            "competition": _competition_ref(
+                competition, submission["competition_id"]
+            ),
+        },
+        "ai_review": ai_serializers.admin_projection(submission),
+        "content_snapshot": _snapshot_view(submission),
+        "history": await ai_service.review_history(
+            db, submission["_id"], limit=_AI_HISTORY_LIMIT
+        ),
+    }
+
+
+@global_router.post("/submissions/{submission_id}/ai-review/rerun")
+async def rerun_submission_ai_review(
+    submission_id: str, request: Request, admin: AdminAccount
+) -> dict:
+    """Chạy lại AI trên đúng nội dung đã chốt lúc nộp; không chấm lại điểm và không đổi quyết định BTC."""
+    db = request.app.state.mongo.db
+    submission = await _submission_or_404(db, submission_id)
+    competition = await db[COMPETITIONS_COLLECTION].find_one(
+        {"_id": submission["competition_id"]}
+    )
+    if competition is None:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+    try:
+        updated = await ai_service.request_manual_review(
+            db,
+            submission,
+            competition=competition,
+            settings=get_settings(),
+            requested_by=admin["_id"],
+            now=datetime.now(timezone.utc),
+        )
+    except ai_service.ReviewRequestInvalid as exc:
+        raise api_error(422, exc.code, exc.message)
+    except ai_service.ReviewInProgress as exc:
+        raise api_error(409, exc.code, exc.message)
+    logger.info(
+        "AI review rerun requested admin=%s submission=%s", admin["email"], submission["_id"]
+    )
+    account = await db[ACCOUNTS_COLLECTION].find_one({"_id": updated["account_id"]})
+    return {"submission": _admin_submission(updated, account)}
+
+
+async def _submission_or_404(db, submission_id: str) -> dict:
+    try:
+        oid = ObjectId(submission_id)
+    except InvalidId:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+    submission = await db[service.SUBMISSIONS_COLLECTION].find_one({"_id": oid})
+    if submission is None:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+    return submission
+
+
+def _snapshot_view(submission: dict) -> dict | None:
+    """Ảnh chụp policy đã dùng cho bài này; `None` khi cuộc thi chưa từng bật AI lúc nộp."""
+    snapshot = submission.get("content_snapshot")
+    if not snapshot:
+        return None
+    return {
+        "state": snapshot.get("state"),
+        "revision_id": (
+            str(snapshot["revision_id"]) if snapshot.get("revision_id") else None
+        ),
+        "content_hash": snapshot.get("content_hash"),
+        "error_code": snapshot.get("error_code"),
+        "captured_at": (
+            iso_z(snapshot["captured_at"]) if snapshot.get("captured_at") else None
+        ),
+    }
+
+
 @global_router.get("/submissions/{submission_id}/prediction")
 async def admin_download_prediction(
     submission_id: str, request: Request, admin: AdminAccount
@@ -201,13 +308,7 @@ async def admin_download_notebook(
 
 async def _admin_download(request: Request, submission_id: str, kind: str) -> Response:
     db = request.app.state.mongo.db
-    try:
-        oid = ObjectId(submission_id)
-    except InvalidId:
-        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
-    submission = await db[service.SUBMISSIONS_COLLECTION].find_one({"_id": oid})
-    if submission is None:
-        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+    submission = await _submission_or_404(db, submission_id)
     competition = await db[COMPETITIONS_COLLECTION].find_one(
         {"_id": submission["competition_id"]}
     )
@@ -220,15 +321,19 @@ async def _admin_download(request: Request, submission_id: str, kind: str) -> Re
 def _validate_query_params(
     status: str | None,
     review: str | None,
+    ai_review: str,
     sort: str,
     order: str,
     sort_fields: tuple[str, ...],
 ) -> None:
     if status is not None and status not in _STATUSES:
         raise api_error(422, "VALIDATION_ERROR", "Trạng thái submission không hợp lệ.")
-    # `status` là trạng thái chấm điểm, `review` là quyết định của admin - hai trục, hai tham số.
+    # Ba trục độc lập, ba tham số: `status` là trạng thái chấm điểm, `review` là quyết định của
+    # admin, `ai_review` là kết luận sơ bộ của AI. Không trục nào ghi đè trục nào.
     if review is not None and review not in service.REVIEW_STATUSES:
         raise api_error(422, "VALIDATION_ERROR", "Trạng thái duyệt không hợp lệ.")
+    if ai_review not in ai_constants.AI_FILTERS:
+        raise api_error(422, "VALIDATION_ERROR", "Bộ lọc AI không hợp lệ.")
     if sort not in sort_fields:
         raise api_error(422, "VALIDATION_ERROR", "Tiêu chí sắp xếp không hợp lệ.")
     if order not in service.SORT_ORDERS:
@@ -236,12 +341,13 @@ def _validate_query_params(
 
 
 async def _apply_filters(
-    db, query: dict, q: str, status: str | None, review: str | None
+    db, query: dict, q: str, status: str | None, review: str | None, ai_review: str
 ) -> None:
     if status:
         query["status"] = status
     if review:
         query.update(service.review_filter(review))
+    query.update(service.ai_review_filter(ai_review))
     account_ids = await service.matching_account_ids(db, q)
     if account_ids is not None:
         query["account_id"] = {"$in": account_ids}
@@ -318,6 +424,7 @@ def _admin_submission(
     }
     # Ghi đè shape participant-safe bằng shape đầy đủ của admin (có người duyệt và thời điểm).
     item[service.REVIEW_FIELD] = _admin_review(submission, reviewer)
+    item["ai_review"] = ai_serializers.admin_projection(submission)
     return item
 
 

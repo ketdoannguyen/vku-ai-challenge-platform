@@ -1,3 +1,4 @@
+import type { AdminAiReview, ParticipantAiReview } from "./aiReview";
 import { api } from "./client";
 
 export interface Metrics {
@@ -47,6 +48,8 @@ export interface SubmissionHistoryItem {
   error?: { code: string; message: string };
   /** Chỉ có mặt khi bài đang bị từ chối; endpoint admin ghi đè bằng shape đầy đủ. */
   review?: ParticipantReview;
+  /** Vắng mặt khi cuộc thi chưa bật AI, tắt AI, hoặc không công khai kết luận cho thí sinh. */
+  ai_review?: ParticipantAiReview;
 }
 
 export interface SubmissionsResponse {
@@ -88,10 +91,13 @@ export interface AdminSubmissionStats {
 }
 
 /** Dòng submission phía admin: thêm định danh tài khoản mà endpoint participant cố ý bỏ. */
-export interface AdminSubmissionItem extends Omit<SubmissionHistoryItem, "review"> {
+export interface AdminSubmissionItem
+  extends Omit<SubmissionHistoryItem, "review" | "ai_review"> {
   account: { id: string; name: string; email: string };
   /** Khác participant: luôn có khoá, `null` khi bài chưa từng bị xét duyệt. */
   review: AdminReview | null;
+  /** Khác participant: luôn có khoá, `null` khi cuộc thi chưa từng bật AI lúc nộp bài. */
+  ai_review: AdminAiReview | null;
 }
 
 /** Bảng toàn cục gắn thêm cuộc thi của từng dòng. */

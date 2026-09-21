@@ -10,6 +10,10 @@
 #
 # Script này KHÔNG bật timer. Bật timer là bước bàn giao cuối: in ở cuối để người vận hành tự chạy
 # sau khi đã bootstrap và xem `--dry-run`.
+#
+# BẮT BUỘC chạy lại script này TRƯỚC release đầu tiên có `ai-review-worker`: bản đang cài trên VM là
+# bản đóng băng cũ, không biết service mới, nên nó sẽ build và recreate `api`/`web` rồi **bỏ quên**
+# worker mà không báo gì - AI im lặng không chạy dù release đã lên.
 
 set -euo pipefail
 

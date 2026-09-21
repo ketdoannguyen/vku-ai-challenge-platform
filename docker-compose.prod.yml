@@ -118,6 +118,14 @@ services:
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aic_session}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
+      # AI Notebook Review (ADR-036), tất cả dùng `${VAR:-}` chứ KHÔNG `${VAR:?}`: thiếu cấu hình AI
+      # chỉ làm tính năng AI không bật được, tuyệt đối không được chặn deploy (quyết định sản phẩm #3).
+      # Credential Mongo/MinIO ở trên vẫn fail-fast vì thiếu chúng thì stack không chạy được thật.
+      LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
+      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
+      AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
+      AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
+      AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
     expose:
       - "8000" # internal only - đi qua Nginx same-origin (ADR-002)
     volumes:
@@ -139,6 +147,69 @@ services:
       interval: 15s
       timeout: 10s
       retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+
+  ai-review-worker:
+    # CÙNG image với `api` (cùng tag `vku-challenge-api:prod`, cùng build context): worker là tiến
+    # trình riêng, không phải background task trong API process - một lượt gọi provider mất hàng
+    # chục giây, và API phải trả lời được kể cả khi LLM hỏng hoàn toàn.
+    build:
+      context: ./backend
+    image: vku-challenge-api:prod
+    command: ["python", "-m", "app.ai_review.worker"]
+    environment:
+      APP_ENV: production
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ai_challenge}
+      MONGO_USER: ${MONGO_USER:?MONGO_USER bắt buộc có trong .env}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD bắt buộc có trong .env}
+      DATA_DIR: /data
+      # Worker đọc lại artifact từ MinIO khi cần chẩn đoán snapshot, và đọc Markdown thể lệ từ
+      # `data_dir` để dựng ngữ cảnh - nên nó cần đúng credential app như `api`, không hơn.
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY bắt buộc có trong .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY bắt buộc có trong .env}
+      MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
+      # Cùng lý do với `api`: thiếu cấu hình AI không được chặn deploy.
+      LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
+      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
+      AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
+      AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
+      AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
+      AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
+      AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
+      AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
+      AI_REVIEW_MAX_ATTEMPTS: ${AI_REVIEW_MAX_ATTEMPTS:-3}
+      AI_REVIEW_CONNECT_TIMEOUT_SECONDS: ${AI_REVIEW_CONNECT_TIMEOUT_SECONDS:-5}
+      AI_REVIEW_REQUEST_TIMEOUT_SECONDS: ${AI_REVIEW_REQUEST_TIMEOUT_SECONDS:-60}
+    # Không expose/publish port nào (master context §13): worker chỉ đi RA Mongo, MinIO và provider.
+    volumes:
+      - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/app:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    # SIGTERM dừng ở ranh giới job, không cắt ngang một lượt gọi provider. Hết ân hạn thì job bị
+    # cắt và lease hết hạn sẽ được `recover_expired` thu hồi ở lượt sau - chậm hơn, không sai.
+    stop_grace_period: 120s
+    healthcheck:
+      # Worker ghi file này mỗi vòng lặp kể cả khi hàng đợi rỗng (`worker.py:_touch`); mất dấu quá
+      # 300s là vòng lặp đã chết, không phải "đang chạy job dài" (một lượt gọi tối đa 60s). Đổi
+      # AI_REVIEW_HEARTBEAT_FILE thì phải đổi cả đường dẫn ở đây.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,sys,time; p='/tmp/ai-review-worker.heartbeat'; m=os.stat(p).st_mtime if os.path.exists(p) else 0; sys.exit(0 if time.time()-m < 300 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
       start_period: 30s
     restart: unless-stopped
     logging: *logging

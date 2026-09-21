@@ -14,7 +14,9 @@
 #   - Không bao giờ chạm `mongo`, `cloudflared`, volume, `/srv/vku-ai-challenge/data` hay backups.
 #     Riêng `cloudflared` còn đang chạy Quick Tunnel: restart nó là đổi URL công khai và làm chết
 #     `API_ORIGIN` của Worker.
-#   - Chỉ dùng `docker compose build/up/ps/exec`, không `down`, không `down -v`, không prune.
+#   - Chỉ dùng `docker compose build/up/ps/exec`, không `down`, không `down -v`, không prune. Ngoại lệ
+#     duy nhất: `rm -sf ai-review-worker` khi rollback qua commit giới thiệu worker (ADR-036) - đúng
+#     một service, không đụng gì khác.
 #   - Mỗi SHA lỗi chỉ thử một lần; muốn thử lại thì push commit mới (không sửa state tay).
 #   - `minio`/`minio-init` nằm NGOÀI override theo SHA. Release cần artifact backend mà MinIO chưa
 #     bootstrap thì deploy dừng trước khi thay api/web và in lệnh bootstrap (ADR-028, §13 kế hoạch).
@@ -35,8 +37,13 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-180}"
 DEPLOY_REF="refs/vku-deploy/$BRANCH"
 IMAGE_API="vku-challenge-api"
 IMAGE_WEB="vku-challenge-web"
+WORKER_SERVICE="ai-review-worker"
 RUNTIME_OVERRIDE="$STATE_DIR/runtime-override.yml"
 ROLLBACK_OVERRIDE="$STATE_DIR/rollback-override.yml"
+
+# Đường dẫn compose TƯƠNG ĐỐI trong repo: `git show <sha>:<path>` chỉ nhận path trong cây, không nhận
+# đường dẫn tuyệt đối. COMPOSE_FILE mặc định nằm trong repo nên đây là trường hợp thường gặp.
+COMPOSE_REL="${COMPOSE_FILE#"$REPO"/}"
 
 # ---------------------------------------------------------------- tiện ích
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -83,6 +90,17 @@ history_add() {
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2" "${3:-none}" >>"$STATE_DIR/history.log"
 }
 
+# Image của một service. Worker dùng CHUNG image backend với `api` (cùng Dockerfile, chỉ khác
+# `command`), nên nó không bao giờ có image riêng: build một lần, rollback một lần, và không có
+# đường nào để api/worker lệch code nhau.
+image_for_service() {
+  case "$1" in
+    api|"$WORKER_SERVICE") printf '%s' "$IMAGE_API" ;;
+    web) printf '%s' "$IMAGE_WEB" ;;
+    *) return 1 ;;
+  esac
+}
+
 # Ghi lại override trỏ service về image tag theo SHA.
 write_override() {
   local path="$1" sha="$2"
@@ -92,11 +110,7 @@ write_override() {
     printf '# Sinh tự động bởi vku-auto-deploy - KHÔNG sửa tay.\n'
     printf 'services:\n'
     for svc in "$@"; do
-      case "$svc" in
-        api) image="$IMAGE_API" ;;
-        web) image="$IMAGE_WEB" ;;
-        *) die "service không hỗ trợ: $svc" ;;
-      esac
+      image="$(image_for_service "$svc")" || die "service không hỗ trợ: $svc"
       printf '  %s:\n' "$svc"
       printf '    image: %s:%s\n' "$image" "${sha:0:12}"
       printf '    build:\n'
@@ -131,9 +145,10 @@ map_changed_paths() {
       # nginx trong `web` trỏ thẳng `proxy_pass http://api:8000` và không có `resolver`, nên nó
       # phân giải IP của `api` đúng một lần lúc khởi động. `api` được tạo lại là mang IP mới, còn
       # `web` cũ sẽ proxy vào IP đã chết cho tới khi chính nó được tạo lại.
-      backend/*) NEED_API=1; NEED_WEB=1 ;;
+      # Worker chạy đúng source backend đó, nên nó đi kèm `api` trong mọi lượt backend đổi.
+      backend/*) NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
       frontend/*) NEED_WEB=1 ;;
-      docker-compose.prod.yml) NEED_API=1; NEED_WEB=1 ;;
+      docker-compose.prod.yml) NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
       *)
         is_no_container_path "$path" || die "đường dẫn chưa được phân loại trong $path: $path - dừng để operator xử lý"
         ;;
@@ -169,15 +184,16 @@ verify_services() {
 }
 
 # `minio`/`minio-init` là hạ tầng dùng chung, KHÔNG nằm trong override theo SHA (deployer chỉ quản
-# `api` và `web`), nên một release cần artifact backend có thể gặp stack chưa từng bootstrap MinIO.
+# `api`, `ai-review-worker` và `web`), nên một release cần artifact backend có thể gặp stack chưa
+# từng bootstrap MinIO.
 # Nhận biết bằng chính compose file của SHA mục tiêu: release cũ chưa khai `minio` thì không cần.
 needs_minio() {
   grep -qE '^[[:space:]]+minio:[[:space:]]*$' "$COMPOSE_FILE"
 }
 
-# MinIO phải bootstrap XONG trước khi thay api/web: API mới ghi artifact vào bucket ngay từ request
-# đầu tiên, còn `minio-init` mới là thứ tạo bucket + credential app. Đổi api trước khi có hai thứ đó
-# biến mọi lượt nộp thành lỗi 503. Trả về 1 kèm lý do cụ thể để log nói đúng việc cần làm.
+# MinIO phải bootstrap XONG trước khi thay container backend: API mới ghi artifact vào bucket ngay từ
+# request đầu tiên, còn `minio-init` mới là thứ tạo bucket + credential app. Đổi api trước khi có hai
+# thứ đó biến mọi lượt nộp thành lỗi 503. Trả về 1 kèm lý do cụ thể để log nói đúng việc cần làm.
 check_minio_bootstrap() {
   local cid status
   cid="$(compose "$RUNTIME_OVERRIDE" ps -q minio)"
@@ -247,13 +263,18 @@ has_image() {
   shift
   local svc image
   for svc in "$@"; do
-    case "$svc" in
-      api) image="$IMAGE_API" ;;
-      web) image="$IMAGE_WEB" ;;
-      *) return 1 ;;
-    esac
+    image="$(image_for_service "$svc")" || return 1
     docker image inspect "$image:$tag" >/dev/null 2>&1 || return 1
   done
+}
+
+# Một service có được KHAI trong compose của release tại SHA đó hay không. Đọc đúng file compose của
+# SHA cũ bằng `git show` thay vì bản đang nằm trong working tree: lúc rollback, working tree đang ở SHA
+# mục tiêu nên nó luôn khai worker, kể cả khi bản cũ chưa từng có service này.
+release_defines_service() {
+  local sha="$1" svc="$2" content
+  content="$(git_repo show "$sha:$COMPOSE_REL" 2>/dev/null)" || return 1
+  grep -qE "^[[:space:]]+$svc:[[:space:]]*$" <<<"$content"
 }
 
 # Khôi phục image của lần deploy thành công trước đó. KHÔNG build lại source cũ: build lại là một
@@ -261,7 +282,23 @@ has_image() {
 do_rollback() {
   local sha="$1"
   shift
-  local services=("$@")
+  local svc
+  local -a services=()
+
+  # Worker chỉ tồn tại từ release giới thiệu nó. Chạy `up ai-review-worker` bằng image cũ không có
+  # module `app.ai_review.worker` là dựng một container crash-loop, và `--wait` sẽ cháy hết thời gian
+  # chờ - rollback thất bại vì một service mà người dùng cuối không cần để làm việc. Bỏ nó khỏi lượt
+  # rollback và dọn container còn sót của release vừa hỏng.
+  for svc in "$@"; do
+    if [ "$svc" = "$WORKER_SERVICE" ] && ! release_defines_service "$sha" "$WORKER_SERVICE"; then
+      log "Rollback: bản ${sha:0:12} chưa khai $WORKER_SERVICE - dọn container thay vì chạy lại nó."
+      compose "$RUNTIME_OVERRIDE" rm -sf "$WORKER_SERVICE" >/dev/null 2>&1 ||
+        log "Không dọn được container $WORKER_SERVICE (có thể chưa từng tồn tại) - bỏ qua"
+      continue
+    fi
+    services+=("$svc")
+  done
+  [ "${#services[@]}" -gt 0 ] || { log "LỖI: rollback không còn service nào để chạy"; return 1; }
   log "ROLLBACK: đưa ${services[*]} về image của ${sha:0:12}"
 
   # Bắt buộc kiểm tra trước khi `up`: `docker compose up` TỰ BUILD khi image vắng mặt. Lúc này working
@@ -418,18 +455,22 @@ while IFS= read -r path; do
 done < <(git_repo diff --name-only "$LAST_SUCCESS" "$TARGET")
 
 NEED_API=0
+NEED_WORKER=0
 NEED_WEB=0
 if [ "${#CHANGED[@]}" -eq 0 ]; then
-  # Không đọc được diff (object cũ đã mất): chọn hướng an toàn là deploy lại cả hai.
-  log "Cảnh báo: không tính được diff ${LAST_SUCCESS:0:12}..${TARGET:0:12}; deploy lại cả api và web"
+  # Không đọc được diff (object cũ đã mất): chọn hướng an toàn là deploy lại cả ba.
+  log "Cảnh báo: không tính được diff ${LAST_SUCCESS:0:12}..${TARGET:0:12}; deploy lại cả api, worker và web"
   NEED_API=1
+  NEED_WORKER=1
   NEED_WEB=1
 else
   map_changed_paths "${CHANGED[@]}"
 fi
 
+# Thứ tự trong mảng LÀ thứ tự `up`: api -> worker -> web.
 declare -a SERVICES=()
 [ "$NEED_API" -eq 1 ] && SERVICES+=(api)
+[ "$NEED_WORKER" -eq 1 ] && SERVICES+=("$WORKER_SERVICE")
 [ "$NEED_WEB" -eq 1 ] && SERVICES+=(web)
 
 log "Mục tiêu ${TARGET:0:12} (từ ${LAST_SUCCESS:0:12}): ${#CHANGED[@]} file thay đổi, service cần deploy: ${SERVICES[*]:-không có}"
@@ -465,7 +506,7 @@ if [ "$NEED_API" -eq 1 ] && needs_minio && ! check_minio_bootstrap; then
   history_add "$TARGET" "minio-not-bootstrapped" "${SERVICES[*]}"
   git_repo checkout --detach "$LAST_SUCCESS" >/dev/null 2>&1 ||
     log "Cảnh báo: không checkout lại được ${LAST_SUCCESS:0:12}"
-  die "MinIO chưa được bootstrap nên KHÔNG thay api/web (production vẫn chạy ${LAST_SUCCESS:0:12}).
+  die "MinIO chưa được bootstrap nên KHÔNG thay api/worker/web (production vẫn chạy ${LAST_SUCCESS:0:12}).
    Chạy tay trên VM rồi để lượt timer sau deploy tiếp:
      sudo mkdir -p \${PROD_DATA_ROOT}/minio
      sudo docker compose --env-file $ENV_FILE -f $COMPOSE_FILE up -d minio minio-init
@@ -476,7 +517,15 @@ fi
 # lần `up` trước đó hết thời gian chờ.
 export COMPOSE_PARALLEL_LIMIT=1
 
-if ! compose "$RUNTIME_OVERRIDE" build "${SERVICES[@]}"; then
+# Đúng hai image tồn tại trong stack: backend (`api` + worker dùng chung) và web. Worker không bao giờ
+# tự đứng ra build - `build api ai-review-worker` là build lại đúng source đó lần thứ hai.
+declare -a BUILD_SERVICES=()
+for svc in "${SERVICES[@]}"; do
+  [ "$svc" = "$WORKER_SERVICE" ] && continue
+  BUILD_SERVICES+=("$svc")
+done
+
+if ! compose "$RUNTIME_OVERRIDE" build "${BUILD_SERVICES[@]}"; then
   state_set last-failed-sha "$TARGET"
   printf 'build thất bại cho %s\n' "$TARGET" >"$STATE_DIR/last-failure.txt"
   history_add "$TARGET" "build-failed" "${SERVICES[*]}"
@@ -485,8 +534,8 @@ if ! compose "$RUNTIME_OVERRIDE" build "${SERVICES[@]}"; then
   die "build ${TARGET:0:12} thất bại; production vẫn đang chạy ${LAST_SUCCESS:0:12}"
 fi
 
-# `api` lên trước `web`: nginx của `web` phân giải IP của `api` lúc khởi động, nên `api` phải sẵn sàng
-# trước khi `web` được tạo lại.
+# `SERVICES` đã xếp sẵn api -> worker -> web: nginx của `web` phân giải IP của `api` lúc khởi động nên
+# `api` phải được tạo trước, và worker không phụ thuộc gì vào `web`.
 if ! compose "$RUNTIME_OVERRIDE" up -d --no-deps --no-build --wait --wait-timeout "$WAIT_TIMEOUT" "${SERVICES[@]}"; then
   state_set last-failed-sha "$TARGET"
   printf 'up/health thất bại cho %s\n' "$TARGET" >"$STATE_DIR/last-failure.txt"

@@ -1,5 +1,6 @@
 """Participant submission upload (CSV + notebook), validation, scoring and persistence."""
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,6 +10,9 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, File, Query, Request, Response, UploadFile
 
 from app.accounts import service as accounts_service
+from app.ai_review import constants as ai_constants
+from app.ai_review import content_snapshot, service as ai_service
+from app.ai_review import settings as ai_settings
 from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
 from app.core.config import get_settings
@@ -167,6 +171,9 @@ async def submit_submission(
                     notebook.filename, "notebook.ipynb"
                 ),
                 "size_bytes": len(notebook_data),
+                # Hash chốt ngay lúc nộp: worker đối chiếu lại bytes đã lưu với nó trước khi kiểm,
+                # nên artifact bị thay ngoài luồng không bao giờ được đem ra kết luận.
+                "sha256": hashlib.sha256(notebook_data).hexdigest(),
             },
         },
         "status": "completed",
@@ -175,6 +182,11 @@ async def submit_submission(
         "created_at": now,
     }
     try:
+        snapshot, projection = await _ai_state(db, competition, settings, now)
+        if snapshot is not None:
+            document["content_snapshot"] = snapshot
+        if projection is not None:
+            document["ai_review"] = projection
         await _upload(
             prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
         )
@@ -204,6 +216,8 @@ async def submit_submission(
         # Bài không ghi được thì trả lại lượt đã giữ, quota không bị tiêu oan.
         await service.release_quota_slot(db, membership, now)
         raise
+    if projection is not None and snapshot["state"] == ai_constants.SNAPSHOT_CAPTURED:
+        await _wake_worker(db, document, settings, now)
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
@@ -211,7 +225,54 @@ async def submit_submission(
         submission_id,
         submission_no,
     )
-    return service.public_submission(document, max(quota - quota_used, 0))
+    return service.public_submission(
+        document, max(quota - quota_used, 0), ai_visible=ai_settings.participant_visible(competition)
+    )
+
+
+async def _ai_state(db, competition: dict, settings, now: datetime) -> tuple[dict | None, dict | None]:
+    """Chốt ảnh chụp policy và desired state AI cho bài nộp; không bao giờ chặn việc nộp bài.
+
+    Không chụp được nội dung chỉ làm lượt AI kết thúc ở ERROR: bài vẫn được chấm, vẫn xếp hạng và
+    vẫn qua được vòng duyệt của BTC y như khi tính năng AI không tồn tại.
+    """
+    stored = ai_settings.stored_config(competition)
+    if not stored["enabled"]:
+        return None, None
+    try:
+        revision = await content_snapshot.capture_revision(
+            db, competition["_id"], settings=settings
+        )
+    except content_snapshot.SnapshotError as exc:
+        logger.warning(
+            "AI content snapshot failed competition=%s code=%s", competition["_id"], exc.code
+        )
+        snapshot = ai_service.failed_snapshot(exc.code, now=now)
+    else:
+        snapshot = ai_service.captured_snapshot(revision, now=now)
+    if not stored["auto_review"]:
+        return snapshot, None
+    return snapshot, ai_service.initial_projection(
+        captured=snapshot["state"] == ai_constants.SNAPSHOT_CAPTURED, now=now
+    )
+
+
+async def _wake_worker(db, document: dict, settings, now: datetime) -> None:
+    """Đánh thức worker; hỏng ở đây không được làm hỏng một bài đã ghi thành công.
+
+    Reconciler coi "submission đang chờ mà không có job" là lỗ hổng phải vá, nên job rơi ở đây
+    vẫn được tạo ở vòng quét sau.
+    """
+    try:
+        await ai_service.ensure_job(
+            db,
+            document,
+            source=ai_constants.JOB_SOURCE_AUTO,
+            now=now,
+            max_attempts=settings.ai_review_max_attempts,
+        )
+    except Exception:
+        logger.exception("AI review enqueue failed submission=%s", document["_id"])
 
 
 async def _upload(key: str, data: bytes, content_type: str, competition: dict, account: dict) -> None:
@@ -251,6 +312,7 @@ async def my_submissions(
         account["_id"],
         limit=limit,
         offset=offset,
+        ai_visible=ai_settings.participant_visible(competition),
     )
     return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 

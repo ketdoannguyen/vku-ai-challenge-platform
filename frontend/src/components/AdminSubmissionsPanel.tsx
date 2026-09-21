@@ -8,6 +8,14 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import {
+  AI_FILTER_OPTIONS,
+  AI_STATE_LABEL,
+  AI_VERDICT_LABEL,
+  AI_VERDICT_TONE,
+  hasPendingAiReview,
+  type AiReviewFilter,
+} from "../api/aiReview";
 import { api } from "../api/client";
 import { formatLocal } from "../api/competitions";
 import {
@@ -21,6 +29,8 @@ import {
   type AdminSubmissionsResponse,
   type ReviewPayload,
 } from "../api/results";
+import { usePendingPolling } from "../hooks/usePendingPolling";
+import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { ArtifactLinks } from "./ArtifactLinks";
 import { ConfirmModal } from "./Modal";
 import { SubmissionRejectModal } from "./SubmissionReviewModal";
@@ -62,9 +72,17 @@ interface Filters {
   q: string;
   status: string;
   review: string;
+  /** Trục thứ ba, độc lập: bộ lọc AI không bao giờ gộp vào `status` hay `review`. */
+  ai_review: AiReviewFilter;
 }
 
-const NO_FILTERS: Filters = { competition_id: "", q: "", status: "", review: "" };
+const NO_FILTERS: Filters = {
+  competition_id: "",
+  q: "",
+  status: "",
+  review: "",
+  ai_review: "all",
+};
 
 /** Bộ lọc + sắp xếp + trang đang xem; đổi bất kỳ phần nào cũng gọi lại server. */
 interface Query extends Filters {
@@ -109,6 +127,7 @@ export function AdminSubmissionsPanel({
   /** Bài đang được xử lý; `null` nghĩa là modal tương ứng đang đóng. */
   const [rejecting, setRejecting] = useState<AdminSubmissionItem | null>(null);
   const [restoring, setRestoring] = useState<AdminSubmissionItem | null>(null);
+  const [aiDetail, setAiDetail] = useState<AdminSubmissionItem | null>(null);
   const [message, setMessage] = useState("");
   const requestSequence = useRef(0);
   const hasData = useRef(false);
@@ -153,6 +172,7 @@ export function AdminSubmissionsPanel({
       if (next.q) params.set("q", next.q);
       if (next.status) params.set("status", next.status);
       if (next.review) params.set("review", next.review);
+      params.set("ai_review", next.ai_review);
       try {
         const response = await api.get<AdminSubmissionsResponse>(
           `${endpoint}?${params.toString()}`,
@@ -219,7 +239,7 @@ export function AdminSubmissionsPanel({
 
   /**
    * Lỗi để modal tự hiển thị nên ở đây không bắt: chỉ đóng modal khi backend đã nhận.
-   * Refetch giữ nguyên cuộc thi/tìm kiếm/hai bộ lọc/sắp xếp/trang và làm mới cả thẻ thống kê.
+   * Refetch giữ nguyên cuộc thi/tìm kiếm/ba bộ lọc/sắp xếp/trang và làm mới cả thẻ thống kê.
    */
   async function rejectSubmission(payload: ReviewPayload) {
     await setSubmissionReview(rejecting!.id, payload);
@@ -272,8 +292,16 @@ export function AdminSubmissionsPanel({
   }
 
   const busy = loading || refreshing;
+  // Còn lượt AI đang chạy thì tự làm mới, nhưng có ngân sách: bảng không quay mãi một mình.
+  const pollExhausted = usePendingPolling(hasPendingAiReview(data?.submissions ?? []), () =>
+    requestPage(query.offset),
+  );
   const hasFilters = Boolean(
-    query.competition_id || query.status || query.review || search.trim(),
+    query.competition_id ||
+      query.status ||
+      query.review ||
+      query.ai_review !== "all" ||
+      search.trim(),
   );
   const shownFrom = data ? data.offset + 1 : 0;
   const shownTo = data ? Math.min(data.offset + PAGE_SIZE, data.total) : 0;
@@ -320,6 +348,46 @@ export function AdminSubmissionsPanel({
         <span className="cell-secondary">
           {submission.review.reviewed_by.name} · {formatLocal(submission.review.reviewed_at)}
         </span>
+      </>
+    );
+  }
+
+  /**
+   * Cột AI chỉ để đọc. Bài nộp từ lúc cuộc thi chưa bật AI không có projection - hiển thị là
+   * "Chưa đánh giá" chứ không phải "Không phát hiện": thiếu dữ liệu không phải bằng chứng sạch.
+   * Nút vẫn phải có: đó là đường duy nhất để BTC khởi tạo lượt kiểm tra cho bài cũ, vì reconciler
+   * cố ý không tự chạy cho bài thiếu desired state.
+   */
+  function aiCell(submission: AdminSubmissionItem) {
+    const projection = submission.ai_review;
+    return (
+      <>
+        {projection ? (
+          <span
+            className={`status-badge ${
+              projection.verdict ? AI_VERDICT_TONE[projection.verdict] : "neutral"
+            }`}
+          >
+            {projection.verdict
+              ? AI_VERDICT_LABEL[projection.verdict]
+              : AI_STATE_LABEL[projection.state]}
+          </span>
+        ) : (
+          <span className="cell-secondary">Chưa đánh giá</span>
+        )}
+        {projection?.updated_at && (
+          <span className="cell-secondary">{formatLocal(projection.updated_at)}</span>
+        )}
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={(event) => {
+            triggerRef.current = event.currentTarget;
+            setAiDetail(submission);
+          }}
+        >
+          Chi tiết AI
+        </button>
       </>
     );
   }
@@ -374,7 +442,7 @@ export function AdminSubmissionsPanel({
 
       {!competitionId && <SubmissionStats stats={data?.stats ?? null} pending={!data && !error} />}
 
-      {/* Bảng khóa cuộc thi không có ô lọc cuộc thi nên giữ nguyên lưới hai bộ lọc gốc. */}
+      {/* Bảng khóa cuộc thi không có ô lọc cuộc thi nên giữ nguyên lưới bộ lọc gốc. */}
       <form
         className={`results-filters${competitionId ? "" : " admin-submissions-filters"}`}
         onSubmit={applySearch}
@@ -426,6 +494,20 @@ export function AdminSubmissionsPanel({
             </option>
           ))}
         </select>
+        <select
+          className="input"
+          aria-label="Lọc theo kết luận AI"
+          value={query.ai_review}
+          onChange={(event) =>
+            changeFilters({ ai_review: event.target.value as AiReviewFilter })
+          }
+        >
+          {AI_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
         {hasFilters && (
           <button className="btn btn-ghost" type="button" onClick={clearFilters}>
             Xóa bộ lọc
@@ -441,6 +523,20 @@ export function AdminSubmissionsPanel({
       {message && (
         <div className="status-banner success admin-submissions-banner" role="status">
           <span>{message}</span>
+        </div>
+      )}
+
+      {/* Polling tự dừng sau ngân sách lượt: nói rõ để không bị đọc thành "AI đã chạy xong". */}
+      {pollExhausted && (
+        <div className="status-banner warning admin-submissions-banner" role="status">
+          <span>Đã tạm dừng tự động làm mới sau nhiều lượt chờ. Bảng có thể chưa hiện kết quả mới nhất.</span>
+          <button
+            className="btn btn-secondary btn-sm"
+            type="button"
+            onClick={() => requestPage(query.offset)}
+          >
+            Làm mới
+          </button>
         </div>
       )}
 
@@ -486,6 +582,7 @@ export function AdminSubmissionsPanel({
                 {sortableHeader("team", "Đội")}
                 <th scope="col">Tệp đã nộp</th>
                 <th scope="col">Trạng thái</th>
+                <th scope="col">AI sơ bộ</th>
                 <th scope="col">Xét duyệt</th>
                 <th scope="col">Thao tác</th>
                 {sortableHeader("f1", "F1", "score-cell")}
@@ -532,6 +629,7 @@ export function AdminSubmissionsPanel({
                       <span className="cell-error">{submission.error.message}</span>
                     )}
                   </td>
+                  <td className="subm-ai-cell">{aiCell(submission)}</td>
                   <td className="subm-review-cell">{reviewCell(submission)}</td>
                   <td className="subm-action-cell">{actionCell(submission)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
@@ -606,6 +704,16 @@ export function AdminSubmissionsPanel({
           submission={rejecting}
           onConfirm={rejectSubmission}
           onClose={() => setRejecting(null)}
+          returnFocusRef={triggerRef}
+        />
+      )}
+
+      {aiDetail && (
+        <AiReviewDetailModal
+          submission={aiDetail}
+          // Chạy lại đổi projection của dòng đang mở: làm mới bảng để cột AI khớp lại.
+          onChanged={() => requestPage(query.offset)}
+          onClose={() => setAiDetail(null)}
           returnFocusRef={triggerRef}
         />
       )}

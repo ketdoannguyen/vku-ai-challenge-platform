@@ -1,0 +1,220 @@
+"""Provider OpenAI-compatible: payload, ánh xạ lỗi, trần body, và redirect không bao giờ được đi theo."""
+
+import json
+
+import httpx
+import pytest
+
+from app.ai_review import constants, provider, url_policy
+from app.ai_review.url_policy import EndpointPolicy
+from app.core.config import get_settings
+
+ENDPOINT_URL = "https://api.example.com/v1/chat/completions"
+
+POLICY = EndpointPolicy(
+    allowed_hosts=frozenset({"api.example.com"}),
+    allowed_private_hosts=frozenset(),
+    allowed_http_hosts=frozenset(),
+    allowed_ports=frozenset({443}),
+    is_production=True,
+)
+
+MESSAGES = [{"role": "system", "content": "system"}, {"role": "user", "content": "user"}]
+
+
+@pytest.fixture(autouse=True)
+def public_dns(monkeypatch):
+    monkeypatch.setattr(url_policy, "resolve_host", lambda host: ["93.184.216.34"])
+
+
+@pytest.fixture()
+def endpoint():
+    return url_policy.normalize_endpoint("https://api.example.com/v1", POLICY)
+
+
+def _client(handler) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def _call(client, endpoint, **overrides):
+    options = {
+        "endpoint": endpoint,
+        "policy": POLICY,
+        "api_key": "sk-test",
+        "model": "gpt-oss-120b",
+        "messages": MESSAGES,
+        "max_tokens": 64,
+        "settings": get_settings(),
+    }
+    options.update(overrides)
+    return await provider.chat_completions(client, **options)
+
+
+def _ok(text: str = '{"verdict": "CLEAR"}') -> httpx.Response:
+    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+
+
+async def test_successful_call_returns_content_and_sends_a_deterministic_payload(endpoint):
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["auth"] = request.headers["authorization"]
+        seen["body"] = json.loads(request.content)
+        return _ok("nội dung model")
+
+    async with _client(handler) as client:
+        result = await _call(client, endpoint)
+
+    assert result.text == "nội dung model"
+    assert result.latency_ms >= 0
+    assert seen["url"] == ENDPOINT_URL
+    assert seen["auth"] == "Bearer sk-test"
+    assert seen["body"] == {
+        "model": "gpt-oss-120b",
+        "messages": MESSAGES,
+        "temperature": 0,
+        "max_tokens": 64,
+        "stream": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "code", "retryable"),
+    [
+        (301, constants.AI_PROVIDER_REDIRECT_REJECTED, False),
+        (302, constants.AI_PROVIDER_REDIRECT_REJECTED, False),
+        (401, constants.AI_PROVIDER_UNAUTHORIZED, False),
+        (403, constants.AI_PROVIDER_UNAUTHORIZED, False),
+        (400, constants.AI_PROVIDER_MODEL_INVALID, False),
+        (404, constants.AI_PROVIDER_MODEL_INVALID, False),
+        (429, constants.AI_PROVIDER_RATE_LIMITED, True),
+        (500, constants.AI_PROVIDER_UNAVAILABLE, True),
+        (503, constants.AI_PROVIDER_UNAVAILABLE, True),
+        (418, constants.AI_PROVIDER_UNAVAILABLE, False),
+    ],
+)
+async def test_status_codes_map_to_stable_codes_with_the_right_retry_flag(
+    endpoint, status, code, retryable
+):
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(status, headers={"location": "https://elsewhere.test/"})
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+
+    assert exc.value.code == code
+    assert exc.value.retryable is retryable
+    # Redirect không bao giờ được đi theo: đúng một request tới đúng host đã được duyệt.
+    assert calls["n"] == 1
+
+
+async def test_response_body_larger_than_the_cap_is_refused(endpoint, monkeypatch):
+    monkeypatch.setattr(get_settings(), "ai_review_max_response_bytes", 16)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"x" * 64)
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+    assert exc.value.code == constants.AI_PROVIDER_RESPONSE_TOO_LARGE
+    assert exc.value.retryable is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"not json",
+        b'{"choices": []}',
+        b'{"choices": [{"message": {}}]}',
+        b'{"choices": [{"message": {"content": 42}}]}',
+    ],
+)
+async def test_malformed_provider_bodies_are_invalid_responses(endpoint, body):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body)
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+    assert exc.value.code == constants.AI_RESPONSE_INVALID
+    assert exc.value.retryable is False
+
+
+async def test_transport_failures_are_retryable_connection_errors(endpoint):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom")
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+    assert exc.value.code == constants.AI_CONNECTION_FAILED
+    assert exc.value.retryable is True
+
+
+async def test_endpoint_resolving_to_a_private_address_never_reaches_the_network(
+    endpoint, monkeypatch
+):
+    monkeypatch.setattr(url_policy, "resolve_host", lambda host: ["127.0.0.1"])
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return _ok()
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+    assert exc.value.code == constants.AI_PRIVATE_HOST_NOT_ALLOWED
+    assert exc.value.retryable is False
+    assert calls["n"] == 0
+
+
+async def test_connection_test_returns_redacted_metadata(endpoint):
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return _ok('{"ok": true}')
+
+    async with _client(handler) as client:
+        result = await provider.test_connection(
+            client,
+            endpoint=endpoint,
+            policy=POLICY,
+            api_key="sk-test",
+            model="gpt-oss-120b",
+            settings=get_settings(),
+        )
+
+    assert result == {
+        "ok": True,
+        "host": "api.example.com",
+        "model": "gpt-oss-120b",
+        "latency_ms": result["latency_ms"],
+    }
+    # Prompt thử kết nối là cố định và không chứa dữ liệu cuộc thi nào.
+    assert "sk-test" not in json.dumps(seen["body"])
+    assert seen["body"]["messages"][1]["content"] == provider.TEST_USER_PROMPT
+
+
+async def test_connection_test_rejects_a_model_that_does_not_answer_json(endpoint):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _ok("Xin chào, tôi là một trợ lý.")
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await provider.test_connection(
+                client,
+                endpoint=endpoint,
+                policy=POLICY,
+                api_key="sk-test",
+                model="gpt-oss-120b",
+                settings=get_settings(),
+            )
+    assert exc.value.code == constants.AI_RESPONSE_INVALID

@@ -8,6 +8,8 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
 
 from app.accounts.service import ACCOUNTS_COLLECTION
+from app.ai_review import constants as ai_constants
+from app.ai_review import serializers as ai_serializers
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
@@ -89,6 +91,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await collection.create_index(
         [("competition_id", 1), ("created_at", -1), ("_id", -1)]
     )
+    # Trục AI: vòng reconcile quét theo `state`, bảng admin lọc theo `verdict`. Index thường (không
+    # partial) vì mongomock không hỗ trợ đầy đủ partial expression trên field lồng nhau.
+    await collection.create_index([("ai_review.state", 1), ("created_at", -1), ("_id", -1)])
+    await collection.create_index([("ai_review.verdict", 1), ("created_at", -1), ("_id", -1)])
 
 
 def eligible_query(query: dict | None = None) -> dict:
@@ -109,6 +115,23 @@ def review_filter(value: str) -> dict:
     if value == REVIEW_STATUS_REJECTED:
         return {REVIEW_STATUS_FIELD: REVIEW_STATUS_REJECTED}
     return {REVIEW_STATUS_FIELD: {"$ne": REVIEW_STATUS_REJECTED}}
+
+
+def ai_review_filter(value: str) -> dict:
+    """Query cho trục AI của bảng admin - hoàn toàn độc lập với `status` và `review`.
+
+    `pending` là QUEUED/RUNNING (kể cả lượt ERROR chưa kịp có audit row), `none` là bài nộp từ
+    lúc cuộc thi chưa bật AI.
+    """
+    if value == ai_constants.FILTER_AI_ALL:
+        return {}
+    if value == ai_constants.FILTER_AI_NONE:
+        return {"ai_review": {"$exists": False}}
+    if value == ai_constants.FILTER_AI_PENDING:
+        return {"ai_review.state": {"$in": list(ai_constants.AI_PENDING_STATES)}}
+    if value == ai_constants.FILTER_AI_ERROR:
+        return {"ai_review.verdict": ai_constants.VERDICT_ERROR}
+    return {"ai_review.verdict": value.upper()}
 
 
 async def set_submission_review(
@@ -288,8 +311,10 @@ def artifact_metadata(submission: dict) -> dict:
     return result
 
 
-def public_submission(submission: dict, quota_remaining: int) -> dict:
-    return {
+def public_submission(
+    submission: dict, quota_remaining: int, *, ai_visible: bool = False
+) -> dict:
+    result = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
         "submission_no": submission.get("submission_no"),
@@ -300,9 +325,13 @@ def public_submission(submission: dict, quota_remaining: int) -> dict:
         "artifacts": artifact_metadata(submission),
         "quota_remaining": quota_remaining,
     }
+    projection = ai_serializers.participant_projection(submission, ai_visible)
+    if projection is not None:
+        result["ai_review"] = projection
+    return result
 
 
-def submission_history_item(submission: dict) -> dict:
+def submission_history_item(submission: dict, *, ai_visible: bool = False) -> dict:
     """Return participant-safe history data without account or storage details."""
     item = {
         "id": str(submission["_id"]),
@@ -332,17 +361,20 @@ def submission_history_item(submission: dict) -> dict:
             "status": REVIEW_STATUS_REJECTED,
             "note": review.get("note"),
         }
+    projection = ai_serializers.participant_projection(submission, ai_visible)
+    if projection is not None:
+        item["ai_review"] = projection
     return item
 
 
 async def list_account_submissions(
-    db, competition_id, account_id, *, limit: int, offset: int
+    db, competition_id, account_id, *, limit: int, offset: int, ai_visible: bool = False
 ) -> tuple[list[dict], int]:
     query = {"competition_id": competition_id, "account_id": account_id}
     collection = db[SUBMISSIONS_COLLECTION]
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
-    return [submission_history_item(item) async for item in cursor], total
+    return [submission_history_item(item, ai_visible=ai_visible) async for item in cursor], total
 
 
 async def matching_account_ids(db, query: str) -> list[ObjectId] | None:

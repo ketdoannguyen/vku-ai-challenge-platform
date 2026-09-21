@@ -69,6 +69,37 @@ const SCORING = {
   max_upload_mb: 10,
 };
 
+const AI_REVIEW_SETTINGS = {
+  config: {
+    enabled: true,
+    auto_review: true,
+    participant_visible: true,
+    provider: "openai-compatible",
+    base_url: "https://api.example.com/v1",
+    model: "gpt-oss-120b",
+    api_key_configured: true,
+    acknowledged_host: "api.example.com",
+    updated_at: "2026-09-15T09:00:00Z",
+  },
+  runtime: { encryption_available: true, allowed_hosts_configured: true },
+  content_source: {
+    included_count: 1,
+    excluded_count: 0,
+    total_bytes: 120,
+    pages: [
+      {
+        content_id: "c1",
+        title: "Thể lệ",
+        slug: "rules",
+        order: 1,
+        visibility: "public",
+        included: true,
+        reason: "OK",
+      },
+    ],
+  },
+};
+
 const calls: Array<{ url: string; init?: RequestInit }> = [];
 
 function mockApi(handler: (url: string, init?: RequestInit) => { body: unknown; status: number }) {
@@ -111,7 +142,7 @@ function renderPage() {
   );
 }
 
-/** Mock đủ endpoint của cả 6 panel để đổi tab không phụ thuộc shape dữ liệu. */
+/** Mock đủ endpoint của cả 7 panel để đổi tab không phụ thuộc shape dữ liệu. */
 async function renderRail() {
   mockApi((url) => {
     if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
@@ -119,6 +150,7 @@ async function renderRail() {
     if (url.includes("/assets")) return { body: { assets: [] }, status: 200 };
     if (url.includes("/members")) return { body: MEMBERS, status: 200 };
     if (url.includes("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
     if (url.includes("/leaderboard")) {
       return {
         body: { competition_id: COMPETITION.id, primary_metric: "f1", total: 0, entries: [] },
@@ -136,6 +168,22 @@ async function renderRail() {
 
 function rail(): HTMLElement {
   return screen.getByRole("tablist", { name: "Quản lý cuộc thi" });
+}
+
+/** Thứ tự tab của rail quản trị; dùng chung để thêm tab mới chỉ phải sửa một chỗ. */
+const TAB_LABELS = [
+  "Nội dung",
+  "Hình ảnh",
+  "Tài nguyên",
+  "Chấm điểm",
+  "Cài đặt",
+  "Kết quả",
+  "Thành viên & mã tham gia",
+];
+
+/** Danh sách tabindex kỳ vọng khi chỉ tab ở vị trí `focusedIndex` nhận focus. */
+function tabsWithFocusAt(focusedIndex: number): string[] {
+  return TAB_LABELS.map((_, index) => (index === focusedIndex ? "0" : "-1"));
 }
 
 function railTab(name: string): HTMLElement {
@@ -192,7 +240,7 @@ test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter m�
   expectKeyboardFilePicker(/^Upload \.md/, 'Upload file Markdown cho "Rules"');
 });
 
-test("rail quản trị: đủ 6 khu vực, panel gắn đúng tab đang mở", async () => {
+test("rail quản trị: đủ 7 khu vực, panel gắn đúng tab đang mở", async () => {
   mockApi((url) => {
     if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -204,14 +252,7 @@ test("rail quản trị: đủ 6 khu vực, panel gắn đúng tab đang mở", 
 
   const rail = screen.getByRole("tablist", { name: "Quản lý cuộc thi" });
   const tabs = within(rail).getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual([
-    "Nội dung",
-    "Hình ảnh",
-    "Tài nguyên",
-    "Chấm điểm",
-    "Kết quả",
-    "Thành viên & mã tham gia",
-  ]);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(TAB_LABELS);
   expect(tabs.filter((tab) => tab.getAttribute("aria-selected") === "true")).toHaveLength(1);
 
   // React dùng lại chính nút DOM đó qua mỗi lần render nên phải chốt id trước khi bấm.
@@ -229,31 +270,31 @@ test("rail quản trị: đủ 6 khu vực, panel gắn đúng tab đang mở", 
 
 test("rail quản trị: roving tabindex - chỉ focused tab có tabIndex=0, Arrow/Home/End wrap đúng", async () => {
   await renderRail();
-  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(0));
 
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowRight" });
   expect(railTab("Hình ảnh")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "0", "-1", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(1));
 
   fireEvent.keyDown(railTab("Hình ảnh"), { key: "ArrowRight" });
   expect(railTab("Tài nguyên")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(2));
 
   fireEvent.keyDown(railTab("Tài nguyên"), { key: "ArrowRight" });
   expect(railTab("Chấm điểm")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "0", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(3));
 
   fireEvent.keyDown(railTab("Chấm điểm"), { key: "ArrowLeft" });
   expect(railTab("Tài nguyên")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "0", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(2));
 
   fireEvent.keyDown(railTab("Tài nguyên"), { key: "End" });
   expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["-1", "-1", "-1", "-1", "-1", "0"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(TAB_LABELS.length - 1));
 
   fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "Home" });
   expect(railTab("Nội dung")).toHaveFocus();
-  expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
+  expect(tabIndexes()).toEqual(tabsWithFocusAt(0));
 
   // Wrap ở biên: trái từ tab đầu về tab cuối, phải từ tab cuối về tab đầu.
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowLeft" });
@@ -329,7 +370,7 @@ test("rail quản trị: tablist nằm ngang nên ArrowUp/ArrowDown để trang 
   for (const key of ["ArrowDown", "ArrowUp"]) {
     fireEvent.keyDown(first, { key });
     expect(first).toHaveFocus();
-    expect(tabIndexes()).toEqual(["0", "-1", "-1", "-1", "-1", "-1"]);
+    expect(tabIndexes()).toEqual(tabsWithFocusAt(0));
   }
 });
 
@@ -916,6 +957,7 @@ test("tab Kết quả xét duyệt qua endpoint toàn cục nhưng tải lại d
               },
               account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
               review: null,
+              ai_review: null,
             },
           ],
           total: 1,
@@ -1753,16 +1795,8 @@ test("dải tóm tắt: đủ sáu field theo formatter hiện có, tone xoay th
 test("tab rail: icon decorative aria-hidden, accessible name vẫn đúng bằng nhãn chữ", async () => {
   await renderRail();
 
-  const labels = [
-    "Nội dung",
-    "Hình ảnh",
-    "Tài nguyên",
-    "Chấm điểm",
-    "Kết quả",
-    "Thành viên & mã tham gia",
-  ];
   const tabs = within(rail()).getAllByRole("tab");
-  expect(tabs.map((tab) => tab.textContent)).toEqual(labels);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(TAB_LABELS);
 
   for (const [index, tab] of tabs.entries()) {
     const icon = tab.querySelector("svg");
@@ -1770,7 +1804,7 @@ test("tab rail: icon decorative aria-hidden, accessible name vẫn đúng bằng
     expect(icon).toHaveAttribute("aria-hidden", "true");
     expect(icon).toHaveAttribute("focusable", "false");
     // Nếu icon lọt vào accessible name thì truy vấn theo tên chính xác sẽ trượt.
-    expect(within(rail()).getByRole("tab", { name: labels[index] })).toBe(tab);
+    expect(within(rail()).getByRole("tab", { name: TAB_LABELS[index] })).toBe(tab);
   }
 });
 
@@ -1783,6 +1817,7 @@ test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không s
     ["Hình ảnh", ["blue", "yellow", "red"]],
     ["Tài nguyên", ["yellow"]],
     ["Chấm điểm", ["blue", "red", "yellow"]],
+    ["Cài đặt", ["blue", "yellow"]],
     ["Kết quả", ["yellow", "blue"]],
     ["Thành viên & mã tham gia", ["red", "blue"]],
   ] as Array<[string, string[]]>) {

@@ -108,6 +108,7 @@ openssl rand -hex 24    # -> MONGO_PASSWORD, MINIO_ROOT_PASSWORD, MINIO_SECRET_K
 | `MINIO_BUCKET` | Mặc định `submission-artifacts` |
 | `APP_NAME` | Tên hiển thị |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Chỉ dùng khi chạy kèm `deploy/docker-compose.tunnel.named.yml` (§6). Để trống với Quick Tunnel |
+| `LLM_CONFIG_ENCRYPTION_KEY` + nhóm `AI_REVIEW_*` | **Tuỳ chọn**, xem §3.2. Thiếu hết vẫn deploy và chạy bình thường |
 
 `APP_ENV=production`, `DATA_DIR=/data` và `MONGO_HOST=mongo` do compose đặt cứng, không khai trong `.env`.
 `SESSION_SECRET` trong `.env.example` là config chết (ADR-008) - không dùng, không cần sinh.
@@ -127,6 +128,30 @@ sudo docker compose --env-file /srv/vku-ai-challenge/.env \
 ```
 
 Không chạy `docker compose config` rồi lưu/chia sẻ output đầy đủ - kết quả nội suy có chứa secret.
+
+### 3.2 Nhóm AI Notebook Review (ADR-036) - tuỳ chọn
+
+Toàn bộ nhóm này đọc bằng `${VAR:-}` trong `docker-compose.prod.yml`, **không** phải `${VAR:?}`: để
+trống thì stack vẫn lên đủ, nộp bài vẫn chấm điểm và xếp hạng bình thường - chỉ tính năng AI là không
+bật được. Đây là điều kiện để một sự cố cấu hình AI không bao giờ chặn deploy.
+
+| Biến | Ý nghĩa |
+|---|---|
+| `LLM_CONFIG_ENCRYPTION_KEY` | Khoá Fernet mã hoá API key provider lưu trong Mongo. Rỗng = không lưu được key, nên không bật được AI. Sinh bằng `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `AI_REVIEW_ALLOWED_HOSTS` | Danh sách host được phép, cách nhau bằng dấu phẩy, khớp **chính xác** (không wildcard, không subdomain). Rỗng = không host nào được phép |
+| `AI_REVIEW_ALLOWED_PRIVATE_HOSTS` | Mở cho host nội bộ. **Chỉ dùng khi phát triển** với provider tự dựng |
+| `AI_REVIEW_ALLOWED_HTTP_HOSTS` | Cho phép `http://` thay vì bắt buộc `https://`. **Chỉ dùng khi phát triển** |
+| `AI_REVIEW_ALLOWED_PORTS` | Mặc định `443` |
+| `AI_REVIEW_POLL_INTERVAL_SECONDS` / `AI_REVIEW_LEASE_SECONDS` / `AI_REVIEW_HEARTBEAT_SECONDS` | Nhịp của worker. **`HEARTBEAT` bắt buộc nhỏ hơn `LEASE`**, nếu không worker thoát mã 2 ngay lúc khởi động |
+| `AI_REVIEW_MAX_ATTEMPTS` / `AI_REVIEW_CONNECT_TIMEOUT_SECONDS` / `AI_REVIEW_REQUEST_TIMEOUT_SECONDS` | Trần retry và timeout gọi provider |
+
+Cấu hình **provider** (Base URL, model, API key) **không** nằm trong `.env`: nó do admin nhập ở tab
+`Cài đặt` của cuộc thi và lưu trong Mongo, dưới dạng ciphertext. Đổi máy chủ thì phải nhập lại key;
+đổi `LLM_CONFIG_ENCRYPTION_KEY` sau khi đã lưu key làm ciphertext cũ không giải mã được.
+
+Hai host ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS`/`_HTTP_HOSTS` chỉ nên có mặt trên môi trường phát triển.
+Production chỉ khai `AI_REVIEW_ALLOWED_HOSTS` với host thật - mỗi host trong danh sách là một nơi
+notebook của thí sinh được phép đi tới.
 
 ### 3.1 MinIO: bootstrap bucket và credential (ADR-028)
 
@@ -400,6 +425,14 @@ hại; thay đổi API phá vỡ tương thích ngược phải tách thành hai
 
 Luồng thường ngày: PR `main` → `release` (chờ `release-gate` xanh) → merge → Actions deploy Worker,
 timer trên VM kéo commit về trong khoảng 1 phút.
+
+Từ ADR-036 stack có **ba** container chạy code: `api`, `ai-review-worker` và `web`. Worker dùng
+**chung image** với `api` (`vku-challenge-api:prod`, cùng build context) và chỉ khác `command`, nên
+hai bên không thể lệch code. Deployer biết điều đó: một thay đổi ở `backend/*` hoặc ở
+`docker-compose.prod.yml` bật cả `api` lẫn `ai-review-worker` lẫn `web`, nhưng chỉ **build image
+backend một lần** (`BUILD_SERVICES` cố ý bỏ worker ra - `build api ai-review-worker` là build lại
+đúng source đó lần thứ hai). Cả hai container nhận cùng nhãn revision của SHA đang deploy, nên
+"worker đang chạy bản nào" trả lời được bằng `docker ps`.
 
 **VM: cài đặt một lần**
 
@@ -782,6 +815,18 @@ trước khi đụng vào container, nên không có đường nào dựng lại
 được coi là xong sau khi deployer đã xác minh label revision của container khớp SHA cũ, nên "rollback
 thành công" là trạng thái đã kiểm chứng, không phải suy đoán.
 
+**Worker AI (`ai-review-worker`) có một quy tắc riêng.** Nó chỉ tồn tại từ release giới thiệu nó
+(ADR-036), nên khi deployer lùi về một SHA **chưa từng khai** service này, nó sẽ `rm -sf
+ai-review-worker` thay vì `up` nó bằng image cũ - image cũ không có module `app.ai_review.worker`, và
+chạy nó sẽ tạo một container crash-loop làm `--wait` cháy hết thời gian chờ, tức là rollback thất bại
+vì một service mà người dùng cuối không cần để làm việc. Đây là **ngoại lệ duy nhất** của nguyên tắc
+"deployer chỉ dùng `build/up/ps/exec`" và nó chỉ xoá đúng container của chính nó. Deployer đọc file
+compose **của SHA cũ** bằng `git show` để quyết định, chứ không đọc bản trong working tree - lúc
+rollback working tree đang ở SHA mục tiêu nên nó luôn khai worker.
+
+Việc dọn này chỉ ảnh hưởng worker: `api` và `web` vẫn về image cũ bình thường, dữ liệu AI trong Mongo
+không bị đụng, và các bài nộp cũ giữ nguyên điểm. Muốn có lại AI thì deploy tiếp một SHA có worker.
+
 **MinIO không nằm trong rollback theo SHA.** `minio`/`minio-init` là hạ tầng pin theo tag, không có
 image theo SHA để lùi về, và deployer không bao giờ build/up chúng. Vì vậy có thêm một cổng preflight
 (ADR-028): nếu SHA mục tiêu cần artifact backend (compose của nó khai `minio`) mà `minio` không
@@ -834,9 +879,105 @@ database và không sửa trực tiếp dữ liệu để "ép chạy". Chạy b
 | Deployer báo đường dẫn "chưa được phân loại" | Commit đổi thư mục mà deployer chưa biết nên map vào service nào | Thêm vào `map_changed_paths` trong `auto-deploy.sh` rồi chạy lại `install-auto-deploy.sh`; deployer dừng là đúng, không phải lỗi |
 | Deployer báo rollback cũng thất bại | Cả bản mới lẫn bản cũ đều không lên được | Dừng timer, đọc `last-failure.txt`, deploy lại commit trước bằng đường thủ công (§7.2) |
 | `/api/*` trả `502` sau khi VPS reboot | Quick Tunnel cấp hostname mới, `API_ORIGIN` của Worker vẫn trỏ URL cũ | `journalctl -u vku-deploy.service \| grep 'CẢNH BÁO'` để lấy URL mới, sửa `API_ORIGIN` (§5.2). Đăng nhập lại vì cookie host-only không còn khớp origin |
+| `ai-review-worker` `unhealthy` hoặc restart liên tục | Vòng lặp worker đã chết, hoặc `AI_REVIEW_HEARTBEAT_SECONDS >= AI_REVIEW_LEASE_SECONDS` (worker thoát mã 2 ngay lúc khởi động) | `dcp logs --tail=50 ai-review-worker`; đối chiếu hai biến nhịp ở §3.2; worker không ảnh hưởng điểm hay lượt nộp nên đây không phải sự cố khẩn cấp |
+| Admin bật AI nhưng PUT trả `AI_ENCRYPTION_KEY_MISSING` / `AI_HOST_NOT_ALLOWED` | `.env` thiếu `LLM_CONFIG_ENCRYPTION_KEY` hoặc `AI_REVIEW_ALLOWED_HOSTS` (hoặc deploy chưa nạp lại env) | Tab `Cài đặt` hiện cảnh báo này ở khối `runtime`; điền biến ở §3.2 rồi `dcp up -d api ai-review-worker` |
+| Bài nộp mãi ở `QUEUED`/`RUNNING` | Worker đang down, hoặc job đang chờ backoff sau lỗi tạm thời | `dcp ps ai-review-worker`, `dcp logs --tail=50 ai-review-worker`. **Không** sửa tay document để "đẩy" job: lease hết hạn được `recover_expired` thu hồi ở lượt sau |
+| Lượt kiểm tra trả `ERROR` liên tục | Cấu hình provider sai (key/model/host) hoặc provider chặn mạng ra | Xem tab `Cài đặt` → kiểm tra kết nối; sửa cấu hình rồi bấm **Chạy lại AI** trong modal chi tiết. Điểm và lượt nộp không bị ảnh hưởng |
 
 Không bao giờ dán `CLOUDFLARE_TUNNEL_TOKEN`, mật khẩu Mongo, mật khẩu admin hay session token vào
 chat/log/issue.
+
+## 14. Worker AI review (ADR-036)
+
+`ai-review-worker` là tiến trình **thứ ba** trong stack, dùng chung image với `api`
+(`vku-challenge-api:prod`) và chỉ khác `command`:
+
+```bash
+dcp ps ai-review-worker
+dcp logs --tail=50 -f ai-review-worker
+```
+
+Nó **không** expose port nào, không phục vụ request, và không bao giờ nằm trên đường trả lời của một
+lượt nộp bài: nộp bài chỉ ghi một job vào Mongo rồi trả điểm về ngay. Worker chết **không** làm hỏng
+điểm, lượt nộp, quota hay bảng xếp hạng - nó chỉ làm các lượt kiểm tra AI nằm chờ.
+
+### 14.1 Health
+
+Healthcheck đọc **mtime của `/tmp/ai-review-worker.heartbeat`**, một file worker ghi lại mỗi vòng lặp
+kể cả khi hàng đợi rỗng. Mất dấu quá **300 s** là vòng lặp đã chết, không phải "đang chạy job dài"
+(một lượt gọi provider tối đa `AI_REVIEW_REQUEST_TIMEOUT_SECONDS`, mặc định 60 s).
+
+```bash
+dcp ps ai-review-worker                       # mong đợi: Up ... (healthy)
+dcp exec ai-review-worker python -c \
+  "import os,time;p='/tmp/ai-review-worker.heartbeat';print('stale_s', int(time.time()-os.stat(p).st_mtime))"
+```
+
+Đổi `AI_REVIEW_HEARTBEAT_FILE` thì phải đổi **cả** đường dẫn trong healthcheck của
+`docker-compose.prod.yml` - hai chỗ đó phải trỏ cùng một file.
+
+### 14.2 Chạy một lượt bằng tay
+
+Hữu ích khi vừa sửa cấu hình provider và muốn hàng đợi được xử lý ngay thay vì chờ vòng poll kế tiếp:
+
+```bash
+dcp exec ai-review-worker python -m app.ai_review.worker --once
+dcp exec ai-review-worker python -m app.ai_review.worker --once --max-jobs 5
+```
+
+Tiến trình tay này là **tiến trình thứ hai** cùng tranh hàng đợi với worker đang chạy; điều đó an
+toàn vì claim job là một `find_one_and_update` nguyên tử trên Mongo - không job nào bị chạy hai lần.
+Lệnh chỉ chạy một lượt rồi thoát, không để lại tiến trình nào.
+
+### 14.3 Restart
+
+```bash
+dcp restart ai-review-worker
+```
+
+`stop_grace_period: 120s` cho worker dừng ở **ranh giới job**: nó không cắt ngang một lượt gọi
+provider. Hết ân hạn thì job bị cắt, lease hết hạn và được `recover_expired` thu hồi ở lượt sau -
+chậm hơn nhưng không sai, và không sinh audit row trùng.
+
+Restart worker **không** cần restart `api`: hai bên chỉ gặp nhau qua Mongo.
+
+### 14.4 Trước khi deploy release giới thiệu worker
+
+Release đầu tiên có `ai-review-worker` **bắt buộc** phải chạy lại deployer trên VM trước khi push:
+
+```bash
+cd /srv/vku-ai-challenge/repo
+sudo git fetch origin release && sudo git checkout --detach origin/release
+sudo deploy/vps/install-auto-deploy.sh
+```
+
+Bản deployer đang chạy trên VM là bản cũ **không biết** service `ai-review-worker`: nó sẽ build image
+backend và `up` `api`/`web` rồi thôi, để worker không bao giờ được khởi động dù compose đã khai. Đây
+đúng là lý do đã ghi ở §7.1: sửa deployer trong repo không tự áp dụng lên VM, vì bản chạy thật là
+copy root-owned ở `/usr/local/sbin/vku-auto-deploy`.
+
+Sau khi cài lại, xác nhận deployer đã nhận worker trước khi push:
+
+```bash
+sudo /usr/local/sbin/vku-auto-deploy --dry-run   # danh sách service phải có ai-review-worker
+```
+
+Từ release đó trở đi không cần cài lại nữa; deployer tự đưa worker vào mọi lượt deploy có thay đổi
+`backend/*` hoặc `docker-compose.prod.yml`.
+
+### 14.5 Smoke sau deploy
+
+Kiểm tra có bằng chứng thật, không chỉ "container đang chạy":
+
+1. `dcp ps ai-review-worker` → `Up ... (healthy)` và `dcp logs --tail=20 ai-review-worker` có dòng vòng lặp.
+2. Cấu hình provider ở tab `Cài đặt` của một cuộc thi **nháp** (không dùng cuộc thi thật), bấm **Kiểm tra kết nối** → phải trả host/model/độ trễ.
+3. Nộp một bài có notebook và xác nhận **response trả về ngay** với `status:"completed"`, điểm đã có, kèm `ai_review.state:"QUEUED"`.
+4. `dcp logs --tail=50 ai-review-worker` → thấy job được claim và kết thúc; mở modal chi tiết trong bảng admin thấy lượt mới.
+5. Bấm **Chạy lại AI** → `generation` tăng, điểm không đổi.
+
+Bài nộp và điểm số ở bước 3 phải đúng **dù AI có hỏng**: đây là tính chất quan trọng nhất cần xác
+nhận trước khi bật AI cho cuộc thi chính thức. Lượt smoke đầy đủ trên stack dev (bao gồm cache, thu
+hồi lease, redaction) nằm ở `docs/TEST_MATRIX.md` §17.
 
 ## Vận hành thường ngày
 
