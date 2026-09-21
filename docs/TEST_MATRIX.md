@@ -116,6 +116,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Align theo ID; reorder giữ nguyên score | passing | `backend/tests/test_scoring.py`, `backend/tests/test_submissions.py` |
 | Auth + active membership + published/start/deadline enforce backend | passing | `backend/tests/test_submissions.py` |
 | Quota completed/ngày UTC + quota_remaining | passing | `backend/tests/test_submissions.py` |
+| Hạn mức là cổng chặn **nguyên tử**: 6 request song song khi còn 2 lượt → chỉ 2 lượt được cấp; `quota_used` không vượt `quota_per_day`; bài lỗi upload trả lại lượt | passing | `backend/tests/test_submissions.py` (bộ đếm `quota_day`/`quota_used` trên membership, ADR-034) |
+| Notebook phải có ≥ 1 cell `code`: `cells: []` và notebook chỉ markdown → `422 NOTEBOOK_INVALID` | passing | `backend/tests/test_submission_artifacts.py`, `backend/tests/test_submissions.py` |
 | Upload size dùng global `MAX_UPLOAD_MB`; filename không thành path | passing | `backend/tests/test_submissions.py` |
 | Validation reject không lưu record/file | passing | `backend/tests/test_submissions.py` |
 | Ground truth/config admin validate, metadata safe, lock sau score/closed | passing | `backend/tests/test_scoring_admin.py` |
@@ -133,6 +135,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Best completed submission mỗi account; competition isolation | passing | `backend/tests/test_results.py::test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time` |
 | Tie-break score DESC → best time ASC deterministic; current-user marker, không lộ email/account id | passing | `backend/tests/test_results.py::test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time` |
 | Hidden participant leaderboard trả 403 không data; admin vẫn xem được | passing | `backend/tests/test_results.py::test_hidden_leaderboard_denies_participant_but_admin_can_view` |
+| Leaderboard nhận **cả slug lẫn id** như các endpoint anh em (cùng body), slug/id lạ đều 404 | passing | `backend/tests/test_results.py::test_leaderboard_accepts_slug_like_its_sibling_endpoints` |
 | Admin submission list scope competition, filter team/status, không lộ server path | passing | `backend/tests/test_results.py::test_admin_submission_list_filters_and_never_exposes_server_path` |
 | XLSX mở được, đúng columns/rank/metrics/count; không email/formula/control-char crash | passing | `backend/tests/test_results.py::test_admin_xlsx_export_has_rank_values_counts_and_formula_safe_names` |
 | Participant My Submissions loading/data/failed reason/empty/error UI | passing | `frontend/src/pages/MySubmissionsPage.test.tsx` |
@@ -162,7 +165,8 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Cross-competition isolation (membership, ground truth, submissions) | passing | `backend/tests/test_submissions.py`, `backend/tests/test_results.py` (Sprint 05-06 giữ pass) |
 | Upload guards: extension/magic bytes/size 413/filename không thành path/symlink | passing | `backend/tests/test_contents_admin.py`, `backend/tests/test_content_storage.py`, `backend/tests/test_submissions.py` (giữ pass Sprint 04-05) |
 | Markdown malicious fixture không execute (script/javascript link) | passing | `frontend/src/markdown/MarkdownView.test.tsx` + live smoke: payload `<script>` render an toàn qua API |
-| Security headers qua Nginx: nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, CSP Report-Only | passing | Live Sprint 07 smoke: `curl -I http://localhost:8080/` từng header |
+| Security headers qua Nginx: nosniff, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, **CSP enforce** (không còn Report-Only) + HSTS | passing | Live: `curl -I http://localhost:8080/` từng header; quét 15 route (ẩn danh/thí sinh/admin) bằng `/tmp/uiverify/csp-verify.mjs` → 15/15 có CSP + HSTS, **0 vi phạm CSP**, 0 lỗi JS, 0 request hỏng, không trang trắng |
+| `422 VALIDATION_ERROR` nêu tên trường sai trong `error.details`, không echo giá trị đã gửi | passing | `backend/tests/test_health.py::test_validation_error_names_the_offending_fields`, `::test_validation_error_does_not_echo_submitted_values` |
 | `/data/` không được Nginx serve; Mongo không publish public | passing | Live Sprint 07 smoke: `/data/` 404, `docker compose port mongo 27017` rỗng |
 | Private ground truth không reachable qua Nginx/participant API | passing | `backend/tests/test_scoring_admin.py` + live smoke: traversal asset path và unknown ground-truth route đều 404 |
 | Full E2E local MVP flow (login→create→config→GT→content→publish→join→submit→reject→quota→history→leaderboard→export) | passing | Isolated live smoke Sprint 07 qua Nginx + Mongo thật, cleanup sau chạy (xem PROJECT_STATE Commands verified) |
@@ -205,6 +209,7 @@ Contract đầy đủ ở `DESIGN.md`. Quy tắc gốc: màu thẻ theo **vị t
 |---|---|---|
 | Theme xoay vòng theo index render: `blue,red,yellow,blue,red`; 5 cuộc thi → đúng 5 card, không filler | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Theme độc lập status: cuộc thi `closed` ở index 1 vẫn `data-theme="red"`; root card không mang class trạng thái; badge vẫn `closed` + nhãn "Đã kết thúc" | passing | `frontend/src/pages/DashboardPage.test.tsx` |
+| Nhãn trạng thái suy từ `status` **và** `end_at` (`displayStatus`): cuộc thi `published` đã quá `end_at` hiện "Đã kết thúc" ở dashboard, trang chi tiết, bảng admin và cảnh báo admin - khớp với việc backend chặn thật | passing | `frontend/src/pages/{DashboardPage,AdminCompetitionsPage}.test.tsx`; live: cuộc thi QA `published` quá hạn → badge `status-badge-lg closed` ở dashboard và "Đã kết thúc" ở bảng admin, `POST /join` vẫn `422 JOIN_DEADLINE_PASSED` |
 | Search/filter còn 1 kết quả → theme tính lại theo vị trí mới (xanh); count theo `filtered.length` | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Vùng thống kê `aria-label="Thống kê cuộc thi"` lấy số từ dữ liệu API; khách ẩn ô "Đã tham gia" | passing | `frontend/src/pages/DashboardPage.test.tsx` |
 | Outline tiêu đề: một `h1`, section `h2`, tiêu đề thẻ `h3`; trạng thái rỗng không sinh `article` | passing | `frontend/src/pages/DashboardPage.test.tsx` |
@@ -706,6 +711,7 @@ trên VM.
 | Bấm tiêu đề cột đổi `sort`/`order` gửi lên server (mặc định riêng của từng cột rồi đảo chiều) | passing | `AdminSubmissionsPage.test.tsx` ("sắp xếp theo tiêu đề cột…") |
 | Đổi trang giữ bảng cũ và báo đang bận thay vì để bảng trống | passing | `AdminSubmissionsPage.test.tsx` ("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới") |
 | Cuộc thi đã xoá hiện tên nhưng không có link; lỗi tải danh sách có nút thử lại; bộ lọc không khớp có empty state xoá được | passing | `AdminSubmissionsPage.test.tsx` (3 test còn lại) |
+| Trạng thái rỗng tách hai ngữ cảnh: chưa có bài nộp nào → "Chưa có bài nộp nào." (không mời xoá lọc); bị lọc hết → "Không có bài nộp phù hợp." + nút xoá lọc | passing | `AdminSubmissionsPage.test.tsx` ("cuộc thi chưa có bài nộp nào…", "bộ lọc không khớp…") |
 
 ### Browser smoke thật (stack dev: api + web + MinIO, không mock)
 
@@ -948,3 +954,113 @@ Chạy 2026-09-20 trên đúng compose dev (`nginx :8080` → FastAPI → Mongo)
 "mép phải trùng mép phải ô thống kê" ở §9b giờ được đo trên **điều khiển cuối** (nút `Lọc`) thay vì trên
 `.dash-filters`; oracle cũ `/tmp/uiverify/vku-toolbar.mjs` đã hỏng vì `.dash-hero` được đổi tên thành
 `.page-hero` và không còn dùng được. Lượt đo mới nằm ở `adr032-smoke.mjs`.
+
+## 16. Xét duyệt bài nộp của admin (ADR-035)
+
+Trục `review` tách khỏi `status`; xem ADR-035 để biết vì sao không thể gộp. Toàn bộ mục này là
+`passing`: tự động ở các bảng dưới, cộng thêm hai lượt end-to-end trên stack dev thật ở cuối mục.
+
+### Backend - contract, phân quyền và validation
+
+| Check | Status | Cách verify |
+|---|---|---|
+| PATCH yêu cầu admin: anonymous → 401, participant → 403 | passing | `backend/tests/test_submission_review.py::test_review_requires_admin` |
+| ObjectId sai/không tồn tại → 404 `NOT_FOUND`; record `failed`/`rejected` legacy → 422 `INVALID_TRANSITION` | passing | `test_submission_review.py::test_review_rejects_unknown_id_and_non_completed_record` |
+| `status` ngoài allowlist, lý do rỗng sau trim, lý do >1000 ký tự, hoặc gửi `note` khi khôi phục → 422 `VALIDATION_ERROR` | passing | `test_submission_review.py::test_review_validates_status_and_note` |
+| Hai request xét duyệt đồng thời để lại **một** object `review` nhất quán của một request (không trộn note/actor/time) | passing | `test_submission_review.py::test_concurrent_reviews_never_mix_metadata` |
+
+### Backend - bất biến dữ liệu (điều mà yêu cầu gốc đòi hỏi)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Từ chối **không** đổi `status` (vẫn `completed`), metrics, `primary_score`, metadata artifact và `submission_no` | passing | `test_submission_review.py::test_reject_keeps_document_artifacts_and_quota` |
+| Từ chối **không** hoàn lượt: `quota.used_today`/`remaining` và `submission_count` công khai giữ nguyên | passing | Cùng test trên |
+| Participant và admin vẫn tải được **cả** prediction lẫn notebook của bài bị từ chối | passing | Cùng test trên |
+| Xoá cứng member vẫn 409 `MEMBER_HAS_SUBMISSIONS`; scoring config/ground truth vẫn khoá (`SCORING_LOCKED`) | passing | `test_submission_review.py::test_review_preserves_retention_and_scoring_lock` |
+
+### Backend - hiển thị và tác động lên kết quả
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Participant chỉ nhận `{status:"rejected", note}` khi bài **đang** bị từ chối; không lộ `reviewed_by`/`reviewed_at`; khôi phục xong thì key biến mất | passing | `test_submission_review.py::test_participant_sees_reason_without_reviewer_identity` |
+| Khôi phục đặt `status="accepted"`, `note=null`, cập nhật actor/time mới, giữ quyết định gần nhất; **không** chấm lại | passing | `test_submission_review.py::test_restore_clears_note_and_keeps_newest_decision` |
+| Leaderboard participant, leaderboard admin và XLSX cùng loại bài bị từ chối, rơi về bài hợp lệ tốt nhất kế tiếp, loại account khi không còn bài hợp lệ; `me` và `total_submissions` theo cùng predicate; khôi phục đưa bài trở lại **từ metrics cũ** | passing | `test_submission_review.py::test_leaderboard_and_export_drop_rejected_and_fall_back` |
+| Filter `review=accepted\|rejected` chạy ở cả hai route admin, kết hợp được với `competition_id`/`q`/`status`; giá trị ngoài allowlist → 422; `stats.completed` loại bài bị từ chối trong khi `stats.total` vẫn đếm | passing | `test_submission_review.py::test_review_filter_and_completed_stat_excludes_rejected` |
+| **Không** thêm index Mongo và **không** backfill: `review` là field tùy chọn, `$ne` khớp document thiếu field | passing | `docs/DATA_MODEL.md` §6; `test_review_...` chạy trên record không có `review` (bài nộp mới tạo trong test) |
+
+### Frontend - bảng admin
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Cột `Xét duyệt` hiện lý do + người duyệt + thời điểm cho bài bị từ chối, `Hợp lệ` cho bài chưa từng xử lý, và gạch cho bài `failed`/`rejected` (không có thao tác) | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::cột Xét duyệt hiện lý do, người duyệt và thời điểm; bài lỗi chấm không xét duyệt được` |
+| Lọc `trạng thái duyệt` là trục **riêng**, gửi `review=` và không lẫn `status=`; `accepted` gửi đúng giá trị | passing | `AdminSubmissionsPage.test.tsx::lọc theo trạng thái duyệt là trục riêng, không lẫn với trạng thái chấm` |
+| Modal từ chối: lý do chỉ có khoảng trắng thì nút xác nhận tắt và **không** gửi gì; PATCH đúng URL + body đã trim; thành công thì đóng modal, hiện banner `role="status"` và refetch **đúng trang đang xem**; lỗi giữ modal mở, giữ nguyên lý do và đặt `aria-invalid` | passing | `AdminSubmissionsPage.test.tsx::từ chối bài nộp gửi đúng PATCH, đóng modal và tải lại đúng trang đang xem`, `::PATCH lỗi thì modal vẫn mở, giữ nguyên lý do và không báo thành công` |
+| Khôi phục qua `ConfirmModal` gửi `{status:"accepted"}`, copy xác nhận nói rõ không chấm lại, có báo thành công | passing | `AdminSubmissionsPage.test.tsx::khôi phục bài đã bị từ chối qua confirm modal` |
+| Hủy và Escape đều **không** gửi PATCH và trả focus về đúng nút vừa bấm | passing | `AdminSubmissionsPage.test.tsx::Hủy và Escape đều không gửi PATCH và trả focus về nút vừa bấm` |
+| Thẻ thống kê thứ tư đổi nhãn thành `Được tính kết quả` / `Bài đã chấm và được chấp nhận` | passing | `AdminSubmissionsPage.test.tsx::hiện bốn thẻ thống kê theo bộ lọc hiện tại` |
+| Panel `Kết quả` khóa theo cuộc thi dùng **endpoint toàn cục** cho mutation nhưng refetch **endpoint của cuộc thi**, không kéo bảng về phạm vi toàn hệ thống | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::tab Kết quả xét duyệt qua endpoint toàn cục nhưng tải lại danh sách của cuộc thi` |
+| Hai ô lọc tách biệt cùng tồn tại trong panel khóa cuộc thi | passing | `AdminCompetitionDetailPage.test.tsx::tab Kết quả hiển thị ranking, filter submission và link export` |
+| CSS dùng class/design token có sẵn (`status-badge success\|danger`), không thêm Tailwind | passing | `frontend/src/test/designSystemGuard.test.ts` (suite frontend) |
+
+### Frontend - lịch sử của participant
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Bài bị từ chối vẫn hiện badge `Đã chấm điểm`, thêm badge `Không chấp nhận` + dòng `Lý do: …`, vẫn hiện metrics và vẫn tải được cả hai artifact | passing | `frontend/src/pages/MySubmissionsPage.test.tsx::bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nhưng không còn là bài tốt nhất` |
+| Bài bị từ chối **không** mang badge `Tốt nhất` và bị loại khỏi "Điểm cao nhất trong trang"; bài hợp lệ thấp điểm hơn giành lại chỗ đó | passing | Cùng test trên |
+| Trang chỉ có bài bị từ chối thì không hiện khối "Điểm cao nhất trong trang" | passing | `MySubmissionsPage.test.tsx::trang chỉ có bài bị từ chối thì không hiện điểm cao nhất` |
+
+### End-to-end trên stack dev (chạy thật 2026-09-20)
+
+Stack: `docker compose up -d --build api web`, image build từ chính working tree này (api + web +
+Mongo + MinIO sau Nginx ở `http://localhost:8080`). Dữ liệu: cuộc thi sạch `e2e-review-170401`
+(id `6ab01202b536dac23dd3e806`), quota 3/ngày, metric `f1`, hai bài của `Đội 01` — bài điểm cao
+f1 `1.0` nộp trước (`submission-0001`) và bài kém f1 `0.5` nộp sau (`submission-0002`); bài điểm
+cao chính là bài bị từ chối, nên "rơi về bài hợp lệ kế tiếp" là quan sát được rõ ràng.
+
+**Tầng API** — `bash /tmp/e2e/adr035/run.sh` (curl + `mongosh` đọc thẳng document) — **50 check, 0 fail**:
+
+| Quan sát | Kết quả thật |
+|---|---|
+| Quota và số bài persist | `2/1` trước, sau từ chối và sau khôi phục **không đổi**; vẫn 2 document `submissions` |
+| `submission_count` công khai | `2` ở cả ba thời điểm (vẫn là một lượt đã persist) |
+| Stats admin | `stats.total=2` suốt; `stats.completed` `2 → 1 → 2` |
+| Hai trục lọc độc lập | `review=rejected` chỉ ra bài bị từ chối, `review=accepted` chỉ ra bài chưa từng xét, còn `status=completed` vẫn ra **cả hai** |
+| Dữ liệu participant | `/submissions/me` chỉ có đúng `{note, status}` với note khớp; `available=true` cho cả hai artifact; `primary_score` vẫn `1.0` |
+| Tải artifact | Participant và admin đều tải được CSV (byte-identical) và notebook của bài bị từ chối (200) |
+| Leaderboard | Rơi từ `1.0`/1 lượt tính điểm về `0.5`/1 lượt, rồi trở lại `1.0`/2 lượt sau khôi phục — **không** chấm lại |
+| Export XLSX | `best=1.000 total=2` → `best=0.500 total=1` → `best=1.000 total=2`, khớp leaderboard ở từng thời điểm |
+| Giữ chỗ | `PUT ground-truth` → 422 `SCORING_LOCKED`; `DELETE` member → 409 `MEMBER_HAS_SUBMISSIONS` |
+| Phân quyền và validation | Anonymous PATCH → 401, participant → 403, id lạ → 404 `NOT_FOUND`; note rỗng/toàn khoảng trắng, note khi khôi phục, `status` ngoài allowlist, note >1000 ký tự → 422 `VALIDATION_ERROR` |
+| Document trong Mongo | `status=completed`, `review` có đủ `note/reviewed_at/reviewed_by/status`, object key artifact vẫn nguyên `competitions/e2e-review-170401/accounts/doi-01/submissions/submission-0001/*` |
+
+**Tầng UI** — `LD_LIBRARY_PATH=/tmp/uiverify/libs/usr/lib/x86_64-linux-gnu node adr035-ui.mjs`
+(Chromium headless, đăng nhập thật cả hai vai, bấm thật, không mock `/api`) — **40 check, 0 fail**:
+
+| Quan sát | Kết quả thật |
+|---|---|
+| Modal từ chối | Mở từ nút của đúng dòng; nút xác nhận khoá khi lý do rỗng **và** khi chỉ có khoảng trắng; focus đặt sẵn ở ô lý do |
+| Bảng admin sau từ chối | Banner `role="status"`, dòng đổi sang badge `Không chấp nhận` + lý do + `Admin · <thời điểm>`, nút chuyển thành `Khôi phục`, thẻ `Được tính kết quả` `2 → 1` |
+| Hai bộ lọc | `Không chấp nhận` còn đúng bài bị từ chối; `Hợp lệ` còn đúng bài chưa từng xét (trục riêng, không lẫn `status`) |
+| Lịch sử participant | Thấy badge `Không chấp nhận` + `Lý do: …`, vẫn badge `Đã chấm điểm`, **không** lộ người/thời điểm duyệt |
+| "Tốt nhất" và điểm cao nhất | Chuyển từ bài điểm cao sang bài hợp lệ kế tiếp khi bị từ chối, về lại bài điểm cao sau khôi phục (`1.000000 → 0.500000 → 1.000000`) |
+| Tải tệp từ UI | Bấm nút trong dòng bài bị từ chối vẫn nhận được `e2e-review-170401_Đội-01_submission-0001_prediction.csv` và `…_notebook.ipynb` |
+| Tab `Kết quả` của cuộc thi | Thấy badge + lý do qua endpoint danh sách của cuộc thi; khôi phục tại đây gửi PATCH toàn cục, copy confirm nói rõ không chấm lại, badge thành `Đã khôi phục` |
+| Ảnh chụp | `/tmp/e2e/adr035/out/ui-{1..5}-*.png`, kết quả từng check ở `ui-results.json` |
+
+### Chưa kiểm (phải chạy trước khi release)
+
+| Check | Status | Ghi chú |
+|---|---|---|
+| Hiệu năng lọc `review` sau khi index đã thu hẹp tập | **chưa kiểm** | ADR-035 ghi rõ đây là nợ chưa đo; chỉ có ý nghĩa khi có dữ liệu lớn |
+| Banner thành công tự tắt sau `MESSAGE_TIMEOUT_MS` | **chưa kiểm** | Chỉ test lúc banner xuất hiện; hẹn giờ 4.5 s không đáng chờ trong suite |
+
+### Bằng chứng tự động đã chạy (2026-09-20, working tree có ADR-035 chưa commit)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **316 passed** (trước đợt này 306; +10 case `test_submission_review.py`) |
+| `cd frontend && npm test -- --maxWorkers=1` | **410 passed (32 files)** (trước đợt này 401; +9 case review) |
+| `cd frontend && npx tsc -b` | sạch |
+| `cd frontend && npm run lint` | 0 error, chỉ warning có sẵn |
+| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |

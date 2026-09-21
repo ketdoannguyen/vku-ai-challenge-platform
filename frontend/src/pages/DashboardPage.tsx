@@ -18,6 +18,7 @@ import {
   JOIN_MODE_LABEL,
   METRIC_LABEL,
   STATUS_LABEL,
+  displayStatus,
   formatLocal,
   statusClass,
 } from "../api/competitions";
@@ -721,6 +722,8 @@ function CompetitionCard({
   const c = competition;
   const remaining =
     c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
+  // Thẻ đã quá hạn không còn "Đang diễn ra" nữa, dù backend vẫn giữ status `published`.
+  const shown = displayStatus(c.status, c.end_at);
 
   return (
     // `data-theme` quyết định màu thẻ, `data-status` chỉ để tra cứu; `statusClass` chỉ
@@ -731,9 +734,9 @@ function CompetitionCard({
         <h3 className="comp-card-title">
           <Link to={`/competitions/${c.slug}`}>{c.name}</Link>
         </h3>
-        <span className={`status-badge status-badge-lg ${statusClass(c.status)}`}>
+        <span className={`status-badge status-badge-lg ${statusClass(shown)}`}>
           <span className="chip-dot" aria-hidden="true" />
-          {STATUS_LABEL[c.status]}
+          {STATUS_LABEL[shown]}
         </span>
       </div>
 

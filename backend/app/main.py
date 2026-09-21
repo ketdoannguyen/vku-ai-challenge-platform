@@ -56,11 +56,18 @@ app = FastAPI(title="AI Challenge Platform API", lifespan=lifespan)
 
 
 def error_response(
-    status_code: int, code: str, message: str, headers: dict[str, str] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    headers: dict[str, str] | None = None,
+    details: list[dict] | None = None,
 ) -> JSONResponse:
+    error: dict = {"code": code, "message": message}
+    if details:
+        error["details"] = details
     return JSONResponse(
         status_code=status_code,
-        content={"error": {"code": code, "message": message}},
+        content={"error": error},
         headers=headers,
     )
 
@@ -84,9 +91,29 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
     return error_response(exc.status_code, "HTTP_ERROR", "Yêu cầu không thể được xử lý.")
 
 
+_VALIDATION_SOURCES = ("body", "query", "path", "header", "cookie")
+
+
+def _validation_field(loc: tuple) -> str:
+    """Tên trường sai, bỏ tiền tố nguồn ("body"/"query"...) khi vẫn còn tên trường phía sau."""
+    parts = [str(part) for part in loc]
+    if len(parts) > 1 and parts[0] in _VALIDATION_SOURCES:
+        parts = parts[1:]
+    return ".".join(parts)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return error_response(422, "VALIDATION_ERROR", "Dữ liệu gửi lên không hợp lệ.")
+    """Kèm danh sách trường sai: người tích hợp không phải đọc source mới biết payload đúng."""
+    return error_response(
+        422,
+        "VALIDATION_ERROR",
+        "Dữ liệu gửi lên không hợp lệ.",
+        details=[
+            {"field": _validation_field(error.get("loc", ())), "message": error.get("msg", "")}
+            for error in exc.errors()
+        ],
+    )
 
 
 @app.exception_handler(Exception)

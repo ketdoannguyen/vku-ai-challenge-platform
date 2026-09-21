@@ -57,10 +57,12 @@ async def submit_submission(
         raise api_error(422, "SUBMISSION_DEADLINE_PASSED", "Đã hết hạn nộp bài.")
 
     config = _ready_config(competition)
+    quota = competition["quota_per_day"]
+    # Chặn sớm cho khỏi chấm điểm khi đã hết lượt; đây chỉ là đường nhanh vì phép đếm không nguyên
+    # tử. Cổng chặn thật là `reserve_quota_slot` ngay trước khi upload.
     completed_today = await service.completed_today_count(
         db, competition["_id"], account["_id"], now
     )
-    quota = competition["quota_per_day"]
     if completed_today >= quota:
         raise api_error(
             429,
@@ -126,6 +128,17 @@ async def submit_submission(
         )
         raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
 
+    # Giữ lượt nguyên tử TRƯỚC khi cấp số và upload: phép đếm ở trên không nguyên tử nên nhiều
+    # request song song cùng lọt qua, còn `$inc` có điều kiện trên một document membership thì
+    # không. Giữ sau validate/score nên bài không hợp lệ không tiêu lượt.
+    quota_used = await service.reserve_quota_slot(db, membership, quota, now)
+    if quota_used is None:
+        raise api_error(
+            429,
+            "SUBMISSION_QUOTA_EXCEEDED",
+            "Bạn đã dùng hết lượt nộp bài hôm nay.",
+        )
+
     # Số thứ tự phải có trước khi upload vì nó nằm trong object key (ADR-033); cấp số đặt sau
     # validate/score/quota nên bài không hợp lệ không tiêu số.
     account_slug = await accounts_service.ensure_account_slug(db, account)
@@ -137,20 +150,6 @@ async def submit_submission(
     notebook_key = artifact_storage.notebook_key(
         competition["slug"], account_slug, submission_no
     )
-    await _upload(
-        prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
-    )
-    try:
-        await artifact_storage.put_bytes(
-            notebook_key, notebook_data, ARTIFACT_MEDIA_TYPES[NOTEBOOK_ARTIFACT]
-        )
-    except artifact_storage.ArtifactStorageUnavailable:
-        logger.exception(
-            "Notebook upload failed competition=%s account=%s", competition["_id"], account["_id"]
-        )
-        await _cleanup(prediction_key)
-        raise _storage_unavailable()
-
     document = {
         "_id": submission_id,
         "competition_id": competition["_id"],
@@ -176,15 +175,35 @@ async def submit_submission(
         "created_at": now,
     }
     try:
-        await db[service.SUBMISSIONS_COLLECTION].insert_one(document)
-    except Exception:
-        logger.exception(
-            "Cannot persist submission competition=%s account=%s",
-            competition["_id"],
-            account["_id"],
+        await _upload(
+            prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
         )
-        await _cleanup(prediction_key, notebook_key)
-        raise api_error(500, "SUBMISSION_SAVE_FAILED", "Không thể lưu kết quả bài nộp.")
+        try:
+            await artifact_storage.put_bytes(
+                notebook_key, notebook_data, ARTIFACT_MEDIA_TYPES[NOTEBOOK_ARTIFACT]
+            )
+        except artifact_storage.ArtifactStorageUnavailable:
+            logger.exception(
+                "Notebook upload failed competition=%s account=%s",
+                competition["_id"],
+                account["_id"],
+            )
+            await _cleanup(prediction_key)
+            raise _storage_unavailable()
+        try:
+            await db[service.SUBMISSIONS_COLLECTION].insert_one(document)
+        except Exception:
+            logger.exception(
+                "Cannot persist submission competition=%s account=%s",
+                competition["_id"],
+                account["_id"],
+            )
+            await _cleanup(prediction_key, notebook_key)
+            raise api_error(500, "SUBMISSION_SAVE_FAILED", "Không thể lưu kết quả bài nộp.")
+    except Exception:
+        # Bài không ghi được thì trả lại lượt đã giữ, quota không bị tiêu oan.
+        await service.release_quota_slot(db, membership, now)
+        raise
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
@@ -192,7 +211,7 @@ async def submit_submission(
         submission_id,
         submission_no,
     )
-    return service.public_submission(document, max(quota - completed_today - 1, 0))
+    return service.public_submission(document, max(quota - quota_used, 0))
 
 
 async def _upload(key: str, data: bytes, content_type: str, competition: dict, account: dict) -> None:
@@ -278,11 +297,18 @@ async def _own_submission_or_404(db, competition: dict, account: dict, submissio
 
 
 async def _competition_or_404(db, competition_id: str) -> dict:
+    """Nhận cả ObjectId lẫn slug: các endpoint anh em đều nhận slug nên ở đây không được chỉ nhận id."""
+    competition = None
     try:
         oid = ObjectId(competition_id)
     except InvalidId:
-        raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
-    competition = await db[competitions_service.COMPETITIONS_COLLECTION].find_one({"_id": oid})
+        pass
+    else:
+        competition = await db[competitions_service.COMPETITIONS_COLLECTION].find_one(
+            {"_id": oid}
+        )
+    if competition is None:
+        competition = await competitions_service.find_competition_by_slug(db, competition_id)
     if competition is None or competition["status"] == "draft":
         raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
     return competition

@@ -787,7 +787,9 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   }
   expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
   expect(screen.getByLabelText("Lọc theo đội")).toBeTruthy();
-  expect(screen.getByLabelText("Lọc theo trạng thái")).toBeTruthy();
+  // Hai trục tách biệt: trạng thái chấm điểm và trạng thái duyệt của admin.
+  expect(screen.getByLabelText("Lọc theo trạng thái chấm")).toBeTruthy();
+  expect(screen.getByLabelText("Lọc theo trạng thái duyệt")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
   await waitFor(() => {
     // Bảng dùng chung luôn gửi kèm sắp xếp, nên đọc tham số thay vì so khớp cả query string.
@@ -877,13 +879,81 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
   }
 
   // Lọc trạng thái áp dụng ngay, không cần bấm nút.
-  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái"), { target: { value: "rejected" } });
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái chấm"), {
+    target: { value: "rejected" },
+  });
   await waitFor(() => {
     const filtered = calls.find(
       (call) => new URL(call.url, "http://localhost").searchParams.get("status") === "rejected",
     );
     expect(filtered?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
   });
+});
+
+test("tab Kết quả xét duyệt qua endpoint toàn cục nhưng tải lại danh sách của cuộc thi", async () => {
+  mockApi((url, init) => {
+    if (url.includes("/leaderboard")) {
+      return {
+        body: { competition_id: COMPETITION.id, primary_metric: "f1", total: 0, entries: [] },
+        status: 200,
+      };
+    }
+    if (init?.method === "PATCH") return { body: { submission: {} }, status: 200 };
+    if (url.includes("/submissions")) {
+      return {
+        body: {
+          submissions: [
+            {
+              id: "s1",
+              competition_id: COMPETITION.id,
+              status: "completed",
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              primary_score: 0.9,
+              created_at: "2026-09-15T09:00:00Z",
+              artifacts: {
+                prediction: { filename: "result.csv", size_bytes: 128, available: true },
+                notebook: { filename: "solution.ipynb", size_bytes: 4096, available: true },
+              },
+              account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
+              review: null,
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
+  const region = await screen.findByRole("region", { name: "Bảng bài nộp của cuộc thi" });
+  await within(region).findByText("Thí Sinh");
+
+  fireEvent.click(within(region).getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  fireEvent.change(within(dialog).getByLabelText("Lý do không chấp nhận"), {
+    target: { value: "Sai kiến trúc." },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Không chấp nhận" }));
+
+  // Bài nộp là tài nguyên chung nên endpoint xét duyệt luôn là route toàn cục.
+  await waitFor(() =>
+    expect(calls.find((call) => call.init?.method === "PATCH")?.url).toBe(
+      "/api/admin/submissions/s1/review",
+    ),
+  );
+  // Nhưng refetch vẫn nằm trong cuộc thi đang mở, không kéo bảng về phạm vi toàn hệ thống.
+  await waitFor(() =>
+    expect(calls.filter((call) => call.url.includes("/submissions?")).at(-1)?.url).toContain(
+      `/admin/competitions/${COMPETITION.id}/submissions?`,
+    ),
+  );
+  expect(calls.filter((call) => call.url.includes("/submissions?")).length).toBeGreaterThan(1);
+  expect(calls.some((call) => call.url.includes("/api/admin/submissions?"))).toBe(false);
 });
 
 test("header hiển thị action theo status: draft có Publish, published có Kết thúc, closed có Mở lại và Xóa", async () => {

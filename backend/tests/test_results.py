@@ -213,6 +213,30 @@ def test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time(client)
     assert all("account_id" not in row and "email" not in row for row in body["entries"])
 
 
+def test_leaderboard_accepts_slug_like_its_sibling_endpoints(client):
+    """Các endpoint anh em nhận slug; leaderboard không được là ngoại lệ trả 404 sai bản chất."""
+    current = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "slug-leaderboard-cup")
+    base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
+    _submission(client, competition_id, current["_id"], 0.9, base)
+
+    _login_participant(client)
+    by_id = client.get(f"/api/competitions/{competition_id}/leaderboard")
+    by_slug = client.get("/api/competitions/slug-leaderboard-cup/leaderboard")
+
+    assert by_id.status_code == 200
+    assert by_slug.status_code == 200
+    assert by_slug.json() == by_id.json()
+
+
+def test_leaderboard_unknown_slug_and_unknown_id_are_both_404(client):
+    _login_participant(client)
+    for key in ("khong-co-cuoc-thi-nay", "6aafe3b8d7fbd2467e8cc39f"):
+        response = client.get(f"/api/competitions/{key}/leaderboard")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
 def test_hidden_leaderboard_denies_participant_but_admin_can_view(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "hidden-cup", leaderboard_visible=False)

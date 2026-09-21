@@ -230,7 +230,8 @@ def test_content_disposition_falls_back_when_ascii_is_empty():
 # --- notebook validation ---------------------------------------------------
 
 VALID_NOTEBOOK = (
-    b'{"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}'
+    b'{"cells": [{"cell_type": "code", "source": ["print(1)"]}],'
+    b' "metadata": {}, "nbformat": 4, "nbformat_minor": 5}'
 )
 
 
@@ -256,6 +257,10 @@ def test_has_notebook_extension_is_case_insensitive():
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "sql", "source": ""}]}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "code"}]}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "code", "source": [1]}]}',
+        # Notebook hợp lệ về hình dạng nhưng rỗng, hoặc không có cell code nào.
+        b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": []}',
+        b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {},'
+        b' "cells": [{"cell_type": "markdown", "source": ["# markdown only"]}]}',
     ],
 )
 def test_validate_notebook_rejects_malformed_payloads(payload):
@@ -267,5 +272,5 @@ def test_validate_notebook_rejects_malformed_payloads(payload):
 def test_validate_notebook_accepts_v4_notebook_with_nul_free_source():
     validation.validate_notebook(VALID_NOTEBOOK)
     with_bom = b"\xef\xbb\xbf" + b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {},'
-    with_bom += b' "cells": [{"cell_type": "markdown", "source": ["# a", "# b"]}]}'
+    with_bom += b' "cells": [{"cell_type": "code", "source": ["# a", "# b"]}]}'
     validation.validate_notebook(with_bom)

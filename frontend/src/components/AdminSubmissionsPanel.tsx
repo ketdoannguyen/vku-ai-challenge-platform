@@ -12,23 +12,38 @@ import { api } from "../api/client";
 import { formatLocal } from "../api/competitions";
 import {
   formatScore,
+  REVIEW_STATUS_LABEL,
+  setSubmissionReview,
   SUBMISSION_STATUS_LABEL,
   type AdminSortField,
   type AdminSortOrder,
+  type AdminSubmissionItem,
   type AdminSubmissionsResponse,
+  type ReviewPayload,
 } from "../api/results";
 import { ArtifactLinks } from "./ArtifactLinks";
+import { ConfirmModal } from "./Modal";
+import { SubmissionRejectModal } from "./SubmissionReviewModal";
 import { ErrorBox, Loading } from "./ui";
 
 const PAGE_SIZE = 50;
 /** Gõ xong mới gọi server; Enter trong ô tìm kiếm thì áp dụng ngay. */
 const SEARCH_DEBOUNCE_MS = 300;
+/** Băng báo thành công tự tắt; đủ lâu để đọc hết một câu. */
+const MESSAGE_TIMEOUT_MS = 4500;
 
 const STATUS_OPTIONS = [
-  { value: "", label: "Mọi trạng thái" },
+  { value: "", label: "Mọi trạng thái chấm" },
   { value: "completed", label: "Đã chấm điểm" },
   { value: "rejected", label: "Không hợp lệ" },
   { value: "failed", label: "Lỗi chấm điểm" },
+];
+
+/** Trục duyệt tách khỏi trục chấm điểm: "Hợp lệ" gồm cả bài chưa từng bị xét duyệt. */
+const REVIEW_OPTIONS = [
+  { value: "", label: "Mọi trạng thái duyệt" },
+  { value: "accepted", label: "Hợp lệ" },
+  { value: "rejected", label: "Không chấp nhận" },
 ];
 
 /** Thứ tự mặc định khi chuyển sang một cột: điểm/thời gian mới nhất trước, tên A→Z. */
@@ -46,9 +61,10 @@ interface Filters {
   competition_id: string;
   q: string;
   status: string;
+  review: string;
 }
 
-const NO_FILTERS: Filters = { competition_id: "", q: "", status: "" };
+const NO_FILTERS: Filters = { competition_id: "", q: "", status: "", review: "" };
 
 /** Bộ lọc + sắp xếp + trang đang xem; đổi bất kỳ phần nào cũng gọi lại server. */
 interface Query extends Filters {
@@ -90,8 +106,15 @@ export function AdminSubmissionsPanel({
   const [competitionsError, setCompetitionsError] = useState(false);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState<Query>(INITIAL_QUERY);
+  /** Bài đang được xử lý; `null` nghĩa là modal tương ứng đang đóng. */
+  const [rejecting, setRejecting] = useState<AdminSubmissionItem | null>(null);
+  const [restoring, setRestoring] = useState<AdminSubmissionItem | null>(null);
+  const [message, setMessage] = useState("");
   const requestSequence = useRef(0);
   const hasData = useRef(false);
+  const messageTimer = useRef<number | null>(null);
+  /** Nút vừa mở modal; dùng để trả focus về đúng chỗ sau khi đóng. */
+  const triggerRef = useRef<HTMLElement | null>(null);
   const endpoint = competitionId
     ? `/admin/competitions/${competitionId}/submissions`
     : "/admin/submissions";
@@ -129,6 +152,7 @@ export function AdminSubmissionsPanel({
       if (!competitionId && next.competition_id) params.set("competition_id", next.competition_id);
       if (next.q) params.set("q", next.q);
       if (next.status) params.set("status", next.status);
+      if (next.review) params.set("review", next.review);
       try {
         const response = await api.get<AdminSubmissionsResponse>(
           `${endpoint}?${params.toString()}`,
@@ -177,6 +201,40 @@ export function AdminSubmissionsPanel({
     }));
   }, []);
 
+  const notify = useCallback((text: string) => {
+    if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    setMessage(text);
+    messageTimer.current = window.setTimeout(() => {
+      setMessage("");
+      messageTimer.current = null;
+    }, MESSAGE_TIMEOUT_MS);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    },
+    [],
+  );
+
+  /**
+   * Lỗi để modal tự hiển thị nên ở đây không bắt: chỉ đóng modal khi backend đã nhận.
+   * Refetch giữ nguyên cuộc thi/tìm kiếm/hai bộ lọc/sắp xếp/trang và làm mới cả thẻ thống kê.
+   */
+  async function rejectSubmission(payload: ReviewPayload) {
+    await setSubmissionReview(rejecting!.id, payload);
+    setRejecting(null);
+    notify("Đã đánh dấu bài nộp là không chấp nhận.");
+    requestPage(query.offset);
+  }
+
+  async function restoreSubmission() {
+    await setSubmissionReview(restoring!.id, { status: "accepted" });
+    setRestoring(null);
+    notify("Đã khôi phục bài nộp về trạng thái hợp lệ.");
+    requestPage(query.offset);
+  }
+
   function changeSort(field: AdminSortField) {
     setQuery((current) => ({
       ...current,
@@ -214,7 +272,9 @@ export function AdminSubmissionsPanel({
   }
 
   const busy = loading || refreshing;
-  const hasFilters = Boolean(query.competition_id || query.status || search.trim());
+  const hasFilters = Boolean(
+    query.competition_id || query.status || query.review || search.trim(),
+  );
   const shownFrom = data ? data.offset + 1 : 0;
   const shownTo = data ? Math.min(data.offset + PAGE_SIZE, data.total) : 0;
   const hasNext = data ? shownTo < data.total : false;
@@ -233,6 +293,64 @@ export function AdminSubmissionsPanel({
           <SortArrow active={active} descending={query.order === "desc"} />
         </button>
       </th>
+    );
+  }
+
+  /**
+   * Trạng thái duyệt của một dòng. Record chưa chấm được điểm (`failed`/`rejected` legacy) không
+   * bao giờ xét duyệt được nên hiển thị gạch, tránh bị đọc thành "hợp lệ".
+   */
+  function reviewCell(submission: AdminSubmissionItem) {
+    if (submission.status !== "completed") return <span className="cell-secondary">—</span>;
+    if (!submission.review) {
+      return <span className="status-badge success">Hợp lệ</span>;
+    }
+    return (
+      <>
+        <span
+          className={`status-badge ${
+            submission.review.status === "rejected" ? "danger" : "success"
+          }`}
+        >
+          {REVIEW_STATUS_LABEL[submission.review.status]}
+        </span>
+        {submission.review.note && (
+          <span className="cell-secondary subm-review-note">{submission.review.note}</span>
+        )}
+        <span className="cell-secondary">
+          {submission.review.reviewed_by.name} · {formatLocal(submission.review.reviewed_at)}
+        </span>
+      </>
+    );
+  }
+
+  function actionCell(submission: AdminSubmissionItem) {
+    if (submission.status !== "completed") return <span className="cell-secondary">—</span>;
+    if (submission.review?.status === "rejected") {
+      return (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={(event) => {
+            triggerRef.current = event.currentTarget;
+            setRestoring(submission);
+          }}
+        >
+          Khôi phục
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={(event) => {
+          triggerRef.current = event.currentTarget;
+          setRejecting(submission);
+        }}
+      >
+        Không chấp nhận
+      </button>
     );
   }
 
@@ -286,11 +404,23 @@ export function AdminSubmissionsPanel({
         />
         <select
           className="input"
-          aria-label="Lọc theo trạng thái"
+          aria-label="Lọc theo trạng thái chấm"
           value={query.status}
           onChange={(event) => changeFilters({ status: event.target.value })}
         >
           {STATUS_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <select
+          className="input"
+          aria-label="Lọc theo trạng thái duyệt"
+          value={query.review}
+          onChange={(event) => changeFilters({ review: event.target.value })}
+        >
+          {REVIEW_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -307,6 +437,12 @@ export function AdminSubmissionsPanel({
           </span>
         )}
       </form>
+
+      {message && (
+        <div className="status-banner success admin-submissions-banner" role="status">
+          <span>{message}</span>
+        </div>
+      )}
 
       {Boolean(error) && data && (
         <div className="admin-section-error admin-submissions-error">
@@ -350,6 +486,8 @@ export function AdminSubmissionsPanel({
                 {sortableHeader("team", "Đội")}
                 <th scope="col">Tệp đã nộp</th>
                 <th scope="col">Trạng thái</th>
+                <th scope="col">Xét duyệt</th>
+                <th scope="col">Thao tác</th>
                 {sortableHeader("f1", "F1", "score-cell")}
                 {sortableHeader("precision", "Precision", "score-cell")}
                 {sortableHeader("recall", "Recall", "score-cell")}
@@ -394,6 +532,8 @@ export function AdminSubmissionsPanel({
                       <span className="cell-error">{submission.error.message}</span>
                     )}
                   </td>
+                  <td className="subm-review-cell">{reviewCell(submission)}</td>
+                  <td className="subm-action-cell">{actionCell(submission)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.precision)}</td>
                   <td className="score-cell">{formatScore(submission.metrics?.recall)}</td>
@@ -407,11 +547,16 @@ export function AdminSubmissionsPanel({
         </div>
       ) : (
         <div className="admin-results-empty">
-          <p>Không có bài nộp phù hợp.</p>
-          {hasFilters && (
-            <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>
-              Xóa bộ lọc
-            </button>
+          {/* Chưa có dữ liệu khác hẳn bị lọc hết: câu chữ "không phù hợp" ở đây gây hiểu nhầm. */}
+          {hasFilters ? (
+            <>
+              <p>Không có bài nộp phù hợp.</p>
+              <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>
+                Xóa bộ lọc
+              </button>
+            </>
+          ) : (
+            <p>Chưa có bài nộp nào.</p>
           )}
         </div>
       )}
@@ -455,6 +600,26 @@ export function AdminSubmissionsPanel({
           </div>
         </div>
       )}
+
+      {rejecting && (
+        <SubmissionRejectModal
+          submission={rejecting}
+          onConfirm={rejectSubmission}
+          onClose={() => setRejecting(null)}
+          returnFocusRef={triggerRef}
+        />
+      )}
+
+      {restoring && (
+        <ConfirmModal
+          title="Khôi phục bài nộp"
+          body={`Khôi phục bài nộp của ${restoring.account.name} về trạng thái hợp lệ? Bài không được chấm lại và lượt nộp đã dùng không thay đổi.`}
+          confirmLabel="Khôi phục"
+          onConfirm={restoreSubmission}
+          onClose={() => setRestoring(null)}
+          returnFocusRef={triggerRef}
+        />
+      )}
     </section>
   );
 }
@@ -495,10 +660,11 @@ function SubmissionStats({
         pending={pending}
         glyph={<IconTeam />}
       />
+      {/* Bài bị từ chối vẫn đã chấm điểm nhưng không nằm trong con số này. */}
       <StatCard
         tone={STAT_TONES[3]}
-        label="Đã chấm điểm"
-        detail="Bài nộp hợp lệ có điểm"
+        label="Được tính kết quả"
+        detail="Bài đã chấm và được chấp nhận"
         value={stats?.completed ?? null}
         pending={pending}
         glyph={<IconScored />}

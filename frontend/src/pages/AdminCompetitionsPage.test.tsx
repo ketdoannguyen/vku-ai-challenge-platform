@@ -121,6 +121,25 @@ test("hiển thị table competitions với status badge và hành động theo 
   expect(screen.queryByRole("menuitem", { name: "Kết thúc" })).toBeNull(); // draft chưa có nút close
 });
 
+test("cuộc thi published đã quá end_at hiển thị Đã kết thúc", async () => {
+  const expired = {
+    ...DRAFT,
+    status: "published",
+    end_at: new Date(Date.now() - 60_000).toISOString(),
+  };
+  mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [expired] }, status: 200 } : { body: {}, status: 500 }));
+  render(
+    <MemoryRouter>
+      <AdminCompetitionsPage />
+    </MemoryRouter>,
+  );
+  await screen.findByText("AI Challenge 2026");
+
+  const table = within(screen.getByRole("region", { name: "Bảng danh sách cuộc thi" }));
+  expect(table.getByText("Đã kết thúc")).toBeTruthy();
+  expect(table.queryByText("Đang diễn ra")).toBeNull();
+});
+
 test("menu ba chấm đóng khi bấm ra ngoài hoặc nhấn Escape", async () => {
   mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
   render(

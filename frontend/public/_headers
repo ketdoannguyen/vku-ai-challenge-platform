@@ -1,12 +1,13 @@
 # Security headers cho static assets của Workers Static Assets.
-# Sao chép byte-for-byte 5 header từ frontend/nginx.conf; KHÔNG áp dụng cho response do Worker
+# Sao chép byte-for-byte 6 header từ frontend/nginx.conf; KHÔNG áp dụng cho response do Worker
 # sinh ra (route /api/*), nên /api/* vẫn nhận header đúng từ tầng Nginx phía sau tunnel.
 /*
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 # Mọi file dưới /assets/ do Vite sinh đều có content hash trong tên (xem vite.config.ts không
 # override output filename) nên cache immutable an toàn; index.html không nằm trong nhánh này.

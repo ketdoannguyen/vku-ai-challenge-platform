@@ -117,6 +117,23 @@ export const STATUS_LABEL: Record<Competition["status"], string> = {
   closed: "Đã kết thúc",
 };
 
+/**
+ * Trạng thái để hiển thị: cuộc thi `published` đã qua `end_at` thì coi như đã kết thúc, khớp với
+ * việc backend đã chặn thật (`JOIN_DEADLINE_PASSED`, `SUBMISSION_DEADLINE_PASSED`). Backend không
+ * tự chuyển `closed` khi qua hạn nên nhãn phải suy từ `end_at`, nếu không bảng quản trị và
+ * dashboard vẫn nói "Đang diễn ra" trong khi thí sinh không vào được nữa. Mốc không hợp lệ thì
+ * giữ nguyên `status`. Giờ hệ thống đọc lúc render - các chỗ hiện nhãn này đều re-render theo nhịp
+ * đếm ngược nên nhãn tự đổi ngay khi tới hạn.
+ */
+export function displayStatus(
+  status: Competition["status"],
+  endAt: string,
+): Competition["status"] {
+  if (status !== "published") return status;
+  const end = new Date(endAt).getTime();
+  return Number.isFinite(end) && Date.now() > end ? "closed" : status;
+}
+
 export const JOIN_MODE_LABEL: Record<Competition["join_mode"], string> = {
   open: "Tự do tham gia",
   code: "Cần mã tham gia",

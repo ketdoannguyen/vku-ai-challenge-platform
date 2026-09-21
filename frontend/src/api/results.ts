@@ -19,6 +19,23 @@ export interface SubmissionArtifacts {
   notebook: ArtifactMeta | null;
 }
 
+/** Quyết định xét duyệt của admin - trục riêng, không thay `status` (trạng thái chấm điểm). */
+export type ReviewStatus = "accepted" | "rejected";
+
+/** Participant chỉ nhận được lý do, và chỉ khi bài đang bị từ chối. */
+export interface ParticipantReview {
+  status: "rejected";
+  note: string | null;
+}
+
+/** Admin nhận thêm người duyệt và thời điểm; `null` nghĩa là bài chưa từng bị xét duyệt. */
+export interface AdminReview {
+  status: ReviewStatus;
+  note: string | null;
+  reviewed_at: string;
+  reviewed_by: { id: string; name: string; email: string };
+}
+
 export interface SubmissionHistoryItem {
   id: string;
   competition_id: string;
@@ -28,6 +45,8 @@ export interface SubmissionHistoryItem {
   created_at: string;
   artifacts: SubmissionArtifacts;
   error?: { code: string; message: string };
+  /** Chỉ có mặt khi bài đang bị từ chối; endpoint admin ghi đè bằng shape đầy đủ. */
+  review?: ParticipantReview;
 }
 
 export interface SubmissionsResponse {
@@ -41,6 +60,12 @@ export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], st
   completed: "Đã chấm điểm",
   rejected: "Không hợp lệ",
   failed: "Lỗi chấm điểm",
+};
+
+/** Nhãn badge cho dòng đã từng bị xét duyệt; `null` (chưa xét) hiển thị là "Hợp lệ". */
+export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
+  accepted: "Đã khôi phục",
+  rejected: "Không chấp nhận",
 };
 
 /** Cột sắp xếp bảng submission của admin - khớp `SORT_FIELDS` phía backend. */
@@ -63,8 +88,10 @@ export interface AdminSubmissionStats {
 }
 
 /** Dòng submission phía admin: thêm định danh tài khoản mà endpoint participant cố ý bỏ. */
-export interface AdminSubmissionItem extends SubmissionHistoryItem {
+export interface AdminSubmissionItem extends Omit<SubmissionHistoryItem, "review"> {
   account: { id: string; name: string; email: string };
+  /** Khác participant: luôn có khoá, `null` khi bài chưa từng bị xét duyệt. */
+  review: AdminReview | null;
 }
 
 /** Bảng toàn cục gắn thêm cuộc thi của từng dòng. */
@@ -112,6 +139,22 @@ export interface ParticipantLeaderboardResponse extends LeaderboardResponse {
   has_more: boolean;
   /** Hạng toàn cục của người xem, kể cả khi ngoài trang; null nếu chưa có bài hoàn thành. */
   me: LeaderboardEntry | null;
+}
+
+/** Lý do bắt buộc khi từ chối, không được gửi kèm khi khôi phục (backend trả 422). */
+export type ReviewPayload =
+  | { status: "rejected"; note: string }
+  | { status: "accepted" };
+
+/**
+ * Xét duyệt hậu kiểm một bài đã chấm điểm. Không chấm lại, không hoàn lượt nộp.
+ * Luôn gọi endpoint toàn cục, kể cả khi bảng đang khóa vào một cuộc thi.
+ */
+export function setSubmissionReview(
+  submissionId: string,
+  payload: ReviewPayload,
+): Promise<{ submission: AdminSubmissionItem }> {
+  return api.patch(`/admin/submissions/${submissionId}/review`, payload);
 }
 
 export function fetchMySubmissions(

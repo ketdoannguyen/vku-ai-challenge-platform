@@ -8,7 +8,7 @@ React + Vite + TypeScript frontend, FastAPI + Python backend, MongoDB, Nginx sam
 
 ## Current status
 
-**Release candidate** - Sprint 07 hoàn thành: toàn bộ MVP flow (login → competition → join → Markdown → submit → scoring → history → leaderboard → export) chạy được, kèm hardening: login rate limiting, error contract ổn định, audit log an toàn, security headers + CSP Report-Only, admin UX hoàn thiện. Production deploy thuộc Sprint 08. Xem `docs/PROJECT_STATE.md`.
+**Release candidate** - Sprint 07 hoàn thành: toàn bộ MVP flow (login → competition → join → Markdown → submit → scoring → history → leaderboard → export) chạy được, kèm hardening: login rate limiting, error contract ổn định, audit log an toàn, security headers + CSP enforce + HSTS (ADR-034), admin UX hoàn thiện. Production deploy thuộc Sprint 08. Xem `docs/PROJECT_STATE.md`.
 
 ## Chạy local (Docker)
 

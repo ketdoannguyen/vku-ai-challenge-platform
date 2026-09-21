@@ -63,7 +63,7 @@ Indexes:
 - unique trên `slug` - tạo idempotent ở app startup (`ensure_indexes`)
 
 Derived field (không lưu DB):
-- `submission_count` - **không** là field của document. `GET /api/competitions` chạy một aggregation `$match competition_id` + `$group _id` trên `submissions` cho cả trang rồi gắn vào từng item (ADR-032). Đếm mọi document submission đã persist, không phụ thuộc `status`, nên bài bị reject (không tạo document) không được tính. Không migration, không index mới: index có prefix `competition_id` của `submissions` (§6) đã phục vụ `$match` này. Detail và endpoint admin không dùng lại field này - admin đã có `submission_count` từ `activity_counts`.
+- `submission_count` - **không** là field của document. `GET /api/competitions` chạy một aggregation `$match competition_id` + `$group _id` trên `submissions` cho cả trang rồi gắn vào từng item (ADR-032). Đếm mọi document submission đã persist, không phụ thuộc `status` **lẫn `review`**, nên bài bị reject (không tạo document) không được tính, còn bài đã persist mà admin từ chối thì vẫn tính - nó vẫn là một lượt đã tiêu (ADR-035). Không migration, không index mới: index có prefix `competition_id` của `submissions` (§6) đã phục vụ `$match` này. Detail và endpoint admin không dùng lại field này - admin đã có `submission_count` từ `activity_counts`.
 
 ## 4. competition_memberships - implemented (Sprint 04)
 
@@ -75,6 +75,7 @@ Fields:
 - `joined_at` (UTC, timezone-aware)
 - `updated_at` (UTC, timezone-aware)
 - `submission_seq` (int | absent ở membership cũ) - counter cấp `submission_no` cho cặp (cuộc thi, account) này, tăng nguyên tử bằng `$inc` **trước** khi upload (ADR-033). Membership chưa có thì lần cấp đầu tiên seed bằng `submission_no` lớn nhất đã cấp cho cặp đó; số nhảy cách nếu upload fail sau khi đã cấp.
+- `quota_day` (str `YYYY-MM-DD` UTC | absent ở membership cũ) + `quota_used` (int | absent) - bộ đếm lượt nộp theo ngày, nguồn sự thật của hạn mức thay cho phép đếm submission (ADR-034). `quota_used` chỉ được tăng/giảm qua `find_one_and_update` có điều kiện nên không bao giờ vượt `quota_per_day`; sang ngày mới (hoặc membership chưa có field) thì seed lại từ số bài `completed` thật trong ngày. Bài không ghi được (upload/insert lỗi) được trả lại lượt.
 
 Indexes:
 - unique compound `(competition_id, account_id)` - enforce race-safe idempotent join
@@ -121,8 +122,15 @@ Fields:
 - `metrics`: `{f1, precision, recall}` raw float
 - `primary_score`
 - `created_at`
+- `review` (object | absent ở record cũ) - quyết định xét duyệt **hậu kiểm** của admin, là trục **độc lập** với `status` (ADR-035):
+  - `status`: `rejected` | `accepted`
+  - `note` (str | null) - lý do từ chối, participant đọc được; luôn `null` khi `accepted`
+  - `reviewed_by` (ObjectId → accounts._id), `reviewed_at` (UTC, timezone-aware)
+  - Ghi **cả object** trong một `$set` trên một document nên không bao giờ trộn metadata của hai lần xét duyệt; chỉ giữ quyết định **gần nhất**, không có event history. `reviewed_by`/`reviewed_at` không bao giờ đi ra endpoint participant.
 
-Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Quota đếm completed theo `created_at` trong ngày UTC.
+Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Hạn mức/ngày đọc từ bộ đếm `quota_day`/`quota_used` trên membership (§4), seed từ số bài `completed` theo `created_at` trong ngày UTC khi sang ngày mới (ADR-034).
+
+Document thiếu `review` (mọi record cũ và mọi bài chưa từng bị xét duyệt) mặc định là **được tính kết quả**: predicate dùng chung là `status == "completed" AND review.status != "rejected"`, và `$ne` khớp cả document thiếu field nên **không cần migration hay backfill**. Từ chối và khôi phục đều không đụng `status`, `metrics`, `primary_score`, `artifacts`, `submission_no`, `created_at` hay counter quota - nhờ vậy quota, scoring lock, bảo vệ xoá member và việc giữ artifact giữ nguyên hành vi; khôi phục cũng không chấm lại vì metrics đã nằm trong document.
 
 Artifact mới **không** nằm dưới `<DATA_DIR>`: object key là `competitions/<slug cuộc thi>/accounts/<slug account>/submissions/submission-0001/prediction.csv|notebook.ipynb`, bucket private, chỉ FastAPI đọc/ghi (ADR-028, layout slug từ ADR-033). Token `submission-{no:04d}` sinh từ cùng một hàm với tên file tải về nên hai chỗ không lệch nhau. Record tạo trước ADR-033 giữ nguyên key theo ObjectId (`competitions/<id>/accounts/<id>/submissions/<id>/…`) vì `object_key` lưu nguyên văn trong document - **không có migration**, hai layout cùng tồn tại. Xoá cuộc thi dọn **cả hai** prefix `competitions/<slug>/` và `competitions/<id>/`; xoá member dọn object của các bài chưa `completed` - xem §10.
 
@@ -136,11 +144,13 @@ Indexes:
 - `(created_at DESC, _id DESC)` - trang `/admin/submissions` toàn cục sắp xếp không kèm `competition_id`
 - `(primary_score DESC, created_at DESC, _id DESC)` - sắp xếp theo điểm ở trang toàn cục
 
+`review` **không có index riêng**: đường đọc chính của leaderboard/export vẫn đi qua prefix `competition_id` + `status` của index có sẵn rồi lọc `review` trên tập đã thu hẹp, còn bộ lọc `review` của bảng admin là đường quản trị phụ. Thêm index khi có bằng chứng đo được, không thêm trước (ADR-035).
+
 Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_score` dùng index ở trên; `team` sắp theo **tên account** nên phải `$lookup` sang `accounts`, `competition` sắp theo tên rồi slug nên `$lookup` sang `competitions` (ADR-029). Hai metric còn lại (`f1`, `precision`, `recall`) sắp trực tiếp trên `metrics.<field>` và không có index riêng: đây là đường quản trị phụ, thêm ba index nữa không đáng so với chi phí ghi. Mọi kiểu sort đều kết thúc bằng tie-break `created_at` rồi `_id` để phân trang không trùng/mất dòng.
 
-`stats` của trang toàn cục là **derived**, không lưu DB và không có collection riêng: một aggregation `$facet` trên cùng query filter trả về `total`, số `competition_id` khác nhau, số `account_id` khác nhau và số document `status=completed`. Route theo một cuộc thi vẫn dùng `count_documents` và không chạy aggregation này.
+`stats` của trang toàn cục là **derived**, không lưu DB và không có collection riêng: một aggregation `$facet` trên cùng query filter trả về `total`, số `competition_id` khác nhau, số `account_id` khác nhau và số document **được tính kết quả** (`status=completed` + `review.status != rejected`) - nên nhãn của thẻ này là "Được tính kết quả", không phải "Đã chấm điểm" (ADR-035). Route theo một cuộc thi vẫn dùng `count_documents` và không chạy aggregation này.
 
-Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record `completed`, nhất quán với ADR-011.
+Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record **được tính kết quả**, nhất quán với ADR-011 và ADR-035.
 
 ## 7. Scoring config (embedded trong competitions)
 
