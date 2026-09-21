@@ -4,11 +4,12 @@ from collections import Counter
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.core.datetimes import iso_z
-from app.submissions.service import SUBMISSIONS_COLLECTION
+from app.submissions.service import SUBMISSIONS_COLLECTION, eligible_query
 
 
 async def ranked_entries(db, competition_id) -> list[dict]:
-    query = {"competition_id": competition_id, "status": "completed"}
+    # Participant, admin và file export dùng chung một tập eligible nên ba đường không thể lệch nhau.
+    query = eligible_query({"competition_id": competition_id, "status": "completed"})
     cursor = db[SUBMISSIONS_COLLECTION].find(query).sort(
         [("primary_score", -1), ("created_at", 1), ("account_id", 1), ("_id", 1)]
     )

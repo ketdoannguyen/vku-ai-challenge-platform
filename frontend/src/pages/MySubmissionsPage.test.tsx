@@ -341,3 +341,85 @@ test("vùng cuộn ngang của bảng là region focus được bằng bàn phí
   expect(region).toHaveAttribute("tabindex", "0");
   expect(within(region).getByRole("table")).toBeTruthy();
 });
+
+test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nhưng không còn là bài tốt nhất", async () => {
+  const REJECTED_NOTE = "Notebook dùng kiến trúc không được phép.";
+  mockResponse({
+    submissions: [
+      {
+        id: "s3",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.95, precision: 0.9, recall: 0.9 },
+        primary_score: 0.95,
+        created_at: "2026-09-16T10:00:00Z",
+        review: { status: "rejected", note: REJECTED_NOTE },
+        artifacts: {
+          prediction: { filename: "rejected.csv", size_bytes: 128, available: true },
+          notebook: { filename: "rejected.ipynb", size_bytes: 4096, available: true },
+        },
+      },
+      {
+        id: "s2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.7, precision: 0.6, recall: 0.5 },
+        primary_score: 0.7,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts: {
+          prediction: { filename: "accepted.csv", size_bytes: 128, available: true },
+          notebook: { filename: "accepted.ipynb", size_bytes: 4096, available: true },
+        },
+      },
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByTitle("rejected.csv");
+
+  const rows = screen.getAllByRole("row");
+  const rejectedRow = rows[1];
+  // Trạng thái chấm điểm vẫn là "Đã chấm điểm"; quyết định của admin là badge riêng kèm lý do.
+  expect(within(rejectedRow).getByText("Đã chấm điểm")).toBeTruthy();
+  expect(within(rejectedRow).getByText("Không chấp nhận")).toBeTruthy();
+  expect(within(rejectedRow).getByText(`Lý do: ${REJECTED_NOTE}`)).toBeTruthy();
+  // Minh bạch: metrics và cả hai artifact vẫn còn (F1 và Điểm chính cùng bằng 0.95).
+  expect(within(rejectedRow).getAllByText("0.950000").length).toBe(2);
+  expect(within(rejectedRow).getAllByRole("button")).toHaveLength(3);
+  expect(within(rejectedRow).getByRole("button", { name: "Notebook" })).toBeTruthy();
+  expect(within(rejectedRow).queryByText("Tốt nhất")).toBeNull();
+
+  // Bài hợp lệ thấp điểm hơn giữ badge "Tốt nhất" và là điểm cao nhất trong trang.
+  expect(within(rows[2]).getByText("Tốt nhất")).toBeTruthy();
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.700000");
+});
+
+test("trang chỉ có bài bị từ chối thì không hiện điểm cao nhất", async () => {
+  mockResponse({
+    submissions: [
+      {
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.95, precision: 0.9, recall: 0.9 },
+        primary_score: 0.95,
+        created_at: "2026-09-16T10:00:00Z",
+        review: { status: "rejected", note: "Thiếu mô tả kiến trúc." },
+        artifacts: {
+          prediction: { filename: "only.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByTitle("only.csv");
+
+  expect(screen.queryByText("Điểm cao nhất trong trang:")).toBeNull();
+  expect(screen.queryByText("Tốt nhất")).toBeNull();
+});

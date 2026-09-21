@@ -147,7 +147,12 @@ export function MySubmissionsPage() {
 
   // Xác định submission có primary_score cao nhất trong trang hiện tại
   const bestSubmissionId = data.submissions.reduce<string | null>((bestId, current) => {
-    if (current.status !== "completed" || typeof current.primary_score !== "number") {
+    // Bài bị admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả.
+    if (
+      current.status !== "completed" ||
+      current.review?.status === "rejected" ||
+      typeof current.primary_score !== "number"
+    ) {
       return bestId;
     }
     if (!bestId) return current.id;
@@ -327,6 +332,7 @@ export function MySubmissionsPage() {
                     />
                   </td>
                   <td>
+                    {/* Trạng thái chấm điểm vẫn là "Đã chấm điểm"; quyết định của admin là badge riêng. */}
                     <span
                       className={`status-badge ${
                         submission.status === "completed" ? "success" : "danger"
@@ -334,8 +340,16 @@ export function MySubmissionsPage() {
                     >
                       {SUBMISSION_STATUS_LABEL[submission.status]}
                     </span>
+                    {submission.review && (
+                      <span className="status-badge danger">Không chấp nhận</span>
+                    )}
                     {submission.error && (
                       <span className="cell-error">{submission.error.message}</span>
+                    )}
+                    {submission.review?.note && (
+                      <span className="cell-secondary subm-review-reason">
+                        Lý do: {submission.review.note}
+                      </span>
                     )}
                   </td>
                   <td className="subm-score-cell score-cell">

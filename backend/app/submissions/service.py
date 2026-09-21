@@ -25,6 +25,15 @@ _PUBLIC_ERROR_MESSAGES = {
 # Record cũ chỉ có CSV trên đĩa; tên mặc định dùng khi metadata không có.
 LEGACY_FILENAME_FALLBACK = "submission.csv"
 
+# Trục xét duyệt của admin, độc lập với `status` (trạng thái chấm điểm). Giữ `status="completed"`
+# là điều kiện để quota, scoring lock và việc giữ artifact khi xoá member không đổi hành vi.
+REVIEW_FIELD = "review"
+REVIEW_STATUS_FIELD = f"{REVIEW_FIELD}.status"
+REVIEW_STATUS_REJECTED = "rejected"
+REVIEW_STATUS_ACCEPTED = "accepted"
+REVIEW_STATUSES = (REVIEW_STATUS_ACCEPTED, REVIEW_STATUS_REJECTED)
+MAX_REVIEW_NOTE_LENGTH = 1000
+
 # Allowlist sort/order của bảng quản trị: không bao giờ nội suy trực tiếp từ query vào `$sort`.
 # Bảng theo một cuộc thi không có cột cuộc thi nên không nhận `competition` - sort đó vô nghĩa ở đó.
 SCOPED_SORT_FIELDS = ("created_at", "team", "primary_score", "f1", "precision", "recall")
@@ -79,6 +88,54 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     )
     await collection.create_index(
         [("competition_id", 1), ("created_at", -1), ("_id", -1)]
+    )
+
+
+def eligible_query(query: dict | None = None) -> dict:
+    """Thêm điều kiện "được tính kết quả": đã chấm điểm và chưa bị admin từ chối.
+
+    `$ne` khớp cả document thiếu `review`, nên record cũ và bài chưa từng bị xét duyệt mặc nhiên
+    hợp lệ - không cần migration hay backfill.
+    """
+    return {**(query or {}), REVIEW_STATUS_FIELD: {"$ne": REVIEW_STATUS_REJECTED}}
+
+
+def review_filter(value: str) -> dict:
+    """Query cho bộ lọc trạng thái duyệt của bảng admin.
+
+    `accepted` gồm cả bài chưa từng bị từ chối lẫn bài đã được khôi phục, vì hai thứ đó hành xử
+    giống nhau ở mọi đường tính kết quả.
+    """
+    if value == REVIEW_STATUS_REJECTED:
+        return {REVIEW_STATUS_FIELD: REVIEW_STATUS_REJECTED}
+    return {REVIEW_STATUS_FIELD: {"$ne": REVIEW_STATUS_REJECTED}}
+
+
+async def set_submission_review(
+    db, submission_id, *, status: str, note: str | None, reviewed_by, now: datetime
+) -> dict | None:
+    """Ghi đè trọn object `review` - một thao tác nguyên tử trên một document.
+
+    Ghi cả object thay vì `$set` từng field để note, người duyệt và thời điểm luôn thuộc về cùng
+    một lần xét duyệt, không trộn metadata của hai admin thao tác song song. Lọc kèm
+    `status="completed"` để record chưa chấm được điểm không bao giờ nhận được quyết định duyệt.
+
+    Trả `None` khi không khớp; người gọi phân biệt 404 với 422 bằng một lượt đọc riêng trên nhánh
+    lỗi. Đây là latest-write-wins: `reviewed_at` đổi ở mỗi lần ghi nên thao tác không idempotent.
+    """
+    return await db[SUBMISSIONS_COLLECTION].find_one_and_update(
+        {"_id": submission_id, "status": "completed"},
+        {
+            "$set": {
+                REVIEW_FIELD: {
+                    "status": status,
+                    "note": note,
+                    "reviewed_by": reviewed_by,
+                    "reviewed_at": now,
+                }
+            }
+        },
+        return_document=ReturnDocument.AFTER,
     )
 
 
@@ -267,6 +324,14 @@ def submission_history_item(submission: dict) -> dict:
                 error_code, "Không thể xử lý bài nộp."
             ),
         }
+    # Participant chỉ thấy lý do khi bài đang bị từ chối; người duyệt và thời điểm là chuyện nội bộ.
+    # Serializer này cũng phục vụ bảng admin nên admin ghi đè lại bằng shape đầy đủ.
+    review = submission.get(REVIEW_FIELD) or {}
+    if review.get("status") == REVIEW_STATUS_REJECTED:
+        item[REVIEW_FIELD] = {
+            "status": REVIEW_STATUS_REJECTED,
+            "note": review.get("note"),
+        }
     return item
 
 
@@ -411,8 +476,10 @@ async def submission_stats(db, query: dict) -> dict:
                         {"$group": {"_id": "$account_id"}},
                         {"$count": "value"},
                     ],
+                    # "Đã chấm điểm" trên thẻ thống kê phải khớp thẻ của nó: bài bị từ chối vẫn
+                    # `completed` nhưng không được tính kết quả nên không nằm trong con số này.
                     "completed": [
-                        {"$match": {"status": "completed"}},
+                        {"$match": eligible_query({"status": "completed"})},
                         {"$count": "value"},
                     ],
                 }

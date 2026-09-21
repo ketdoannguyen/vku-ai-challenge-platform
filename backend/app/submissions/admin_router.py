@@ -10,10 +10,12 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Query, Request, Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
+from pydantic import BaseModel
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.auth.dependencies import AdminAccount
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
@@ -29,6 +31,11 @@ _XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.
 _XLSX_ILLEGAL_CHARACTERS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 
+class ReviewBody(BaseModel):
+    status: str
+    note: str | None = None
+
+
 @router.get("/{competition_id}/submissions")
 async def list_submissions(
     competition_id: str,
@@ -36,6 +43,7 @@ async def list_submissions(
     admin: AdminAccount,
     q: str = "",
     status: str | None = None,
+    review: str | None = None,
     sort: str = service.DEFAULT_SORT,
     order: str = service.DEFAULT_ORDER,
     limit: int = Query(50, ge=1, le=200),
@@ -43,18 +51,22 @@ async def list_submissions(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    _validate_query_params(status, sort, order, service.SCOPED_SORT_FIELDS)
+    _validate_query_params(status, review, sort, order, service.SCOPED_SORT_FIELDS)
 
     query: dict = {"competition_id": competition["_id"]}
-    await _apply_filters(db, query, q, status)
+    await _apply_filters(db, query, q, status, review)
     total = await db[service.SUBMISSIONS_COLLECTION].count_documents(query)
     submissions = await service.list_admin_submissions(
         db, query, sort=sort, order=order, limit=limit, offset=offset
     )
     accounts = await _accounts_by_id(db, [item["account_id"] for item in submissions])
+    reviewers = await _accounts_by_id(db, _reviewer_ids(submissions))
     return {
         "submissions": [
-            _admin_submission(item, accounts.get(item["account_id"])) for item in submissions
+            _admin_submission(
+                item, accounts.get(item["account_id"]), reviewers.get(_reviewer_id(item))
+            )
+            for item in submissions
         ],
         "total": total,
         "limit": limit,
@@ -71,20 +83,21 @@ async def list_all_submissions(
     competition_id: str | None = None,
     q: str = "",
     status: str | None = None,
+    review: str | None = None,
     sort: str = service.DEFAULT_SORT,
     order: str = service.DEFAULT_ORDER,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict:
     db = request.app.state.mongo.db
-    _validate_query_params(status, sort, order, service.SORT_FIELDS)
+    _validate_query_params(status, review, sort, order, service.SORT_FIELDS)
     query: dict = {}
     if competition_id:
         try:
             query["competition_id"] = ObjectId(competition_id)
         except InvalidId:
             raise api_error(422, "VALIDATION_ERROR", "Cuộc thi không hợp lệ.")
-    await _apply_filters(db, query, q, status)
+    await _apply_filters(db, query, q, status, review)
 
     # Bảng toàn cục cần cả bốn số tổng quan nên đếm trong một lượt `$facet`; `total` lấy từ đó.
     stats = await service.submission_stats(db, query)
@@ -93,11 +106,14 @@ async def list_all_submissions(
         db, query, sort=sort, order=order, limit=limit, offset=offset
     )
     accounts = await _accounts_by_id(db, [item["account_id"] for item in submissions])
+    reviewers = await _accounts_by_id(db, _reviewer_ids(submissions))
     competitions = await _competitions_by_id(db, [item["competition_id"] for item in submissions])
     return {
         "submissions": [
             {
-                **_admin_submission(item, accounts.get(item["account_id"])),
+                **_admin_submission(
+                    item, accounts.get(item["account_id"]), reviewers.get(_reviewer_id(item))
+                ),
                 "competition": _competition_ref(
                     competitions.get(item["competition_id"]), item["competition_id"]
                 ),
@@ -111,6 +127,62 @@ async def list_all_submissions(
         "order": order,
         "stats": stats,
     }
+
+
+@global_router.patch("/submissions/{submission_id}/review")
+async def set_submission_review(
+    submission_id: str, body: ReviewBody, request: Request, admin: AdminAccount
+) -> dict:
+    """Xét duyệt hậu kiểm một bài đã chấm điểm: từ chối kèm lý do, hoặc khôi phục về hợp lệ.
+
+    Không chấm lại và không hoàn lượt nộp - `status`, metrics, artifact và bộ đếm quota giữ nguyên;
+    thao tác chỉ đổi quyết định duyệt. Vì vậy phải tách khỏi `PUT`/`POST` của luồng nộp bài.
+    """
+    db = request.app.state.mongo.db
+    if body.status not in service.REVIEW_STATUSES:
+        raise api_error(422, "VALIDATION_ERROR", "Trạng thái duyệt không hợp lệ.")
+    note = body.note.strip() if body.note else ""
+    if body.status == service.REVIEW_STATUS_REJECTED:
+        if not note or len(note) > service.MAX_REVIEW_NOTE_LENGTH:
+            raise api_error(
+                422,
+                "VALIDATION_ERROR",
+                f"Lý do không chấp nhận phải có 1-{service.MAX_REVIEW_NOTE_LENGTH} ký tự.",
+            )
+    elif body.note is not None:
+        raise api_error(422, "VALIDATION_ERROR", "Khôi phục bài nộp không nhận lý do.")
+
+    try:
+        oid = ObjectId(submission_id)
+    except InvalidId:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+
+    updated = await service.set_submission_review(
+        db,
+        oid,
+        status=body.status,
+        note=note if body.status == service.REVIEW_STATUS_REJECTED else None,
+        reviewed_by=admin["_id"],
+        now=datetime.now(timezone.utc),
+    )
+    if updated is None:
+        # Update không khớp vì id sai hoặc vì record chưa chấm được điểm; phân biệt bằng một lượt đọc.
+        exists = await db[service.SUBMISSIONS_COLLECTION].count_documents({"_id": oid}, limit=1)
+        if not exists:
+            raise api_error(404, "NOT_FOUND", "Không tìm thấy bài nộp.")
+        raise api_error(
+            422, "INVALID_TRANSITION", "Chỉ xét duyệt được bài đã chấm điểm thành công."
+        )
+
+    account = await db[ACCOUNTS_COLLECTION].find_one({"_id": updated["account_id"]})
+    # Nội dung lý do là dữ liệu của người dùng, không ghi vào log.
+    logger.info(
+        "Admin %s reviewed submission=%s decision=%s",
+        admin["email"],
+        oid,
+        body.status,
+    )
+    return {"submission": _admin_submission(updated, account, admin)}
 
 
 @global_router.get("/submissions/{submission_id}/prediction")
@@ -146,19 +218,30 @@ async def _admin_download(request: Request, submission_id: str, kind: str) -> Re
 
 
 def _validate_query_params(
-    status: str | None, sort: str, order: str, sort_fields: tuple[str, ...]
+    status: str | None,
+    review: str | None,
+    sort: str,
+    order: str,
+    sort_fields: tuple[str, ...],
 ) -> None:
     if status is not None and status not in _STATUSES:
         raise api_error(422, "VALIDATION_ERROR", "Trạng thái submission không hợp lệ.")
+    # `status` là trạng thái chấm điểm, `review` là quyết định của admin - hai trục, hai tham số.
+    if review is not None and review not in service.REVIEW_STATUSES:
+        raise api_error(422, "VALIDATION_ERROR", "Trạng thái duyệt không hợp lệ.")
     if sort not in sort_fields:
         raise api_error(422, "VALIDATION_ERROR", "Tiêu chí sắp xếp không hợp lệ.")
     if order not in service.SORT_ORDERS:
         raise api_error(422, "VALIDATION_ERROR", "Thứ tự sắp xếp không hợp lệ.")
 
 
-async def _apply_filters(db, query: dict, q: str, status: str | None) -> None:
+async def _apply_filters(
+    db, query: dict, q: str, status: str | None, review: str | None
+) -> None:
     if status:
         query["status"] = status
+    if review:
+        query.update(service.review_filter(review))
     account_ids = await service.matching_account_ids(db, q)
     if account_ids is not None:
         query["account_id"] = {"$in": account_ids}
@@ -224,14 +307,45 @@ async def _competitions_by_id(db, competition_ids: list[ObjectId]) -> dict[Objec
     }
 
 
-def _admin_submission(submission: dict, account: dict | None) -> dict:
+def _admin_submission(
+    submission: dict, account: dict | None, reviewer: dict | None = None
+) -> dict:
     item = service.submission_history_item(submission)
     item["account"] = {
         "id": str(submission["account_id"]),
         "name": account["name"] if account else "Tài khoản đã xóa",
         "email": account["email"] if account else "",
     }
+    # Ghi đè shape participant-safe bằng shape đầy đủ của admin (có người duyệt và thời điểm).
+    item[service.REVIEW_FIELD] = _admin_review(submission, reviewer)
     return item
+
+
+def _reviewer_id(submission: dict):
+    """Id admin đã ra quyết định duyệt gần nhất; None nếu bài chưa từng bị xét duyệt."""
+    return (submission.get(service.REVIEW_FIELD) or {}).get("reviewed_by")
+
+
+def _reviewer_ids(submissions: list[dict]) -> list[ObjectId]:
+    """Gom theo trang để tra tên người duyệt bằng một truy vấn `$in`, không N+1."""
+    return [rid for item in submissions if (rid := _reviewer_id(item)) is not None]
+
+
+def _admin_review(submission: dict, reviewer: dict | None) -> dict | None:
+    """`None` khi bài chưa từng được xét duyệt - UI hiểu là mặc định hợp lệ."""
+    review = submission.get(service.REVIEW_FIELD)
+    if not review:
+        return None
+    return {
+        "status": review["status"],
+        "note": review.get("note"),
+        "reviewed_at": iso_z(review["reviewed_at"]),
+        "reviewed_by": {
+            "id": str(review["reviewed_by"]) if review.get("reviewed_by") else "",
+            "name": reviewer["name"] if reviewer else "Tài khoản đã xóa",
+            "email": reviewer["email"] if reviewer else "",
+        },
+    }
 
 
 def _competition_ref(competition: dict | None, competition_id) -> dict:

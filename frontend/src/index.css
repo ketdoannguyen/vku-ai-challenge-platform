@@ -6022,7 +6022,8 @@ button.resource-link:disabled {
 /* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": ba cột cho tìm kiếm, trạng thái và nút xóa. */
 .results-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) auto;
+  /* Ô tìm kiếm + hai bộ lọc (trạng thái chấm, trạng thái duyệt) + nút xóa bộ lọc. */
+  grid-template-columns: minmax(200px, 1fr) minmax(150px, 200px) minmax(150px, 200px) auto;
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px;
@@ -6046,8 +6047,9 @@ button.resource-link:disabled {
   min-width: 840px;
 }
 
+/* Hai cột xét duyệt/thao tác cộng vào nên bảng rộng hơn trước, vẫn cuộn ngang trong `table-wrap`. */
 .admin-submissions-table {
-  min-width: 1120px;
+  min-width: 1320px;
 }
 
 .results-table th {
@@ -6252,11 +6254,45 @@ button.resource-link:disabled {
 /* Bảng bài nộp toàn cục có thêm ô lọc cuộc thi nên lưới rộng hơn lưới hai bộ lọc của
    tab kết quả; dưới 48rem vẫn thừa hưởng nhánh một cột của `.results-filters`. */
 .admin-submissions-filters {
-  grid-template-columns: minmax(200px, 1fr) minmax(180px, 1fr) minmax(160px, 200px) auto;
+  grid-template-columns:
+    minmax(180px, 1fr) minmax(160px, 1fr) minmax(150px, 200px) minmax(150px, 200px)
+    auto;
 }
 
 .admin-submissions-error {
   margin-bottom: 16px;
+}
+
+.admin-submissions-banner {
+  margin-bottom: 16px;
+}
+
+/* Cột xét duyệt: badge, lý do và người duyệt xếp dọc để lý do dài vẫn đọc được. */
+.subm-review-cell,
+.subm-action-cell {
+  vertical-align: top;
+}
+
+.subm-review-cell > * {
+  display: block;
+}
+
+.subm-review-note {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  font-style: italic;
+}
+
+.subm-action-cell .btn {
+  white-space: nowrap;
+}
+
+/* Lý do từ chối nằm trong cell trạng thái của trang participant. */
+.subm-review-reason {
+  display: block;
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  font-style: italic;
 }
 
 .admin-members {
