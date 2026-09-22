@@ -6437,12 +6437,8 @@ button.resource-link:disabled {
 }
 
 /* KHÔNG đặt `overflow: hidden` ở đây: tooltip của icon trạng thái bung lên trên và sẽ bị
-   cắt cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`.
-
-   `position: relative` biến thẻ thành mốc định vị cho tooltip đó - xem chú thích ở
-   `.subm-icon::after`. */
+   cắt cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`. */
 .subm-card {
-  position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--surface);
@@ -6463,14 +6459,19 @@ button.resource-link:disabled {
   margin: 0;
 }
 
-/* Mỗi tầng là MỘT dòng trường: các trường co theo nội dung và chỉ xuống dòng khi hết chỗ. */
+/* Mỗi tầng là MỘT dòng trường: các trường co theo nội dung và chỉ xuống dòng khi hết chỗ.
+
+   `space-between` chia đều chỗ trống còn lại thành các khe giữa trường, nên các cột giãn cách
+   nhau đều nhau thay vì dồn hết vào trường được phép giãn. Khe dọc (`row-gap`) nhỏ hơn khe
+   ngang vì hai dòng đã có nhãn `dt` ngăn cách. */
 .subm-card-tier {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--space-sm) var(--space-md);
+  justify-content: space-between;
+  gap: var(--space-md) var(--space-xl);
   margin: 0;
-  padding: 10px var(--space-md);
+  padding: 10px var(--space-lg);
 }
 
 /* Tầng thao tác nằm trên nền chìm để tách khỏi tầng nhận diện mà không cần thêm viền.
@@ -6490,6 +6491,16 @@ button.resource-link:disabled {
   background: var(--surface-container-high);
 }
 
+/* Màn hẹp thì chỗ đắt hơn khoảng thở: siết lề và khe về bậc nhỏ hơn để hai trường cuối tầng
+   xử lý vẫn nằm chung một dòng (đo được ở 375px: thiếu đúng 3px nên `Trạng thái` rơi xuống
+   một dòng riêng, tốn thêm ~72px chiều cao thẻ). */
+@media (max-width: 47.99rem) {
+  .subm-card-tier {
+    gap: var(--space-sm) var(--space-lg);
+    padding: 10px var(--space-md);
+  }
+}
+
 /* Mặc định không co: trường ngắn (icon trạng thái, nút thao tác) mà bị co thì icon méo và chữ
    trong nút bị cắt. `min-width: 0` vẫn cần để chuỗi dài không đẩy thẻ rộng ra trong mọi trường
    hợp khác. */
@@ -6502,9 +6513,15 @@ button.resource-link:disabled {
 }
 
 /* Hai trường có giá trị dài (tên cuộc thi, đội) nhận hết chỗ trống còn lại rồi chia nhau, và
-   là hai trường duy nhất được phép co. `min-width` giữ chúng không teo dưới mức đọc được. */
+   là hai trường duy nhất được phép co. Chính vì chúng nuốt hết chỗ trống nên `space-between`
+   của tầng không còn gì để chia ở tầng này: khe ở đây đúng bằng `--space-xl`, còn dư thì nằm
+   trong hai cột này. `min-width` giữ chúng không teo dưới mức đọc được.
+
+   `flex-basis` phải bằng `min-width`: flexbox xuống dòng theo basis chứ không theo bề rộng co
+   được, nên basis lớn hơn `min-width` sẽ đẩy trường bạn xuống dòng sớm ở màn hẹp dù hai trường
+   vừa khít nếu co lại. */
 .subm-field-grow {
-  flex: 1 1 8rem;
+  flex: 1 1 6rem;
   min-width: 6rem;
 }
 
@@ -6515,6 +6532,10 @@ button.resource-link:disabled {
   flex: 0 1 auto;
 }
 
+/* Nhãn và giá trị đều canh giữa trong cột. Căn bằng `text-align`/`justify-content` trên hai hộp
+   vẫn giữ nguyên bề rộng cột (chúng giãn đầy cột theo `align-items: stretch` mặc định), nên
+   `text-overflow: ellipsis` ở `.subm-truncate` vẫn có bề rộng xác định để cắt. Canh giữa bằng
+   `align-items: center` ở `.subm-field` thì hộp co về đúng nội dung và phép cắt mất tác dụng. */
 .subm-field dt {
   color: var(--text-muted);
   font-size: var(--text-label);
@@ -6522,15 +6543,20 @@ button.resource-link:disabled {
   line-height: var(--leading-label);
   letter-spacing: var(--tracking-label);
   text-transform: uppercase;
+  text-align: center;
   white-space: nowrap;
 }
 
 /* Một dòng ngang, KHÔNG xếp chồng: đây là ràng buộc chiều cao chính của thẻ. Chỗ hẹp thì nhóm
-   nút tự xuống dòng chứ không tràn ra ngoài. */
+   nút tự xuống dòng chứ không tràn ra ngoài.
+
+   `justify-content: center` canh giữa cả nhóm con trong cột. Con flex ở đây đều co được
+   (`min-width: 0`), nên khi chữ dài chúng lấp đầy cột chứ không tràn ra hai bên. */
 .subm-field dd {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: var(--space-sm);
   min-width: 0;
@@ -6602,10 +6628,12 @@ button.resource-link:disabled {
 }
 
 /* Cụm chỉ số phụ cũng tự xuống dòng: ở bề rộng hẹp nó là khối rộng nhất trong cụm Kết quả, ép
-   một dòng sẽ đẩy cả thẻ tràn khung. */
+   một dòng sẽ đẩy cả thẻ tràn khung. Canh giữa để dòng thứ hai (thường chỉ còn `Recall`) không
+   lệch về lề trái trong khi cả khối đã canh giữa. */
 .subm-result-metrics {
   display: inline-flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: var(--space-xs) var(--space-md);
 }
 
@@ -6627,10 +6655,7 @@ button.resource-link:disabled {
 }
 
 /* --- Icon trạng thái: hình dạng + màu nói kết luận, chữ chỉ hiện khi trỏ vào ---
-   Đĩa tròn tint là nền, glyph bên trong là nét trần (không vẽ thêm vòng tròn lồng nhau).
-
-   Cố ý KHÔNG đặt `position` ở đây: tooltip phải bám vào thẻ, không bám vào icon - xem
-   `.subm-icon::after`. */
+   Đĩa tròn tint là nền, glyph bên trong là nét trần (không vẽ thêm vòng tròn lồng nhau). */
 .subm-icon {
   display: inline-flex;
   align-items: center;
@@ -6667,22 +6692,19 @@ button.resource-link:disabled {
 }
 
 /* Tooltip nền mực đặc để không bị đọc lẫn với nội dung thẻ. `pre-line` cho phép xuống dòng
-   bằng `\n` trong `data-tip` - chỗ để ngăn cách kết luận với chi tiết (lý do, thời điểm).
+   bằng `\n` - chỗ để ngăn cách kết luận với chi tiết (lý do, thời điểm).
 
-   Bám theo THẺ (mọi tổ tiên giữa icon và thẻ đều không định vị), không bám theo icon: icon nằm
-   ở nhiều cột khác nhau tuỳ nội dung và bề rộng, nên một bong bóng canh giữa icon sẽ tràn ra
-   ngoài khung - đo được 38px ở dải 1000-1159px và hơn 100px ở 375px.
+   `position: fixed` + `left`/`top` do JS đặt (xem `StatusIcon`): hộp phải nằm ngay trên icon
+   đang trỏ vào, mà bám vào icon bằng CSS thuần thì nó tràn ra ngoài khung nhìn khi icon ở sát
+   lề. Đo rect của icon rồi kẹp lại là cách duy nhất thoả cả hai, và việc đó cần JS.
 
-   Canh lề trái của thẻ rồi mọc sang phải, trần là `min(40rem, bề ngang thẻ)`: kết luận ngắn chỉ
-   chiếm một dải vừa đủ, còn lý do xét duyệt dài có tối đa 40rem để xuống dòng. Trần tính theo
-   phần trăm bề ngang thẻ nên tooltip không bao giờ vượt ra ngoài thẻ, ở mọi bề rộng màn hình. */
-.subm-icon::after {
-  content: attr(data-tip);
-  position: absolute;
-  left: var(--space-md);
-  bottom: calc(100% + 8px);
+   `max-width` tính theo `100vw` chứ không theo bề ngang thẻ: mốc định vị giờ là khung nhìn.
+   Dài tối đa 40rem để lý do xét duyệt dài xuống dòng, vẫn chừa 2 lề để không dính mép. */
+.subm-tip {
+  position: fixed;
+  z-index: 40;
   width: max-content;
-  max-width: min(40rem, calc(100% - 2 * var(--space-md)));
+  max-width: min(40rem, calc(100vw - 2 * var(--space-md)));
   padding: 8px 12px;
   border-radius: var(--radius-md);
   background: var(--vku-ink);
@@ -6697,15 +6719,13 @@ button.resource-link:disabled {
   overflow-wrap: anywhere;
   opacity: 0;
   visibility: hidden;
-  transform: translateY(4px);
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  transition: opacity 0.12s ease;
   pointer-events: none;
 }
 
-.subm-icon:hover::after {
+.subm-tip-open {
   opacity: 1;
   visibility: visible;
-  transform: translateY(0);
 }
 
 /* Chữ nằm sẵn trong DOM nhưng bị ẩn; nó chỉ hiện ở chế độ dự phòng bên dưới. */
@@ -6728,7 +6748,7 @@ button.resource-link:disabled {
     font-weight: 600;
   }
 
-  .subm-icon::after {
+  .subm-tip {
     display: none;
   }
 }

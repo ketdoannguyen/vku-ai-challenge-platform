@@ -237,8 +237,15 @@ test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường c
   const labelsOf = (tier: HTMLElement) =>
     Array.from(tier.querySelectorAll("dt")).map((dt) => dt.textContent);
 
-  expect(labelsOf(tiers[0])).toEqual(["Thời gian", "Cuộc thi", "Đội", "Trạng thái", "Kết quả"]);
-  expect(labelsOf(tiers[1])).toEqual(["Tệp đã nộp", "AI sơ bộ", "Xét duyệt", "Thao tác"]);
+  expect(labelsOf(tiers[0])).toEqual(["Thời gian", "Cuộc thi", "Đội", "Kết quả"]);
+  // Ba trục phán quyết đứng liền nhau ở tầng dưới, thao tác đứng cuối.
+  expect(labelsOf(tiers[1])).toEqual([
+    "Tệp đã nộp",
+    "AI sơ bộ",
+    "Xét duyệt",
+    "Trạng thái",
+    "Thao tác",
+  ]);
 
   // Cụm Kết quả giữ đủ bốn điểm: Điểm chính đứng riêng, ba metric phụ nằm trong một nhóm.
   const result = fieldValue(items[0], "Kết quả");
@@ -512,6 +519,16 @@ function statusIcon(item: HTMLElement, label: string): HTMLElement {
   return icon as HTMLElement;
 }
 
+/**
+ * Tooltip của một icon trạng thái. Nó là phần tử thật chứ không phải `::after` vì phải đặt được
+ * theo vị trí icon, nên nội dung đọc thẳng từ DOM thay vì từ một thuộc tính.
+ */
+function statusTip(item: HTMLElement, label: string): HTMLElement {
+  const tip = statusIcon(item, label).querySelector<HTMLElement>(".subm-tip");
+  expect(tip, `không có tooltip ở trường "${label}"`).toBeTruthy();
+  return tip as HTMLElement;
+}
+
 test("trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
   mockApi(() =>
     jsonResponse({
@@ -533,7 +550,7 @@ test("trường Xét duyệt chỉ còn icon; lý do, người duyệt và thờ
   expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
   // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
   // và thời điểm vào tooltip, cách nhau bằng xuống dòng.
-  const rejectedTip = rejectedReview.getAttribute("data-tip") ?? "";
+  const rejectedTip = statusTip(rejectedItem, "Xét duyệt").textContent ?? "";
   expect(rejectedTip).toContain(REJECTED_REVIEW.note);
   expect(rejectedTip).toContain("Admin A");
   expect(rejectedTip.split("\n")[0]).toBe("Không chấp nhận");
@@ -757,7 +774,7 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
   const flaggedIcon = statusIcon(flaggedItem, "AI sơ bộ");
   expect(flaggedIcon).toHaveAttribute("aria-label", "Có dấu hiệu");
   // Thời điểm cập nhật không chiếm thêm dòng nào trong thẻ, chỉ vào tooltip.
-  expect(flaggedIcon.getAttribute("data-tip")).toContain("Cập nhật");
+  expect(statusTip(flaggedItem, "AI sơ bộ").textContent).toContain("Cập nhật");
   expect(within(fieldValue(flaggedItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
     .toBeTruthy();
 

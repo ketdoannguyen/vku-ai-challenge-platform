@@ -3,9 +3,9 @@
  * - Trang toàn cục `/admin/submissions`: thẻ thống kê, bộ lọc và trường cuộc thi đều bật.
  * - Tab Kết quả của một cuộc thi: đã khóa vào cuộc thi hiện tại nên ẩn cả ba.
  *
- * Mỗi bài nộp là MỘT thẻ hai tầng: tầng đầu để nhận diện (thời gian, cuộc thi, đội, trạng
- * thái, kết quả), tầng sau để xử lý (tệp, AI, xét duyệt, thao tác). Bảng 12 cột cũ phải cuộn
- * ngang ở 1480px nên không đọc nổi trên màn hẹp.
+ * Mỗi bài nộp là MỘT thẻ hai tầng: tầng đầu để nhận diện (thời gian, cuộc thi, đội, kết quả),
+ * tầng sau để xử lý và phán quyết (tệp, AI, xét duyệt, trạng thái chấm, thao tác). Bảng 12 cột
+ * cũ phải cuộn ngang ở 1480px nên không đọc nổi trên màn hẹp.
  *
  * Chiều cao là ràng buộc chính: trong mỗi tầng không giá trị nào được xếp chồng lên nhau, nên
  * nhãn `dt` nằm trên còn `dd` là một dòng ngang. Ba trạng thái (chấm điểm, AI, xét duyệt) chỉ
@@ -15,7 +15,15 @@
  * Lọc, sắp xếp và phân trang đều chạy phía server để tổng số luôn khớp bộ lọc.
  */
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   AI_FILTER_OPTIONS,
@@ -699,10 +707,6 @@ export function AdminSubmissionsPanel({
                         <span className="subm-muted subm-truncate">{submission.account.email}</span>
                       </dd>
                     </div>
-                    <div className="subm-field">
-                      <dt>Trạng thái</dt>
-                      <dd>{statusCell(submission)}</dd>
-                    </div>
                     <div className="subm-field subm-field-result">
                       <dt>Kết quả</dt>
                       <dd>
@@ -744,6 +748,12 @@ export function AdminSubmissionsPanel({
                     <div className="subm-field">
                       <dt>Xét duyệt</dt>
                       <dd>{reviewCell(submission)}</dd>
+                    </div>
+                    {/* Trạng thái chấm điểm đứng cạnh hai trục kia: cả ba đều là kết luận chỉ
+                        còn icon, đứng chung một tầng thì mắt soát một lượt là hết. */}
+                    <div className="subm-field">
+                      <dt>Trạng thái</dt>
+                      <dd>{statusCell(submission)}</dd>
                     </div>
                     <div className="subm-field">
                       <dt>Thao tác</dt>
@@ -974,13 +984,20 @@ const AI_VERDICT_GLYPH: Record<AiVerdict, Glyph> = {
   ERROR: "clock",
 };
 
+/** Toạ độ khung nhìn của tooltip đang mở; `null` là đóng. */
+type TipAnchor = { left: number; top: number };
+
 /**
  * Một trạng thái trong thẻ bài nộp.
  *
  * Chữ không nằm cạnh icon: nhãn `dt` ngay trên đã nói đây là trục nào, còn kết luận thì hình
  * dạng + màu nói thay. Chữ đầy đủ nằm trong `aria-label` (cho trình đọc màn hình) và trong
- * tooltip CSS (cho người dùng chuột). Tooltip là giả, không phải phần tử thật, nên không thêm
- * tab stop nào cho mỗi thẻ.
+ * tooltip mở khi trỏ chuột.
+ *
+ * Tooltip là phần tử thật chứ không phải `::after` vì phải đặt được theo vị trí icon: hộp bám
+ * thẳng vào icon bằng CSS thì tràn ra ngoài khung nhìn khi icon nằm sát lề (đo được 38px ở dải
+ * 1000-1159px và hơn 100px ở 375px), còn bám vào thẻ thì hộp lại nằm tận lề trái, xa icon.
+ * Chỉ chuột mở được tooltip nên không thêm tab stop nào cho mỗi thẻ.
  */
 function StatusIcon({
   tone,
@@ -993,12 +1010,52 @@ function StatusIcon({
   label: string;
   tip?: string;
 }) {
+  const tipRef = useRef<HTMLSpanElement>(null);
+  const [anchor, setAnchor] = useState<TipAnchor | null>(null);
+
+  /**
+   * Toạ độ chốt lúc trỏ vào, còn icon thì trôi theo trang khi cuộn. Cuộn mà chuột đứng yên trên
+   * icon thì không có `mouseleave` nào để đóng, hộp ở lại một mình và nói về chỗ khác. Đóng hộp
+   * khi trang cuộn hoặc đổi bề rộng là cách rẻ nhất để điều đó không xảy ra. Chỉ icon đang mở
+   * mới gắn listener nên cùng lúc có tối đa một cặp listener.
+   */
+  useEffect(() => {
+    if (!anchor) return;
+    const close = () => setAnchor(null);
+    // `capture` để bắt cả cuộn của khung cuộn lồng bên trong, không riêng `window`.
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [anchor]);
+
+  /** Đặt tooltip ngay trên icon vừa trỏ vào rồi kẹp vào trong khung nhìn. */
+  function openTip(event: MouseEvent<HTMLSpanElement>) {
+    const box = tipRef.current;
+    if (!box) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const gap = 8;
+    const above = rect.top - gap - box.offsetHeight;
+    setAnchor({
+      // Kẹp ngang: hộp rộng hơn phần còn lại của khung nhìn thì dạt vào, không tràn ra ngoài.
+      left: Math.min(
+        Math.max(rect.left, gap),
+        Math.max(gap, window.innerWidth - gap - box.offsetWidth),
+      ),
+      // Thiếu chỗ phía trên (icon ở sát mép trên) thì lật xuống dưới icon.
+      top: above >= gap ? above : rect.bottom + gap,
+    });
+  }
+
   return (
     <span
       className={`subm-icon subm-icon-${tone}`}
       role="img"
       aria-label={label}
-      data-tip={tip ? `${label}\n${tip}` : label}
+      onMouseEnter={openTip}
+      onMouseLeave={() => setAnchor(null)}
     >
       <svg
         viewBox="0 0 24 24"
@@ -1018,6 +1075,15 @@ function StatusIcon({
           giờ mở, nên kết luận phải đọc được bằng mắt thường. `role="img"` khiến trình đọc màn
           hình bỏ qua phần chữ này và chỉ đọc `aria-label`, nên không bị đọc hai lần. */}
       <span className="subm-icon-label">{label}</span>
+      {/* Luôn nằm trong DOM kể cả khi đóng: `openTip` phải đo được bề ngang bề cao của hộp
+          trước khi biết đặt nó ở đâu. */}
+      <span
+        ref={tipRef}
+        className={anchor ? "subm-tip subm-tip-open" : "subm-tip"}
+        style={anchor ?? undefined}
+      >
+        {tip ? `${label}\n${tip}` : label}
+      </span>
     </span>
   );
 }
