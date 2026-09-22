@@ -34,6 +34,7 @@ from tests.ai_review_helpers import (  # noqa: F401 - fixture tái xuất cho py
     finding,
     handler,
     job_of,
+    rule_ref,
     public_dns,
     reviews,
     run,
@@ -65,6 +66,12 @@ async def test_a_clean_run_writes_a_completed_review_and_advances_the_projection
     assert review["model"] == MODEL
     assert review["notebook_stats"]["code_cells"] == 2
     assert review["prompt_version"] == constants.PROMPT_VERSION
+    # Mọi version tham gia vào việc dựng câu trả lời đều phải nằm lại trong audit row.
+    assert review["normalization_version"] == constants.NORMALIZATION_VERSION
+    assert review["context_policy_version"] == constants.CONTEXT_POLICY_VERSION
+    assert review["canonicalization_version"] == constants.CANONICALIZATION_VERSION
+    assert review["rule_ref_version"] == constants.RULE_REF_VERSION
+    assert review["verifier_version"] == constants.VERIFIER_VERSION
 
     stored = await submission_of(mock_db, submission["_id"])
     assert stored["ai_review"]["state"] == constants.AI_STATE_COMPLETED
@@ -111,12 +118,24 @@ async def test_the_review_row_never_carries_the_api_key_or_the_raw_prompt(mock_d
         "source_content_title",
         "source_content_slug",
         "rule_text",
+        "rule_ref",
+        "model_rule_ref",
+        "rule_resolution",
+        "rule_verified",
+        "evidence_count",
+        "valid_evidence_count",
+        "evidence_verified",
+        "verified",
+        "traceable",
         "checkability",
         "status",
         "reason",
         "evidence",
-        "verified",
+        "verification_codes",
     }
+    # Ref model gửi và ref backend resolve được là cùng một giá trị, nhưng chỉ ref sau được lưu như
+    # nguồn sự thật; `rule_text` đi kèm cũng lấy từ revision.
+    assert review["findings"][0]["rule_text"] == RULE
 
 
 async def test_a_flagged_run_never_touches_the_scoring_or_human_review_axes(mock_db, ai_env):
@@ -171,7 +190,10 @@ async def test_an_unverifiable_accusation_is_downgraded_to_inconclusive(mock_db,
     invented = {
         "verdict": "FLAGGED",
         "summary": "Vi phạm.",
-        "findings": [finding(rule="Quy định không hề tồn tại trong thể lệ.")],
+        # Ref bịa và quote không khớp block nào: không có nguồn sự thật nào chống lưng cho cáo buộc.
+        "findings": [
+            finding(ref="rules#000000000000000000000000", quote="Quy định không hề tồn tại.")
+        ],
     }
     await run(mock_db, handler(invented))
 
@@ -179,6 +201,65 @@ async def test_an_unverifiable_accusation_is_downgraded_to_inconclusive(mock_db,
     assert review["verdict"] == constants.VERDICT_INCONCLUSIVE
     assert review["model_verdict"] == constants.VERDICT_FLAGGED
     assert review["downgrade_codes"] == ["NO_VERIFIED_VIOLATION", "RULE_NOT_FOUND"]
+
+
+async def test_a_wrong_ref_still_resolves_through_the_unique_quote_fallback(mock_db, ai_env):
+    """Model chép sai id nhưng chép đúng câu: đường dự phòng cứu được quy định, và rule text lưu vào
+    vẫn lấy từ revision chứ không từ quote."""
+    await seed(mock_db)
+    output = {
+        "verdict": "FLAGGED",
+        "summary": "Dùng dữ liệu ngoài.",
+        "findings": [finding(ref="rules#000000000000000000000000", quote=RULE)],
+    }
+    await run(mock_db, handler(output))
+
+    review = (await reviews(mock_db))[0]
+    assert review["verdict"] == constants.VERDICT_FLAGGED
+    assert review["downgrade_codes"] == []
+    stored = review["findings"][0]
+    assert stored["rule_resolution"] == constants.RULE_RESOLUTION_CANONICAL_QUOTE
+    assert stored["rule_text"] == RULE
+    assert stored["rule_ref"] == rule_ref()
+    assert stored["model_rule_ref"] == "rules#000000000000000000000000"
+    assert stored["traceable"] is True
+
+
+async def test_a_revision_with_duplicate_page_slugs_stops_before_the_provider(mock_db, ai_env):
+    """Revision dựng không được chỉ mục quy định là lỗi dữ liệu: dừng pipeline, không đoán."""
+    await seed(mock_db)
+    revision = await mock_db[content_snapshot.REVISIONS_COLLECTION].find_one({})
+    await mock_db[content_snapshot.REVISIONS_COLLECTION].update_one(
+        {"_id": revision["_id"]},
+        {"$set": {"pages": [{**revision["pages"][0]}, {**revision["pages"][0]}]}},
+    )
+    calls: list = []
+
+    _, outcome = await run(mock_db, handler(CLEAR_OUTPUT, calls))
+
+    assert outcome == service.OUTCOME_FAILED
+    assert calls == []
+    review = (await reviews(mock_db))[0]
+    assert review["verdict"] == constants.VERDICT_ERROR
+    assert review["error"]["code"] == constants.AI_CONTENT_SNAPSHOT_UNAVAILABLE
+
+
+async def test_the_review_run_leaves_the_content_revision_untouched(mock_db, ai_env):
+    """Chỉ mục quy định được DẪN XUẤT lúc đọc, không được ghi ngược vào revision.
+
+    Revision là dữ liệu bất biến đã chốt lúc nộp và `content_hash` là thứ cache bám vào; nhét đầu ra
+    của thuật toán vào đó là đổi định nghĩa của chính cái hash ấy, và mọi revision cũ trên production
+    sẽ mang một hình dạng khác với revision do code hiện tại sinh ra.
+    """
+    await seed(mock_db)
+    collection = mock_db[content_snapshot.REVISIONS_COLLECTION]
+    before = await collection.find_one({})
+
+    _, outcome = await run(mock_db, handler(FLAGGED_OUTPUT))
+
+    assert outcome == service.OUTCOME_COMPLETED
+    after = await collection.find_one({})
+    assert after == before
 
 
 async def test_a_notebook_missing_from_storage_is_a_terminal_audit_row(mock_db, ai_env):
@@ -541,15 +622,14 @@ async def test_two_competitions_with_opposite_policies_get_opposite_verdicts(moc
         user = body["messages"][1]["content"]
         seen.append(user)
         allowed = "Được phép dùng mô hình pretrained." in user
+        ban = "Cấm dùng mô hình pretrained dưới mọi hình thức."
         payload = (
             CLEAR_OUTPUT
             if allowed
             else {
                 "verdict": "FLAGGED",
                 "summary": "Dùng pretrained.",
-                "findings": [
-                    finding(rule="Cấm dùng mô hình pretrained dưới mọi hình thức.")
-                ],
+                "findings": [finding(ref=rule_ref(bans, ban), quote=ban)],
             }
         )
         return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(payload)}}]})
@@ -817,8 +897,21 @@ async def test_the_cache_key_changes_with_every_component_that_reaches_the_model
     assert service.cache_key(**base) == original
 
 
-def test_the_cache_key_moves_when_the_prompt_version_moves(monkeypatch):
-    """Prompt đổi mà version không đổi thì cache trả kết luận cũ - lượt chạy mới mất gợi ý."""
+@pytest.mark.parametrize(
+    "version",
+    [
+        "PROMPT_VERSION",
+        "NORMALIZATION_VERSION",
+        "CONTEXT_POLICY_VERSION",
+        "CANONICALIZATION_VERSION",
+        "RULE_REF_VERSION",
+        # Verifier quyết định verdict cuối: đổi cách hậu kiểm mà không đổi khoá là phục vụ lại kết
+        # luận của một verifier khác dưới danh nghĩa lượt chạy mới.
+        "VERIFIER_VERSION",
+    ],
+)
+def test_every_version_that_shapes_a_review_moves_the_cache_key(monkeypatch, version):
+    """Một version đổi mà khoá không đổi thì cache trả kết luận cũ - lượt chạy mới mất gợi ý."""
     base = {
         "competition_id": ObjectId(),
         "content_hash": "c",
@@ -830,6 +923,6 @@ def test_the_cache_key_moves_when_the_prompt_version_moves(monkeypatch):
     }
     original = service.cache_key(**base)
 
-    monkeypatch.setattr(constants, "PROMPT_VERSION", "ai-review-v3-next")
+    monkeypatch.setattr(constants, version, "next-version")
 
     assert service.cache_key(**base) != original

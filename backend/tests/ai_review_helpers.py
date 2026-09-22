@@ -16,6 +16,8 @@ from cryptography.fernet import Fernet
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.ai_review import constants, content_snapshot, crypto, queue, service, url_policy
+from app.ai_review.rule_refs import build_rule_index
+from app.ai_review.rule_text import canonicalize_rule_text
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
 from app.submission_artifacts import storage
@@ -79,11 +81,28 @@ def default_notebook() -> bytes:
     )
 
 
-def finding(*, slug="rules", rule=RULE, status="VIOLATION", evidence=((1, 1, 1),)) -> dict:
+def revision_pages(markdown: str = MARKDOWN) -> list[dict]:
+    """Trang nội dung tối thiểu mà `build_rule_index` cần; `seed` bổ sung các field lưu trữ."""
+    return [{"slug": "rules", "title": "Thể lệ", "order": 1, "markdown": markdown}]
+
+
+def rule_ref(markdown: str = MARKDOWN, text: str = RULE) -> str:
+    """Ref thật của `text` trong `markdown`, tính bằng chính thuật toán production.
+
+    Test không hard-code digest: đổi `RULE_REF_VERSION` hay canonicalizer thì ref ở đây đổi theo,
+    đúng như nó đổi trong prompt thật.
+    """
+    wanted = canonicalize_rule_text(text)
+    for block in build_rule_index(revision_pages(markdown)).blocks:
+        if block.canonical_text == wanted:
+            return block.ref
+    raise AssertionError(f"Không có block nào khớp: {text!r}")
+
+
+def finding(*, ref=None, quote=RULE, status="VIOLATION", evidence=((1, 1, 1),)) -> dict:
     return {
-        "source_content_title": "Thể lệ",
-        "source_content_slug": slug,
-        "rule_text": rule,
+        "rule_ref": rule_ref() if ref is None else ref,
+        "rule_quote": quote,
         "checkability": "CHECKABLE_FROM_NOTEBOOK",
         "status": status,
         "reason": "vì sao",
@@ -167,12 +186,9 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
                     "total_bytes": len(encoded),
                     "pages": [
                         {
+                            **revision_pages(markdown)[0],
                             "content_id": ObjectId(),
-                            "title": "Thể lệ",
-                            "slug": "rules",
-                            "order": 1,
                             "visibility": "public",
-                            "markdown": markdown,
                             "markdown_sha256": hashlib.sha256(encoded).hexdigest(),
                             "size_bytes": len(encoded),
                         }

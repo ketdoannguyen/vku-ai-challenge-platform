@@ -307,9 +307,19 @@ model_verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | null   kết luận thô t
 summary: str
 participant_summary: str               gợi ý ngắn cho thí sinh, admin-only (ADR-040); "" khi model không đưa
 findings: [
-  {source_content_title, source_content_slug, rule_text,
+  {source_content_title, source_content_slug, rule_text,   backend điền từ revision; "" khi unresolved
+   rule_ref: str | null          ref đã resolve (ADR-045)
+   model_rule_ref: str           ref model gửi, giữ nguyên để đối chiếu
+   rule_resolution: "REFERENCE" | "CANONICAL_QUOTE" | "UNRESOLVED"
+   rule_verified: bool
+   evidence_count: int           số khoảng model khai
+   valid_evidence_count: int     số khoảng còn dùng được sau khi kiểm
+   evidence_verified: bool       có >= 1 khoảng hợp lệ
+   verified: bool                rule_verified AND evidence_verified
+   traceable: bool               verified AND VIOLATION AND CHECKABLE
+   verification_codes: [str]     chẩn đoán riêng của finding
    checkability: "CHECKABLE_FROM_NOTEBOOK" | "NOT_CHECKABLE_FROM_NOTEBOOK",
-   status: "VIOLATION" | "COMPLIANT",
+   status: "VIOLATION" | "COMPLIANT" | "UNCLEAR",
    reason,
    evidence: [{cell, start_line, end_line, snippet}]}
 ]
@@ -320,13 +330,13 @@ content_revision_id, content_hash
 provider: "openai_compatible"
 provider_host, model
 prompt_version, normalization_version, context_policy_version
+canonicalization_version, rule_ref_version, verifier_version   ADR-045; row cũ thiếu ⇒ đọc ra null
 cache_key
 source: "PROVIDER" | "CACHE" | "PIPELINE"
 reused_from_review_id: ObjectId | null
 bypass_cache, manual: bool
 attempts: int
-downgrade_codes: [str]
-findings_omitted: int
+downgrade_codes: [str]                mã ở mức lượt, giữ để tương thích
 error: {code, message} | null          message đã che
 usage: {prompt_tokens, completion_tokens, total_tokens} | null
 started_at, completed_at, duration_ms, created_at, updated_at
@@ -341,6 +351,8 @@ Indexes:
 
 **Không lưu**: API key, full Base URL (chỉ host), raw prompt, raw notebook/policy payload, raw provider response. `error.message` chỉ chứa thông điệp đã che; khi parse output model thất bại, message của Pydantic có thể chứa nguyên văn output nên log chỉ ghi `type(exc).__name__`.
 
-`verdict` chỉ được **hạ cấp** so với `model_verdict` và không bao giờ được nâng: thiếu vi phạm đã kiểm chứng ⇒ FLAGGED thành INCONCLUSIVE; bằng chứng trỏ sai cell/dòng ⇒ bị loại và mã lý do vào `downgrade_codes`. `snippet` của model bị **vứt bỏ** và dựng lại từ chính notebook đã lưu. `ERROR` là verdict do pipeline sinh, model không bao giờ được trả nó.
+`verdict` chỉ được **hạ cấp** so với `model_verdict` và không bao giờ được nâng: thiếu vi phạm `traceable` ⇒ FLAGGED thành INCONCLUSIVE; bằng chứng trỏ sai cell/dòng ⇒ bị loại và mã lý do vào `verification_codes` của finding (kèm `downgrade_codes` ở mức lượt để tương thích). `snippet` của model bị **vứt bỏ** và dựng lại từ chính notebook đã lưu. `ERROR` là verdict do pipeline sinh, model không bao giờ được trả nó.
 
-Cache key = `SHA256(notebook_sha256 + content_hash + provider + host + model + prompt_version + normalization_version + context_policy_version)`, tra trong **cùng cuộc thi**. Chỉ `CACHEABLE_VERDICTS` (CLEAR/FLAGGED/INCONCLUSIVE) được tái sử dụng - **ERROR không bao giờ được cache**. Cache hit vẫn sinh audit row mới với `source=CACHE` và `reused_from_review_id` trỏ về lượt gốc, nên lịch sử không bị nối tắt. Chạy tay luôn `bypass_cache=true`.
+Từ ADR-045, `source_content_title`/`source_content_slug`/`rule_text` của một finding **không** đến từ model nữa: model chỉ trả `rule_ref` (bắt buộc) và `rule_quote` (tuỳ chọn, chỉ là khoá tra cứu, **không bao giờ** được lưu làm văn bản quy định), backend resolve về `RuleBlock` trong revision rồi tự điền lại. `RuleIndex` được **dẫn xuất lúc worker đọc revision**, không lưu vào `competition_content_revisions`, nên `canonical_content_hash` và mọi document revision không đổi - không migration, không backfill. Bằng chứng được kiểm **độc lập** với việc resolve rule: một `rule_ref` sai vẫn giữ được các khoảng dòng hợp lệ và vẫn đếm ra phần bị loại.
+
+Cache key = `SHA256(competition_id + content_hash + notebook_sha256 + provider + host + model + max_notebook_chars + prompt_version + normalization_version + context_policy_version + canonicalization_version + rule_ref_version + verifier_version)`, tra trong **cùng cuộc thi**. `max_notebook_chars` nằm trong khoá vì nó **cắt bớt** nội dung: hạ trần thì notebook dài mất cell mà hash thô của artifact không đổi. Ba version cuối (ADR-045) không đổi nội dung gửi model nhưng đổi cách dựng marker, cách sinh `rule_ref` và cách hậu kiểm, tức là đổi ý nghĩa của kết quả đã lưu. Chỉ `CACHEABLE_VERDICTS` (CLEAR/FLAGGED/INCONCLUSIVE) được tái sử dụng - **ERROR không bao giờ được cache**. Cache hit vẫn sinh audit row mới với `source=CACHE` và `reused_from_review_id` trỏ về lượt gốc, nên lịch sử không bị nối tắt. Chạy tay luôn `bypass_cache=true`.

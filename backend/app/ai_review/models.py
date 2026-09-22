@@ -33,11 +33,20 @@ class ModelEvidence(BaseModel):
 
 
 class ModelFinding(BaseModel):
+    """Một nhận định của model, neo vào `rule_ref` chứ không vào văn bản do model tự viết.
+
+    Backend tự điền title, slug và rule text từ revision sau khi resolve ref (ADR-045). Nhờ vậy
+    model không thể đưa prose của mình vào audit row dưới danh nghĩa "trích nguyên văn thể lệ".
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    source_content_title: _text(200)
-    source_content_slug: _text(200)
-    rule_text: _text(constants.MAX_RULE_TEXT_CHARS)
+    rule_ref: _text(constants.MAX_RULE_REF_CHARS)
+    # Bản sao nguyên văn của block để làm đường dự phòng khi ref bị sai và để người đọc đối chiếu.
+    # KHÔNG phải nguồn sự thật: giá trị lưu trữ luôn lấy từ revision.
+    rule_quote: Annotated[
+        str, StringConstraints(strip_whitespace=True, max_length=constants.MAX_RULE_TEXT_CHARS)
+    ] = ""
     checkability: _CHECKABILITY
     status: _FINDING_STATUS
     reason: _text(constants.MAX_REASON_CHARS)

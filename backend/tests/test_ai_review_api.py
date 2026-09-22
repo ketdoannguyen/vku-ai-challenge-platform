@@ -323,28 +323,7 @@ def test_every_ai_filter_value_is_independent_from_scoring_and_human_review(clie
     assert enable_ai(client, competition["id"]).status_code == 200
     flagged = submit_as_participant(client, competition["id"])
     assert flagged.status_code == 201
-    run_worker(
-        client,
-        handler(
-            {
-                "verdict": "FLAGGED",
-                "summary": "Có dấu hiệu.",
-                "findings": [
-                    {
-                        "source_content_title": "Thể lệ",
-                        "source_content_slug": "rules",
-                        "rule_text": "Không được dùng dữ liệu ngoài cuộc thi.",
-                        "checkability": constants.CHECKABLE,
-                        "status": constants.FINDING_VIOLATION,
-                        "reason": "vì sao",
-                        "evidence": [
-                            {"cell": 1, "start_line": 1, "end_line": 1, "snippet": "import pandas"}
-                        ],
-                    }
-                ],
-            }
-        ),
-    )
+    run_worker(client, handler(FLAGGED_OUTPUT))
     login_participant(client)
     submit(client, competition["id"], PREDICTION_CSV)
 
@@ -404,9 +383,44 @@ def test_the_detail_shows_the_history_without_raw_payload_or_object_key(client, 
     assert detail["history"][0]["provider_host"] == HOST
     assert detail["history"][0]["source"] == constants.SOURCE_PROVIDER
     assert detail["content_snapshot"]["state"] == constants.SNAPSHOT_CAPTURED
+    assert detail["history"][0]["versions"] == {
+        "prompt": constants.PROMPT_VERSION,
+        "normalization": constants.NORMALIZATION_VERSION,
+        "context_policy": constants.CONTEXT_POLICY_VERSION,
+        "canonicalization": constants.CANONICALIZATION_VERSION,
+        "rule_ref": constants.RULE_REF_VERSION,
+        "verifier": constants.VERIFIER_VERSION,
+    }
     serialized = str(detail)
     for forbidden in ("object_key", API_KEY, "sk-live", "messages", "api_key_ciphertext"):
         assert forbidden not in serialized
+
+
+def test_an_audit_row_from_before_hybrid_bd_still_serializes(client, competition):
+    """Lịch sử không được viết lại: row cũ thiếu ba version mới vẫn phải đọc được, không 500."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submitted = submit_as_participant(client, competition["id"]).json()
+    run_worker(client)
+
+    async def strip_versions():
+        await _db(client)[service.REVIEWS_COLLECTION].update_many(
+            {},
+            {
+                "$unset": {
+                    "canonicalization_version": "",
+                    "rule_ref_version": "",
+                    "verifier_version": "",
+                }
+            },
+        )
+
+    asyncio.run(strip_versions())
+
+    versions = _detail(client, submitted["id"])["history"][0]["versions"]
+    assert versions["canonicalization"] is None
+    assert versions["rule_ref"] is None
+    assert versions["verifier"] is None
+    assert versions["prompt"] == constants.PROMPT_VERSION
 
 
 def test_the_admin_sees_the_participant_summary_in_the_list_and_the_history(client, competition):

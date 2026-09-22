@@ -49,6 +49,20 @@ NOT_CHECKABLE = "NOT_CHECKABLE_FROM_NOTEBOOK"
 FINDING_VIOLATION = "VIOLATION"
 FINDING_COMPLIANT = "COMPLIANT"
 
+# Cách một finding tìm được quy định trong revision. Chỉ hai đường đầu mới là "đã đối chiếu được";
+# `UNRESOLVED` nghĩa là không có nguồn sự thật nào chống lưng cho finding đó.
+RULE_RESOLUTION_REFERENCE = "REFERENCE"
+RULE_RESOLUTION_CANONICAL_QUOTE = "CANONICAL_QUOTE"
+RULE_RESOLUTION_UNRESOLVED = "UNRESOLVED"
+
+# Mã chẩn đoán theo từng finding: nói rõ vì sao nó chưa được xác minh, thay vì để admin đoán.
+VERIFY_RULE_REF_UNKNOWN = "RULE_REF_UNKNOWN"
+VERIFY_RULE_QUOTE_UNMATCHED = "RULE_QUOTE_UNMATCHED"
+VERIFY_RULE_QUOTE_AMBIGUOUS = "RULE_QUOTE_AMBIGUOUS"
+VERIFY_EVIDENCE_MISSING = "EVIDENCE_MISSING"
+VERIFY_EVIDENCE_INVALID = "EVIDENCE_INVALID"
+VERIFY_EVIDENCE_PARTIALLY_INVALID = "EVIDENCE_PARTIALLY_INVALID"
+
 REVIEW_STATUS_COMPLETED = "COMPLETED"
 REVIEW_STATUS_FAILED = "FAILED"
 
@@ -61,9 +75,17 @@ SOURCE_PIPELINE = "PIPELINE"
 # Mọi thứ ảnh hưởng tới nội dung gửi model đều phải nằm trong cache key; đổi hành vi là bump version.
 # v3: prompt yêu cầu thêm một câu gợi ý ngắn cho thí sinh (`participant_summary`).
 # v4: prompt dặn model ngân sách token của chính nó, thay vì để nó viết tới lúc trần cứng cắt ngang.
-PROMPT_VERSION = "ai-review-v4"
+# v5: model trả `rule_ref` do backend sinh thay vì tự viết title/slug/rule text (ADR-045).
+PROMPT_VERSION = "ai-review-v5"
 NORMALIZATION_VERSION = "notebook-v2"
 CONTEXT_POLICY_VERSION = "context-v2"
+# Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
+# nên phải bump version, và cache cũ tự động không còn dùng được.
+CANONICALIZATION_VERSION = "rule-text-v1"
+RULE_REF_VERSION = "rule-ref-v1"
+# Verifier là thứ quyết định verdict cuối, không phải model. Đổi cách kiểm chứng rule/evidence mà
+# không bump version là phục vụ lại kết luận của một verifier khác dưới cùng một cache key.
+VERIFIER_VERSION = "verifier-v2"
 
 # --- Giới hạn cấu trúc output ---------------------------------------------------------------
 # Trần cứng để output model không bao giờ phình to trong Mongo; vượt trần là output không hợp lệ.
@@ -74,6 +96,9 @@ MAX_SUMMARY_CHARS = 1_000
 # không được làm hỏng cả lượt review - nó chỉ bị cắt trần khi vượt xa mức hợp lý.
 MAX_PARTICIPANT_SUMMARY_CHARS = 200
 MAX_REASON_CHARS = 1_000
+# `rule_ref` là ID mờ do backend sinh (`slug#digest`), không phải văn bản luật: trần chỉ để một chuỗi
+# rác khổng lồ không lọt vào Mongo, không phải để chứa quy định.
+MAX_RULE_REF_CHARS = 200
 MAX_RULE_TEXT_CHARS = 2_000
 MAX_SNIPPET_LINES = 12
 MAX_SNIPPET_CHARS = 600

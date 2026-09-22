@@ -81,10 +81,15 @@ def review_detail(review: dict) -> dict:
         "provider": review.get("provider"),
         "provider_host": review.get("provider_host"),
         "model": review.get("model"),
+        # `.get()` chứ không phải `[...]`: audit row ghi trước Hybrid B+D không có ba version dưới,
+        # và một dòng lịch sử thiếu field không được làm hỏng cả endpoint.
         "versions": {
             "prompt": review.get("prompt_version"),
             "normalization": review.get("normalization_version"),
             "context_policy": review.get("context_policy_version"),
+            "canonicalization": review.get("canonicalization_version"),
+            "rule_ref": review.get("rule_ref_version"),
+            "verifier": review.get("verifier_version"),
         },
         "source": review.get("source"),
         "reused_from_review_id": (

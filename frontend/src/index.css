@@ -6654,6 +6654,15 @@ button.resource-link:disabled {
   font-size: 0.8125rem;
 }
 
+/* Quy định không đối chiếu được. Chỉ nhấn bằng màu cảnh báo chứ không dựng thêm khối cảnh báo thứ
+   hai trong cùng thẻ: badge hậu kiểm ngay trên đó đã nói cùng một điều. */
+.ai-finding-unresolved {
+  margin: var(--space-sm) 0 0;
+  color: var(--warning);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
 /* Lịch sử: mỗi lượt cũ là một `<details>` đóng sẵn, dòng đóng chỉ giữ bốn dữ kiện. */
 .ai-history {
   margin-top: var(--space-lg);

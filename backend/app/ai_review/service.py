@@ -32,6 +32,7 @@ from app.ai_review.notebook import (
     snapshot_stats,
 )
 from app.ai_review.provider import ProviderError, chat_completions
+from app.ai_review.rule_refs import RuleIndexError, build_rule_index
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.datetimes import as_utc, iso_z
 from app.submission_artifacts import storage as artifact_storage
@@ -151,6 +152,12 @@ def cache_key(*, competition_id, content_hash: str, notebook_sha256: str, provid
             constants.PROMPT_VERSION,
             constants.NORMALIZATION_VERSION,
             constants.CONTEXT_POLICY_VERSION,
+            # Ba version dưới đây không đổi nội dung gửi model, nhưng đổi cách dựng marker, cách sinh
+            # `rule_ref` và cách hậu kiểm - tức là đổi ý nghĩa của kết quả lưu trong row. Thiếu chúng
+            # ở đây là phục vụ lại phán quyết của một phiên bản thuật toán khác.
+            constants.CANONICALIZATION_VERSION,
+            constants.RULE_REF_VERSION,
+            constants.VERIFIER_VERSION,
         ]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -188,6 +195,17 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
         return await _finish_error(
             db, job, now=now, code=constants.AI_CONTENT_SNAPSHOT_UNAVAILABLE,
             message="Revision nội dung cuộc thi không còn đọc được.", snapshot=snapshot,
+        )
+
+    # Index quy định được dẫn xuất MỘT LẦN cho cả job và dùng chung cho trần policy, prompt và hậu
+    # kiểm: dựng lại ở mỗi bước là mở đường cho ba bước nhìn thấy ba chỉ mục khác nhau.
+    try:
+        index = build_rule_index(revision["pages"])
+    except RuleIndexError as exc:
+        logger.warning("Revision không dựng được rule index: %s", exc.code)
+        return await _finish_error(
+            db, job, now=now, code=constants.AI_CONTENT_SNAPSHOT_UNAVAILABLE,
+            message="Nội dung cuộc thi không dựng được chỉ mục quy định.", snapshot=snapshot,
         )
 
     competition = await db[COMPETITIONS_COLLECTION].find_one({"_id": job["competition_id"]})
@@ -233,7 +251,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
     }
 
     # Revision phải được gửi TRỌN VẸN: gửi một phần thể lệ rồi kết luận là kết luận sai.
-    if prompt.exceeds_policy_cap(revision, settings.ai_review_max_policy_chars):
+    if prompt.exceeds_policy_cap(revision, index, settings.ai_review_max_policy_chars):
         return await _finish_error(
             db, job, now=now, code=constants.AI_CONTENT_TOO_LARGE,
             message="Nội dung cuộc thi vượt giới hạn ngữ cảnh của model.", snapshot=snapshot,
@@ -295,7 +313,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             policy=policy,
             api_key=api_key,
             model=model,
-            messages=prompt.build_messages(revision, notebook, context),
+            messages=prompt.build_messages(revision, index, notebook, context),
             max_tokens=settings.ai_review_max_output_tokens,
             # Cả lượt review là một "session" phía provider: retry cùng run phải mang cùng định danh.
             session_id=job["run_id"],
@@ -303,7 +321,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
         )
         output = ModelReviewOutput.model_validate_json(result.text)
         final_verdict, verified, downgrades = verdict_module.verify_review(
-            output, pages=revision["pages"], notebook=notebook
+            output, index=index, notebook=notebook
         )
     except ProviderError as exc:
         if exc.retryable:
@@ -732,6 +750,9 @@ def _base_document(job: dict, *, now: datetime, snapshot: dict) -> dict:
         "prompt_version": constants.PROMPT_VERSION,
         "normalization_version": constants.NORMALIZATION_VERSION,
         "context_policy_version": constants.CONTEXT_POLICY_VERSION,
+        "canonicalization_version": constants.CANONICALIZATION_VERSION,
+        "rule_ref_version": constants.RULE_REF_VERSION,
+        "verifier_version": constants.VERIFIER_VERSION,
         "source": job.get("source"),
         "manual": job.get("source") == constants.JOB_SOURCE_MANUAL,
         "attempts": job.get("attempts"),

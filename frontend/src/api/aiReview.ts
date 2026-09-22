@@ -128,14 +128,43 @@ export interface AiEvidence {
 export type FindingStatus = "VIOLATION" | "COMPLIANT" | "UNCLEAR";
 export type Checkability = "CHECKABLE_FROM_NOTEBOOK" | "NOT_CHECKABLE_FROM_NOTEBOOK";
 
+/** Cách hệ thống tìm ra quy định mà finding dựa vào. `UNRESOLVED` nghĩa là không có gì chống lưng. */
+export type RuleResolution = "REFERENCE" | "CANONICAL_QUOTE" | "UNRESOLVED";
+
 export interface AiFinding {
   source_content_title: string;
   source_content_slug: string;
+  /**
+   * Nguyên văn quy định, do server điền từ bản thể lệ đã chốt lúc nộp. Rỗng khi không đối chiếu
+   * được quy định nào - UI không bao giờ được thay chỗ trống đó bằng lời của model.
+   */
   rule_text: string;
   checkability: Checkability;
   status: FindingStatus;
   reason: string;
   evidence: AiEvidence[];
+
+  /**
+   * Các field hậu kiểm bên dưới chỉ có ở audit row từ bản Hybrid B+D trở đi. Chúng đều optional
+   * đúng vì lý do đó: row lịch sử không có chúng, và UI phải chịu được điều đó thay vì suy diễn.
+   */
+  /** Ref do backend sinh mà model đã nhắc lại. `null` khi không đối chiếu được quy định nào. */
+  rule_ref?: string | null;
+  /** Ref nguyên văn model gửi - giữ lại để đối chiếu khi model chép sai. */
+  model_rule_ref?: string;
+  rule_resolution?: RuleResolution;
+  /** Quy định có thật trong bản thể lệ đã chốt hay không. */
+  rule_verified?: boolean;
+  evidence_count?: number;
+  valid_evidence_count?: number;
+  /** Có ít nhất một khoảng cell/dòng hợp lệ và snippet đã được server dựng lại. */
+  evidence_verified?: boolean;
+  /** Quy định đối chiếu được VÀ bằng chứng hợp lệ. */
+  verified?: boolean;
+  /** `verified` cộng thêm: là cáo buộc, và kiểm chứng được từ notebook. Đây là thứ giữ FLAGGED. */
+  traceable?: boolean;
+  /** Mã chẩn đoán vì sao finding chưa được xác minh; UI dịch sang tiếng Việt, không hiện mã. */
+  verification_codes?: string[];
 }
 
 export interface AiNotebookStats {
@@ -169,10 +198,14 @@ export interface AiReviewRecord {
   provider: string | null;
   provider_host: string | null;
   model: string | null;
+  /** Ba version cuối chỉ có ở row từ Hybrid B+D trở đi; row cũ trả `null`. */
   versions: {
     prompt: string | null;
     normalization: string | null;
     context_policy: string | null;
+    canonicalization: string | null;
+    rule_ref: string | null;
+    verifier: string | null;
   };
   source: "PROVIDER" | "CACHE" | "PIPELINE";
   reused_from_review_id: string | null;
@@ -240,6 +273,26 @@ export const FINDING_STATUS_LABEL: Record<FindingStatus, string> = {
   VIOLATION: "Có dấu hiệu vi phạm",
   COMPLIANT: "Không vi phạm",
   UNCLEAR: "Chưa rõ",
+};
+
+/**
+ * Mức độ đối chiếu của một finding, đã dịch từ các field hậu kiểm. `UNKNOWN` dành cho audit row
+ * ghi trước Hybrid B+D: chúng không có field mới, và thiếu dữ liệu KHÔNG được đọc thành "đã xác
+ * minh" - đó chính là kiểu suy diễn khiến một cáo buộc chưa kiểm chứng trông như đã kiểm chứng.
+ */
+export type FindingVerification = "VERIFIED" | "RULE_ONLY" | "UNRESOLVED" | "UNKNOWN";
+
+export function findingVerification(finding: AiFinding): FindingVerification {
+  if (typeof finding.rule_verified !== "boolean") return "UNKNOWN";
+  if (!finding.rule_verified) return "UNRESOLVED";
+  return finding.evidence_verified ? "VERIFIED" : "RULE_ONLY";
+}
+
+export const FINDING_VERIFICATION_LABEL: Record<FindingVerification, string> = {
+  VERIFIED: "Đã đối chiếu",
+  RULE_ONLY: "Đã tìm thấy quy định, chưa xác minh bằng chứng",
+  UNRESOLVED: "Không đối chiếu được quy định",
+  UNKNOWN: "",
 };
 
 export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: string }> = [

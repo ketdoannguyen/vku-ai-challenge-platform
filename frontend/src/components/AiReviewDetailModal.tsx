@@ -7,11 +7,13 @@
  * số cell notebook, slug nội dung - đều bị bỏ khỏi UI tác nghiệp; chúng vẫn nằm nguyên trong audit
  * row ở backend nên vẫn tra cứu được khi cần điều tra.
  *
- * Ba điều nó phải giữ đúng:
+ * Bốn điều nó phải giữ đúng:
  * - Kết luận AI là thông tin tham khảo. Câu nhắc đó đứng ngay trong thẻ kết quả, không nằm cuối modal.
  * - Không có raw prompt hay raw response ở đây - backend không lưu chúng, nên UI cũng không hứa.
  * - Mỗi thẻ kết quả lấy toàn bộ verdict, summary và finding từ ĐÚNG MỘT `AiReviewRecord`. Trộn
  *   verdict của projection này với finding của record khác sẽ tạo ra một kết luận chưa từng tồn tại.
+ * - Verdict hiện trên header là kết quả SAU hậu kiểm, không phải ý kiến của model. Khi hai thứ khác
+ *   nhau, thẻ phải nói ra cả hai thay vì để người đọc đoán vì sao chúng lệch.
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
@@ -20,12 +22,15 @@ import {
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
   FINDING_STATUS_LABEL,
+  FINDING_VERIFICATION_LABEL,
   fetchAiReviewDetail,
+  findingVerification,
   rerunAiReview,
   type AiFinding,
   type AiReviewDetail,
   type AiReviewRecord,
   type FindingStatus,
+  type FindingVerification,
 } from "../api/aiReview";
 import type { ArtifactMeta, AdminSubmissionItem } from "../api/results";
 import { usePendingPolling } from "../hooks/usePendingPolling";
@@ -41,6 +46,19 @@ const FINDING_TONE: Record<FindingStatus, "danger" | "warning" | "success"> = {
   VIOLATION: "danger",
   UNCLEAR: "warning",
   COMPLIANT: "success",
+};
+
+/**
+ * Tông màu của trạng thái hậu kiểm. `VERIFIED` để trung tính chứ không tô xanh: nó là mặc định lành
+ * mạnh, và một pill xanh cạnh pill trạng thái sẽ khiến "đã đối chiếu" trông như một kết luận. Hai
+ * mức còn lại là cảnh báo vì chúng nói người đọc chớ dựa vào finding này. `UNKNOWN` không bao giờ
+ * được vẽ - nhãn của nó rỗng - khóa ở đây chỉ để map đủ.
+ */
+const VERIFICATION_TONE: Record<FindingVerification, "neutral" | "warning"> = {
+  VERIFIED: "neutral",
+  RULE_ONLY: "warning",
+  UNRESOLVED: "warning",
+  UNKNOWN: "neutral",
 };
 
 const DISCLAIMER = "AI chỉ tham khảo, không ảnh hưởng điểm số. Ban Tổ chức quyết định cuối cùng.";
@@ -326,12 +344,13 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
         </div>
       )}
 
-      {/* Kết luận thô khác kết luận cuối nghĩa là server đã hạ cấp vì thiếu bằng chứng. Câu này chỉ
-          nói điều đó, không dịch mã hạ cấp của backend thành văn xuôi. */}
+      {/* Kết luận thô khác kết luận cuối nghĩa là server đã hạ cấp. Câu này nói đủ hai vế - AI đề
+          xuất gì và hậu kiểm kết luận gì - để admin không đọc pill ở header thành ý kiến của model;
+          nó không dịch mã hạ cấp của backend thành văn xuôi. */}
       {record.model_verdict && record.model_verdict !== record.verdict && (
         <p className="ai-downgrade">
-          AI đề xuất “{AI_VERDICT_LABEL[record.model_verdict]}”, nhưng kết quả đã được hạ xuống sau
-          khi đối chiếu bằng chứng.
+          AI đề xuất “{AI_VERDICT_LABEL[record.model_verdict]}”. Sau khi hậu kiểm quy định và bằng
+          chứng, kết quả cuối là “{AI_VERDICT_LABEL[record.verdict]}”.
         </p>
       )}
 
@@ -427,20 +446,35 @@ function HistoryFact({ label, value }: { label: string; value: string }) {
  * Một đối chiếu giữa thể lệ và notebook. `rule_text` là nguyên văn thể lệ và `reason` là lời giải
  * thích của model - hai đoạn tách bạch, không trộn thành một khối. Bằng chứng hiển thị nguyên văn
  * trong `<pre>` vì đó là đoạn notebook server tự trích lại, không phải output của model.
+ *
+ * Badge hậu kiểm đứng cạnh badge trạng thái vì hai câu hỏi khác nhau: notebook đã làm gì, và nhận
+ * định về nó đã được đối chiếu tới đâu. Với một finding `VIOLATION` chưa đối chiếu được, vế thứ hai
+ * mới là vế quyết định người đọc có nên hành động hay không.
  */
 function FindingItem({ finding }: { finding: AiFinding }) {
-  const noEvidence = finding.evidence.length === 0;
+  const verification = findingVerification(finding);
+  const unresolved = verification === "UNRESOLVED";
+  const note = evidenceNote(finding);
+
   return (
     <li className="ai-finding">
       <div className="ai-finding-head">
         <span className={`status-badge ${FINDING_TONE[finding.status]}`}>
           {FINDING_STATUS_LABEL[finding.status]}
         </span>
+        {FINDING_VERIFICATION_LABEL[verification] && (
+          <span className={`status-badge ${VERIFICATION_TONE[verification]}`}>
+            {FINDING_VERIFICATION_LABEL[verification]}
+          </span>
+        )}
         {/* Chỉ nói "ngoài notebook" khi đó là điều bất thường; còn lại là mặc định nên không cần chip. */}
         {finding.checkability === "NOT_CHECKABLE_FROM_NOTEBOOK" && (
           <span className="status-badge neutral">Ngoài notebook</span>
         )}
-        <strong className="ai-finding-title">{finding.source_content_title}</strong>
+        {/* Không resolve được quy định thì backend để trống tên trang; ô rỗng không nói lên điều gì. */}
+        {finding.source_content_title && (
+          <strong className="ai-finding-title">{finding.source_content_title}</strong>
+        )}
       </div>
 
       {(finding.rule_text || finding.reason) && (
@@ -454,6 +488,15 @@ function FindingItem({ finding }: { finding: AiFinding }) {
         </div>
       )}
 
+      {/* Không có văn bản thể lệ nào để hiện, và bản sao model gửi cũng KHÔNG được dán vào đây: người
+          đọc sẽ tưởng đó là trích dẫn từ bản thể lệ đã chốt, đúng thứ mà hậu kiểm vừa bác bỏ. */}
+      {unresolved && (
+        <p className="ai-finding-unresolved">
+          Tham chiếu quy định của AI không khớp với bản thể lệ đã chốt tại thời điểm nộp, nên nhận
+          định này chưa có căn cứ thể lệ.
+        </p>
+      )}
+
       {finding.evidence.map((evidence, index) => (
         <figure key={index} className="ai-evidence">
           <figcaption className="ai-evidence-meta">
@@ -462,11 +505,32 @@ function FindingItem({ finding }: { finding: AiFinding }) {
           <pre>{evidence.snippet}</pre>
         </figure>
       ))}
-      {noEvidence && (finding.status === "VIOLATION" || finding.status === "UNCLEAR") && (
-        <p className="ai-evidence-missing">Không có đoạn code được xác minh.</p>
-      )}
+      {note && <p className="ai-evidence-missing">{note}</p>}
     </li>
   );
+}
+
+/**
+ * Câu duy nhất nói về bằng chứng, hoặc `null` khi không có gì đáng nói.
+ *
+ * `evidence_count` và `valid_evidence_count` chỉ có ở row từ bản Hybrid B+D. Row cũ thiếu hai số đó
+ * thì chỉ được nói điều hiển nhiên là danh sách bằng chứng rỗng, không được suy diễn là "AI có nêu
+ * nhưng server bỏ" - đó là bịa thêm dữ kiện mà audit row không có.
+ */
+function evidenceNote(finding: AiFinding): string | null {
+  const dropped =
+    typeof finding.evidence_count === "number" &&
+    typeof finding.valid_evidence_count === "number" &&
+    finding.valid_evidence_count < finding.evidence_count;
+
+  if (finding.evidence.length > 0) {
+    return dropped ? "Một số đoạn trích AI nêu không khớp với notebook nên đã bị bỏ." : null;
+  }
+  if (dropped) return "Không đoạn trích nào của AI khớp với notebook.";
+  // Chỉ cáo buộc mới bắt buộc phải có bằng chứng; thiếu ở mức khác là chuyện bình thường.
+  return finding.status === "VIOLATION" || finding.status === "UNCLEAR"
+    ? "Không có đoạn code được xác minh."
+    : null;
 }
 
 /**

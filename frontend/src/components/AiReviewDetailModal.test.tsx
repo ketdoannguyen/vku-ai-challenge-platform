@@ -1,9 +1,11 @@
 /**
- * Modal chi tiết AI. Ba thứ test ở đây bảo vệ:
+ * Modal chi tiết AI. Bốn thứ test ở đây bảo vệ:
  * - Ranh giới trách nhiệm: modal chỉ đọc và chạy lại, tuyệt đối không có thao tác duyệt bài.
  * - Tính toàn vẹn của kết luận: mỗi thẻ lấy verdict, nhận xét và finding từ ĐÚNG MỘT record.
  * - Chỉ bốn dữ kiện được hiện: chi tiết audit (cache, host, phiên bản prompt, thống kê notebook,
  *   slug nội dung, mã hạ cấp) không được quay lại UI tác nghiệp.
+ * - Minh bạch hậu kiểm: một finding chỉ được trình bày như đã xác minh khi audit row thật sự nói
+ *   thế. Row cũ thiếu field mới không có badge nào, và mã chẩn đoán không bao giờ lên UI.
  */
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -80,7 +82,14 @@ function record(overrides: Partial<AiReviewRecord> = {}): AiReviewRecord {
     provider: "openai-compatible",
     provider_host: "api.example.com",
     model: null,
-    versions: { prompt: "v3", normalization: "v1", context_policy: "v2" },
+    versions: {
+      prompt: "ai-review-v3",
+      normalization: "notebook-v1",
+      context_policy: "context-v2",
+      canonicalization: null,
+      rule_ref: null,
+      verifier: null,
+    },
     source: "PROVIDER",
     reused_from_review_id: null,
     bypass_cache: false,
@@ -405,6 +414,8 @@ test("chi tiết audit không quay lại UI: không phiên bản prompt, host, c
     /Dùng lại kết quả cũ/,
     /Pipeline tự kết luận/,
     /EVIDENCE_MISSING/,
+    /RULE_REF_UNKNOWN/,
+    /RULE_QUOTE_UNMATCHED/,
     /the-le-vong-so-loai/,
     /Notebook: \d+ cell/,
     /Kiểm tra được từ notebook/,
@@ -413,14 +424,15 @@ test("chi tiết audit không quay lại UI: không phiên bản prompt, host, c
   }
 });
 
-test("thông điệp hạ cấp nói kết quả đã hạ xuống, không dịch mã của backend", async () => {
+test("thông điệp hạ cấp tách đề xuất của AI khỏi kết quả sau hậu kiểm", async () => {
   mockApi(() => json({ submission: DETAIL.submission }));
   renderModal();
 
   await screen.findByText("Kết quả đánh giá");
+  // Cả hai vế phải có mặt: chỉ nói "đã hạ xuống" thì admin không biết model đã đề xuất gì.
   expect(
     screen.getByText(
-      "AI đề xuất “Có dấu hiệu”, nhưng kết quả đã được hạ xuống sau khi đối chiếu bằng chứng.",
+      "AI đề xuất “Có dấu hiệu”. Sau khi hậu kiểm quy định và bằng chứng, kết quả cuối là “Chưa đủ căn cứ”.",
     ),
   ).toBeTruthy();
 });
@@ -593,6 +605,30 @@ function detailWithFindings(findings: AiFindingFixture[]): AiReviewDetail {
   });
 }
 
+/**
+ * Finding của row Hybrid B+D: có đủ số đo hậu kiểm mà badge dựa vào. Mặc định là ca lành mạnh -
+ * quy định resolve được và bằng chứng hợp lệ - để mỗi test chỉ phải nói ra đúng thứ nó muốn phá.
+ */
+function checked(overrides: Partial<AiFindingFixture> = {}): AiFindingFixture {
+  return {
+    ...THREE_FINDINGS,
+    rule_ref: "the-le-vong-so-loai#0123456789abcdef01234567",
+    model_rule_ref: "the-le-vong-so-loai#0123456789abcdef01234567",
+    rule_resolution: "REFERENCE",
+    rule_verified: true,
+    evidence_count: 1,
+    valid_evidence_count: 1,
+    evidence_verified: true,
+    verified: true,
+    traceable: true,
+    verification_codes: [],
+    ...overrides,
+  };
+}
+
+const UNCHECKED_LABEL = "Không đối chiếu được quy định";
+const RULE_ONLY_LABEL = "Đã tìm thấy quy định, chưa xác minh bằng chứng";
+
 test("ba mức finding có ba tông khác nhau, và vi phạm thì đỏ", async () => {
   mockApi(
     () => json({ submission: DETAIL.submission }),
@@ -685,6 +721,93 @@ test("finding COMPLIANT không có bằng chứng thì không có câu nhắc n�
 
   await screen.findByText("Kết quả đánh giá");
   expect(screen.queryByText("Không có đoạn code được xác minh.")).toBeNull();
+});
+
+test("finding đối chiếu được cả quy định lẫn bằng chứng mang badge trung tính", async () => {
+  mockApi(() => json({ submission: DETAIL.submission }), detailWithFindings([checked()]));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  // Trung tính chứ không xanh: "đã đối chiếu" là mặc định lành mạnh, không phải một kết luận.
+  expect(screen.getByText("Đã đối chiếu")).toHaveClass("neutral");
+  expect(screen.queryByText(/khớp với notebook/)).toBeNull();
+});
+
+test("đối chiếu được quy định nhưng không xác minh được bằng chứng thì nói rõ vế còn thiếu", async () => {
+  mockApi(
+    () => json({ submission: DETAIL.submission }),
+    detailWithFindings([
+      checked({
+        evidence: [],
+        evidence_count: 1,
+        valid_evidence_count: 0,
+        evidence_verified: false,
+        verified: false,
+        traceable: false,
+      }),
+    ]),
+  );
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  expect(screen.getByText(RULE_ONLY_LABEL)).toHaveClass("warning");
+  expect(screen.getByText("Không đoạn trích nào của AI khớp với notebook.")).toBeTruthy();
+});
+
+test("không đối chiếu được quy định thì nói ra, và không dán bản sao của model vào chỗ thể lệ", async () => {
+  mockApi(
+    () => json({ submission: DETAIL.submission }),
+    detailWithFindings([
+      checked({
+        // Backend để trống provenance khi không resolve được; UI không được lấp chỗ trống đó.
+        source_content_title: "",
+        source_content_slug: "",
+        rule_text: "",
+        rule_ref: null,
+        rule_resolution: "UNRESOLVED",
+        rule_verified: false,
+        verified: false,
+        traceable: false,
+        verification_codes: ["RULE_REF_UNKNOWN", "RULE_QUOTE_UNMATCHED"],
+      }),
+    ]),
+  );
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  expect(screen.getByText(UNCHECKED_LABEL)).toHaveClass("warning");
+  expect(screen.getByText(/không khớp với bản thể lệ đã chốt/)).toBeTruthy();
+  // Không có văn bản thể lệ nào để hiện, và mã chẩn đoán của backend cũng không được lên UI.
+  expect(resultCard().querySelector(".ai-finding-rule")).toBeNull();
+  for (const code of ["RULE_REF_UNKNOWN", "RULE_QUOTE_UNMATCHED"]) {
+    expect(screen.queryByText(new RegExp(code))).toBeNull();
+  }
+});
+
+test("range bị bỏ được đếm ra thay vì im lặng coi như finding không có bằng chứng", async () => {
+  mockApi(
+    () => json({ submission: DETAIL.submission }),
+    detailWithFindings([checked({ evidence_count: 3, valid_evidence_count: 1 })]),
+  );
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  expect(
+    screen.getByText("Một số đoạn trích AI nêu không khớp với notebook nên đã bị bỏ."),
+  ).toBeTruthy();
+});
+
+test("row lịch sử thiếu field hậu kiểm thì không có badge nào, không suy diễn là đã xác minh", async () => {
+  // `THREE_FINDINGS` đúng là hình dạng row cũ: không có field hậu kiểm nào cả.
+  mockApi(() => json({ submission: DETAIL.submission }), detailWithFindings([THREE_FINDINGS]));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  for (const label of ["Đã đối chiếu", RULE_ONLY_LABEL, UNCHECKED_LABEL]) {
+    expect(screen.queryByText(label)).toBeNull();
+  }
+  // Văn bản thể lệ và bằng chứng của row cũ vẫn hiện nguyên vẹn.
+  expect(screen.getByText("Không được sử dụng dữ liệu ngoài cuộc thi.")).toBeTruthy();
 });
 
 test("không có finding và kết luận là CLEAR thì nói không phát hiện nội dung vi phạm", async () => {

@@ -977,11 +977,11 @@ Từ release đó trở đi không cần cài lại nữa; deployer tự đưa w
 Kiểm tra có bằng chứng thật, không chỉ "container đang chạy":
 
 1. `dcp ps ai-review-worker` → `Up ... (healthy)` và `dcp logs --tail=20 ai-review-worker` có dòng vòng lặp.
-2. Cấu hình provider ở tab `Cài đặt` của một cuộc thi **nháp** (không dùng cuộc thi thật), bấm **Kiểm tra kết nối** → phải trả host/model/độ trễ.
+2. Cấu hình provider ở tab `Cài đặt` của một cuộc thi **nháp** (không dùng cuộc thi thật) rồi **Lưu** - lưu chạy luôn lượt kiểm tra kết nối (ADR-042 đã bỏ nút riêng) → chip xác minh phải xanh và lượt probe phải trả host/model/độ trễ.
 3. Nộp một bài có notebook và xác nhận **response trả về ngay** với `status:"completed"`, điểm đã có, kèm `ai_review.state:"QUEUED"`.
 4. `dcp logs --tail=50 ai-review-worker` → thấy job được claim và kết thúc; mở modal chi tiết trong bảng admin thấy lượt mới.
 5. Bấm **Chạy lại AI** → `generation` tăng, điểm không đổi.
-6. Mở modal chi tiết của lượt vừa chạy → mỗi lượt trong lịch sử phải ghi `prompt ai-review-v4` (ADR-040, ADR-044). Thấy `ai-review-v3` trở xuống nghĩa là worker/image chưa được cập nhật, không phải cache.
+6. Đọc `GET /api/admin/submissions/{id}/ai-review` và soi `history[0].versions` → lượt mới phải mang **sáu** khoá `ai-review-v5` / `notebook-v2` / `context-v2` / `rule-text-v1` / `rule-ref-v1` / `verifier-v2` (ADR-040, ADR-044, ADR-045). Thấy `ai-review-v4` trở xuống nghĩa là worker/image chưa được cập nhật, không phải cache. **Đọc bằng API, không đọc trên modal**: ADR-041 đã bỏ hẳn nhãn phiên bản khỏi UI tác nghiệp.
 7. Lượt review mới phải có **gợi ý ngắn cho thí sinh** hiện ngay dưới tóm tắt dài. Verdict `FLAGGED` mà gợi ý trống là bình thường (model quyết định không có gì để nói) - nhưng nếu **mọi** lượt đều trống thì nghi prompt không tới được model.
 8. Bấm **Không chấp nhận** một bài có verdict `FLAGGED`: ô lý do phải **điền sẵn** gợi ý kèm dòng nhắc *"Lý do dưới đây do AI soạn nháp…"*. Sửa lại vài chữ rồi gửi → mở lịch sử của **thí sinh** và xác nhận em đọc đúng **bản đã sửa**, không phải bản của model.
 
@@ -989,13 +989,19 @@ Bài nộp và điểm số ở bước 3 phải đúng **dù AI có hỏng**: �
 nhận trước khi bật AI cho cuộc thi chính thức. Lượt smoke đầy đủ trên stack dev (bao gồm cache, thu
 hồi lease, redaction) nằm ở `docs/TEST_MATRIX.md` §17.
 
-**Cảnh báo cho lượt deploy có ADR-040 + ADR-044**: `PROMPT_VERSION` đổi `ai-review-v2` →
-`ai-review-v4` nên **mọi** notebook đã từng chấm sẽ trượt cache đúng một lần và được gọi provider lại
-(kể cả lượt chạy tự động). Đây là chủ ý - giữ nguyên version thì audit row cũ được phục vụ lại **không
-có** gợi ý (ADR-040) và **không có** ngân sách mềm trong prompt (ADR-044), tức model vẫn viết tới lúc
-trần cứng cắt ngang. Nếu muốn tránh đợt gọi provider ồ ạt, chạy deploy vào lúc vắng; không có cách
-"vá cache" nào khác ngoài việc chấp nhận lượt gọi lại. Nhớ đặt `AI_REVIEW_MAX_OUTPUT_TOKENS=12000`
-(§3.2) - để nguyên `8000` thì trần cứng nằm **ngay dưới** ngân sách mềm mà prompt vừa dặn.
+**Cảnh báo cho lượt deploy có ADR-040 + ADR-044 + ADR-045**: `PROMPT_VERSION` đổi `ai-review-v2` →
+`ai-review-v5`, và ba version mới (`CANONICALIZATION_VERSION`, `RULE_REF_VERSION`, `VERIFIER_VERSION`)
+cùng vào `cache_key`, nên **mọi** notebook đã từng chấm sẽ trượt cache đúng một lần và được gọi
+provider lại (kể cả lượt chạy tự động). Đây là chủ ý - giữ nguyên version thì audit row cũ được phục
+vụ lại **không có** gợi ý (ADR-040), **không có** ngân sách mềm trong prompt (ADR-044), và **không
+có** `rule_ref` (ADR-045), tức kết luận vẫn là của verifier so chuỗi với văn xuôi model. Nếu muốn
+tránh đợt gọi provider ồ ạt, chạy deploy vào lúc vắng; không có cách "vá cache" nào khác ngoài việc
+chấp nhận lượt gọi lại. Nhớ đặt `AI_REVIEW_MAX_OUTPUT_TOKENS=12000` (§3.2) - để nguyên `8000` thì
+trần cứng nằm **ngay dưới** ngân sách mềm mà prompt vừa dặn.
+
+ADR-045 **không** cần migration và **không** cần env mới: chỉ mục quy định được dẫn xuất lúc worker
+đọc `competition_content_revisions`, nên không có bước backfill nào phải chạy trước khi deploy, và
+`canonical_content_hash` của mọi revision cũ giữ nguyên giá trị.
 
 ## Vận hành thường ngày
 

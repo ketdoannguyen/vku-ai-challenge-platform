@@ -1190,6 +1190,37 @@ và không rò rỉ giữa hai cuộc thi.
 | Verdict không phải `FLAGGED`: ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
 | Modal chi tiết AI hiện gợi ý **tách khỏi** tóm tắt dài, và vẫn hiện khi verdict không phải FLAGGED để admin tự quyết định | passing | `frontend/src/components/AiReviewDetailModal.test.tsx::bản nháp model soạn cho thí sinh đứng riêng dưới một nhãn của nó` |
 
+### Backend - Hybrid B+D: canonical hóa, `rule_ref` và hậu kiểm (ADR-045)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Canonicalizer tháo marker trình bày (heading ATX, blockquote, bullet/số thứ tự, thụt lề, bold/italic/backtick/link/image) nhưng **giữ nguyên nội dung**, và collapse khoảng trắng/tab/xuống dòng | passing | `test_ai_review_rule_text.py::test_strips_heading_blockquote_and_list_markers`, `::test_nested_markers_are_all_stripped`, `::test_unwraps_bold_italic_code_links_and_images`, `::test_collapses_whitespace_tabs_and_newlines` |
+| Canonicalizer **không** fuzzy: số, từ phủ định và chữ hoa/thường vẫn có nghĩa; dấu ba chấm hay diễn giải lại cùng ý **không** được coi là bằng nhau | passing | `::test_numbers_negation_and_case_stay_significant`, `::test_ellipsis_and_paraphrase_are_not_treated_as_equal` |
+| Định danh lập trình giữ nguyên underscore (`device_id`, `n_estimators`, `load_state_dict`); code trong backtick giữ nguyên ký tự đặc biệt và ổn định qua nhiều lần chạy | passing | `::test_identifiers_and_numbers_keep_their_underscores_and_digits`, `::test_identifiers_with_interior_underscore_are_not_escaped`, `::test_code_with_links_markers_and_backslashes_stays_literal_and_stable` |
+| Tiếng Việt NFC và NFD canonicalize về cùng một chuỗi | passing | `::test_nfc_and_nfd_vietnamese_canonicalize_identically` |
+| Hàm **idempotent** và **đối xứng**: canonical của block nguồn bằng canonical của bản model gửi khi nội dung giống nhau, kể cả khi bold bị ngắt qua dòng | passing | `::test_canonicalization_is_idempotent_on_every_sample`, `::test_source_block_and_model_quote_canonicalize_the_same`, `::test_emphasis_spanning_a_line_wrap_is_unwrapped` |
+| Parser dựng block theo heading ATX/Setext, paragraph, list item kèm dòng nối, blockquote và hàng dữ liệu bảng; `raw_text` giữ marker gốc và `start_line`/`end_line` trỏ đúng dòng nguồn | passing | `test_ai_review_rule_refs.py::test_paragraphs_and_list_items_become_blocks_under_the_atx_heading_path`, `::test_raw_text_keeps_the_marker_and_block_lines_point_at_the_source`, `::test_setext_heading_updates_the_heading_path_and_is_not_a_block`, `::test_blockquote_paragraph_is_citable`, `::test_table_data_rows_are_citable_but_header_and_separator_are_not` |
+| Fenced code được gửi **nguyên văn** nhưng **không** sinh ref; fence chỉ đóng bằng đúng ký tự đã mở và không ngắn hơn; fence chưa đóng làm phần còn lại của trang không thể trích dẫn | passing | `::test_fenced_code_is_kept_in_the_policy_but_not_citable`, `::test_a_different_fence_character_does_not_close_the_block`, `::test_unclosed_fence_makes_the_rest_of_the_page_uncitable` |
+| `rule_ref` **ổn định** khi chỉ đổi formatting/reflow, và **đổi** khi số, phủ định hoặc heading context đổi; cùng câu chữ ở hai trang khác nhau ra hai ref khác nhau; block trùng canonical trong cùng namespace được phân biệt bằng hậu tố `~n` | passing | `::test_ref_is_stable_when_only_formatting_and_reflow_change`, `::test_ref_is_stable_when_bold_spans_a_line_wrap`, `::test_ref_changes_when_number_negation_or_heading_context_changes`, `::test_same_text_in_two_pages_gets_different_refs`, `::test_identical_blocks_in_the_same_namespace_get_occurrence_suffixes`, `::test_heading_ordinal_is_part_of_the_digest` |
+| Revision có **duplicate page slug** làm `build_rule_index` ném lỗi (fail closed) thay vì trả ref mơ hồ | passing | `::test_duplicate_page_slugs_fail_closed` |
+| `render_annotated_policy` phát **mọi** dòng nguồn đúng một lần theo đúng thứ tự trang và chèn mỗi `[RULE_REF ...]` đúng một lần | passing | `::test_render_keeps_every_source_line_once_and_inserts_each_ref_once`, `::test_render_covers_every_page_in_order_with_unique_refs` |
+| Trần policy đo **chính** văn bản đã chèn marker, không phải văn bản gốc | passing | `test_ai_review_prompt.py::test_the_policy_cap_counts_the_ref_markers_that_are_actually_sent` |
+| Prompt v5 xin `rule_ref` và **không** còn xin model tự cung cấp title/slug/rule text; system prompt nói rõ ref là định danh mờ và **cấm tự chế ref** | passing | `test_ai_review_prompt.py::test_the_system_prompt_asks_for_a_ref_and_no_longer_for_prose_provenance`, `::test_the_system_prompt_forbids_inventing_a_ref` |
+| Ranh giới chống prompt-injection vẫn đứng **trước** khối thể lệ | passing | `test_ai_review_prompt.py::test_the_injection_boundary_still_precedes_the_rules` |
+| Schema v5: `rule_ref` **bắt buộc** và có trần riêng; thiếu `rule_quote` vẫn hợp lệ; `extra="forbid"` từ chối field lạ và trần evidence giữ nguyên | passing | `test_ai_review_verdict.py::test_model_output_requires_a_rule_ref`, `::test_a_finding_without_a_rule_quote_is_still_valid`, `::test_model_output_rejects_an_over_long_rule_ref`, `::test_model_output_rejects_more_evidence_than_the_cap` |
+| Ref khớp ⇒ provenance (title/slug/rule text) lấy **từ revision**, không từ prose model; cùng câu chữ ở hai trang resolve đúng trang theo ref | passing | `test_ai_review_verdict.py::test_matching_ref_fills_provenance_from_the_revision_not_from_the_model`, `::test_ref_resolves_to_the_right_page_when_two_pages_share_the_same_wording` |
+| Ref sai **không** kèm quote ⇒ `UNRESOLVED`, không provenance | passing | `::test_unknown_ref_without_a_quote_is_unresolved_and_keeps_no_provenance` |
+| Fallback chỉ nhận quote canonical **duy nhất**: khớp đúng một block ⇒ resolve, kể cả khi quote đã mất formatting; khớp 0 hoặc >1 block ⇒ unresolved | passing | `::test_unknown_ref_falls_back_to_a_unique_canonical_quote`, `::test_fallback_accepts_a_quote_that_lost_its_markdown_formatting`, `::test_fallback_rejects_a_quote_that_matches_no_rule`, `::test_fallback_rejects_a_quote_that_matches_several_rules` |
+| `rule_quote` **không bao giờ** trở thành văn bản quy định được lưu | passing | `::test_a_quote_alone_never_becomes_the_stored_rule_text` |
+| Bằng chứng được kiểm **độc lập** với việc resolve rule: ref sai vẫn giữ khoảng dòng hợp lệ và vẫn đếm ra phần bị loại; evidence ngoài phạm vi hoặc trỏ cell không tồn tại bị loại và đánh dấu | passing | `::test_evidence_is_validated_even_when_the_rule_does_not_resolve`, `::test_out_of_range_evidence_is_dropped_and_marked_invalid`, `::test_evidence_pointing_to_a_missing_cell_is_dropped` |
+| `EVIDENCE_MISSING` chỉ dành cho `VIOLATION`; một finding `COMPLIANT` không cần bằng chứng | passing | `::test_a_violation_without_evidence_is_marked_missing`, `::test_a_compliant_finding_needs_no_evidence` |
+| Một khoảng hợp lệ lẫn trong các khoảng hỏng vẫn `traceable` nhưng được đánh dấu partial | passing | `::test_one_valid_range_among_invalid_ones_keeps_the_finding_traceable_but_flagged_partial` |
+| `NOT_CHECKABLE_FROM_NOTEBOOK` **không bao giờ** tạo được vi phạm `traceable` | passing | `::test_a_not_checkable_violation_is_never_traceable` |
+| Ba version mới (`CANONICALIZATION_VERSION`, `RULE_REF_VERSION`, `VERIFIER_VERSION`) đều làm `cache_key` đổi, cùng với ba version cũ | passing | `test_ai_review_service.py::test_every_version_that_shapes_a_review_moves_the_cache_key` (6 tham số), `::test_the_cache_key_changes_with_every_component_that_reaches_the_model` |
+| Audit row mới ghi đủ sáu version và endpoint detail trả chúng trong `versions`; row cũ thiếu ba field mới đọc ra `null` chứ **không** làm hỏng response | passing | `test_ai_review_api.py` (nhóm detail: khẳng định `versions` đủ sáu khoá, và bản strip-version trả `null` cho ba khoá mới) |
+| Revision là **chỉ đọc**: một lượt review chạy xong để lại document revision y nguyên (index được dẫn xuất lúc đọc, không migration/backfill) | passing | `test_ai_review_service.py::test_the_review_run_leaves_the_content_revision_untouched` |
+| Duplicate page slug trong revision ⇒ service dừng với `AI_CONTENT_SNAPSHOT_UNAVAILABLE` **trước khi** gọi provider | passing | `test_ai_review_service.py::test_a_revision_with_duplicate_page_slugs_stops_before_the_provider` |
+
 ### Backend - queue và worker
 
 | Check | Status | Cách verify |
@@ -1216,8 +1247,11 @@ và không rò rỉ giữa hai cuộc thi.
 | Chip xác minh đọc từ `verified_at` của server: unmount rồi mount lại (đổi tab) vẫn xanh, sửa Base URL/Model/key thì về vàng, gõ trả lại giá trị đã lưu thì xanh lại **không** gọi provider thêm lần nào, xoá key thì về vàng (ADR-043) | passing | `AiReviewSettingsPanel.test.tsx::chip xác minh sống qua lần quay lại tab vì vết nằm ở server`, `::sửa Base URL sau khi đã xác minh thì chip về chưa xác minh`, `::trả một trường kết nối về giá trị đã lưu thì chip xanh lại mà không gọi provider`, `::xoá API key thì vết xác minh cũng hết hiệu lực` |
 | Không còn nút "Kiểm tra kết nối" riêng, không còn ô xác nhận chuyển dữ liệu theo host, panel **không** còn dòng đếm trang, badge trạng thái từng trang hay ghi chú "không phải công cụ soạn luật" (ADR-042) | passing | `AiReviewSettingsPanel.test.tsx::lưu cấu hình chạy luôn kiểm tra kết nối và bật chip xác minh` (khẳng định nút cũ không tồn tại), `::danh sách nguồn nội dung chỉ liệt kê trang sẽ được gửi cho AI` |
 | Bảng admin: cột `Kiểm tra AI` hiện badge + thời điểm, luôn có nút mở chi tiết (kể cả bài legacy để BTC khởi tạo lượt đầu), bộ lọc AI là trục **riêng** gửi `ai_review=` | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
-| Modal chi tiết (ADR-041): **một** thẻ kết quả cho đúng lượt canonical (`latest_review_id`, lùi về lượt gần nhất khi thiếu), chỉ bốn dữ kiện (verdict, hoàn tất, thời gian chạy, model); lịch sử cũ **đóng mặc định**, không lặp lượt đang xem và khi đóng chỉ mang đúng bốn dữ kiện; finding hiện nguyên văn thể lệ + lý do + bằng chứng trong `<pre>` (chip `Ngoài notebook` chỉ khi `NOT_CHECKABLE_FROM_NOTEBOOK`); kết luận hạ cấp và notebook bị cắt được nói riêng; lượt hỏng chỉ hiện lỗi đã che; hai nhận xét và hai đoạn của finding nằm chung một khối để lên hai cột khi dialog đủ rộng, đoạn rỗng không dựng; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (38 case) |
-| Chi tiết audit **không** quay lại UI tác nghiệp (ADR-041): `generation`/`Lần #N`, `manual`, `bypass_cache`, `source`, provider/host, phiên bản prompt/normalization/context-policy, `attempts`, `reused_from_review_id`, thống kê cell/dòng notebook, `source_content_slug`, mã `downgrade_codes` | passing | `AiReviewDetailModal.test.tsx::chi tiết audit không quay lại UI: không phiên bản prompt, host, cache, slug hay mã hạ cấp`; Chromium headless 7 fixture, `/tmp/uiverify/airv-verify.mjs` (regex chuỗi cấm) |
+| Modal chi tiết (ADR-041): **một** thẻ kết quả cho đúng lượt canonical (`latest_review_id`, lùi về lượt gần nhất khi thiếu), chỉ bốn dữ kiện (verdict, hoàn tất, thời gian chạy, model); lịch sử cũ **đóng mặc định**, không lặp lượt đang xem và khi đóng chỉ mang đúng bốn dữ kiện; finding hiện nguyên văn thể lệ + lý do + bằng chứng trong `<pre>` (chip `Ngoài notebook` chỉ khi `NOT_CHECKABLE_FROM_NOTEBOOK`); kết luận hạ cấp và notebook bị cắt được nói riêng; lượt hỏng chỉ hiện lỗi đã che; hai nhận xét và hai đoạn của finding nằm chung một khối để lên hai cột khi dialog đủ rộng, đoạn rỗng không dựng; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (43 case) |
+| Modal tách "AI đề xuất" khỏi "kết quả sau hậu kiểm" khi verdict bị hạ, và gắn badge hậu kiểm cho từng finding (`Đã đối chiếu` / `Đã tìm thấy quy định, chưa xác minh bằng chứng` / `Không đối chiếu được quy định`); finding chưa resolve **không** hiện ref hay quote của model như văn bản thể lệ | passing | `AiReviewDetailModal.test.tsx::finding đối chiếu được cả quy định lẫn bằng chứng mang badge trung tính`, `::đối chiếu được quy định nhưng không xác minh được bằng chứng thì nói rõ vế còn thiếu`, `::không đối chiếu được quy định thì nói ra, và không dán bản sao của model vào chỗ thể lệ` |
+| Finding thiếu đoạn trích được nói rõ lý do: mất một phần (`Một số đoạn trích AI nêu không khớp…`), hoặc vi phạm không có đoạn code nào được xác minh | passing | `AiReviewDetailModal.test.tsx::range bị bỏ được đếm ra thay vì im lặng coi như finding không có bằng chứng`, `::vi phạm không có bằng chứng thì nói rõ chưa xác minh được đoạn code nào`, `::finding COMPLIANT không có bằng chứng thì không có câu nhắc nào` |
+| Row lịch sử (ghi trước Hybrid B+D, không có field hậu kiểm) render an toàn: **không** badge nào được suy diễn, rule text vẫn hiện | passing | `AiReviewDetailModal.test.tsx::row lịch sử thiếu field hậu kiểm thì không có badge nào, không suy diễn là đã xác minh` |
+| Chi tiết audit **không** quay lại UI tác nghiệp (ADR-041): `generation`/`Lần #N`, `manual`, `bypass_cache`, `source`, provider/host, phiên bản prompt/normalization/context-policy, `attempts`, `reused_from_review_id`, thống kê cell/dòng notebook, `source_content_slug`, mã `downgrade_codes`, và từ ADR-045 cả `rule_ref`/`model_rule_ref`/`rule_resolution`/`verification_codes` (`RULE_REF_UNKNOWN`, `RULE_QUOTE_UNMATCHED`, …) | passing | `AiReviewDetailModal.test.tsx::chi tiết audit không quay lại UI: không phiên bản prompt, host, cache, slug hay mã hạ cấp`; Chromium headless 7 fixture, `/tmp/uiverify/airv-verify.mjs` (regex chuỗi cấm) |
 | Ô lý do từ chối được **điền sẵn** bản nháp của AI khi `verdict === "FLAGGED"`, kèm dòng nhắc nguồn gốc đã nối vào `aria-describedby`; admin sửa thì **bản đã sửa** mới là thứ được gửi | passing | `AdminSubmissionsPage.test.tsx::ô lý do được điền sẵn bản nháp của AI, và bản admin sửa mới là thứ được gửi` |
 | Verdict không phải `FLAGGED` (kể cả gợi ý có sẵn trong projection): ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `AdminSubmissionsPage.test.tsx::gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED` |
 | Modal chi tiết hiện gợi ý **tách khỏi** tóm tắt dài (kể cả khi verdict không phải FLAGGED, để admin tự quyết định có gõ lại không); model không soạn gợi ý thì không có nhãn nào | passing | `AiReviewDetailModal.test.tsx::bản nháp model soạn cho thí sinh đứng riêng dưới một nhãn của nó`, `::model không soạn gợi ý thì không có nhãn gợi ý nào` |
@@ -1379,27 +1413,40 @@ overlay chừa (736px), ở 375px vẫn 343px như trước - nên cột 375px c
 
 | Lệnh | Kết quả |
 |---|---|
-| `cd backend && uv run pytest -q` | **568 passed** (đợt ADR-035 trước đó: 316; ADR-036→ADR-040 đóng góp 252 case AI, các case cũ vẫn xanh) |
-| `cd frontend && npm test -- --maxWorkers=1` | **480 passed (34 files)** (đợt trước: 410; +41 case AI của ADR-036→ADR-040; ADR-041 viết lại suite modal 11 → 38 case: 35 case bố cục + 3 case hai cột, và +2 case nhãn gợi ý) |
-| `cd frontend && npx tsc -b` | sạch |
+| `cd backend && uv run pytest -q` | **675 passed** (2026-09-22, 209 s; lượt ADR-045 +99 so với 576 của `HEAD` - trong đó **25** là harness E2E `test_ai_review_e2e_harness.py`; trước đó **568** ở lượt ADR-040, **316** ở lượt ADR-035 - ADR-036→ADR-040 đóng góp 252 case AI, các case cũ vẫn xanh) |
+| `cd frontend && npm test -- --maxWorkers=1` | **491 passed (34 files)** (2026-09-22, 120 s; lượt ADR-045 +5 case so với 486; trước đó 480, rồi 410; +41 case AI của ADR-036→ADR-040; ADR-041 viết lại suite modal 11 → 38 case: 35 case bố cục + 3 case hai cột, và +2 case nhãn gợi ý) |
+| `cd frontend && npx tsc -b` | sạch (exit 0) |
 | `cd frontend && npm run lint` | 0 error, 25 warning có sẵn (không phát sinh ở `AiReviewDetailModal.tsx`/`Modal.tsx`) |
-| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
+| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK (637 ms; cảnh báo chunk >500 kB có sẵn) |
+| `docker compose config --quiet` | OK |
+| `docker compose --env-file deploy/production.env.example -f docker-compose.prod.yml config --quiet` | OK - file prod **bắt buộc** có `.env`; chạy trần thì dừng ở `PROD_DATA_ROOT`/`MINIO_ACCESS_KEY`/`MINIO_ROOT_USER` thiếu, đúng như `docs/DEPLOYMENT.md` mô tả |
 
-252 case backend nằm trong 12 file `backend/tests/test_ai_review_*.py` (dùng chung fixture ở
+359 case backend nằm trong 16 file `backend/tests/test_ai_review_*.py` (dùng chung fixture ở
 `tests/ai_review_helpers.py`). Số dưới đây là số case **thu được** (`pytest --collect-only`), tức
 đã tính cả các case tham số hoá - đúng bằng thứ mà `pytest -q` đếm:
 
 | File | Số case |
 |---|---|
-| `test_ai_review_service.py` | 49 |
+| `test_ai_review_service.py` | 58 |
+| `test_ai_review_verdict.py` | 38 |
 | `test_ai_review_queue.py` | 29 |
+| `test_ai_review_api.py` | 27 |
 | `test_ai_review_url_policy.py` | 25 |
-| `test_ai_review_api.py` | 26 |
-| `test_ai_review_verdict.py` | 25 |
+| `test_ai_review_settings.py` | 25 |
 | `test_ai_review_provider.py` | 23 |
-| `test_ai_review_settings.py` | 17 |
+| `test_ai_review_rule_refs.py` | 22 |
+| `test_ai_review_rule_text.py` | 21 |
 | `test_ai_review_content_snapshot.py` | 14 |
 | `test_ai_review_notebook.py` | 14 |
 | `test_ai_review_worker.py` | 14 |
+| `test_ai_review_e2e_harness.py` | 25 |
 | `test_ai_review_scoring_isolation.py` | 9 |
+| `test_ai_review_prompt.py` | 8 |
 | `test_ai_review_crypto.py` | 7 |
+
+Bốn tệp đầu trong nhóm ADR-045 (`e2e_harness`, `rule_refs`, `rule_text`, `prompt`) là tệp **mới**;
+`verdict` **25→38**, `service` **49→58**, `api` **26→27**, `settings` **17→25** (`settings` tăng ở
+lượt ADR-044 chứ không phải lượt này). `e2e_harness` khoá phần **thuần** của harness chiến dịch
+(đọc archive, oracle, dựng báo cáo, khớp bài nộp theo SHA) - không case nào trong đó gọi mạng,
+Mongo thật hay provider; phần chạy thật chỉ chứng minh được bằng một campaign thật, xem
+`docs/AI_REVIEW_HYBRID_BD_E2E_2026-09-22.md`.
