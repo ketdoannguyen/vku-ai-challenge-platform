@@ -129,9 +129,10 @@ test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái v�
     "/admin/competitions/c1",
   );
   expect(screen.getByText("cup-1")).toBeTruthy();
-  // Nhãn trạng thái trùng với nhãn trong ô lọc nên phải đọc trong bảng.
-  const region = screen.getByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
-  expect(within(region).getByText("Đã chấm điểm")).toBeTruthy();
+  // Trạng thái chỉ còn icon, kết luận nằm trong `aria-label`; nhãn chữ trùng với ô lọc nên chỉ
+  // tra được bằng role.
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
+  expect(within(region).getByRole("img", { name: "Đã chấm điểm" })).toBeTruthy();
   expect(screen.getAllByText("0.900000").length).toBeGreaterThan(0);
   expect(screen.getByText("1 bài nộp trong bộ lọc hiện tại.")).toBeTruthy();
 
@@ -221,76 +222,96 @@ test("gõ tìm kiếm chỉ gọi server sau khi ngừng gõ, Enter áp dụng n
   expect(lastParams(urls).get("offset")).toBe("0");
 });
 
-test("bảy cột sắp xếp được với thứ tự mặc định riêng của từng cột", async () => {
-  const { urls } = mockApi();
-  renderPage();
-  await screen.findByText("Đội 0");
-
-  // Mặc định ban đầu: hàng mới nhất trước.
-  expect(screen.getByRole("columnheader", { name: /^Thời gian/ })).toHaveAttribute(
-    "aria-sort",
-    "descending",
-  );
-
-  const columns: Array<[RegExp, string, string]> = [
-    [/^Cuộc thi/, "competition", "asc"],
-    [/^Đội/, "team", "asc"],
-    [/^F1$/, "f1", "desc"],
-    [/^Precision/, "precision", "desc"],
-    [/^Recall/, "recall", "desc"],
-    [/Điểm chính/, "primary_score", "desc"],
-    [/^Thời gian/, "created_at", "desc"],
-  ];
-
-  for (const [label, field, order] of columns) {
-    fireEvent.click(within(screen.getByRole("columnheader", { name: label })).getByRole("button"));
-    await waitFor(() => expect(lastParams(urls).get("sort")).toBe(field));
-    expect(lastParams(urls).get("order")).toBe(order);
-    expect(lastParams(urls).get("offset")).toBe("0");
-    expect(screen.getByRole("columnheader", { name: label })).toHaveAttribute(
-      "aria-sort",
-      order === "asc" ? "ascending" : "descending",
-    );
-  }
-
-  // Bấm lại cột đang chọn thì đảo chiều; rời cột rồi quay lại thì về lại mặc định của cột.
-  const primaryHeader = () => screen.getByRole("columnheader", { name: /Điểm chính/ });
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
-  expect(lastParams(urls).get("order")).toBe("desc");
-
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
-
-  fireEvent.click(within(screen.getByRole("columnheader", { name: /^Đội/ })).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("team"));
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
-  expect(lastParams(urls).get("order")).toBe("desc");
-
-  // Cột không sắp xếp được thì không được mang trạng thái aria-sort.
-  expect(screen.getByRole("columnheader", { name: "Trạng thái" })).not.toHaveAttribute(
-    "aria-sort",
-  );
-  expect(screen.getByRole("columnheader", { name: "Tệp đã nộp" })).not.toHaveAttribute(
-    "aria-sort",
-  );
-});
-
-test("chỉ cột Điểm chính được đánh dấu nổi bật", async () => {
+test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường của từng tầng", async () => {
   mockApi();
   renderPage();
   await screen.findByText("Đội 0");
 
-  const primary = screen.getByRole("columnheader", { name: /Điểm chính/ });
-  expect(primary.className).toContain("primary-col");
-  expect(screen.getByRole("columnheader", { name: /^F1$/ }).className).not.toContain("primary-col");
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
+  // Một bài nộp vẫn là một item duy nhất, không tách thành hai dòng.
+  const items = within(region).getAllByRole("listitem");
+  expect(items).toHaveLength(1);
 
-  const cells = within(screen.getByText("Đội 0").closest("tr") as HTMLElement).getAllByRole("cell");
-  // Điểm chính là cột cuối; F1 là cột điểm đầu tiên sau hai cột xét duyệt/thao tác.
-  expect(cells[cells.length - 1].className).toContain("primary-score");
-  expect(cells[cells.length - 1].className).toContain("primary-col");
-  expect(cells[cells.length - 4].className).not.toContain("primary-col");
+  const tiers = Array.from(items[0].querySelectorAll(".subm-card-tier")) as HTMLElement[];
+  expect(tiers).toHaveLength(2);
+  const labelsOf = (tier: HTMLElement) =>
+    Array.from(tier.querySelectorAll("dt")).map((dt) => dt.textContent);
+
+  expect(labelsOf(tiers[0])).toEqual(["Thời gian", "Cuộc thi", "Đội", "Trạng thái", "Kết quả"]);
+  expect(labelsOf(tiers[1])).toEqual(["Tệp đã nộp", "AI sơ bộ", "Xét duyệt", "Thao tác"]);
+
+  // Cụm Kết quả giữ đủ bốn điểm: Điểm chính đứng riêng, ba metric phụ nằm trong một nhóm.
+  const result = fieldValue(items[0], "Kết quả");
+  expect(within(result).getByText("Điểm chính")).toBeTruthy();
+  expect(result.querySelectorAll(".subm-metric")).toHaveLength(3);
+});
+
+test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có thứ tự mặc định riêng", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const field = screen.getByLabelText("Sắp xếp theo");
+  // Mặc định ban đầu: bài mới nhất trước.
+  expect(field).toHaveValue("created_at");
+  expect(screen.getByRole("button", { name: "Giảm dần" })).toBeTruthy();
+
+  const fields: Array<[string, string, string, string]> = [
+    ["competition", "asc", "Tăng dần", "Cuộc thi"],
+    ["team", "asc", "Tăng dần", "Đội"],
+    ["f1", "desc", "Giảm dần", "F1"],
+    ["precision", "desc", "Giảm dần", "Precision"],
+    ["recall", "desc", "Giảm dần", "Recall"],
+    ["primary_score", "desc", "Giảm dần", "Điểm chính"],
+    ["created_at", "desc", "Giảm dần", "Thời gian"],
+  ];
+
+  for (const [sort, order, direction, label] of fields) {
+    fireEvent.change(field, { target: { value: sort } });
+    await waitFor(() => expect(lastParams(urls).get("sort")).toBe(sort));
+    expect(lastParams(urls).get("order")).toBe(order);
+    expect(lastParams(urls).get("offset")).toBe("0");
+    expect(field).toHaveValue(sort);
+    // Mỗi lựa chọn đều có nhãn đọc được và nút đảo chiều nói đúng chiều đang áp dụng.
+    expect(within(field).getByRole("option", { name: label })).toBeTruthy();
+    expect(screen.getByRole("button", { name: direction })).toBeTruthy();
+  }
+
+  // Rời trường rồi quay lại thì về lại thứ tự mặc định của trường đó, không giữ chiều cũ.
+  fireEvent.change(field, { target: { value: "team" } });
+  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
+  fireEvent.change(field, { target: { value: "primary_score" } });
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
+  expect(lastParams(urls).get("order")).toBe("desc");
+
+  // Nút đảo chiều lật chiều của trường đang chọn, và đây là đường duy nhất để lật.
+  fireEvent.click(screen.getByRole("button", { name: "Giảm dần" }));
+  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
+  expect(lastParams(urls).get("sort")).toBe("primary_score");
+  expect(screen.getByRole("button", { name: "Tăng dần" })).toBeTruthy();
+});
+
+test("chỉ Điểm chính trong cụm Kết quả được nhấn, ba metric phụ giữ trung tính", async () => {
+  mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const result = fieldValue(itemOf("Đội 0"), "Kết quả");
+  expect(result.querySelector(".subm-result-primary-score")).toHaveTextContent("0.900000");
+  // Điểm chính không nằm lẫn trong nhóm metric phụ.
+  expect(result.querySelector(".subm-result-metrics .subm-result-primary-score")).toBeNull();
+
+  for (const [label, value] of [
+    ["F1", "0.900000"],
+    ["Precision", "0.800000"],
+    ["Recall", "0.700000"],
+  ]) {
+    const metric = Array.from(result.querySelectorAll(".subm-metric")).find(
+      (node) => node.querySelector(".subm-metric-label")?.textContent === label,
+    ) as HTMLElement;
+    expect(metric, `không có metric "${label}"`).toBeTruthy();
+    expect(metric.querySelector(".subm-metric-value")).toHaveTextContent(value);
+  }
 });
 
 test("hiện bốn thẻ thống kê theo bộ lọc hiện tại", async () => {
@@ -352,7 +373,7 @@ test("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới",
   await screen.findByText("Đội 0");
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
 
-  const region = screen.getByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   expect(region).toHaveAttribute("aria-busy", "true");
   expect(screen.getByText("Đội 0")).toBeTruthy();
   expect(screen.getByRole("status")).toHaveTextContent("Đang cập nhật…");
@@ -468,17 +489,30 @@ function row(
   };
 }
 
-/** Ô của một dòng tra theo tên cột, để thêm cột mới không làm lệch assertion vị trí cứng. */
-function cellByHeader(row: HTMLElement, header: string): HTMLElement {
-  const table = row.closest("table") as HTMLTableElement;
-  const index = Array.from(table.querySelectorAll("thead th")).findIndex((th) =>
-    (th.textContent ?? "").includes(header),
-  );
-  expect(index, `không có cột "${header}"`).toBeGreaterThanOrEqual(0);
-  return row.querySelectorAll("td")[index] as HTMLElement;
+/** Thẻ bài nộp của một đội: mỗi bài nộp là đúng một `li`. */
+function itemOf(name: string): HTMLElement {
+  return screen.getByText(name).closest("li") as HTMLElement;
 }
 
-test("cột Xét duyệt hiện lý do, người duyệt và thời điểm; bài lỗi chấm không xét duyệt được", async () => {
+/** Giá trị của một trường trong thẻ, tra theo nhãn `dt` nên thêm trường mới không lệch assertion. */
+function fieldValue(item: HTMLElement, label: string): HTMLElement {
+  const term = Array.from(item.querySelectorAll("dt")).find((dt) => dt.textContent === label);
+  expect(term, `không có trường "${label}"`).toBeTruthy();
+  return (term as HTMLElement).nextElementSibling as HTMLElement;
+}
+
+/**
+ * Ba trục trạng thái chỉ còn icon, nên kết luận phải tra qua `aria-label` chứ không qua chữ nhìn
+ * thấy được. Phần chữ nằm trong `.subm-icon-label` chỉ hiện ở `@media (hover: none)`, còn jsdom
+ * không nạp stylesheet nên `getByText` ở đây sẽ pass dù người dùng không hề thấy chữ.
+ */
+function statusIcon(item: HTMLElement, label: string): HTMLElement {
+  const icon = fieldValue(item, label).querySelector<HTMLElement>(".subm-icon");
+  expect(icon, `không có icon trạng thái ở trường "${label}"`).toBeTruthy();
+  return icon as HTMLElement;
+}
+
+test("trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
   mockApi(() =>
     jsonResponse({
       ...page(0, 3),
@@ -491,26 +525,39 @@ test("cột Xét duyệt hiện lý do, người duyệt và thời điểm; bà
   );
   renderPage();
 
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   await within(region).findByText("Đội bị từ chối");
 
-  const rejectedRow = within(region).getByText("Đội bị từ chối").closest("tr") as HTMLElement;
-  expect(within(rejectedRow).getByText("Không chấp nhận")).toBeTruthy();
-  expect(within(rejectedRow).getByText(REJECTED_REVIEW.note)).toBeTruthy();
-  expect(within(rejectedRow).getByText(/Admin A/)).toBeTruthy();
-  expect(within(rejectedRow).getByRole("button", { name: "Khôi phục" })).toBeTruthy();
+  const rejectedItem = itemOf("Đội bị từ chối");
+  const rejectedReview = statusIcon(rejectedItem, "Xét duyệt");
+  expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
+  // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
+  // và thời điểm vào tooltip, cách nhau bằng xuống dòng.
+  const rejectedTip = rejectedReview.getAttribute("data-tip") ?? "";
+  expect(rejectedTip).toContain(REJECTED_REVIEW.note);
+  expect(rejectedTip).toContain("Admin A");
+  expect(rejectedTip.split("\n")[0]).toBe("Không chấp nhận");
+  expect(
+    within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
+  ).toBeTruthy();
 
   // Chưa từng bị xét duyệt nghĩa là hợp lệ, và chỉ có thao tác từ chối.
-  const validRow = within(region).getByText("Đội hợp lệ").closest("tr") as HTMLElement;
-  expect(within(validRow).getByText("Hợp lệ")).toBeTruthy();
-  expect(within(validRow).getByRole("button", { name: "Không chấp nhận" })).toBeTruthy();
+  const validItem = itemOf("Đội hợp lệ");
+  expect(statusIcon(validItem, "Xét duyệt")).toHaveAttribute("aria-label", "Hợp lệ");
+  expect(
+    within(fieldValue(validItem, "Thao tác")).getByRole("button", { name: "Không chấp nhận" }),
+  ).toBeTruthy();
 
-  // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai ô đều là gạch, không có thao tác.
-  const failedRow = within(region).getByText("Đội lỗi chấm").closest("tr") as HTMLElement;
-  expect(cellByHeader(failedRow, "Xét duyệt")).toHaveTextContent("—");
-  expect(cellByHeader(failedRow, "Thao tác")).toHaveTextContent("—");
-  // Ô thao tác chỉ có gạch; nút tải artifact ở cột khác không tính.
-  expect(within(cellByHeader(failedRow, "Thao tác")).queryByRole("button")).toBeNull();
+  // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai trường đều là gạch, không có thao tác.
+  const failedItem = itemOf("Đội lỗi chấm");
+  expect(statusIcon(failedItem, "Xét duyệt")).toHaveAttribute(
+    "aria-label",
+    "Không xét duyệt được",
+  );
+  expect(fieldValue(failedItem, "Thao tác")).toHaveTextContent("—");
+  expect(within(fieldValue(failedItem, "Thao tác")).queryByRole("button")).toBeNull();
+  // Gạch chỉ dành cho hai trường phụ thuộc trạng thái chấm; tệp của bài lỗi vẫn tải được.
+  expect(within(fieldValue(failedItem, "Tệp đã nộp")).getAllByRole("button")).toHaveLength(2);
 });
 
 test("lọc theo trạng thái duyệt là trục riêng, không lẫn với trạng thái chấm", async () => {
@@ -614,7 +661,7 @@ test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   );
   renderPage();
 
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   await within(region).findByText("Không chấp nhận");
 
   fireEvent.click(within(region).getByRole("button", { name: "Khôi phục" }));
@@ -694,7 +741,7 @@ function pageOf(submissions: GlobalSubmissionItem[], total = submissions.length,
   return { ...page(offset, total), submissions };
 }
 
-test("cột AI hiện kết luận sơ bộ, bài chưa từng được đánh giá thì ghi rõ là chưa", async () => {
+test("trường AI hiện kết luận sơ bộ, bài chưa từng được đánh giá thì ghi rõ là chưa", async () => {
   mockApi(() =>
     jsonResponse(
       pageOf([
@@ -706,21 +753,27 @@ test("cột AI hiện kết luận sơ bộ, bài chưa từng được đánh g
   renderPage();
   await screen.findByText("Đội 0");
 
-  const flagged = screen.getByText("Đội 0").closest("tr") as HTMLElement;
-  const flaggedCell = cellByHeader(flagged, "AI sơ bộ");
-  expect(within(flaggedCell).getByText("Có dấu hiệu")).toBeTruthy();
-  expect(within(flaggedCell).getByRole("button", { name: "Chi tiết AI" })).toBeTruthy();
+  const flaggedItem = itemOf("Đội 0");
+  const flaggedIcon = statusIcon(flaggedItem, "AI sơ bộ");
+  expect(flaggedIcon).toHaveAttribute("aria-label", "Có dấu hiệu");
+  // Thời điểm cập nhật không chiếm thêm dòng nào trong thẻ, chỉ vào tooltip.
+  expect(flaggedIcon.getAttribute("data-tip")).toContain("Cập nhật");
+  expect(within(fieldValue(flaggedItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
+    .toBeTruthy();
 
   // Bài nộp từ lúc cuộc thi chưa bật AI không có projection. Thiếu dữ liệu không phải bằng chứng
   // sạch, nên ô này không được hiện "Không phát hiện". Nút vẫn phải có: đó là đường duy nhất để BTC
   // mở modal và khởi tạo lượt kiểm tra cho bài cũ.
-  const legacy = screen.getByText("Đội cũ").closest("tr") as HTMLElement;
-  const legacyCell = cellByHeader(legacy, "AI sơ bộ");
-  expect(legacyCell).toHaveTextContent("Chưa đánh giá");
-  expect(within(legacyCell).getByRole("button", { name: "Chi tiết AI" })).toBeTruthy();
+  const legacyItem = itemOf("Đội cũ");
+  expect(statusIcon(legacyItem, "AI sơ bộ")).toHaveAttribute("aria-label", "Chưa đánh giá");
+  expect(within(fieldValue(legacyItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
+    .toBeTruthy();
 
-  // Cột AI nằm cạnh cột xét duyệt của người, nhưng là hai ô riêng biệt.
-  expect(within(cellByHeader(legacy, "Xét duyệt")).queryByText("Chưa đánh giá")).toBeNull();
+  // AI sơ bộ đứng cạnh xét duyệt của người, nhưng là hai trường riêng biệt.
+  expect(statusIcon(legacyItem, "Xét duyệt")).not.toHaveAttribute(
+    "aria-label",
+    "Chưa đánh giá",
+  );
 });
 
 test("lọc theo kết luận AI là trục riêng, không lẫn với trạng thái chấm hay trạng thái duyệt", async () => {

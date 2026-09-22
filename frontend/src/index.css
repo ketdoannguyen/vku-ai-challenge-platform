@@ -1095,6 +1095,19 @@ samp {
   border-color: transparent;
   color: var(--text);
 }
+/* Hành động nguy hiểm nhưng chưa phá huỷ ngay: viền đỏ trên nền trắng, đủ nổi để không bị
+   đọc thành nút trung tính như `.btn-secondary`. */
+.btn-danger-outline {
+  border-color: var(--danger);
+  background: var(--surface);
+  color: var(--danger);
+}
+.btn-danger-outline:hover {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 /* Hành động nguy hiểm dạng nhẹ: xóa cấp hàng hoặc rời cuộc thi. */
 .btn-danger-ghost {
   border-color: transparent;
@@ -6033,10 +6046,10 @@ button.resource-link:disabled {
 /* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": mỗi bộ lọc một cột, nút xóa đứng cuối. */
 .results-filters {
   display: grid;
-  /* Ô tìm kiếm + ba bộ lọc độc lập (trạng thái chấm, trạng thái duyệt, kết luận AI) + nút xóa. */
-  grid-template-columns:
-    minmax(180px, 1fr) minmax(140px, 180px) minmax(140px, 180px) minmax(140px, 180px)
-    auto;
+  /* Lưới tự dồn cột: mỗi ô rộng tối thiểu 12rem, thừa chỗ thì chia đều, hết chỗ thì xuống
+     dòng. Trần `min(12rem, 100%)` giữ đúng một cột trên màn hẹp thay vì ép track rộng hơn
+     khung - nhờ vậy số ô tăng lên (thêm bộ lọc cuộc thi) cũng không đẩy trang sang ngang. */
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
   gap: 12px;
   margin-bottom: 16px;
   padding: 12px;
@@ -6058,11 +6071,6 @@ button.resource-link:disabled {
 
 .results-table {
   min-width: 840px;
-}
-
-/* Ba cột AI/xét duyệt/thao tác cộng vào nên bảng rộng hơn trước, vẫn cuộn ngang trong `table-wrap`. */
-.admin-submissions-table {
-  min-width: 1480px;
 }
 
 .results-table th {
@@ -6116,26 +6124,6 @@ button.resource-link:disabled {
    (F1/Precision/Recall) giữ nguyên để không metric nào bị đọc nhầm là primary. */
 .admin-detail-page .primary-score {
   color: var(--vku-blue-700);
-}
-
-/* Nền vàng + vạch kẻ trái đánh dấu cột Điểm chính ở cả hai bảng bài nộp. Ý nghĩa không
-   chỉ nằm ở màu: cột vẫn có tiêu đề chữ riêng và đứng cuối bảng. */
-.results-table th.primary-col,
-.results-table td.primary-col {
-  background: var(--vku-yellow-50);
-}
-
-.results-table th.primary-col {
-  box-shadow: inset 3px 0 0 var(--vku-yellow-600);
-}
-
-.results-table td.primary-col {
-  box-shadow: inset 3px 0 0 var(--vku-yellow-100);
-}
-
-/* Hàng đang hover vẫn phải nhận ra được ở cột đã tô nền riêng. */
-.results-table tbody tr:hover td.primary-col {
-  background: var(--vku-yellow-100);
 }
 
 /* Huy chương nhẹ cho top 3; badge luôn kèm số hạng nên màu chỉ là phụ trợ. */
@@ -6389,46 +6377,360 @@ button.resource-link:disabled {
   line-height: 1.5;
 }
 
-/* Ô tiêu đề sắp xếp được: nút giữ nguyên dáng của `th`, chỉ đổi màu khi cột đang áp dụng. */
-.admin-sort-button {
-  display: inline-flex;
+/* Mỗi thẻ không còn tiêu đề cột để bấm nên trường và chiều sắp xếp phải có chỗ riêng,
+   đứng ngay trên danh sách. */
+.subm-sort-bar {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-  cursor: pointer;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
 }
 
-.admin-sort-button:hover {
-  color: var(--vku-blue-700);
+.subm-sort-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.subm-sort-label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Cao bằng nút cạnh nó để hai điều khiển đứng chung một đường; `width: auto` cho select
+   co theo nhãn dài nhất thay vì kéo hết bề rộng như `.input` mặc định. */
+.subm-sort-field .input,
+.subm-sort-direction {
+  width: auto;
+  height: 36px;
+}
+
+.subm-sort-field .input {
+  min-width: 11rem;
 }
 
 .admin-sort-arrow {
   flex: 0 0 auto;
-  opacity: 0.45;
 }
 
-.table th[aria-sort="ascending"] .admin-sort-button,
-.table th[aria-sort="descending"] .admin-sort-button {
-  color: var(--vku-blue-700);
+/* --- Danh sách bài nộp: mỗi bài nộp là một thẻ hai tầng ---
+   Tầng đầu để nhận diện (thời gian, cuộc thi, đội, trạng thái, kết quả), tầng sau để xử
+   lý (tệp, AI, xét duyệt, thao tác). Bảng 12 cột cũ phải cuộn ngang ở 1480px nên bị thay.
+
+   Khoảng cách giữa hai thẻ lớn hơn hẳn khoảng cách giữa hai tầng trong một thẻ (24 so với
+   0) - đây là thứ duy nhất giúp mắt tách được thẻ này với thẻ kia khi cả hai đều là nền
+   trắng trên nền trang xám. */
+.subm-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.table th[aria-sort="ascending"] .admin-sort-arrow,
-.table th[aria-sort="descending"] .admin-sort-arrow {
+/* KHÔNG đặt `overflow: hidden` ở đây: tooltip của icon trạng thái bung lên trên và sẽ bị
+   cắt cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`.
+
+   `position: relative` biến thẻ thành mốc định vị cho tooltip đó - xem chú thích ở
+   `.subm-icon::after`. */
+.subm-card {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+/* Trỏ vào thẻ thì thẻ sáng lên: cùng với khoảng cách rộng, đây là tín hiệu thứ hai cho biết
+   đang ở thẻ nào. */
+.subm-card:hover {
+  border-color: var(--vku-blue-500);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.subm-card-body {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+/* Mỗi tầng là MỘT dòng trường: các trường co theo nội dung và chỉ xuống dòng khi hết chỗ. */
+.subm-card-tier {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-sm) var(--space-md);
+  margin: 0;
+  padding: 10px var(--space-md);
+}
+
+/* Tầng thao tác nằm trên nền chìm để tách khỏi tầng nhận diện mà không cần thêm viền.
+   Nền phải ĐẬM HƠN nền trang (không dùng `--surface-subtle`, gần như trùng màu nền trang): nếu
+   nhạt hơn hoặc bằng thì nửa dưới của thẻ tan vào nền và mắt không còn thấy thẻ kết thúc ở đâu -
+   đó chính là lý do các bài nộp trước đây khó tách khỏi nhau. */
+.subm-card-tier-detail {
+  border-top: 1px solid var(--vku-border-soft);
+  border-radius: 0 0 calc(var(--radius-xl) - 1px) calc(var(--radius-xl) - 1px);
+  background: var(--surface-container-low);
+}
+
+/* Nền tầng này trùng màu hover mặc định của nút trung tính nên phải đổi sang bậc đậm hơn,
+   nếu không nút trông như biến mất khi trỏ vào. */
+.subm-card-tier-detail .btn-secondary:hover,
+.subm-card-tier-detail .btn-outline:hover {
+  background: var(--surface-container-high);
+}
+
+/* Mặc định không co: trường ngắn (icon trạng thái, nút thao tác) mà bị co thì icon méo và chữ
+   trong nút bị cắt. `min-width: 0` vẫn cần để chuỗi dài không đẩy thẻ rộng ra trong mọi trường
+   hợp khác. */
+.subm-field {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Hai trường có giá trị dài (tên cuộc thi, đội) nhận hết chỗ trống còn lại rồi chia nhau, và
+   là hai trường duy nhất được phép co. `min-width` giữ chúng không teo dưới mức đọc được. */
+.subm-field-grow {
+  flex: 1 1 8rem;
+  min-width: 6rem;
+}
+
+/* Ngoại lệ của `.subm-field`: cụm Kết quả chứa chỉ số nên co lại thì tự xuống dòng mà vẫn đọc
+   được, trong khi các trường chữ co lại là mất chữ. Ở 375px cụm này rộng hơn cả thẻ, nếu không
+   cho co thì nó tràn ra ngoài khung. */
+.subm-field-result {
+  flex: 0 1 auto;
+}
+
+.subm-field dt {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Một dòng ngang, KHÔNG xếp chồng: đây là ràng buộc chiều cao chính của thẻ. Chỗ hẹp thì nhóm
+   nút tự xuống dòng chứ không tràn ra ngoài. */
+.subm-field dd {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-body-sm);
+}
+
+/* Riêng trường được giãn thì giá trị là chữ, không phải nhóm nút: giữ một dòng và cắt bằng
+   ellipsis (kèm `title`) thay vì để tên đội và email xuống hai dòng làm thẻ cao lên. */
+.subm-field-grow dd {
+  flex-wrap: nowrap;
+}
+
+/* Trong cặp giá trị chính/phụ, phần phụ ngắn lại trước. Slug và email là định danh kỹ thuật, cụt
+   một đoạn vẫn dùng được; còn tên cuộc thi và tên đội mà bị cắt theo tỉ lệ thuận với độ dài thì
+   phần đọc được lại ngắn hơn cả phần phụ. */
+.subm-field-grow dd > .subm-muted {
+  flex-shrink: 6;
+}
+
+.subm-truncate {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Giá trị phụ nằm cạnh giá trị chính trên cùng một dòng; dấu `·` do CSS sinh để không phải
+   thêm phần tử vào DOM. */
+.subm-muted {
+  color: var(--text-muted);
+}
+
+.subm-muted::before {
+  content: "·";
+  margin-right: var(--space-sm);
+}
+
+/* Cụm Kết quả: Điểm chính là metric chính của cuộc thi nên đứng riêng một viên vàng, ba
+   metric phụ nằm cùng dòng nhưng nhỏ và trung tính để không bị đọc nhầm là primary. */
+.subm-field-result dd {
+  gap: var(--space-xs) var(--space-md);
+}
+
+.subm-result-primary {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 10px;
+  border: 1px solid var(--vku-yellow-600);
+  border-radius: var(--radius-pill);
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.subm-result-primary-label {
+  font-size: var(--text-label);
+  font-weight: 700;
+  line-height: var(--leading-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.subm-result-primary-score {
+  font-family: var(--font-mono);
+  font-size: var(--text-body-sm);
+  font-weight: 700;
+}
+
+/* Cụm chỉ số phụ cũng tự xuống dòng: ở bề rộng hẹp nó là khối rộng nhất trong cụm Kết quả, ép
+   một dòng sẽ đẩy cả thẻ tràn khung. */
+.subm-result-metrics {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-md);
+}
+
+.subm-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.subm-metric-label {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+}
+
+.subm-metric-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  font-weight: 600;
+}
+
+/* --- Icon trạng thái: hình dạng + màu nói kết luận, chữ chỉ hiện khi trỏ vào ---
+   Đĩa tròn tint là nền, glyph bên trong là nét trần (không vẽ thêm vòng tròn lồng nhau).
+
+   Cố ý KHÔNG đặt `position` ở đây: tooltip phải bám vào thẻ, không bám vào icon - xem
+   `.subm-icon::after`. */
+.subm-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: var(--radius-pill);
+}
+
+.subm-icon-success {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.subm-icon-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.subm-icon-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.subm-icon-info {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.subm-icon-muted {
+  background: var(--surface-container);
+  color: var(--text-muted);
+}
+
+/* Tooltip nền mực đặc để không bị đọc lẫn với nội dung thẻ. `pre-line` cho phép xuống dòng
+   bằng `\n` trong `data-tip` - chỗ để ngăn cách kết luận với chi tiết (lý do, thời điểm).
+
+   Bám theo THẺ (mọi tổ tiên giữa icon và thẻ đều không định vị), không bám theo icon: icon nằm
+   ở nhiều cột khác nhau tuỳ nội dung và bề rộng, nên một bong bóng canh giữa icon sẽ tràn ra
+   ngoài khung - đo được 38px ở dải 1000-1159px và hơn 100px ở 375px.
+
+   Canh lề trái của thẻ rồi mọc sang phải, trần là `min(40rem, bề ngang thẻ)`: kết luận ngắn chỉ
+   chiếm một dải vừa đủ, còn lý do xét duyệt dài có tối đa 40rem để xuống dòng. Trần tính theo
+   phần trăm bề ngang thẻ nên tooltip không bao giờ vượt ra ngoài thẻ, ở mọi bề rộng màn hình. */
+.subm-icon::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: var(--space-md);
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(40rem, calc(100% - 2 * var(--space-md)));
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--vku-ink);
+  color: var(--surface);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+.subm-icon:hover::after {
   opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
 }
 
-/* Bảng bài nộp toàn cục có thêm ô lọc cuộc thi nên lưới rộng hơn lưới hai bộ lọc của
-   tab kết quả; dưới 48rem vẫn thừa hưởng nhánh một cột của `.results-filters`. */
-.admin-submissions-filters {
-  grid-template-columns:
-    minmax(160px, 1fr) minmax(150px, 1fr) minmax(140px, 180px) minmax(140px, 180px)
-    minmax(140px, 180px) auto;
+/* Chữ nằm sẵn trong DOM nhưng bị ẩn; nó chỉ hiện ở chế độ dự phòng bên dưới. */
+.subm-icon-label {
+  display: none;
+}
+
+/* Thiết bị không có hover thì tooltip không bao giờ mở, nên chữ phải nằm sẵn cạnh icon. Đây là
+   lý do icon vẫn kèm một bản chữ trong DOM. */
+@media (hover: none) {
+  .subm-icon {
+    width: auto;
+    padding: 0 var(--space-sm);
+    gap: var(--space-xs);
+  }
+
+  .subm-icon-label {
+    display: inline;
+    font-size: var(--text-label);
+    font-weight: 600;
+  }
+
+  .subm-icon::after {
+    display: none;
+  }
 }
 
 .admin-submissions-error {
@@ -6439,30 +6741,17 @@ button.resource-link:disabled {
   margin-bottom: 16px;
 }
 
-/* Cột AI/xét duyệt: badge, thời điểm, lý do và người duyệt xếp dọc để nội dung dài vẫn đọc được. */
-.subm-ai-cell,
-.subm-review-cell,
-.subm-action-cell {
+/* Cột AI của trang thí sinh: badge, thời điểm và nút xếp dọc để nội dung dài vẫn đọc được. */
+.subm-ai-cell {
   vertical-align: top;
 }
 
-.subm-ai-cell > *,
-.subm-review-cell > * {
+.subm-ai-cell > * {
   display: block;
 }
 
 .subm-ai-cell .btn {
   margin-top: 4px;
-}
-
-.subm-review-note {
-  max-width: 320px;
-  overflow-wrap: anywhere;
-  font-style: italic;
-}
-
-.subm-action-cell .btn {
-  white-space: nowrap;
 }
 
 /* Lý do từ chối nằm trong cell trạng thái của trang participant. */
@@ -8940,10 +9229,7 @@ button.resource-link:disabled {
 }
 
 @media (max-width: 47.99rem) {
-  .results-filters {
-    grid-template-columns: 1fr;
-  }
-
+  /* Lưới `auto-fit` tự dồn về một cột ở bề rộng này; chỉ còn cần cho nút bấm chiếm hết hàng. */
   .results-filters .btn,
   .admin-results-export {
     width: 100%;
@@ -10642,9 +10928,6 @@ button:focus-visible {
   }
   .admin-members-add-form {
     width: 100%;
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .results-filters {
     grid-template-columns: minmax(0, 1fr);
   }
   .s14-bento-grid {

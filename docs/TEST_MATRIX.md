@@ -784,19 +784,26 @@ này còn là thay đổi **chưa lên production** (xem §1 `docs/PROJECT_STATE
 | Hành vi cũ không đổi: phân trang, lọc chéo cuộc thi, metadata artifact, chặn non-admin | passing | `test_admin_submissions.py::test_global_list_sorts_and_paginates`, `::test_global_list_spans_competitions_with_filters`, `::test_global_list_reports_artifact_metadata_for_new_submissions`, `::test_global_list_requires_admin` |
 | **Không** thêm index Mongo nào cho batch này | passing | `docs/DATA_MODEL.md` §6 ghi rõ metric sort là đường quản trị phụ; review code `backend/app/submissions/service.py` không có `create_index` mới |
 
-### Frontend - bảng bài nộp
+### Frontend - danh sách bài nộp
 
 | Check | Status | Cách verify |
 |---|---|---|
-| Bảy cột sắp xếp được, mỗi cột có thứ tự mặc định riêng (`competition`/`team` asc, các điểm và `created_at` desc), `aria-sort` khớp chiều đang xem, `offset` về 0 | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::bảy cột sắp xếp được với thứ tự mặc định riêng của từng cột` |
-| Bấm lại cột đang chọn thì đảo chiều; rời cột rồi quay lại thì về mặc định của cột; cột không sắp xếp được (Trạng thái, Tệp đã nộp) **không** mang `aria-sort` | passing | Cùng test trên |
+| Bảy trường sắp xếp được từ thanh sắp xếp (không còn tiêu đề cột để bấm), mỗi trường có thứ tự mặc định riêng (`competition`/`team` asc, các điểm và `created_at` desc), đổi trường thì `offset` về 0 | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::thanh sắp xếp đổi trường và đảo chiều, mỗi trường có thứ tự mặc định riêng` |
+| Nút đảo chiều đổi `order` đang gửi lên và đổi nhãn theo chiều mới | passing | Cùng test trên |
 | Đổi bộ lọc cuộc thi/trạng thái gọi lại API **ngay**, không còn nút `Lọc` | passing | `AdminSubmissionsPage.test.tsx::đổi bộ lọc cuộc thi và trạng thái áp dụng ngay, không còn nút Lọc` |
 | Gõ tìm kiếm chỉ gọi server sau debounce, Enter áp dụng ngay | passing | `AdminSubmissionsPage.test.tsx::gõ tìm kiếm chỉ gọi server sau khi ngừng gõ, Enter áp dụng ngay` |
 | Xoá bộ lọc không phát request trùng và hiện empty state đúng | passing | `AdminSubmissionsPage.test.tsx::bộ lọc không khớp thì hiện empty state và xóa bộ lọc không gọi trùng request` |
 | Bốn thẻ thống kê đọc theo bộ lọc hiện tại và **không** đổi sort/phân trang đang xem | passing | `AdminSubmissionsPage.test.tsx::hiện bốn thẻ thống kê theo bộ lọc hiện tại` |
 | Lần tải đầu để chỗ trống + "Đang tải thống kê", không hiện số 0 giả | passing | `AdminSubmissionsPage.test.tsx::chưa có dữ liệu thì thẻ thống kê để chỗ trống thay vì số 0 giả` |
-| Chỉ cột `Điểm chính` mang class nổi bật (`primary-col` ở header, `primary-score` ở cell), các cột điểm khác không | passing | `AdminSubmissionsPage.test.tsx::chỉ cột Điểm chính được đánh dấu nổi bật` |
-| Panel `Kết quả` trong cuộc thi: không ô lọc/cột Cuộc thi, không gọi endpoint toàn cục, không thẻ thống kê, không nút `Lọc`; metric sort vẫn chạy qua endpoint của cuộc thi; lọc trạng thái áp dụng ngay; cột Điểm chính vẫn nổi bật | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở` |
+| Mỗi bài nộp là **một** item duy nhất gồm hai tầng: tầng nhận diện (Thời gian, Cuộc thi, Đội, Trạng thái, Kết quả) và tầng xử lý (Tệp đã nộp, AI sơ bộ, Xét duyệt, Thao tác), đúng thứ tự đó; không còn `table` trong danh sách | passing | `AdminSubmissionsPage.test.tsx::mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường của từng tầng` |
+| Cụm `Kết quả` giữ đủ bốn metric, chỉ `Điểm chính` mang class nhấn vàng (`subm-result-primary-score`), ba metric phụ (`subm-metric`) giữ trung tính | passing | `AdminSubmissionsPage.test.tsx::chỉ Điểm chính trong cụm Kết quả được nhấn, ba metric phụ giữ trung tính` |
+| Ba trục trạng thái (chấm điểm, AI sơ bộ, xét duyệt) chỉ còn icon mang `aria-label`; kết luận tra bằng `role="img"` chứ không bằng chữ nhìn thấy được | passing | `AdminSubmissionsPage.test.tsx::hiển thị bảng toàn cục với cuộc thi, đội, trạng thái và điểm`, `::trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip`, `::trường AI hiện kết luận sơ bộ, bài chưa từng được đánh giá thì ghi rõ là chưa` |
+| Lý do xét duyệt (tới 1000 ký tự), người duyệt, thời điểm và mốc cập nhật AI đi hết vào `data-tip` của icon, không chiếm dòng nào trong thẻ | passing | Cùng hai test trên, assert trên `data-tip` (dòng đầu là kết luận, các dòng sau là chi tiết) |
+| Chiều cao thẻ ở 1440/1280px là **139px** với mỗi tầng đúng **1 dòng** (`dd` cao nhất 32px, tức không giá trị nào xếp chồng); trước redesign là 235px với cụm Kết quả và AI xếp 3 dòng | passing | Chromium headless `/tmp/uiverify/subm-redesign.mjs` (đo `.subm-card`, `offsetTop` của từng trường trong tầng) |
+| Tooltip của icon nằm trong khung ở mọi bề rộng 360–1440px: bám lề trái của **thẻ** (không canh giữa icon) và trần `min(40rem, 100% - 2*--space-md)` | passing | `/tmp/uiverify/rd-tip-bounds.mjs`, `/tmp/uiverify/rd-tip-long.mjs` (lý do 1000 ký tự: `[74, 714]` trong thẻ `[57, 1383]` ở 1440px) |
+| Nền tầng xử lý đậm hơn nền trang (`--surface-container-low` #f1f5f9 so với #f7f9fc) nên thẻ tách khỏi nền ở cả hai đầu; khoảng cách giữa hai thẻ là `--space-lg` (24px) | passing | `/tmp/uiverify/rd-zoom.mjs` (`page` / `card` / `detail` đọc bằng `getComputedStyle`) |
+| Chữ trạng thái hiện tại chỗ thay vì tooltip khi thiết bị không có hover (`@media (hover: none)`) | passing | `/tmp/uiverify/subm-redesign.mjs` (`hasTouch: true` → `.subm-icon-label` visible) |
+| Panel `Kết quả` trong cuộc thi: không ô lọc/trường Cuộc thi, không lựa chọn sort Cuộc thi, không gọi endpoint toàn cục, không thẻ thống kê, không nút `Lọc`; metric sort vẫn chạy qua endpoint của cuộc thi; lọc trạng thái áp dụng ngay; cụm Kết quả vẫn nổi bật; danh sách không còn vùng cuộn ngang nên **không** có `tabindex` | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở` |
 | Đổi trang giữ hàng cũ rồi thay bằng trang mới; lỗi tải có thông báo + nút thử lại; cuộc thi xoá hiện tên không có link | passing | `AdminSubmissionsPage.test.tsx::đổi trang giữ bảng cũ, báo đang bận rồi render trang mới`, `::lỗi tải danh sách hiện thông báo và nút thử lại gọi lại đúng trang`, `::cuộc thi đã xóa hiện tên nhưng không có link để mở` |
 | CSS nằm trong `frontend/src/index.css`, không thêm utility/Tailwind | passing | `frontend/src/test/designSystemGuard.test.ts` (suite frontend) |
 
@@ -841,9 +848,9 @@ sau mỗi lượt `artifact-smoke.mjs` nộp thật, nên con số cứng cũ đ
 | CTA tải notebook khung chạy thật cho khách | passing | Tên tệp `starter-notebook.ipynb`, body parse JSON, `nbformat == 4`, có `SEED = 42`, `import numpy as np`, `import pandas as pd`, hai bước `# 5. TIỀN XỬ LÝ DỮ LIỆU`/`# 6. HUẤN LUYỆN MÔ HÌNH`; không còn `Checklist tái lập kết quả` lẫn `Lỗi thường gặp` |
 | Hướng dẫn không tràn ngang ở 1280 và 375 | passing | `scrollWidth == innerWidth` ở cả hai bề rộng |
 | Cuộc thi **không** có link ngoài (`ai-challenge-6`) vẫn thấy block `Tài nguyên` | passing | Count `1`, đúng một `button.resource-link` là `Notebook khởi đầu (.ipynb)`, tải được |
-| Admin toàn cục: không còn nút `Lọc`; đúng bảy cột mang `aria-sort` | passing | 0 nút `Lọc`; 7 `th[aria-sort]` (`Trạng thái`/`Tệp đã nộp` không có) |
-| Bảy cột gửi đúng `sort`/`order`/`offset` lên server và đổi `aria-sort` tại chỗ | passing | `competition`/`team` → `order=asc`; `f1`/`precision`/`recall`/`primary_score`/`created_at` → `order=desc`; mọi lượt `offset=0`, `aria-sort` khớp chiều |
-| Chỉ cột `Điểm chính` được nhấn nổi bật | passing | `th.primary-col` = 1, nhãn `ĐIỂM CHÍNH`; các cột F1/Precision/Recall không có |
+| Admin toàn cục: không còn nút `Lọc`; đúng bảy cột mang `aria-sort` (lúc chạy còn là bảng 12 cột, nay là thanh sắp xếp + thẻ hai tầng) | passing | 0 nút `Lọc`; 7 `th[aria-sort]` (`Trạng thái`/`Tệp đã nộp` không có) |
+| Bảy cột gửi đúng `sort`/`order`/`offset` lên server và đổi `aria-sort` tại chỗ (lúc chạy còn là bảng cũ) | passing | `competition`/`team` → `order=asc`; `f1`/`precision`/`recall`/`primary_score`/`created_at` → `order=desc`; mọi lượt `offset=0`, `aria-sort` khớp chiều |
+| Chỉ cột `Điểm chính` được nhấn nổi bật (lúc chạy còn là bảng cũ; nay là `subm-result-primary-score` trong cụm Kết quả) | passing | `th.primary-col` = 1, nhãn `ĐIỂM CHÍNH`; các cột F1/Precision/Recall không có |
 | Bốn thẻ thống kê khớp `stats` của response và tính lại theo bộ lọc | passing | Lượt 2026-09-20: không lọc `19/2/2/19` (khớp `stats` của response); sau khi lọc một cuộc thi `17/1/2/17` |
 | Đổi ô lọc cuộc thi gọi server **ngay** và quay về trang đầu | passing | Request phát ngay với `competition_id=…&offset=0`, không cần bấm nút |
 | Tên artifact tải thật chỉ còn **một** `_` mỗi phân cách | passing | `ai-challenge_Admin_submission-0007_prediction.csv`, `ai-challenge_Đội-01_submission-0010_{prediction.csv,notebook.ipynb}` - không tên nào chứa `__` |
@@ -988,11 +995,11 @@ Trục `review` tách khỏi `status`; xem ADR-035 để biết vì sao không t
 | Filter `review=accepted\|rejected` chạy ở cả hai route admin, kết hợp được với `competition_id`/`q`/`status`; giá trị ngoài allowlist → 422; `stats.completed` loại bài bị từ chối trong khi `stats.total` vẫn đếm | passing | `test_submission_review.py::test_review_filter_and_completed_stat_excludes_rejected` |
 | **Không** thêm index Mongo và **không** backfill: `review` là field tùy chọn, `$ne` khớp document thiếu field | passing | `docs/DATA_MODEL.md` §6; `test_review_...` chạy trên record không có `review` (bài nộp mới tạo trong test) |
 
-### Frontend - bảng admin
+### Frontend - danh sách admin
 
 | Check | Status | Cách verify |
 |---|---|---|
-| Cột `Xét duyệt` hiện lý do + người duyệt + thời điểm cho bài bị từ chối, `Hợp lệ` cho bài chưa từng xử lý, và gạch cho bài `failed`/`rejected` (không có thao tác) | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::cột Xét duyệt hiện lý do, người duyệt và thời điểm; bài lỗi chấm không xét duyệt được` |
+| Trường `Xét duyệt` chỉ còn icon: `Hợp lệ` cho bài chưa từng xử lý, gạch cho bài `failed`/`rejected` (không có thao tác); lý do + người duyệt + thời điểm của bài bị từ chối nằm trong tooltip của icon | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx::trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip` |
 | Lọc `trạng thái duyệt` là trục **riêng**, gửi `review=` và không lẫn `status=`; `accepted` gửi đúng giá trị | passing | `AdminSubmissionsPage.test.tsx::lọc theo trạng thái duyệt là trục riêng, không lẫn với trạng thái chấm` |
 | Modal từ chối: lý do chỉ có khoảng trắng thì nút xác nhận tắt và **không** gửi gì; PATCH đúng URL + body đã trim; thành công thì đóng modal, hiện banner `role="status"` và refetch **đúng trang đang xem**; lỗi giữ modal mở, giữ nguyên lý do và đặt `aria-invalid` | passing | `AdminSubmissionsPage.test.tsx::từ chối bài nộp gửi đúng PATCH, đóng modal và tải lại đúng trang đang xem`, `::PATCH lỗi thì modal vẫn mở, giữ nguyên lý do và không báo thành công` |
 | Khôi phục qua `ConfirmModal` gửi `{status:"accepted"}`, copy xác nhận nói rõ không chấm lại, có báo thành công | passing | `AdminSubmissionsPage.test.tsx::khôi phục bài đã bị từ chối qua confirm modal` |

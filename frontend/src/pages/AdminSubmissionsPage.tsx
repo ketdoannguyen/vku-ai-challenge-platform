@@ -33,7 +33,7 @@ export function AdminSubmissionsPage() {
 
       <AdminSubmissionsPanel
         title="Danh sách bài nộp"
-        tableLabel="Bảng bài nộp toàn hệ thống"
+        listLabel="Danh sách bài nộp toàn hệ thống"
       />
     </div>
   );

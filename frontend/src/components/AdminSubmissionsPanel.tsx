@@ -1,7 +1,16 @@
 /**
- * Bảng bài nộp dành cho admin, dùng chung cho hai chỗ:
- * - Trang toàn cục `/admin/submissions`: thẻ thống kê, bộ lọc và cột cuộc thi đều bật.
+ * Danh sách bài nộp dành cho admin, dùng chung cho hai chỗ:
+ * - Trang toàn cục `/admin/submissions`: thẻ thống kê, bộ lọc và trường cuộc thi đều bật.
  * - Tab Kết quả của một cuộc thi: đã khóa vào cuộc thi hiện tại nên ẩn cả ba.
+ *
+ * Mỗi bài nộp là MỘT thẻ hai tầng: tầng đầu để nhận diện (thời gian, cuộc thi, đội, trạng
+ * thái, kết quả), tầng sau để xử lý (tệp, AI, xét duyệt, thao tác). Bảng 12 cột cũ phải cuộn
+ * ngang ở 1480px nên không đọc nổi trên màn hẹp.
+ *
+ * Chiều cao là ràng buộc chính: trong mỗi tầng không giá trị nào được xếp chồng lên nhau, nên
+ * nhãn `dt` nằm trên còn `dd` là một dòng ngang. Ba trạng thái (chấm điểm, AI, xét duyệt) chỉ
+ * còn icon - hình dạng và màu nói kết luận, chữ nằm trong tooltip và `aria-label` - vì badge
+ * chữ chiếm chỗ mà thông tin thì đã có nhãn `dt` ngay cạnh.
  *
  * Lọc, sắp xếp và phân trang đều chạy phía server để tổng số luôn khớp bộ lọc.
  */
@@ -15,6 +24,7 @@ import {
   AI_VERDICT_TONE,
   hasPendingAiReview,
   type AiReviewFilter,
+  type AiVerdict,
 } from "../api/aiReview";
 import { api } from "../api/client";
 import { formatLocal } from "../api/competitions";
@@ -27,6 +37,7 @@ import {
   type AdminSortOrder,
   type AdminSubmissionItem,
   type AdminSubmissionsResponse,
+  type Metrics,
   type ReviewPayload,
 } from "../api/results";
 import { usePendingPolling } from "../hooks/usePendingPolling";
@@ -66,6 +77,27 @@ const DEFAULT_ORDER: Record<AdminSortField, AdminSortOrder> = {
   precision: "desc",
   recall: "desc",
 };
+
+/**
+ * Trường sắp xếp của thanh "Sắp xếp theo". Bảng khóa cuộc thi đã biết sẵn cuộc thi của mọi
+ * dòng nên bỏ hẳn lựa chọn này thay vì để nó sắp xếp một trường hằng số.
+ */
+const SORT_OPTIONS: Array<{ value: AdminSortField; label: string; globalOnly?: boolean }> = [
+  { value: "created_at", label: "Thời gian" },
+  { value: "competition", label: "Cuộc thi", globalOnly: true },
+  { value: "team", label: "Đội" },
+  { value: "primary_score", label: "Điểm chính" },
+  { value: "f1", label: "F1" },
+  { value: "precision", label: "Precision" },
+  { value: "recall", label: "Recall" },
+];
+
+/** Ba metric phụ; Điểm chính đứng riêng vì là metric chính của cuộc thi. */
+const METRIC_FIELDS: Array<{ key: keyof Metrics; label: string }> = [
+  { key: "f1", label: "F1" },
+  { key: "precision", label: "Precision" },
+  { key: "recall", label: "Recall" },
+];
 
 interface Filters {
   competition_id: string;
@@ -109,12 +141,12 @@ interface CompetitionOption {
 export function AdminSubmissionsPanel({
   competitionId,
   title,
-  tableLabel,
+  listLabel,
 }: {
-  /** Có cuộc thi thì bảng khóa vào cuộc thi đó: ẩn bộ lọc, cột cuộc thi và thẻ thống kê. */
+  /** Có cuộc thi thì danh sách khóa vào cuộc thi đó: ẩn bộ lọc, trường cuộc thi và thẻ thống kê. */
   competitionId?: string;
   title: string;
-  tableLabel: string;
+  listLabel: string;
 }) {
   const [data, setData] = useState<AdminSubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -255,16 +287,20 @@ export function AdminSubmissionsPanel({
     requestPage(query.offset);
   }
 
-  function changeSort(field: AdminSortField) {
+  /** Chọn trường khác thì về thứ tự mặc định của trường đó, không giữ chiều của trường cũ. */
+  function selectSort(field: AdminSortField) {
+    setQuery((current) =>
+      current.sort === field
+        ? current
+        : { ...current, sort: field, order: DEFAULT_ORDER[field], offset: 0 },
+    );
+  }
+
+  /** Đảo chiều của trường đang chọn; đây là cách duy nhất để lật chiều. */
+  function toggleOrder() {
     setQuery((current) => ({
       ...current,
-      sort: field,
-      order:
-        current.sort === field
-          ? current.order === "desc"
-            ? "asc"
-            : "desc"
-          : DEFAULT_ORDER[field],
+      order: current.order === "desc" ? "asc" : "desc",
       offset: 0,
     }));
   }
@@ -307,85 +343,104 @@ export function AdminSubmissionsPanel({
   const shownTo = data ? Math.min(data.offset + PAGE_SIZE, data.total) : 0;
   const hasNext = data ? shownTo < data.total : false;
 
-  /** Ô tiêu đề sắp xếp được: bấm đổi cột, bấm lại cột đang chọn thì đảo chiều. */
-  function sortableHeader(field: AdminSortField, label: string, className?: string) {
-    const active = query.sort === field;
+  /**
+   * Trạng thái chấm điểm. Chữ nằm trong tooltip; thông báo lỗi của lượt chấm cũng theo vào đó
+   * thay vì chiếm một dòng riêng trong thẻ.
+   */
+  function statusCell(submission: AdminSubmissionItem) {
+    if (submission.status === "completed") {
+      return (
+        <StatusIcon
+          tone="success"
+          glyph="check"
+          label={SUBMISSION_STATUS_LABEL.completed}
+        />
+      );
+    }
+    if (submission.status === "failed") {
+      return (
+        <StatusIcon
+          tone="danger"
+          glyph="alert"
+          label={SUBMISSION_STATUS_LABEL.failed}
+          tip={submission.error?.message}
+        />
+      );
+    }
     return (
-      <th
-        scope="col"
-        className={className}
-        aria-sort={active ? (query.order === "asc" ? "ascending" : "descending") : "none"}
-      >
-        <button type="button" className="admin-sort-button" onClick={() => changeSort(field)}>
-          <span>{label}</span>
-          <SortArrow active={active} descending={query.order === "desc"} />
-        </button>
-      </th>
+      <StatusIcon tone="danger" glyph="cross" label={SUBMISSION_STATUS_LABEL.rejected} />
     );
   }
 
   /**
    * Trạng thái duyệt của một dòng. Record chưa chấm được điểm (`failed`/`rejected` legacy) không
    * bao giờ xét duyệt được nên hiển thị gạch, tránh bị đọc thành "hợp lệ".
+   *
+   * Lý do, người duyệt và thời điểm đi hết vào tooltip: lý do có thể dài tới 1000 ký tự nên nếu
+   * để trong thẻ thì mọi hàng bị từ chối sẽ cao gấp ba lần các hàng còn lại.
    */
   function reviewCell(submission: AdminSubmissionItem) {
-    if (submission.status !== "completed") return <span className="cell-secondary">—</span>;
-    if (!submission.review) {
-      return <span className="status-badge success">Hợp lệ</span>;
+    if (submission.status !== "completed") {
+      return <StatusIcon tone="muted" glyph="dash" label="Không xét duyệt được" />;
     }
+    if (!submission.review) {
+      return <StatusIcon tone="success" glyph="check" label="Hợp lệ" />;
+    }
+    const rejected = submission.review.status === "rejected";
     return (
-      <>
-        <span
-          className={`status-badge ${
-            submission.review.status === "rejected" ? "danger" : "success"
-          }`}
-        >
-          {REVIEW_STATUS_LABEL[submission.review.status]}
-        </span>
-        {submission.review.note && (
-          <span className="cell-secondary subm-review-note">{submission.review.note}</span>
-        )}
-        <span className="cell-secondary">
-          {submission.review.reviewed_by.name} · {formatLocal(submission.review.reviewed_at)}
-        </span>
-      </>
+      <StatusIcon
+        tone={rejected ? "danger" : "success"}
+        glyph={rejected ? "cross" : "check"}
+        label={REVIEW_STATUS_LABEL[submission.review.status]}
+        tip={[submission.review.note, `${submission.review.reviewed_by.name} · ${formatLocal(submission.review.reviewed_at)}`]
+          .filter(Boolean)
+          .join("\n")}
+      />
     );
   }
 
   /**
-   * Cột AI chỉ để đọc. Bài nộp từ lúc cuộc thi chưa bật AI không có projection - hiển thị là
+   * Ô AI chỉ để đọc. Bài nộp từ lúc cuộc thi chưa bật AI không có projection - hiển thị là
    * "Chưa đánh giá" chứ không phải "Không phát hiện": thiếu dữ liệu không phải bằng chứng sạch.
    * Nút vẫn phải có: đó là đường duy nhất để BTC khởi tạo lượt kiểm tra cho bài cũ, vì reconciler
    * cố ý không tự chạy cho bài thiếu desired state.
    */
   function aiCell(submission: AdminSubmissionItem) {
     const projection = submission.ai_review;
+    const tip = projection?.updated_at ? `Cập nhật ${formatLocal(projection.updated_at)}` : undefined;
     return (
       <>
         {projection ? (
-          <span
-            className={`status-badge ${
-              projection.verdict ? AI_VERDICT_TONE[projection.verdict] : "neutral"
-            }`}
-          >
-            {projection.verdict
-              ? AI_VERDICT_LABEL[projection.verdict]
-              : AI_STATE_LABEL[projection.state]}
-          </span>
+          projection.verdict ? (
+            <StatusIcon
+              tone={AI_VERDICT_TONE[projection.verdict]}
+              glyph={AI_VERDICT_GLYPH[projection.verdict]}
+              label={AI_VERDICT_LABEL[projection.verdict]}
+              tip={tip}
+            />
+          ) : (
+            <StatusIcon
+              tone="info"
+              glyph="clock"
+              label={AI_STATE_LABEL[projection.state]}
+              tip={tip}
+            />
+          )
         ) : (
-          <span className="cell-secondary">Chưa đánh giá</span>
-        )}
-        {projection?.updated_at && (
-          <span className="cell-secondary">{formatLocal(projection.updated_at)}</span>
+          <StatusIcon tone="muted" glyph="dash" label="Chưa đánh giá" />
         )}
         <button
           type="button"
-          className="btn btn-ghost btn-sm"
+          className="btn btn-outline btn-sm"
           onClick={(event) => {
             triggerRef.current = event.currentTarget;
             setAiDetail(submission);
           }}
         >
+          <ButtonIcon>
+            <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+            <circle cx="12" cy="12" r="3" />
+          </ButtonIcon>
           Chi tiết AI
         </button>
       </>
@@ -404,6 +459,10 @@ export function AdminSubmissionsPanel({
             setRestoring(submission);
           }}
         >
+          <ButtonIcon>
+            <path d="M3 2v6h6" />
+            <path d="M3.5 15a9 9 0 1 0 2.1-9.4L3 8" />
+          </ButtonIcon>
           Khôi phục
         </button>
       );
@@ -411,12 +470,16 @@ export function AdminSubmissionsPanel({
     return (
       <button
         type="button"
-        className="btn btn-secondary btn-sm"
+        className="btn btn-danger-outline btn-sm"
         onClick={(event) => {
           triggerRef.current = event.currentTarget;
           setRejecting(submission);
         }}
       >
+        <ButtonIcon>
+          <circle cx="12" cy="12" r="9" />
+          <path d="m5.6 5.6 12.8 12.8" />
+        </ButtonIcon>
         Không chấp nhận
       </button>
     );
@@ -442,11 +505,8 @@ export function AdminSubmissionsPanel({
 
       {!competitionId && <SubmissionStats stats={data?.stats ?? null} pending={!data && !error} />}
 
-      {/* Bảng khóa cuộc thi không có ô lọc cuộc thi nên giữ nguyên lưới bộ lọc gốc. */}
-      <form
-        className={`results-filters${competitionId ? "" : " admin-submissions-filters"}`}
-        onSubmit={applySearch}
-      >
+      {/* Lưới bộ lọc tự dồn cột nên chế độ khóa cuộc thi chỉ đơn giản là bớt một ô. */}
+      <form className="results-filters" onSubmit={applySearch}>
         {!competitionId && (
           <select
             className="input"
@@ -567,81 +627,133 @@ export function AdminSubmissionsPanel({
           </button>
         </div>
       ) : data && data.submissions.length > 0 ? (
-        <div
-          className="table-wrap admin-results-table-wrap"
-          aria-busy={busy}
-          tabIndex={0}
-          role="region"
-          aria-label={tableLabel}
-        >
-          <table className="table results-table admin-submissions-table">
-            <thead>
-              <tr>
-                {sortableHeader("created_at", "Thời gian")}
-                {!competitionId && sortableHeader("competition", "Cuộc thi")}
-                {sortableHeader("team", "Đội")}
-                <th scope="col">Tệp đã nộp</th>
-                <th scope="col">Trạng thái</th>
-                <th scope="col">AI sơ bộ</th>
-                <th scope="col">Xét duyệt</th>
-                <th scope="col">Thao tác</th>
-                {sortableHeader("f1", "F1", "score-cell")}
-                {sortableHeader("precision", "Precision", "score-cell")}
-                {sortableHeader("recall", "Recall", "score-cell")}
-                {sortableHeader("primary_score", "Điểm chính", "score-cell primary-col")}
-              </tr>
-            </thead>
-            <tbody>
-              {data.submissions.map((submission) => (
-                <tr key={submission.id}>
-                  <td>{formatLocal(submission.created_at)}</td>
-                  {!competitionId && (
-                    <td>
-                      {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở. */}
-                      {submission.competition?.slug ? (
-                        <>
-                          <Link to={`/admin/competitions/${submission.competition.id}`}>
-                            {submission.competition.name}
-                          </Link>
-                          <span className="cell-secondary">{submission.competition.slug}</span>
-                        </>
-                      ) : (
-                        <span>{submission.competition?.name}</span>
-                      )}
-                    </td>
-                  )}
-                  <td>
-                    <strong>{submission.account.name}</strong>
-                    <span className="cell-secondary">{submission.account.email}</span>
-                  </td>
-                  <td className="subm-artifact-cell">
-                    <ArtifactLinks
-                      basePath="/admin/submissions"
-                      submissionId={submission.id}
-                      artifacts={submission.artifacts}
-                    />
-                  </td>
-                  <td>
-                    <span className={`status-badge submission-status ${submission.status}`}>
-                      {SUBMISSION_STATUS_LABEL[submission.status]}
-                    </span>
-                    {submission.error && (
-                      <span className="cell-error">{submission.error.message}</span>
+        <div aria-busy={busy} role="region" aria-label={listLabel}>
+          {/* Sắp xếp chạy phía server nên đứng ngoài thẻ: mỗi thẻ không còn tiêu đề cột để bấm. */}
+          <div className="subm-sort-bar">
+            <div className="subm-sort-field">
+              <label className="subm-sort-label" htmlFor="subm-sort-select">
+                Sắp xếp theo
+              </label>
+              <select
+                id="subm-sort-select"
+                className="input"
+                value={query.sort}
+                onChange={(event) => selectSort(event.target.value as AdminSortField)}
+              >
+                {SORT_OPTIONS.filter((option) => !option.globalOnly || !competitionId).map(
+                  (option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ),
+                )}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm subm-sort-direction"
+              onClick={toggleOrder}
+            >
+              <SortArrow descending={query.order === "desc"} />
+              {query.order === "desc" ? "Giảm dần" : "Tăng dần"}
+            </button>
+          </div>
+
+          <ul className="subm-list">
+            {data.submissions.map((submission) => (
+              <li key={submission.id} className="subm-card">
+                <article className="subm-card-body">
+                  <dl className="subm-card-tier">
+                    <div className="subm-field">
+                      <dt>Thời gian</dt>
+                      <dd>{formatLocal(submission.created_at)}</dd>
+                    </div>
+                    {!competitionId && (
+                      <div className="subm-field subm-field-grow">
+                        <dt>Cuộc thi</dt>
+                        <dd>
+                          {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở. */}
+                          {submission.competition?.slug ? (
+                            <>
+                              <Link
+                                to={`/admin/competitions/${submission.competition.id}`}
+                                title={submission.competition.name}
+                                className="subm-truncate"
+                              >
+                                {submission.competition.name}
+                              </Link>
+                              <span className="subm-muted subm-truncate">
+                                {submission.competition.slug}
+                              </span>
+                            </>
+                          ) : (
+                            <span>{submission.competition?.name}</span>
+                          )}
+                        </dd>
+                      </div>
                     )}
-                  </td>
-                  <td className="subm-ai-cell">{aiCell(submission)}</td>
-                  <td className="subm-review-cell">{reviewCell(submission)}</td>
-                  <td className="subm-action-cell">{actionCell(submission)}</td>
-                  <td className="score-cell">{formatScore(submission.metrics?.f1)}</td>
-                  <td className="score-cell">{formatScore(submission.metrics?.precision)}</td>
-                  <td className="score-cell">{formatScore(submission.metrics?.recall)}</td>
-                  <td className="score-cell primary-score primary-col">
-                    {formatScore(submission.primary_score)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    <div className="subm-field subm-field-grow">
+                      <dt>Đội</dt>
+                      <dd>
+                        <strong className="subm-truncate">{submission.account.name}</strong>
+                        <span className="subm-muted subm-truncate">{submission.account.email}</span>
+                      </dd>
+                    </div>
+                    <div className="subm-field">
+                      <dt>Trạng thái</dt>
+                      <dd>{statusCell(submission)}</dd>
+                    </div>
+                    <div className="subm-field subm-field-result">
+                      <dt>Kết quả</dt>
+                      <dd>
+                        <span className="subm-result-primary">
+                          <span className="subm-result-primary-label">Điểm chính</span>
+                          <span className="subm-result-primary-score">
+                            {formatScore(submission.primary_score)}
+                          </span>
+                        </span>
+                        <span className="subm-result-metrics">
+                          {METRIC_FIELDS.map((metric) => (
+                            <span key={metric.key} className="subm-metric">
+                              <span className="subm-metric-label">{metric.label}</span>
+                              <span className="subm-metric-value">
+                                {formatScore(submission.metrics?.[metric.key])}
+                              </span>
+                            </span>
+                          ))}
+                        </span>
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <dl className="subm-card-tier subm-card-tier-detail">
+                    <div className="subm-field">
+                      <dt>Tệp đã nộp</dt>
+                      <dd>
+                        <ArtifactLinks
+                          basePath="/admin/submissions"
+                          submissionId={submission.id}
+                          artifacts={submission.artifacts}
+                        />
+                      </dd>
+                    </div>
+                    <div className="subm-field">
+                      <dt>AI sơ bộ</dt>
+                      <dd>{aiCell(submission)}</dd>
+                    </div>
+                    <div className="subm-field">
+                      <dt>Xét duyệt</dt>
+                      <dd>{reviewCell(submission)}</dd>
+                    </div>
+                    <div className="subm-field">
+                      <dt>Thao tác</dt>
+                      <dd>{actionCell(submission)}</dd>
+                    </div>
+                  </dl>
+                </article>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : (
         <div className="admin-results-empty">
@@ -816,13 +928,102 @@ function StatCard({
   );
 }
 
-/** Mũi tên trạng thái sắp xếp; cột chưa chọn hiện hai chiều mờ. */
-function SortArrow({ active, descending }: { active: boolean; descending: boolean }) {
-  const path = !active
-    ? "M8 9l4-4 4 4M8 15l4 4 4-4"
-    : descending
-      ? "M6 9l6 6 6-6"
-      : "M6 15l6-6 6 6";
+/** Tông màu của icon trạng thái; chỉ dùng token sẵn có, không tự đặt mã màu mới. */
+type IconTone = "success" | "danger" | "warning" | "info" | "muted";
+
+/**
+ * Hình dạng glyph, tách hẳn khỏi màu. Mỗi kết luận có một hình riêng nên người không phân biệt
+ * được màu vẫn đọc ra kết luận - màu chỉ là kênh phụ.
+ */
+type Glyph = "check" | "cross" | "alert" | "question" | "clock" | "dash";
+
+const GLYPHS: Record<Glyph, ReactNode> = {
+  check: <path d="m5.4 12.6 4.4 4.4 8.8-9.4" />,
+  cross: (
+    <>
+      <path d="M6.6 6.6 17.4 17.4" />
+      <path d="M17.4 6.6 6.6 17.4" />
+    </>
+  ),
+  alert: (
+    <>
+      <path d="M12 5.6v9.2" />
+      <path d="M12 18.6h.01" />
+    </>
+  ),
+  question: (
+    <>
+      <path d="M9.3 9.4a2.8 2.8 0 1 1 3.4 2.9c-.9.2-1.7.8-1.7 1.8v.7" />
+      <path d="M11 18.6h.01" />
+    </>
+  ),
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M12 7.4V12l3.1 2" />
+    </>
+  ),
+  dash: <path d="M8 12h8" />,
+};
+
+/** Hình dạng theo kết luận AI: ba mức khác nhau phải khác hình, không chỉ khác màu. */
+const AI_VERDICT_GLYPH: Record<AiVerdict, Glyph> = {
+  CLEAR: "check",
+  FLAGGED: "alert",
+  INCONCLUSIVE: "question",
+  ERROR: "clock",
+};
+
+/**
+ * Một trạng thái trong thẻ bài nộp.
+ *
+ * Chữ không nằm cạnh icon: nhãn `dt` ngay trên đã nói đây là trục nào, còn kết luận thì hình
+ * dạng + màu nói thay. Chữ đầy đủ nằm trong `aria-label` (cho trình đọc màn hình) và trong
+ * tooltip CSS (cho người dùng chuột). Tooltip là giả, không phải phần tử thật, nên không thêm
+ * tab stop nào cho mỗi thẻ.
+ */
+function StatusIcon({
+  tone,
+  glyph,
+  label,
+  tip,
+}: {
+  tone: IconTone;
+  glyph: Glyph;
+  label: string;
+  tip?: string;
+}) {
+  return (
+    <span
+      className={`subm-icon subm-icon-${tone}`}
+      role="img"
+      aria-label={label}
+      data-tip={tip ? `${label}\n${tip}` : label}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        width="15"
+        height="15"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        {GLYPHS[glyph]}
+      </svg>
+      {/* Bản chữ chỉ hiện ở `@media (hover: none)`: ở đó không có hover thì tooltip không bao
+          giờ mở, nên kết luận phải đọc được bằng mắt thường. `role="img"` khiến trình đọc màn
+          hình bỏ qua phần chữ này và chỉ đọc `aria-label`, nên không bị đọc hai lần. */}
+      <span className="subm-icon-label">{label}</span>
+    </span>
+  );
+}
+
+/** Mũi tên chiều sắp xếp đang áp dụng, nằm trong nút đảo chiều. */
+function SortArrow({ descending }: { descending: boolean }) {
   return (
     <svg
       className="admin-sort-arrow"
@@ -837,7 +1038,30 @@ function SortArrow({ active, descending }: { active: boolean; descending: boolea
       aria-hidden="true"
       focusable="false"
     >
-      <path d={path} />
+      <path d={descending ? "M6 9l6 6 6-6" : "M6 15l6-6 6 6"} />
+    </svg>
+  );
+}
+
+/**
+ * Icon 14px đứng trước chữ trong nút thao tác. Nút luôn có nhãn chữ nên icon là trang trí và
+ * bị ẩn khỏi cây accessibility; giữ ẩn cũng để tên nút không đổi khi thêm/bớt icon.
+ */
+function ButtonIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="14"
+      height="14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {children}
     </svg>
   );
 }

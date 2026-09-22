@@ -923,7 +923,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
       <AdminSubmissionsPanel
         competitionId={competition.id}
         title="Danh sách submissions"
-        tableLabel="Bảng bài nộp của cuộc thi"
+        listLabel="Danh sách bài nộp của cuộc thi"
       />
     </div>
   );

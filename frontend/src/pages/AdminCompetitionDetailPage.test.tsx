@@ -81,7 +81,7 @@ const AI_REVIEW_SETTINGS = {
     acknowledged_host: "api.example.com",
     updated_at: "2026-09-15T09:00:00Z",
   },
-  runtime: { encryption_available: true, allowed_hosts_configured: true },
+  runtime: { encryption_available: true },
   content_source: {
     included_count: 1,
     excluded_count: 0,
@@ -820,12 +820,14 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
   expect(await screen.findByTitle("result.csv")).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Bảng xếp hạng" })).toBeTruthy();
-  // Hai bảng kết quả cuộn ngang được nên phải là vùng focus được bằng bàn phím.
-  for (const name of ["Bảng xếp hạng của cuộc thi", "Bảng bài nộp của cuộc thi"]) {
-    const region = screen.getByRole("region", { name });
-    expect(region).toHaveAttribute("tabindex", "0");
-    expect(within(region).getByRole("table")).toBeTruthy();
-  }
+  // Bảng xếp hạng vẫn cuộn ngang nên phải là vùng focus được bằng bàn phím.
+  const leaderboard = screen.getByRole("region", { name: "Bảng xếp hạng của cuộc thi" });
+  expect(leaderboard).toHaveAttribute("tabindex", "0");
+  expect(within(leaderboard).getByRole("table")).toBeTruthy();
+  // Danh sách bài nộp thì không: thẻ tự dồn cột nên không còn vùng cuộn nào để tab vào.
+  const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
+  expect(submissions).not.toHaveAttribute("tabindex");
+  expect(within(submissions).getByRole("listitem")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Xuất Excel" })).toBeEnabled();
   expect(screen.getByLabelText("Lọc theo đội")).toBeTruthy();
   // Hai trục tách biệt: trạng thái chấm điểm và trạng thái duyệt của admin.
@@ -882,22 +884,28 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp của cuộc thi" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
 
-  // Cuộc thi đã biết sẵn nên bảng ẩn cả ô lọc lẫn cột cuộc thi, và không gọi endpoint toàn cục.
+  // Cuộc thi đã biết sẵn nên danh sách ẩn cả ô lọc lẫn trường cuộc thi, và không gọi endpoint toàn cục.
   expect(screen.queryByLabelText("Lọc theo cuộc thi")).toBeNull();
-  expect(within(region).queryByRole("columnheader", { name: "Cuộc thi" })).toBeNull();
+  expect(
+    Array.from(region.querySelectorAll("dt")).some((dt) => dt.textContent === "Cuộc thi"),
+  ).toBe(false);
   expect(calls.some((call) => call.url.includes("/api/admin/submissions?"))).toBe(false);
 
-  // Không có thẻ thống kê toàn cục và không còn nút Lọc; cột Điểm chính vẫn được nhấn.
+  // Không có thẻ thống kê toàn cục và không còn nút Lọc; Điểm chính vẫn được nhấn.
   expect(screen.queryByRole("region", { name: "Tổng quan bài nộp" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Lọc" })).toBeNull();
-  expect(within(region).getByRole("columnheader", { name: /Điểm chính/ }).className).toContain(
-    "primary-col",
+  expect(region.querySelector(".subm-result-primary-score")).toHaveTextContent("0.900000");
+
+  // Cuộc thi đã khóa thì sắp xếp theo cuộc thi là trường hằng số: lựa chọn đó bị bỏ hẳn.
+  const sortField = screen.getByLabelText("Sắp xếp theo");
+  expect(Array.from(sortField.querySelectorAll("option")).map((option) => option.textContent)).toEqual(
+    ["Thời gian", "Đội", "Điểm chính", "F1", "Precision", "Recall"],
   );
 
   // Sắp xếp vẫn chạy phía server, qua chính endpoint của cuộc thi.
-  fireEvent.click(within(screen.getByRole("columnheader", { name: /Đội/ })).getByRole("button"));
+  fireEvent.change(sortField, { target: { value: "team" } });
   await waitFor(() => {
     const sorted = calls.find(
       (call) => new URL(call.url, "http://localhost").searchParams.get("sort") === "team",
@@ -906,11 +914,7 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
   });
 
   for (const field of ["f1", "precision", "recall"]) {
-    fireEvent.click(
-      within(
-        within(region).getByRole("columnheader", { name: new RegExp(`^${field}$`, "i") }),
-      ).getByRole("button"),
-    );
+    fireEvent.change(sortField, { target: { value: field } });
     await waitFor(() => {
       const sorted = calls.find(
         (call) => new URL(call.url, "http://localhost").searchParams.get("sort") === field,
@@ -972,7 +976,7 @@ test("tab Kết quả xét duyệt qua endpoint toàn cục nhưng tải lại d
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp của cuộc thi" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
   await within(region).findByText("Thí Sinh");
 
   fireEvent.click(within(region).getByRole("button", { name: "Không chấp nhận" }));
@@ -1928,7 +1932,12 @@ test("năm bảng vẫn là vùng focus được và giữ nguyên accessible na
 
   fireEvent.click(railTab("Kết quả"));
   await expectRegion("Bảng xếp hạng của cuộc thi");
-  await expectRegion("Bảng bài nộp của cuộc thi");
+  // Danh sách bài nộp không còn là bảng cuộn ngang: region bọc một list các thẻ, không tab stop.
+  const submissions = await screen.findByRole("region", {
+    name: "Danh sách bài nộp của cuộc thi",
+  });
+  expect(submissions).not.toHaveAttribute("tabindex");
+  expect(within(submissions).getByRole("listitem")).toBeTruthy();
 
   fireEvent.click(railTab("Thành viên & mã tham gia"));
   await expectRegion("Bảng thành viên cuộc thi");

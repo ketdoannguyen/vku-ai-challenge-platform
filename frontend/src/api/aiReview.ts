@@ -222,7 +222,7 @@ export const AI_VERDICT_LABEL: Record<AiVerdict, string> = {
  * Tông màu badge. `ERROR` là warning chứ không phải danger: một lượt hỏng không phải bằng chứng
  * vi phạm, và cũng không phải một phán quyết.
  */
-export const AI_VERDICT_TONE: Record<AiVerdict, string> = {
+export const AI_VERDICT_TONE: Record<AiVerdict, "success" | "danger" | "warning"> = {
   CLEAR: "success",
   FLAGGED: "danger",
   INCONCLUSIVE: "warning",
