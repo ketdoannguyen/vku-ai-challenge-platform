@@ -120,6 +120,7 @@ export function ConfirmModal({
   body,
   confirmLabel,
   danger = false,
+  requireText,
   onConfirm,
   onClose,
   returnFocusRef,
@@ -128,12 +129,19 @@ export function ConfirmModal({
   body: string;
   confirmLabel: string;
   danger?: boolean;
+  /**
+   * Chữ phải gõ đúng mới bấm được nút xác nhận. Dành cho thao tác không hoàn tác được: một cú bấm
+   * nhầm không thể lấy lại key đã xoá, còn gõ ra một từ thì phải có ý định.
+   */
+  requireText?: string;
   onConfirm: () => Promise<void>;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [typed, setTyped] = useState("");
+  const blocked = requireText !== undefined && typed.trim().toLowerCase() !== requireText;
 
   async function confirm() {
     setBusy(true);
@@ -158,6 +166,21 @@ export function ConfirmModal({
           </span>
           <p>{body}</p>
         </div>
+        {requireText !== undefined && (
+          <div className="confirm-modal-guard">
+            <label className="field-label" htmlFor="confirm-modal-guard">
+              Gõ <code>{requireText}</code> để xác nhận
+            </label>
+            <input
+              id="confirm-modal-guard"
+              className="input"
+              autoComplete="off"
+              value={typed}
+              disabled={busy}
+              onChange={(event) => setTyped(event.target.value)}
+            />
+          </div>
+        )}
         {error && (
           <div className="confirm-modal-error" role="alert">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
@@ -175,7 +198,7 @@ export function ConfirmModal({
             type="button"
             className={`btn ${danger ? "btn-danger" : ""}`}
             onClick={() => void confirm()}
-            disabled={busy}
+            disabled={busy || blocked}
           >
             {busy ? "Đang xử lý..." : confirmLabel}
           </button>

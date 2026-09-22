@@ -1,4 +1,4 @@
-"""Cấu hình AI theo cuộc thi qua API admin: base URL, xác nhận chuyển dữ liệu, và che secret."""
+"""Cấu hình AI theo cuộc thi qua API admin: base URL, điều kiện bật, che secret, và vết xác minh."""
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -7,7 +7,7 @@ import pytest
 from bson import ObjectId
 from cryptography.fernet import Fernet
 
-from app.ai_review import constants
+from app.ai_review import admin_router, constants, provider
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
 from tests.helpers import ADMIN_CREDENTIALS, PARTICIPANT_CREDENTIALS, configure_scoring, login
@@ -20,7 +20,6 @@ VALID_CONFIG = {
     "base_url": f"https://{HOST}/v1",
     "model": "gpt-oss-120b",
     "api_key": API_KEY,
-    "acknowledge_transfer": True,
 }
 
 
@@ -63,6 +62,33 @@ def _stored_config(client, competition_id: str) -> dict:
     return asyncio.run(load())
 
 
+def _probe(client, competition_id: str, body: dict | None = None) -> int:
+    login(client)
+    return client.post(f"{_url(client, competition_id)}/test", json=body or {}).status_code
+
+
+def _verified_at(client, competition_id: str):
+    login(client)
+    return client.get(_url(client, competition_id)).json()["config"]["verified_at"]
+
+
+@pytest.fixture()
+def provider_stub(monkeypatch):
+    """Chặn ở tầng provider: các test dưới đây hỏi chuyện ghi vết, không hỏi chuyện HTTP.
+
+    Đặt `state["fail"]` thành một mã lỗi để lần gọi kế tiếp hỏng như provider từ chối.
+    """
+    state: dict = {"fail": None}
+
+    async def fake(_client, *, endpoint, policy, api_key, model, settings):
+        if state["fail"] is not None:
+            raise provider.ProviderError(state["fail"], "Không kết nối được.", retryable=True)
+        return {"ok": True, "host": endpoint.host, "model": model, "latency_ms": 12}
+
+    monkeypatch.setattr(admin_router.provider, "test_connection", fake)
+    return state
+
+
 def test_ai_review_settings_require_an_admin_session(client, ai_env):
     assert client.get(_url(client, "000000000000000000000000")).status_code == 401
     competition = _competition(client)
@@ -81,7 +107,7 @@ def test_get_reports_disabled_defaults_and_runtime_flags(client, ai_env):
         "base_url": "",
         "model": "",
         "api_key_configured": False,
-        "acknowledged_host": None,
+        "verified_at": None,
         "updated_at": None,
     }
     assert body["runtime"] == {"encryption_available": True}
@@ -155,12 +181,12 @@ def test_enabling_without_an_api_key_is_rejected(client, ai_env):
     assert response.json()["error"]["code"] == constants.AI_API_KEY_MISSING
 
 
-def test_enabling_without_acknowledging_the_transfer_is_rejected(client, ai_env):
+def test_enabling_needs_no_acknowledgement_flag(client, ai_env):
+    # ADR-042 bỏ cơ chế xác nhận chuyển dữ liệu: bật AI chỉ cần base URL, model và API key.
     competition = _competition(client)
-    body = {key: value for key, value in VALID_CONFIG.items() if key != "acknowledge_transfer"}
-    response = client.put(_url(client, competition["id"]), json=body)
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == constants.AI_TRANSFER_NOT_ACKNOWLEDGED
+    response = client.put(_url(client, competition["id"]), json=VALID_CONFIG)
+    assert response.status_code == 200, response.text
+    assert response.json()["config"]["enabled"] is True
 
 
 def test_missing_master_key_blocks_enabling_but_not_saving_a_draft(
@@ -191,35 +217,45 @@ def test_enabling_with_a_complete_config_stores_only_ciphertext(client, ai_env):
     config = response.json()["config"]
     assert config["enabled"] is True
     assert config["api_key_configured"] is True
-    assert config["acknowledged_host"] == HOST
     assert "api_key" not in config
     assert API_KEY not in response.text
 
     stored = _stored_config(client, competition["id"])
     assert stored["api_key_ciphertext"] not in ("", API_KEY)
     assert API_KEY not in str(stored)
-    assert stored["transfer_acknowledgement"]["host"] == HOST
-    assert stored["transfer_acknowledgement"]["acknowledged_by"] is not None
 
 
-def test_changing_the_host_invalidates_the_previous_acknowledgement(client, ai_env):
-    # Mọi host công khai đều lưu được, nhưng lời xác nhận chuyển dữ liệu chỉ có giá trị cho host đã
-    # xác nhận - đây mới là kiểm soát giữ dữ liệu notebook ở đúng chỗ.
+def test_changing_the_host_keeps_the_config_usable(client, ai_env):
+    # Trước ADR-042, đổi host làm lời xác nhận cũ hết hiệu lực và request bị từ chối. Giờ đổi host
+    # chỉ là đổi đích gọi provider; key đã lưu và trạng thái bật phải sống sót qua thao tác đó.
     competition = _competition(client)
     assert client.put(_url(client, competition["id"]), json=VALID_CONFIG).status_code == 200
+    first = _stored_config(client, competition["id"])["api_key_ciphertext"]
 
     moved = client.put(
         _url(client, competition["id"]), json={"base_url": "https://api.other.test/v1"}
     )
-    assert moved.status_code == 422
-    assert moved.json()["error"]["code"] == constants.AI_TRANSFER_NOT_ACKNOWLEDGED
+    assert moved.status_code == 200, moved.text
+    config = moved.json()["config"]
+    assert config["enabled"] is True
+    assert config["base_url"] == "https://api.other.test/v1"
+    assert config["api_key_configured"] is True
+    assert _stored_config(client, competition["id"])["api_key_ciphertext"] == first
 
-    reacknowledged = client.put(
-        _url(client, competition["id"]),
-        json={"base_url": "https://api.other.test/v1", "acknowledge_transfer": True},
-    )
-    assert reacknowledged.status_code == 200
-    assert reacknowledged.json()["config"]["acknowledged_host"] == "api.other.test"
+
+def test_saving_clears_the_legacy_acknowledgement_field(client, ai_env):
+    competition = _competition(client)
+    cid = competition["id"]
+
+    async def seed_legacy_field():
+        await client.app.state.mongo.db[COMPETITIONS_COLLECTION].update_one(
+            {"_id": ObjectId(cid)},
+            {"$set": {"ai_review_config.transfer_acknowledgement": {"host": HOST}}},
+        )
+
+    asyncio.run(seed_legacy_field())
+    assert client.put(_url(client, cid), json={"model": "gpt-oss-120b"}).status_code == 200
+    assert "transfer_acknowledgement" not in _stored_config(client, cid)
 
 
 def test_empty_api_key_keeps_the_existing_one(client, ai_env):
@@ -251,6 +287,80 @@ def test_deleting_the_api_key_unsets_it(client, ai_env):
     assert response.status_code == 200
     assert response.json()["config"]["api_key_configured"] is False
     assert "api_key_ciphertext" not in _stored_config(client, competition["id"])
+
+
+# --- Vết xác minh (ADR-043) ---------------------------------------------------------------------
+
+
+def test_a_probe_of_the_saved_config_records_when_it_was_verified(client, ai_env, provider_stub):
+    competition = _competition(client)
+    cid = competition["id"]
+    assert client.put(_url(client, cid), json=VALID_CONFIG).status_code == 200
+    assert _verified_at(client, cid) is None
+
+    assert _probe(client, cid) == 200
+
+    # Vết nằm trên document chứ không phải trong phiên trình duyệt: mở lại tab vẫn còn.
+    assert _verified_at(client, cid) is not None
+    stored = _stored_config(client, cid)
+    assert stored["verified_at"] and stored["verified_fingerprint"]
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        {"base_url": "https://api.other.test/v1"},
+        {"model": "gpt-oss-20b"},
+        {"api_key": "sk-rotated-value"},
+    ],
+)
+def test_editing_a_connection_field_invalidates_the_verification(
+    client, ai_env, provider_stub, edit
+):
+    competition = _competition(client)
+    cid = competition["id"]
+    assert client.put(_url(client, cid), json=VALID_CONFIG).status_code == 200
+    assert _probe(client, cid) == 200
+
+    assert client.put(_url(client, cid), json=edit).status_code == 200
+
+    # Không ai xoá vết khi ghi: chính vân tay không còn khớp nên vết tự hết hiệu lực.
+    assert _verified_at(client, cid) is None
+
+
+def test_deleting_the_api_key_invalidates_the_verification(client, ai_env, provider_stub):
+    competition = _competition(client)
+    cid = competition["id"]
+    assert client.put(_url(client, cid), json=VALID_CONFIG).status_code == 200
+    assert _probe(client, cid) == 200
+
+    assert client.delete(f"{_url(client, cid)}/api-key").status_code == 200
+
+    assert _verified_at(client, cid) is None
+
+
+def test_a_failed_probe_clears_the_verification(client, ai_env, provider_stub):
+    competition = _competition(client)
+    cid = competition["id"]
+    assert client.put(_url(client, cid), json=VALID_CONFIG).status_code == 200
+    assert _probe(client, cid) == 200
+
+    provider_stub["fail"] = constants.AI_CONNECTION_FAILED
+    assert _probe(client, cid) == 502
+
+    # Vết cũ phải biến mất, nếu không chip xanh sẽ mâu thuẫn với cảnh báo vừa hiện.
+    assert _verified_at(client, cid) is None
+
+
+def test_probing_values_that_are_not_saved_records_nothing(client, ai_env, provider_stub):
+    competition = _competition(client)
+    cid = competition["id"]
+    assert client.put(_url(client, cid), json=VALID_CONFIG).status_code == 200
+
+    assert _probe(client, cid, {"base_url": "https://api.other.test/v1"}) == 200
+
+    # Lần thử đó nói về một cấu hình chưa ai lưu, nên không được ghi thành vết của cấu hình đang có.
+    assert _verified_at(client, cid) is None
 
 
 def test_test_connection_requires_an_admin_session(client, ai_env):

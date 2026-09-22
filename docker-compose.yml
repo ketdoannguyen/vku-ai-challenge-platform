@@ -70,9 +70,9 @@ services:
       AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
       AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
       AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
-      # Ngân sách output một lượt review (ADR-039). Chỉ worker gọi provider thật; route
+      # Trần cứng output một lượt review (ADR-039, ADR-044). Chỉ worker gọi provider thật; route
       # `.../ai-review/test` của API chạy probe 64 token nên không cần biến này.
-      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-8000}
+      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-12000}
     # Không expose/publish port nào: worker chỉ nói chuyện với Mongo, MinIO và provider ra ngoài.
     depends_on:
       mongo:

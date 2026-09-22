@@ -4,8 +4,8 @@ Ba lớp, áp dụng ở cả lúc lưu cấu hình, lúc test connection và NG
 
 1. Cú pháp: chỉ http/https, không credential/query/fragment, port nằm trong danh sách cho phép.
 2. Đích đến: mọi hostname và IP công khai đều được chấp nhận - admin tự nhập Base URL của bất kỳ
-   provider OpenAI-compatible nào. Không có allowlist host: thứ giữ dữ liệu notebook ở đúng chỗ là
-   xác nhận chuyển dữ liệu theo từng host trong `settings`, không phải một biến môi trường.
+   provider OpenAI-compatible nào. Không có allowlist host (ADR-037): gửi dữ liệu notebook tới đâu là
+   quyết định của admin, và từ ADR-042 thì không còn bước xác nhận nào ở tầng này nữa.
 3. Địa chỉ thật: mọi IP mà DNS phân giải ra phải là địa chỉ công khai, trừ khi host nằm rõ trong
    danh sách private exception. Đây mới là bước chặn loopback/mạng nội bộ/metadata.
 

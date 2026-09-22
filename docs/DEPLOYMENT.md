@@ -143,7 +143,7 @@ bật được. Đây là điều kiện để một sự cố cấu hình AI kh
 | `AI_REVIEW_ALLOWED_PORTS` | Mặc định `443` |
 | `AI_REVIEW_POLL_INTERVAL_SECONDS` / `AI_REVIEW_LEASE_SECONDS` / `AI_REVIEW_HEARTBEAT_SECONDS` | Nhịp của worker. **`HEARTBEAT` bắt buộc nhỏ hơn `LEASE`**, nếu không worker thoát mã 2 ngay lúc khởi động |
 | `AI_REVIEW_MAX_ATTEMPTS` / `AI_REVIEW_CONNECT_TIMEOUT_SECONDS` / `AI_REVIEW_REQUEST_TIMEOUT_SECONDS` | Trần retry và timeout gọi provider |
-| `AI_REVIEW_MAX_OUTPUT_TOKENS` | Ngân sách output của **một** lượt review (ADR-039), mặc định `8000`. Trần này là của mình, không phải giới hạn của model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng và lượt đó hỏng với `AI_OUTPUT_TRUNCATED`. Tăng khi đổi sang model dài dòng hơn |
+| `AI_REVIEW_MAX_OUTPUT_TOKENS` | **Trần cứng** output của một lượt review (ADR-039, ADR-044), mặc định `12000`. Trần này là của mình, không phải giới hạn của model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng và lượt đó hỏng với `AI_OUTPUT_TRUNCATED`. Từ ADR-044 prompt đã dặn model một **ngân sách mềm** 8000 token để nó tự kết thúc, nên trần này chỉ còn là lưới an toàn - để cao hơn hẳn ngân sách mềm, và tăng khi đổi sang model dài dòng hơn |
 
 Cấu hình **provider** (Base URL, model, API key) **không** nằm trong `.env`: nó do admin nhập ở tab
 `Cài đặt` của cuộc thi và lưu trong Mongo, dưới dạng ciphertext. Đổi máy chủ thì phải nhập lại key;
@@ -889,7 +889,7 @@ database và không sửa trực tiếp dữ liệu để "ép chạy". Chạy b
 | Admin nhập Base URL hợp lệ nhưng PUT trả `AI_ENDPOINT_INVALID` / `AI_PRIVATE_HOST_NOT_ALLOWED` | Port ngoài `AI_REVIEW_ALLOWED_PORTS`, URL sai cú pháp, hoặc host phân giải vào dải nội bộ | Từ ADR-037 host công khai không cần khai allowlist nữa; nếu đích thật sự nội bộ thì khai tường minh ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS` |
 | Bài nộp mãi ở `QUEUED`/`RUNNING` | Worker đang down, hoặc job đang chờ backoff sau lỗi tạm thời | `dcp ps ai-review-worker`, `dcp logs --tail=50 ai-review-worker`. **Không** sửa tay document để "đẩy" job: lease hết hạn được `recover_expired` thu hồi ở lượt sau |
 | Lượt kiểm tra trả `ERROR` liên tục | Cấu hình provider sai (key/model/host) hoặc provider chặn mạng ra | Xem tab `Cài đặt` → kiểm tra kết nối; sửa cấu hình rồi bấm **Chạy lại AI** trong modal chi tiết. Điểm và lượt nộp không bị ảnh hưởng |
-| Audit row có `error.code = AI_OUTPUT_TRUNCATED` | Model cần nhiều token hơn `AI_REVIEW_MAX_OUTPUT_TOKENS` nên câu trả lời bị cắt giữa chừng (ADR-039) | Tăng `AI_REVIEW_MAX_OUTPUT_TOKENS` ở §3.2 rồi `dcp up -d ai-review-worker`, sau đó **Chạy lại AI**. Thử lại mà không đổi ngân sách sẽ hỏng y nguyên - đây là lỗi terminal, không phải lỗi tạm thời |
+| Audit row có `error.code = AI_OUTPUT_TRUNCATED` | Model cần nhiều token hơn `AI_REVIEW_MAX_OUTPUT_TOKENS` nên câu trả lời bị cắt giữa chừng (ADR-039). Từ ADR-044 prompt đã dặn model ngân sách mềm 8000 token, nên chạm trần 12000 nghĩa là model đã phớt lờ lời dặn đó hoặc notebook lớn bất thường - không còn là "ngân sách hơi chật" | Tăng `AI_REVIEW_MAX_OUTPUT_TOKENS` ở §3.2 rồi `dcp up -d ai-review-worker`, sau đó **Chạy lại AI**. Thử lại mà không đổi ngân sách sẽ hỏng y nguyên - đây là lỗi terminal, không phải lỗi tạm thời |
 
 Không bao giờ dán `CLOUDFLARE_TUNNEL_TOKEN`, mật khẩu Mongo, mật khẩu admin hay session token vào
 chat/log/issue.
@@ -981,7 +981,7 @@ Kiểm tra có bằng chứng thật, không chỉ "container đang chạy":
 3. Nộp một bài có notebook và xác nhận **response trả về ngay** với `status:"completed"`, điểm đã có, kèm `ai_review.state:"QUEUED"`.
 4. `dcp logs --tail=50 ai-review-worker` → thấy job được claim và kết thúc; mở modal chi tiết trong bảng admin thấy lượt mới.
 5. Bấm **Chạy lại AI** → `generation` tăng, điểm không đổi.
-6. Mở modal chi tiết của lượt vừa chạy → mỗi lượt trong lịch sử phải ghi `prompt ai-review-v3` (ADR-040). Thấy `ai-review-v2` nghĩa là worker/image chưa được cập nhật, không phải cache.
+6. Mở modal chi tiết của lượt vừa chạy → mỗi lượt trong lịch sử phải ghi `prompt ai-review-v4` (ADR-040, ADR-044). Thấy `ai-review-v3` trở xuống nghĩa là worker/image chưa được cập nhật, không phải cache.
 7. Lượt review mới phải có **gợi ý ngắn cho thí sinh** hiện ngay dưới tóm tắt dài. Verdict `FLAGGED` mà gợi ý trống là bình thường (model quyết định không có gì để nói) - nhưng nếu **mọi** lượt đều trống thì nghi prompt không tới được model.
 8. Bấm **Không chấp nhận** một bài có verdict `FLAGGED`: ô lý do phải **điền sẵn** gợi ý kèm dòng nhắc *"Lý do dưới đây do AI soạn nháp…"*. Sửa lại vài chữ rồi gửi → mở lịch sử của **thí sinh** và xác nhận em đọc đúng **bản đã sửa**, không phải bản của model.
 
@@ -989,11 +989,13 @@ Bài nộp và điểm số ở bước 3 phải đúng **dù AI có hỏng**: �
 nhận trước khi bật AI cho cuộc thi chính thức. Lượt smoke đầy đủ trên stack dev (bao gồm cache, thu
 hồi lease, redaction) nằm ở `docs/TEST_MATRIX.md` §17.
 
-**Cảnh báo cho lượt deploy có ADR-040**: `PROMPT_VERSION` đổi `ai-review-v2` → `ai-review-v3` nên
-**mọi** notebook đã từng chấm sẽ trượt cache đúng một lần và được gọi provider lại (kể cả lượt chạy
-tự động). Đây là chủ ý - giữ nguyên version thì audit row cũ được phục vụ lại **không có** gợi ý, và
-admin chỉ thấy ô lý do trống mà không có lỗi nào để lần. Nếu muốn tránh đợt gọi provider ồ ạt, chạy
-deploy vào lúc vắng; không có cách "vá cache" nào khác ngoài việc chấp nhận lượt gọi lại.
+**Cảnh báo cho lượt deploy có ADR-040 + ADR-044**: `PROMPT_VERSION` đổi `ai-review-v2` →
+`ai-review-v4` nên **mọi** notebook đã từng chấm sẽ trượt cache đúng một lần và được gọi provider lại
+(kể cả lượt chạy tự động). Đây là chủ ý - giữ nguyên version thì audit row cũ được phục vụ lại **không
+có** gợi ý (ADR-040) và **không có** ngân sách mềm trong prompt (ADR-044), tức model vẫn viết tới lúc
+trần cứng cắt ngang. Nếu muốn tránh đợt gọi provider ồ ạt, chạy deploy vào lúc vắng; không có cách
+"vá cache" nào khác ngoài việc chấp nhận lượt gọi lại. Nhớ đặt `AI_REVIEW_MAX_OUTPUT_TOKENS=12000`
+(§3.2) - để nguyên `8000` thì trần cứng nằm **ngay dưới** ngân sách mềm mà prompt vừa dặn.
 
 ## Vận hành thường ngày
 

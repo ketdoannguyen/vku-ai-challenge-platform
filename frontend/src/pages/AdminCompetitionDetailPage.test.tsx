@@ -78,7 +78,7 @@ const AI_REVIEW_SETTINGS = {
     base_url: "https://api.example.com/v1",
     model: "gpt-oss-120b",
     api_key_configured: true,
-    acknowledged_host: "api.example.com",
+    verified_at: "2026-09-15T09:05:00Z",
     updated_at: "2026-09-15T09:00:00Z",
   },
   runtime: { encryption_available: true },

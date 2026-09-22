@@ -184,9 +184,9 @@ services:
       AI_REVIEW_MAX_ATTEMPTS: ${AI_REVIEW_MAX_ATTEMPTS:-3}
       AI_REVIEW_CONNECT_TIMEOUT_SECONDS: ${AI_REVIEW_CONNECT_TIMEOUT_SECONDS:-5}
       AI_REVIEW_REQUEST_TIMEOUT_SECONDS: ${AI_REVIEW_REQUEST_TIMEOUT_SECONDS:-60}
-      # Ngân sách output một lượt review (ADR-039): thấp hơn nhu cầu thật của model thì câu trả lời bị
-      # cắt giữa chừng, và lượt đó hỏng với `AI_OUTPUT_TRUNCATED` thay vì ra kết luận thiếu.
-      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-8000}
+      # Trần cứng output một lượt review (ADR-039, ADR-044): thấp hơn nhu cầu thật của model thì câu
+      # trả lời bị cắt giữa chừng, và lượt đó hỏng với `AI_OUTPUT_TRUNCATED` thay vì ra kết luận thiếu.
+      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-12000}
     # Không expose/publish port nào (master context §13): worker chỉ đi RA Mongo, MinIO và provider.
     volumes:
       - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/app:/data

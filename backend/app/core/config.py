@@ -57,8 +57,10 @@ class Settings(BaseSettings):
     ai_review_max_policy_chars: int = 160_000
     ai_review_max_notebook_chars: int = 160_000
     # Ngân sách output của MỘT lượt review. Đây là trần cứng phía mình, không phải giới hạn của
-    # model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng (ADR-039).
-    ai_review_max_output_tokens: int = 8_000
+    # model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng (ADR-039). Từ ADR-044 prompt
+    # dặn model một ngân sách mềm thấp hơn (8000) để nó tự kết thúc, nên trần này chỉ còn là lưới an
+    # toàn - nới lên 12000 để nó gần như không bao giờ chạm.
+    ai_review_max_output_tokens: int = 12_000
     ai_review_reconcile_batch: int = 100
     # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
     ai_review_heartbeat_file: str = "/tmp/ai-review-worker.heartbeat"

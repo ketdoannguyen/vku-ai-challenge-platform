@@ -112,7 +112,6 @@ def enable_ai(
             "base_url": base_url,
             "model": MODEL,
             "api_key": API_KEY,
-            "acknowledge_transfer": True,
         },
     )
 
@@ -582,7 +581,7 @@ def test_a_competition_without_ai_config_publishes_and_scores_normally(client, a
         "base_url": "",
         "model": "",
         "api_key_configured": False,
-        "acknowledged_host": None,
+        "verified_at": None,
         "updated_at": None,
     }
 

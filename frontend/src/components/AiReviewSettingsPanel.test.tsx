@@ -1,7 +1,7 @@
 /**
- * Panel cấu hình AI: hai điều dễ làm sai nhất là để lộ API key và để lời xác nhận host
- * sống lâu hơn host nó thuộc về. Mọi test ở đây đều xoay quanh hai chuyện đó, cộng thêm
- * việc panel không được hành xử như một công cụ soạn luật.
+ * Panel cấu hình AI: ba chuyện dễ làm sai nhất là để lộ API key, để một cấu hình chưa từng gọi
+ * được provider trông như đã xác minh, và để nút xoá key không có bước chặn nào. Mọi test ở đây
+ * xoay quanh ba chuyện đó.
  */
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -22,7 +22,7 @@ function settings(overrides: Partial<AiReviewSettings["config"]> = {}): AiReview
       base_url: "https://api.example.com/v1",
       model: "gpt-oss-120b",
       api_key_configured: true,
-      acknowledged_host: "api.example.com",
+      verified_at: null,
       updated_at: "2026-09-15T09:00:00Z",
       ...overrides,
     },
@@ -90,25 +90,53 @@ const CONFIG_URL = `/api/admin/competitions/${COMPETITION_ID}/ai-review`;
 const TEST_URL = `${CONFIG_URL}/test`;
 const KEY_URL = `${CONFIG_URL}/api-key`;
 
-/** Router của bốn lời gọi panel phát ra; mặc định trả cấu hình đã lưu. */
+/**
+ * Router của bốn lời gọi panel phát ra; mặc định trả cấu hình đã lưu và một probe thành công.
+ *
+ * Nó giữ vết xác minh giữa các request đúng như cột `verified_at` thật (ADR-043): probe bằng cấu
+ * hình đã lưu thì ghi vết, xoá key thì vết hết hiệu lực, và mọi lần đọc cấu hình sau đó đều mang
+ * theo vết ấy. Nhờ vậy test hỏi được câu "quay lại tab thì chip còn xanh không" mà không phải tự
+ * dựng lại luật của server ở phía client.
+ */
 function route(overrides: {
   get?: () => Response;
   put?: () => Response;
   test?: () => Response;
   del?: () => Response;
 }) {
+  let verifiedAt: string | null = null;
+  const current = () => settings({ verified_at: verifiedAt });
   return (url: string, init: RequestInit) => {
-    if (url === TEST_URL) return overrides.test?.() ?? json({});
-    if (url === KEY_URL) return overrides.del?.() ?? json({ config: settings().config });
-    if (url === CONFIG_URL && init.method === "PUT") {
-      return overrides.put?.() ?? json({ config: settings().config });
+    if (url === TEST_URL) {
+      if (overrides.test) return overrides.test();
+      verifiedAt = "2026-09-22T10:00:00Z";
+      return json({ ok: true, host: "api.example.com", model: "gpt-oss-120b", latency_ms: 412 });
     }
-    return overrides.get?.() ?? json(settings());
+    if (url === KEY_URL) {
+      // Không còn key thì vân tay cấu hình đổi, nên vết cũ không còn nói được gì.
+      verifiedAt = null;
+      return (
+        overrides.del?.() ?? json({ config: settings({ api_key_configured: false }).config })
+      );
+    }
+    if (url === CONFIG_URL && init.method === "PUT") {
+      return overrides.put?.() ?? json({ config: current().config });
+    }
+    return overrides.get?.() ?? json(current());
   };
 }
 
 function renderPanel() {
   return render(<AiReviewSettingsPanel competitionId={COMPETITION_ID} />);
+}
+
+/** Lưu cấu hình và chờ cả PUT lẫn lượt probe kết thúc. */
+async function saveAndSettle(requests: Request[]) {
+  fireEvent.click(screen.getByRole("button", { name: "Lưu cấu hình" }));
+  await waitFor(() => expect(requests.some((item) => item.url === TEST_URL)).toBe(true));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Lưu cấu hình" })).not.toBeDisabled(),
+  );
 }
 
 afterEach(() => {
@@ -129,8 +157,9 @@ test("nạp cấu hình đã lưu và không bao giờ đưa API key trở lại
   const baseUrl = screen.getByLabelText("Base URL (OpenAI-compatible)") as HTMLInputElement;
   expect(baseUrl.value).toBe("https://api.example.com/v1");
   expect(screen.getByLabelText("Model")).toHaveValue("gpt-oss-120b");
-  expect(screen.getByLabelText(/Bật kiểm tra notebook bằng AI/)).toBeChecked();
-  expect(screen.getByText("Đang bật")).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "Bật kiểm tra bằng AI" })).toBeChecked();
+  // Vết xác minh nằm ở server: cuộc thi này chưa lần nào gọi được provider, kể cả ở phiên trước.
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
 });
 
 test("lưu cấu hình: giữ nguyên key khi ô nhập trống, gửi key khi admin gõ key mới", async () => {
@@ -138,8 +167,7 @@ test("lưu cấu hình: giữ nguyên key khi ô nhập trống, gửi key khi a
   renderPanel();
   await screen.findByLabelText("API key");
 
-  fireEvent.click(screen.getByRole("button", { name: "Lưu cấu hình" }));
-  await waitFor(() => expect(requests.some((item) => item.method === "PUT")).toBe(true));
+  await saveAndSettle(requests);
 
   const kept = requests.find((item) => item.method === "PUT")!;
   expect(kept.body).not.toHaveProperty("api_key");
@@ -149,87 +177,37 @@ test("lưu cấu hình: giữ nguyên key khi ô nhập trống, gửi key khi a
     participant_visible: true,
     base_url: "https://api.example.com/v1",
     model: "gpt-oss-120b",
-    // Host này đã được xác nhận từ trước nên không phải xác nhận lại.
-    acknowledge_transfer: true,
   });
 
   fireEvent.change(screen.getByLabelText("API key"), { target: { value: SAVED_KEY } });
   fireEvent.click(screen.getByRole("button", { name: "Lưu cấu hình" }));
-  await waitFor(() =>
-    expect(requests.filter((item) => item.method === "PUT")).toHaveLength(2),
-  );
+  await waitFor(() => expect(requests.filter((item) => item.method === "PUT")).toHaveLength(2));
   expect(requests.filter((item) => item.method === "PUT")[1].body?.api_key).toBe(SAVED_KEY);
 
   // Key không bao giờ quay lại DOM, kể cả sau khi vừa gửi lên.
   expect(document.body.textContent).not.toContain(SAVED_KEY);
 });
 
-test("đổi Base URL sang host khác thì lời xác nhận cũ hết hiệu lực", async () => {
-  mockApi(route({}));
+test("lưu cấu hình chạy luôn kiểm tra kết nối và bật chip xác minh", async () => {
+  const requests = mockApi(route({}));
   renderPanel();
   await screen.findByLabelText("API key");
 
-  const acknowledge = screen.getByLabelText(/Tôi hiểu notebook/) as HTMLInputElement;
-  expect(acknowledge.checked).toBe(true);
+  await saveAndSettle(requests);
 
-  fireEvent.change(screen.getByLabelText("Base URL (OpenAI-compatible)"), {
-    target: { value: "https://llm.other-host.test/v1" },
-  });
-
-  expect(acknowledge.checked).toBe(false);
-  expect(screen.getByText(/llm\.other-host\.test/)).toBeTruthy();
-});
-
-test("Base URL chưa hợp lệ thì chưa xác nhận được host nào", async () => {
-  mockApi(route({ get: () => json(settings({ base_url: "", acknowledged_host: null })) }));
-  renderPanel();
-  await screen.findByLabelText("API key");
-
-  const acknowledge = screen.getByLabelText(/Nhập Base URL hợp lệ/) as HTMLInputElement;
-  expect(acknowledge).toBeDisabled();
-  expect(acknowledge.checked).toBe(false);
-});
-
-test("xóa API key phải qua bước xác nhận rồi mới gọi DELETE", async () => {
-  const requests = mockApi(
-    route({ del: () => json({ config: settings({ api_key_configured: false }).config }) }),
-  );
-  renderPanel();
-  await screen.findByLabelText("API key");
-
-  fireEvent.click(screen.getByRole("button", { name: "Xóa API key" }));
-  const dialog = await screen.findByRole("dialog", { name: "Xóa API key" });
-  expect(requests.filter((item) => item.method === "DELETE")).toHaveLength(0);
-
-  fireEvent.click(within(dialog).getByRole("button", { name: "Xóa key" }));
-  await waitFor(() =>
-    expect(requests.filter((item) => item.method === "DELETE")).toHaveLength(1),
-  );
-  // Sau khi xóa, nút xóa biến mất vì không còn key để xóa.
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Xóa API key" })).toBeNull());
-});
-
-test("kiểm tra kết nối báo host, model và độ trễ khi thành công", async () => {
-  const requests = mockApi(
-    route({
-      test: () => json({ ok: true, host: "api.example.com", model: "gpt-oss-120b", latency_ms: 412 }),
-    }),
-  );
-  renderPanel();
-  await screen.findByLabelText("API key");
-
-  fireEvent.click(screen.getByRole("button", { name: "Kiểm tra kết nối" }));
-
+  // Không còn nút "Kiểm tra kết nối" riêng: lưu là lần duy nhất admin cần bấm.
+  expect(screen.queryByRole("button", { name: "Kiểm tra kết nối" })).toBeNull();
+  const probe = requests.find((item) => item.url === TEST_URL)!;
+  expect(probe.method).toBe("POST");
+  // Body rỗng: server kiểm bằng chính cấu hình vừa lưu, không bằng giá trị trên form.
+  expect(probe.body).toEqual({});
   expect(
-    await screen.findByText(/Kết nối thành công tới api\.example\.com với model gpt-oss-120b/),
+    await screen.findByText(/Đã lưu cấu hình và kết nối thành công tới api\.example\.com/),
   ).toBeTruthy();
-  const call = requests.find((item) => item.url === TEST_URL)!;
-  expect(call.method).toBe("POST");
-  // Không gửi key khi ô nhập trống: server dùng key đã lưu.
-  expect(call.body).not.toHaveProperty("api_key");
+  expect(screen.getByText("Đã xác minh")).toBeTruthy();
 });
 
-test("kiểm tra kết nối thất bại hiện lỗi thay vì im lặng", async () => {
+test("probe thất bại thì chip ở lại vàng và hiện lỗi thay vì im lặng", async () => {
   mockApi(
     route({
       test: () =>
@@ -247,20 +225,167 @@ test("kiểm tra kết nối thất bại hiện lỗi thay vì im lặng", asyn
   renderPanel();
   await screen.findByLabelText("API key");
 
-  fireEvent.click(screen.getByRole("button", { name: "Kiểm tra kết nối" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lưu cấu hình" }));
 
   expect(await screen.findByText("Không kết nối được tới provider.")).toBeTruthy();
+  expect(screen.getByText(/Đã lưu cấu hình, nhưng chưa kết nối được tới provider\./)).toBeTruthy();
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
 });
 
-test("danh sách nguồn nội dung nói rõ page nào sẽ được gửi cho AI", async () => {
+test("chip xác minh sống qua lần quay lại tab vì vết nằm ở server", async () => {
+  const requests = mockApi(route({}));
+  const opened = renderPanel();
+  await screen.findByLabelText("API key");
+
+  await saveAndSettle(requests);
+  expect(screen.getByText("Đã xác minh")).toBeTruthy();
+
+  // Rời tab làm panel unmount; quay lại là một phiên hoàn toàn mới, không giữ state nào.
+  opened.unmount();
+  renderPanel();
+
+  expect(await screen.findByText("Đã xác minh")).toBeTruthy();
+  expect(screen.queryByText("Chưa xác minh")).toBeNull();
+});
+
+test("sửa Base URL sau khi đã xác minh thì chip về chưa xác minh", async () => {
+  const requests = mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  await saveAndSettle(requests);
+  expect(screen.getByText("Đã xác minh")).toBeTruthy();
+
+  fireEvent.change(screen.getByLabelText("Base URL (OpenAI-compatible)"), {
+    target: { value: "https://llm.other-host.test/v1" },
+  });
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
+});
+
+test("trả một trường kết nối về giá trị đã lưu thì chip xanh lại mà không gọi provider", async () => {
+  const requests = mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  await saveAndSettle(requests);
+  const probes = requests.filter((item) => item.url === TEST_URL).length;
+  const baseUrl = screen.getByLabelText("Base URL (OpenAI-compatible)");
+
+  fireEvent.change(baseUrl, { target: { value: "https://llm.other-host.test/v1" } });
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
+
+  fireEvent.change(baseUrl, { target: { value: "https://api.example.com/v1" } });
+  // Chip là suy luận từ cấu hình đang lưu, không phải một lời gọi mạng mới.
+  expect(screen.getByText("Đã xác minh")).toBeTruthy();
+  expect(requests.filter((item) => item.url === TEST_URL)).toHaveLength(probes);
+});
+
+test("xoá API key thì vết xác minh cũng hết hiệu lực", async () => {
+  const requests = mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  await saveAndSettle(requests);
+  expect(screen.getByText("Đã xác minh")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa API key" }));
+  const dialog = await screen.findByRole("dialog", { name: "Xóa API key" });
+  fireEvent.change(within(dialog).getByLabelText(/Gõ/), { target: { value: "delete" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Xóa key" }));
+
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Xóa API key" })).toBeNull());
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
+});
+
+test("tắt công tắc thì vô hiệu hoá toàn bộ phần cấu hình, nút lưu vẫn bấm được", async () => {
+  mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  fireEvent.click(screen.getByRole("switch", { name: "Bật kiểm tra bằng AI" }));
+
+  expect(screen.getByLabelText("Base URL (OpenAI-compatible)")).toBeDisabled();
+  expect(screen.getByLabelText("Model")).toBeDisabled();
+  expect(screen.getByLabelText("API key")).toBeDisabled();
+  expect(screen.getByLabelText(/Tự động kiểm tra notebook/)).toBeDisabled();
+  expect(screen.getByLabelText(/Hiển thị kết quả AI sơ bộ/)).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Xóa API key" })).toBeDisabled();
+  // Không còn gì để xác minh khi AI đang tắt.
+  expect(screen.queryByText("Chưa xác minh")).toBeNull();
+  expect(screen.getByRole("button", { name: "Lưu cấu hình" })).not.toBeDisabled();
+});
+
+test("tắt AI thì lưu thẳng trạng thái tắt và không gọi provider", async () => {
+  const requests = mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  fireEvent.click(screen.getByRole("switch", { name: "Bật kiểm tra bằng AI" }));
+  fireEvent.click(screen.getByRole("button", { name: "Lưu cấu hình" }));
+
+  await waitFor(() => expect(requests.some((item) => item.method === "PUT")).toBe(true));
+  expect(requests.find((item) => item.method === "PUT")!.body).toMatchObject({ enabled: false });
+  expect(requests.some((item) => item.url === TEST_URL)).toBe(false);
+});
+
+test("xóa API key chỉ chạy khi gõ đúng chữ xác nhận", async () => {
+  const requests = mockApi(
+    route({ del: () => json({ config: settings({ api_key_configured: false }).config }) }),
+  );
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa API key" }));
+  const dialog = await screen.findByRole("dialog", { name: "Xóa API key" });
+  const confirm = within(dialog).getByRole("button", { name: "Xóa key" });
+  expect(confirm).toBeDisabled();
+
+  const guard = within(dialog).getByLabelText(/Gõ/);
+  fireEvent.change(guard, { target: { value: "delet" } });
+  expect(confirm).toBeDisabled();
+  expect(requests.filter((item) => item.method === "DELETE")).toHaveLength(0);
+
+  fireEvent.change(guard, { target: { value: "delete" } });
+  expect(confirm).not.toBeDisabled();
+  fireEvent.click(confirm);
+
+  await waitFor(() => expect(requests.filter((item) => item.method === "DELETE")).toHaveLength(1));
+  // Sau khi xóa, nút xóa biến mất vì không còn key để xóa.
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Xóa API key" })).toBeNull());
+});
+
+test("danh sách nguồn nội dung chỉ liệt kê trang sẽ được gửi cho AI", async () => {
   mockApi(route({}));
   renderPanel();
 
   await screen.findByText("Thể lệ");
-  expect(screen.getByText("Ghi chú nội bộ")).toBeTruthy();
-  expect(screen.getByText("Sẽ được kiểm tra")).toBeTruthy();
-  expect(screen.getByText("Chưa có nội dung Markdown")).toBeTruthy();
-  expect(screen.getByText(/1 trang sẽ được gửi kèm \(2\.0 KB\), 1 trang bị bỏ qua\./)).toBeTruthy();
+  // Trang bị bỏ qua không hiện, và không còn badge trạng thái lẫn dòng đếm số trang.
+  expect(screen.queryByText("Ghi chú nội bộ")).toBeNull();
+  expect(screen.queryByText("Sẽ được kiểm tra")).toBeNull();
+  expect(screen.queryByText(/trang sẽ được gửi kèm/)).toBeNull();
+});
+
+test("chưa có trang nào có Markdown thì danh sách nói rõ vì sao trống", async () => {
+  const empty = settings();
+  mockApi(
+    route({
+      get: () =>
+        json({
+          ...empty,
+          content_source: {
+            included_count: 0,
+            excluded_count: 1,
+            total_bytes: 0,
+            pages: [empty.content_source.pages[1]],
+          },
+        }),
+    }),
+  );
+  renderPanel();
+
+  expect(
+    await screen.findByText("Chưa trang nội dung nào có Markdown để gửi cho AI."),
+  ).toBeTruthy();
 });
 
 test("thiếu khoá mã hoá thì cảnh báo trước khi admin bật AI", async () => {
@@ -272,17 +397,7 @@ test("thiếu khoá mã hoá thì cảnh báo trước khi admin bật AI", asyn
   renderPanel();
 
   expect(await screen.findByText(/Máy chủ chưa có khoá mã hoá/)).toBeTruthy();
-  // Host công khai không cần allowlist nữa, nên không còn banner nào về host.
   expect(screen.queryByText(/allowlist/)).toBeNull();
-});
-
-test("panel nói rõ đây không phải công cụ soạn luật và chỉ về tab Nội dung", async () => {
-  mockApi(route({}));
-  renderPanel();
-
-  const note = await screen.findByText(/không phải công cụ soạn luật/);
-  expect(note).toHaveTextContent("Nội dung");
-  expect(screen.queryByText(/Rule Builder/)).toBeNull();
 });
 
 test("tải cấu hình lỗi thì hiện lỗi và cho thử lại", async () => {
@@ -304,7 +419,7 @@ test("tải cấu hình lỗi thì hiện lỗi và cho thử lại", async () =
   expect(await screen.findByLabelText("API key")).toHaveValue("");
 });
 
-test("bật/tắt AI và công khai cho thí sinh đi thẳng vào payload", async () => {
+test("hai tuỳ chọn hành vi đi thẳng vào payload", async () => {
   const requests = mockApi(route({}));
   renderPanel();
   await screen.findByLabelText("API key");

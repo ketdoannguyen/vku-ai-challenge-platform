@@ -123,6 +123,9 @@ async def test_ai_review_connection(
     runtime = get_settings()
     policy = _runtime_policy(runtime)
     stored = config.stored_config(competition)
+    # Chỉ lần thử bằng chính cấu hình đã lưu mới là bằng chứng về cấu hình đó, và chỉ nó mới được ghi
+    # vết (ADR-043). Thử bằng giá trị admin đang gõ trên form thì chưa có gì đã lưu để nói tới.
+    records_verification = body.base_url is None and body.model is None and body.api_key is None
     try:
         endpoint = config.resolve_endpoint(stored["base_url"], body.base_url, policy)
         if endpoint is None:
@@ -139,7 +142,7 @@ async def test_ai_review_connection(
     # `trust_env=False`: proxy từ biến môi trường sẽ đổi đích thật và vòng qua network policy.
     async with httpx.AsyncClient(trust_env=False) as client:
         try:
-            return await provider.test_connection(
+            result = await provider.test_connection(
                 client,
                 endpoint=endpoint,
                 policy=policy,
@@ -148,5 +151,22 @@ async def test_ai_review_connection(
                 settings=runtime,
             )
         except provider.ProviderError as exc:
+            if records_verification:
+                # Lần thử hỏng phải xoá vết cũ, nếu không chip xanh sẽ mâu thuẫn với cảnh báo lỗi.
+                await db[COMPETITIONS_COLLECTION].update_one(
+                    {"_id": competition["_id"]},
+                    {"$unset": config.verification_clear_fields()},
+                )
             # Lỗi phía provider là 502; body upstream không bao giờ được chuyển tiếp cho admin.
             raise api_error(502, exc.code, exc.message)
+
+    if records_verification:
+        await db[COMPETITIONS_COLLECTION].update_one(
+            {"_id": competition["_id"]},
+            {
+                "$set": config.verification_fields(
+                    stored, now=datetime.now(timezone.utc)
+                )
+            },
+        )
+    return result

@@ -55,8 +55,11 @@ export interface AiReviewConfig {
   model: string;
   /** Backend không bao giờ trả key; chỉ trả việc đã có key hay chưa. */
   api_key_configured: boolean;
-  /** Host admin đã xác nhận sẽ nhận nội dung notebook; null nghĩa là chưa xác nhận. */
-  acknowledged_host: string | null;
+  /**
+   * Lần cuối gọi provider thành công bằng đúng cấu hình đang lưu; `null` khi chưa từng thử hoặc
+   * cấu hình đã đổi kể từ đó. Server tự hết hiệu lực hoá bằng vân tay, client chỉ đọc.
+   */
+  verified_at: string | null;
   updated_at: string | null;
 }
 
@@ -98,7 +101,6 @@ export interface AiReviewSettingsUpdate {
   base_url?: string;
   model?: string;
   api_key?: string;
-  acknowledge_transfer?: boolean;
 }
 
 export interface AiConnectionTestRequest {

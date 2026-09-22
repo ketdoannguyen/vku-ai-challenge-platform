@@ -5,6 +5,7 @@ phép ghi. Nhờ vậy "AI bật được hay không" là một câu hỏi trả
 hình đều là `SettingsError` với mã ổn định thay vì một chuỗi raise rải rác trong router.
 """
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -16,7 +17,17 @@ from app.ai_review.url_policy import EndpointPolicy, NormalizedEndpoint
 from app.core.datetimes import iso_z
 
 CONFIG_FIELD = "ai_review_config"
-ACK_FIELD = "transfer_acknowledgement"
+# Trường của cơ chế xác nhận chuyển dữ liệu đã bỏ ở ADR-042. Vẫn `$unset` khi ghi để document cũ
+# không giữ lại một trường không còn ai đọc.
+LEGACY_ACK_FIELD = "transfer_acknowledgement"
+
+# Vết xác minh (ADR-043): thời điểm gọi provider thành công kèm vân tay của cấu hình đã dùng. Vân tay
+# là thứ giữ cho vết này tự hết hiệu lực - đổi base URL, model hay key thì vân tay không còn khớp và
+# `verification` trả None, nên không cần ai đó nhớ `$unset` khi ghi.
+VERIFIED_AT_FIELD = "verified_at"
+VERIFIED_FINGERPRINT_FIELD = "verified_fingerprint"
+# Đổi cách tính vân tay thì bump số này: mọi vết cũ tự hết hiệu lực thay vì khớp nhầm.
+_FINGERPRINT_VERSION = 1
 
 DEFAULTS = {
     "enabled": False,
@@ -46,7 +57,6 @@ class SettingsUpdate(BaseModel):
     base_url: str | None = None
     model: str | None = None
     api_key: str | None = None
-    acknowledge_transfer: bool = False
 
 
 class ConnectionTest(BaseModel):
@@ -73,7 +83,6 @@ def stored_config(competition: dict) -> dict:
 def public_config(competition: dict) -> dict:
     """View an toàn cho admin: không bao giờ có ciphertext, chỉ có `api_key_configured`."""
     stored = stored_config(competition)
-    acknowledgement = stored.get(ACK_FIELD) or {}
     updated_at = stored.get("updated_at")
     return {
         "enabled": stored["enabled"],
@@ -83,9 +92,48 @@ def public_config(competition: dict) -> dict:
         "base_url": stored["base_url"],
         "model": stored["model"],
         "api_key_configured": bool(stored.get("api_key_ciphertext")),
-        "acknowledged_host": acknowledgement.get("host"),
+        "verified_at": _verified_at(stored),
         "updated_at": iso_z(updated_at) if updated_at else None,
     }
+
+
+def verification_fingerprint(stored: dict) -> str:
+    """Vân tay của đúng bộ ba quyết định gọi được provider, tính từ config đã lưu."""
+    combined = "\n".join(
+        (
+            str(_FINGERPRINT_VERSION),
+            stored.get("base_url") or "",
+            stored.get("model") or "",
+            stored.get("api_key_ciphertext") or "",
+        )
+    )
+    return hashlib.sha256(combined.encode("utf-8")).hexdigest()
+
+
+def verification_fields(stored: dict, *, now: datetime) -> dict:
+    """`$set` cho một lần gọi provider thành công bằng chính config đang lưu."""
+    return {
+        f"{CONFIG_FIELD}.{VERIFIED_AT_FIELD}": now,
+        f"{CONFIG_FIELD}.{VERIFIED_FINGERPRINT_FIELD}": verification_fingerprint(stored),
+    }
+
+
+def verification_clear_fields() -> dict:
+    """`$unset` khi lần thử gần nhất hỏng: chip xanh cũ không được mâu thuẫn với cảnh báo."""
+    return {
+        f"{CONFIG_FIELD}.{VERIFIED_AT_FIELD}": "",
+        f"{CONFIG_FIELD}.{VERIFIED_FINGERPRINT_FIELD}": "",
+    }
+
+
+def _verified_at(stored: dict) -> str | None:
+    """Thời điểm xác minh còn hiệu lực - None khi chưa từng thử, hoặc cấu hình đã đổi kể từ đó."""
+    verified_at = stored.get(VERIFIED_AT_FIELD)
+    if not verified_at:
+        return None
+    if stored.get(VERIFIED_FINGERPRINT_FIELD) != verification_fingerprint(stored):
+        return None
+    return iso_z(verified_at)
 
 
 def active_config(competition: dict) -> dict | None:
@@ -140,21 +188,7 @@ def build_update(
     host = endpoint.host if endpoint else ""
     model = (stored["model"] if body.model is None else body.model).strip()
 
-    previous_ack = stored.get(ACK_FIELD) or {}
-    if body.acknowledge_transfer and host:
-        acknowledgement = {
-            "host": host,
-            "acknowledged_by": updated_by,
-            "acknowledged_at": now,
-        }
-        unset_fields = {}
-    elif host and previous_ack.get("host") == host:
-        # Lời xác nhận chỉ có giá trị cho đúng host đã xác nhận; đổi host là mất hiệu lực.
-        acknowledgement = previous_ack
-        unset_fields = {}
-    else:
-        acknowledgement = None
-        unset_fields = {f"{CONFIG_FIELD}.{ACK_FIELD}": ""}
+    unset_fields = {f"{CONFIG_FIELD}.{LEGACY_ACK_FIELD}": ""}
 
     ciphertext = stored.get("api_key_ciphertext")
     if body.api_key and body.api_key.strip():
@@ -164,7 +198,7 @@ def build_update(
             raise SettingsError(exc.code, exc.message)
 
     if enabled:
-        _require_ready(host=host, model=model, ciphertext=ciphertext, acknowledgement=acknowledgement)
+        _require_ready(host=host, model=model, ciphertext=ciphertext)
 
     set_fields = {
         f"{CONFIG_FIELD}.enabled": enabled,
@@ -176,8 +210,6 @@ def build_update(
         f"{CONFIG_FIELD}.updated_by": updated_by,
         f"{CONFIG_FIELD}.updated_at": now,
     }
-    if acknowledgement is not None:
-        set_fields[f"{CONFIG_FIELD}.{ACK_FIELD}"] = acknowledgement
     if ciphertext is not None:
         set_fields[f"{CONFIG_FIELD}.api_key_ciphertext"] = ciphertext
     return ConfigUpdate(set_fields=set_fields, unset_fields=unset_fields)
@@ -210,7 +242,7 @@ def resolve_api_key(competition: dict, override: str | None) -> str:
         raise SettingsError(exc.code, exc.message)
 
 
-def _require_ready(*, host: str, model: str, ciphertext, acknowledgement) -> None:
+def _require_ready(*, host: str, model: str, ciphertext) -> None:
     if not host or not model:
         raise SettingsError(
             constants.AI_CONFIG_INCOMPLETE,
@@ -222,9 +254,4 @@ def _require_ready(*, host: str, model: str, ciphertext, acknowledgement) -> Non
         raise SettingsError(
             constants.AI_ENCRYPTION_KEY_MISSING,
             "Máy chủ chưa có khoá mã hoá để lưu API key.",
-        )
-    if acknowledgement is None:
-        raise SettingsError(
-            constants.AI_TRANSFER_NOT_ACKNOWLEDGED,
-            "Cần xác nhận nội dung notebook sẽ được gửi tới host này.",
         )

@@ -404,6 +404,58 @@ test("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới",
   expect(screen.getByRole("status")).toHaveTextContent("Đã hiển thị 51–100 trong số 120 bài nộp");
 });
 
+test("nút Làm mới tải lại đúng trang đang xem và tự khoá trong lúc chờ", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const { urls } = mockApi(async (url) => {
+    calls += 1;
+    // Lượt thứ ba chính là nút Làm mới; giữ nó lại để bắt được trạng thái đang bận.
+    if (calls === 3) await gate;
+    return jsonResponse(url.includes("offset=50") ? page(50, 120) : page(0, 120));
+  });
+
+  renderPage();
+  await screen.findByText("Đội 0");
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await screen.findByText("Đội 50");
+
+  const refresh = screen.getByRole("button", { name: "Làm mới" });
+  fireEvent.click(refresh);
+
+  // Đang tải thì nút khoá, nên hai lượt gọi không chồng lên nhau.
+  expect(refresh).toBeDisabled();
+
+  release();
+  await waitFor(() => expect(refresh).not.toBeDisabled());
+  // Tải lại trang đang xem chứ không nhảy về trang đầu.
+  expect(lastParams(urls).get("offset")).toBe("50");
+});
+
+test("lần tải đầu hiện khung xương ba thẻ, không để trống", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mockApi(async () => {
+    await gate;
+    return jsonResponse(page(0, 1));
+  });
+
+  const { container } = renderPage();
+
+  // Ba thẻ giữ đúng nhịp dọc của danh sách thật nên lúc dữ liệu về trang không nhảy.
+  expect(container.querySelectorAll(".subm-skeleton-card")).toHaveLength(3);
+  // Khung xương là trang trí; chữ báo đang tải mới là thứ trình đọc màn hình đọc.
+  expect(screen.getByText("Đang tải danh sách bài nộp...")).toBeTruthy();
+
+  release();
+  expect(await screen.findByText("Đội 0")).toBeTruthy();
+  expect(container.querySelector(".subm-skeleton")).toBeNull();
+});
+
 test("cuộc thi đã xóa hiện tên nhưng không có link để mở", async () => {
   mockApi(() =>
     jsonResponse({

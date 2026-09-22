@@ -60,7 +60,8 @@ SOURCE_PIPELINE = "PIPELINE"
 # --- Phiên bản ------------------------------------------------------------------------------
 # Mọi thứ ảnh hưởng tới nội dung gửi model đều phải nằm trong cache key; đổi hành vi là bump version.
 # v3: prompt yêu cầu thêm một câu gợi ý ngắn cho thí sinh (`participant_summary`).
-PROMPT_VERSION = "ai-review-v3"
+# v4: prompt dặn model ngân sách token của chính nó, thay vì để nó viết tới lúc trần cứng cắt ngang.
+PROMPT_VERSION = "ai-review-v4"
 NORMALIZATION_VERSION = "notebook-v2"
 CONTEXT_POLICY_VERSION = "context-v2"
 
@@ -105,7 +106,6 @@ AI_API_KEY_MISSING = "AI_API_KEY_MISSING"
 AI_ENDPOINT_INVALID = "AI_ENDPOINT_INVALID"
 AI_PRIVATE_HOST_NOT_ALLOWED = "AI_PRIVATE_HOST_NOT_ALLOWED"
 AI_INSECURE_ENDPOINT_NOT_ALLOWED = "AI_INSECURE_ENDPOINT_NOT_ALLOWED"
-AI_TRANSFER_NOT_ACKNOWLEDGED = "AI_TRANSFER_NOT_ACKNOWLEDGED"
 AI_REVIEW_DISABLED = "AI_REVIEW_DISABLED"
 AI_REVIEW_IN_PROGRESS = "AI_REVIEW_IN_PROGRESS"
 AI_REVIEW_NOT_AVAILABLE = "AI_REVIEW_NOT_AVAILABLE"

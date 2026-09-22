@@ -214,10 +214,8 @@ provider: "openai_compatible"         hằng số, không có biến thể Anthr
 base_url: str                         đã chuẩn hoá, không trailing slash
 model: str
 api_key_ciphertext: str | absent      token Fernet; KHÔNG BAO GIỜ trả ra API
-transfer_acknowledgement:
-  host: str                           host đã được admin xác nhận
-  acknowledged_by: ObjectId → accounts._id
-  acknowledged_at: datetime
+verified_at: datetime | absent        lần cuối gọi provider thành công (ADR-043)
+verified_fingerprint: str | absent    sha256 của cấu hình đã dùng lúc đó (ADR-043)
 updated_by: ObjectId → accounts._id
 updated_at: datetime
 ```
@@ -225,8 +223,9 @@ updated_at: datetime
 Quy tắc ghi:
 - PUT dùng dotted `$set` cho từng field công khai, **không** ghi đè cả object - ghi đè cả object sẽ nuốt mất ciphertext đang có.
 - `api_key` vắng mặt hoặc chuỗi rỗng = giữ key cũ; xoá key chỉ qua `DELETE .../ai-review/api-key` bằng `$unset`.
-- Đổi host đã chuẩn hoá làm `transfer_acknowledgement` cũ **mất hiệu lực** (host trong ack không còn khớp) ⇒ phải xác nhận lại. Đây là cơ chế duy nhất ghi lại rằng con người đã biết dữ liệu đi đâu.
-- `enabled=true` đòi URL/model/key/ack hợp lệ. Readiness này **không** tham gia publish/scoring readiness: cuộc thi publish được dù AI cấu hình sai.
+- `transfer_acknowledgement` là trường của cơ chế xác nhận chuyển dữ liệu **đã bỏ ở ADR-042**. Mọi lần PUT đều `$unset` nó, nên document cũ tự sạch sau lần ghi kế tiếp.
+- `verified_at`/`verified_fingerprint` chỉ do `POST .../ai-review/test` chạm, và chỉ khi body **rỗng** (probe bằng chính cấu hình đã lưu): thành công ghi cả hai, hỏng `$unset` cả hai. Vân tay băm `(phiên bản, base_url, model, api_key_ciphertext)`; `public_config` trả `verified_at` **chỉ khi** vân tay còn khớp, nên không đường ghi nào phải nhớ xoá vết - đổi một trong ba trường là vết tự hết hiệu lực. Document cũ thiếu hai field được đọc như "chưa từng xác minh", không cần migration.
+- `enabled=true` đòi URL/model/key hợp lệ. Readiness này **không** tham gia publish/scoring readiness: cuộc thi publish được dù AI cấu hình sai.
 
 ### 11.2 `competition_content_revisions` - bản thể lệ bất biến
 

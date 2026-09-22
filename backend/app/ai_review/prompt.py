@@ -35,6 +35,11 @@ CLEAR, FLAGGED hoặc INCONCLUSIVE.
 - `participant_summary` là câu ban tổ chức có thể gửi thẳng cho thí sinh: MỘT câu tiếng Việt, tối \
 đa 10 từ, nêu lỗi chính và cách sửa. Để chuỗi rỗng khi không có vi phạm nào cần sửa.
 
+Ngân sách câu trả lời: khoảng 8000 token. Hãy tự kết thúc trong khoảng đó thay vì viết cho tới khi \
+bị cắt: nếu thấy sắp vượt, rút gọn `reason` và bỏ bớt finding ít quan trọng nhất. Trong mọi trường \
+hợp KHÔNG được bỏ dở JSON - một kết luận ngắn đóng đúng ngoặc luôn tốt hơn một câu trả lời đầy đủ \
+nhưng đứt giữa chừng.
+
 Định dạng trả về: đúng MỘT JSON object, không văn bản giải thích, không Markdown fence, theo schema:
 
 {"verdict": "CLEAR|FLAGGED|INCONCLUSIVE",

@@ -6,6 +6,7 @@ hành vi của pipeline - cái gì được gọi, cái gì được ghi, và c�
 
 import hashlib
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -581,6 +582,22 @@ async def test_the_page_order_and_titles_reach_the_prompt(mock_db, ai_env):
     assert user.index("<SUBMISSION_CONTEXT>") < user.index("<PARTICIPANT_NOTEBOOK>")
     assert calls[0]["messages"][0]["content"] == prompt.SYSTEM_PROMPT
     assert calls[0]["temperature"] == 0
+
+
+async def test_the_prompt_budgets_the_model_lower_than_the_cap_sent_to_the_provider(mock_db, ai_env):
+    """ADR-044: hai con số ở hai tầng khác nhau. Prompt dặn model ngân sách mềm để nó tự kết thúc;
+    trần cứng gửi provider phải cao hơn hẳn để chỉ còn là lưới an toàn. Trần tụt xuống dưới lời hứa
+    trong prompt nghĩa là model bị cắt đúng vì đã làm theo điều mình dặn."""
+    match = re.search(r"khoảng (\d+) token", prompt.SYSTEM_PROMPT)
+    assert match, "system prompt không còn dặn model ngân sách token"
+
+    await seed(mock_db)
+    calls: list = []
+    await run(mock_db, handler(CLEAR_OUTPUT, calls))
+
+    cap = get_settings().ai_review_max_output_tokens
+    assert calls[0]["max_tokens"] == cap
+    assert int(match.group(1)) < cap
 
 
 async def test_a_prompt_injection_in_the_notebook_stays_inside_the_evidence_block(mock_db, ai_env):

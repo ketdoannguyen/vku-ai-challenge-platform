@@ -142,11 +142,6 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
                     "base_url": f"https://{HOST}/v1",
                     "model": MODEL,
                     "api_key_ciphertext": crypto.encrypt_secret(API_KEY),
-                    "transfer_acknowledgement": {
-                        "host": HOST,
-                        "acknowledged_by": ObjectId(),
-                        "acknowledged_at": datetime.now(timezone.utc),
-                    },
                 },
             }
         )

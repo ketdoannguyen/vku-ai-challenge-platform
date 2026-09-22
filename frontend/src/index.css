@@ -6940,6 +6940,16 @@ button.resource-link:disabled {
   }
 }
 
+/* Bậc khe giữa, cùng lý do trên nhưng ở chiều ngược lại: ở 1280px - bề rộng laptop phổ biến -
+   khe 32px của bậc rộng làm `Kết quả` rơi xuống dòng thứ hai, thẻ từ 150px lên 213px. Xuống
+   một bậc khe là đủ để năm trường nằm chung một dòng trở lại, mà lề vẫn giữ nguyên nên thẻ vẫn
+   thoáng hơn hẳn bậc hẹp. Từ 90rem trở lên thì chỗ đã dư, không cần siết. */
+@media (min-width: 48rem) and (max-width: 89.99rem) {
+  .subm-card-tier {
+    column-gap: var(--space-lg);
+  }
+}
+
 /* Mặc định không co: trường ngắn (icon trạng thái, nút thao tác) mà bị co thì icon méo và chữ
    trong nút bị cắt. `min-width: 0` vẫn cần để chuỗi dài không đẩy thẻ rộng ra trong mọi trường
    hợp khác. */
@@ -6960,13 +6970,13 @@ button.resource-link:disabled {
    được, nên basis lớn hơn `min-width` sẽ đẩy trường bạn xuống dòng sớm ở màn hẹp dù hai trường
    vừa khít nếu co lại.
 
-   11rem không phải con số cho đẹp: đó là mức mà trường Đội còn đọc được. Giá trị của nó gồm ô
-   icon 28px, tên đội và email; dưới ngưỡng này email teo còn vài ký tự. Vì flexbox xuống dòng
-   theo basis, một basis nhỏ sẽ để Cuộc thi và Đội nằm chung dòng rồi bóp nhau - đo ở 768px với
-   basis 6rem thì cột email chỉ còn 19px.
+   11rem là mức mà trường Đội còn đọc được, không phải con số cho đẹp: giá trị của nó gồm ô icon
+   28px, tên đội và email. Vì flexbox xuống dòng theo basis, một basis nhỏ sẽ để Cuộc thi và Đội
+   nằm chung dòng rồi bóp nhau - đo ở 768px, basis 6rem làm cột email chỉ còn 19px trong khi
+   11rem giữ nó đủ 108px.
 
-   Không nâng lên nữa: ở 1280px tầng rộng 1161px, năm trường với khe 32px vừa đúng 1132px, nên
-   basis lớn hơn sẽ đẩy Kết quả xuống dòng thứ hai ngay trên màn desktop. */
+   Không nâng lên nữa: 12rem đẩy Kết quả xuống dòng thứ hai ở 1280px, đúng bề rộng laptop phổ
+   biến, làm thẻ cao thêm 63px. */
 .subm-field-grow {
   flex: 1 1 11rem;
   min-width: 11rem;
