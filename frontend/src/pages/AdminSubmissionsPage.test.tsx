@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { AiReviewDetail } from "../api/aiReview";
+import type { AdminAiReview, AiReviewDetail } from "../api/aiReview";
 import type { AdminSubmissionsResponse, GlobalSubmissionItem } from "../api/results";
 import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
 import { flushTimers, setDocumentHidden } from "../test/timers";
@@ -128,7 +128,8 @@ test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái v�
     "href",
     "/admin/competitions/c1",
   );
-  expect(screen.getByText("cup-1")).toBeTruthy();
+  // Slug là định danh kỹ thuật, không còn chỗ trong thẻ: tên cuộc thi đã đủ để nhận ra.
+  expect(screen.queryByText("cup-1")).toBeNull();
   // Trạng thái chỉ còn icon, kết luận nằm trong `aria-label`; nhãn chữ trùng với ô lọc nên chỉ
   // tra được bằng role.
   const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
@@ -237,20 +238,25 @@ test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường c
   const labelsOf = (tier: HTMLElement) =>
     Array.from(tier.querySelectorAll("dt")).map((dt) => dt.textContent);
 
-  expect(labelsOf(tiers[0])).toEqual(["Thời gian", "Cuộc thi", "Đội", "Kết quả"]);
-  // Ba trục phán quyết đứng liền nhau ở tầng dưới, thao tác đứng cuối.
+  expect(labelsOf(tiers[0])).toEqual([
+    "Thời gian",
+    "Cuộc thi",
+    "Đội",
+    "Điểm chính",
+    "Kết quả",
+  ]);
+  // Tầng dưới theo đúng thứ tự đọc: chấm xong chưa → máy nói gì → người chốt gì, thao tác cuối.
   expect(labelsOf(tiers[1])).toEqual([
     "Tệp đã nộp",
+    "Trạng thái",
     "AI sơ bộ",
     "Xét duyệt",
-    "Trạng thái",
     "Thao tác",
   ]);
 
-  // Cụm Kết quả giữ đủ bốn điểm: Điểm chính đứng riêng, ba metric phụ nằm trong một nhóm.
-  const result = fieldValue(items[0], "Kết quả");
-  expect(within(result).getByText("Điểm chính")).toBeTruthy();
-  expect(result.querySelectorAll(".subm-metric")).toHaveLength(3);
+  // Điểm chính đứng riêng trong hộp của nó; cụm Kết quả chỉ còn ba metric phụ.
+  expect(fieldValue(items[0], "Điểm chính").querySelector(".subm-score")).toBeTruthy();
+  expect(fieldValue(items[0], "Kết quả").querySelectorAll(".subm-metric")).toHaveLength(3);
 });
 
 test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có thứ tự mặc định riêng", async () => {
@@ -298,15 +304,21 @@ test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có
   expect(screen.getByRole("button", { name: "Tăng dần" })).toBeTruthy();
 });
 
-test("chỉ Điểm chính trong cụm Kết quả được nhấn, ba metric phụ giữ trung tính", async () => {
+test("Điểm chính đứng riêng trong hộp vàng, ba metric phụ giữ trung tính", async () => {
   mockApi();
   renderPage();
   await screen.findByText("Đội 0");
 
+  const primary = fieldValue(itemOf("Đội 0"), "Điểm chính");
+  expect(primary.querySelector(".subm-score .subm-result-primary-score")).toHaveTextContent(
+    "0.900000",
+  );
+  // Hộp điểm có ô icon vàng riêng, không mượn ô icon của trường nào khác.
+  expect(primary.querySelector(".subm-score .subm-block-icon-gold")).toBeTruthy();
+
   const result = fieldValue(itemOf("Đội 0"), "Kết quả");
-  expect(result.querySelector(".subm-result-primary-score")).toHaveTextContent("0.900000");
   // Điểm chính không nằm lẫn trong nhóm metric phụ.
-  expect(result.querySelector(".subm-result-metrics .subm-result-primary-score")).toBeNull();
+  expect(result.querySelector(".subm-result-primary-score")).toBeNull();
 
   for (const [label, value] of [
     ["F1", "0.900000"],
@@ -509,14 +521,13 @@ function fieldValue(item: HTMLElement, label: string): HTMLElement {
 }
 
 /**
- * Ba trục trạng thái chỉ còn icon, nên kết luận phải tra qua `aria-label` chứ không qua chữ nhìn
- * thấy được. Phần chữ nằm trong `.subm-icon-label` chỉ hiện ở `@media (hover: none)`, còn jsdom
- * không nạp stylesheet nên `getByText` ở đây sẽ pass dù người dùng không hề thấy chữ.
+ * Badge của một trục trạng thái. Chữ kết luận giờ hiện ngay trên badge, nhưng assertion vẫn tra
+ * qua `aria-label`: đó mới là tên trình đọc màn hình đọc, và nó không đổi theo CSS.
  */
-function statusIcon(item: HTMLElement, label: string): HTMLElement {
-  const icon = fieldValue(item, label).querySelector<HTMLElement>(".subm-icon");
-  expect(icon, `không có icon trạng thái ở trường "${label}"`).toBeTruthy();
-  return icon as HTMLElement;
+function statusBadge(item: HTMLElement, label: string): HTMLElement {
+  const badge = fieldValue(item, label).querySelector<HTMLElement>(".subm-badge");
+  expect(badge, `không có badge trạng thái ở trường "${label}"`).toBeTruthy();
+  return badge as HTMLElement;
 }
 
 /**
@@ -524,12 +535,12 @@ function statusIcon(item: HTMLElement, label: string): HTMLElement {
  * theo vị trí icon, nên nội dung đọc thẳng từ DOM thay vì từ một thuộc tính.
  */
 function statusTip(item: HTMLElement, label: string): HTMLElement {
-  const tip = statusIcon(item, label).querySelector<HTMLElement>(".subm-tip");
+  const tip = statusBadge(item, label).querySelector<HTMLElement>(".subm-tip");
   expect(tip, `không có tooltip ở trường "${label}"`).toBeTruthy();
   return tip as HTMLElement;
 }
 
-test("trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
+test("trường Xét duyệt là badge có chữ; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
   mockApi(() =>
     jsonResponse({
       ...page(0, 3),
@@ -546,28 +557,29 @@ test("trường Xét duyệt chỉ còn icon; lý do, người duyệt và thờ
   await within(region).findByText("Đội bị từ chối");
 
   const rejectedItem = itemOf("Đội bị từ chối");
-  const rejectedReview = statusIcon(rejectedItem, "Xét duyệt");
+  const rejectedReview = statusBadge(rejectedItem, "Xét duyệt");
   expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
   // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
-  // và thời điểm vào tooltip, cách nhau bằng xuống dòng.
+  // và thời điểm vào tooltip, cách nhau bằng xuống dòng. Nhãn kết luận đã hiện ngay trên badge
+  // nên tooltip không lặp lại nó nữa.
   const rejectedTip = statusTip(rejectedItem, "Xét duyệt").textContent ?? "";
   expect(rejectedTip).toContain(REJECTED_REVIEW.note);
   expect(rejectedTip).toContain("Admin A");
-  expect(rejectedTip.split("\n")[0]).toBe("Không chấp nhận");
+  expect(rejectedTip).not.toContain("Không chấp nhận");
   expect(
     within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
   ).toBeTruthy();
 
   // Chưa từng bị xét duyệt nghĩa là hợp lệ, và chỉ có thao tác từ chối.
   const validItem = itemOf("Đội hợp lệ");
-  expect(statusIcon(validItem, "Xét duyệt")).toHaveAttribute("aria-label", "Hợp lệ");
+  expect(statusBadge(validItem, "Xét duyệt")).toHaveAttribute("aria-label", "Hợp lệ");
   expect(
     within(fieldValue(validItem, "Thao tác")).getByRole("button", { name: "Không chấp nhận" }),
   ).toBeTruthy();
 
   // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai trường đều là gạch, không có thao tác.
   const failedItem = itemOf("Đội lỗi chấm");
-  expect(statusIcon(failedItem, "Xét duyệt")).toHaveAttribute(
+  expect(statusBadge(failedItem, "Xét duyệt")).toHaveAttribute(
     "aria-label",
     "Không xét duyệt được",
   );
@@ -775,21 +787,24 @@ test("Hủy và Escape đều không gửi PATCH và trả focus về nút vừa
 /** Bản nháp model soạn cho thí sinh - chỉ admin thấy, và chỉ được điền sẵn khi verdict là FLAGGED. */
 const AI_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu BTC cấp.";
 
+/** Projection AI đứng riêng khỏi `AI_ROW` để bài khác đổi được kết luận mà giữ nguyên phần còn lại. */
+const AI_PROJECTION: AdminAiReview = {
+  state: "COMPLETED",
+  verdict: "FLAGGED",
+  summary: "Có một dấu hiệu cần xem lại.",
+  participant_summary: AI_HINT,
+  generation: 1,
+  run_id: "run-1",
+  latest_review_id: "r1",
+  requested_at: "2026-09-15T09:10:00Z",
+  updated_at: "2026-09-15T09:11:00Z",
+};
+
 const AI_ROW: GlobalSubmissionItem = {
   ...ROW,
   // `page` đặt tên đội theo offset, nhưng fixture này đứng riêng nên tự khai tên.
   account: { id: "a1", name: "Đội 0", email: "team@vku.vn" },
-  ai_review: {
-    state: "COMPLETED",
-    verdict: "FLAGGED",
-    summary: "Có một dấu hiệu cần xem lại.",
-    participant_summary: AI_HINT,
-    generation: 1,
-    run_id: "run-1",
-    latest_review_id: "r1",
-    requested_at: "2026-09-15T09:10:00Z",
-    updated_at: "2026-09-15T09:11:00Z",
-  },
+  ai_review: AI_PROJECTION,
 };
 
 const AI_DETAIL: AiReviewDetail = {
@@ -809,7 +824,44 @@ const AI_DETAIL: AiReviewDetail = {
     error_code: null,
     captured_at: "2026-09-15T09:00:00Z",
   },
-  history: [],
+  // `latest_review_id` chỉ có nghĩa khi record đó thật sự nằm trong history; modal đọc kết luận
+  // từ record chứ không từ projection.
+  history: [
+    {
+      id: "r1",
+      run_id: "run-1",
+      generation: 1,
+      status: "COMPLETED",
+      verdict: "FLAGGED",
+      model_verdict: "FLAGGED",
+      summary: "Có một dấu hiệu cần xem lại.",
+      participant_summary: AI_HINT,
+      findings: [],
+      notebook_stats: {
+        cells: 12,
+        code_cells: 8,
+        markdown_cells: 4,
+        lines: 210,
+        truncated: false,
+        omitted_cells: 0,
+      },
+      provider: "openai-compatible",
+      provider_host: "api.example.com",
+      model: "gpt-oss-120b",
+      versions: { prompt: "v3", normalization: "v1", context_policy: "v2" },
+      source: "PROVIDER",
+      reused_from_review_id: null,
+      bypass_cache: false,
+      manual: false,
+      attempts: 1,
+      downgrade_codes: [],
+      error: null,
+      started_at: "2026-09-15T09:10:00Z",
+      completed_at: "2026-09-15T09:10:02Z",
+      duration_ms: 2000,
+      created_at: "2026-09-15T09:10:02Z",
+    },
+  ],
 };
 
 /** Một trang có đúng những bài nộp được đưa vào, giữ nguyên tổng số để phân trang. */
@@ -830,7 +882,7 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
   await screen.findByText("Đội 0");
 
   const flaggedItem = itemOf("Đội 0");
-  const flaggedIcon = statusIcon(flaggedItem, "AI sơ bộ");
+  const flaggedIcon = statusBadge(flaggedItem, "AI sơ bộ");
   expect(flaggedIcon).toHaveAttribute("aria-label", "Có dấu hiệu");
   // Thời điểm cập nhật không chiếm thêm dòng nào trong thẻ, chỉ vào tooltip.
   expect(statusTip(flaggedItem, "AI sơ bộ").textContent).toContain("Cập nhật");
@@ -841,15 +893,68 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
   // sạch, nên ô này không được hiện "Không phát hiện". Nút vẫn phải có: đó là đường duy nhất để BTC
   // mở modal và khởi tạo lượt kiểm tra cho bài cũ.
   const legacyItem = itemOf("Đội cũ");
-  expect(statusIcon(legacyItem, "AI sơ bộ")).toHaveAttribute("aria-label", "Chưa đánh giá");
+  expect(statusBadge(legacyItem, "AI sơ bộ")).toHaveAttribute("aria-label", "Chưa đánh giá");
   expect(within(fieldValue(legacyItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
     .toBeTruthy();
 
   // AI sơ bộ đứng cạnh xét duyệt của người, nhưng là hai trường riêng biệt.
-  expect(statusIcon(legacyItem, "Xét duyệt")).not.toHaveAttribute(
+  expect(statusBadge(legacyItem, "Xét duyệt")).not.toHaveAttribute(
     "aria-label",
     "Chưa đánh giá",
   );
+});
+
+test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", async () => {
+  mockApi(() =>
+    jsonResponse(
+      pageOf([
+        row("s-clean", "Đội sạch"),
+        // AI không kết luận được: cảnh báo, chưa phải vi phạm.
+        row("s-unsure", "Đội AI chưa kết luận", {
+          ai_review: { ...AI_PROJECTION, verdict: "INCONCLUSIVE" },
+        }),
+        row("s-flagged", "Đội bị AI gắn cờ", { ai_review: AI_ROW.ai_review }),
+        row("s-rejected", "Đội bị từ chối", { review: REJECTED_REVIEW }),
+        row("s-failed", "Đội lỗi chấm", { status: "failed" }),
+      ]),
+    ),
+  );
+  renderPage();
+  await screen.findByText("Đội sạch");
+
+  // Sạch: không trục nào đáng xem nên vạch xanh.
+  expect(itemOf("Đội sạch").className).toContain("subm-card-success");
+
+  // Chưa kết luận được là vàng, dù trạng thái chấm và xét duyệt đều sạch.
+  expect(itemOf("Đội AI chưa kết luận").className).toContain("subm-card-warning");
+
+  // Gắn cờ đã là đỏ, dù chưa ai từ chối.
+  expect(itemOf("Đội bị AI gắn cờ").className).toContain("subm-card-danger");
+
+  // Từ chối cũng đỏ, và đỏ ở đây đến từ trục xét duyệt chứ không phải trục trạng thái.
+  expect(itemOf("Đội bị từ chối").className).toContain("subm-card-danger");
+
+  // Lỗi chấm cũng đỏ.
+  expect(itemOf("Đội lỗi chấm").className).toContain("subm-card-danger");
+});
+
+test("mỗi trục phán quyết mang tông của chính nó, còn vạch thẻ vẫn là mức nặng nhất", async () => {
+  mockApi(() =>
+    jsonResponse(
+      pageOf([row("s-flagged", "Đội bị AI gắn cờ", { ai_review: AI_ROW.ai_review })]),
+    ),
+  );
+  renderPage();
+  await screen.findByText("Đội bị AI gắn cờ");
+
+  const flagged = itemOf("Đội bị AI gắn cờ");
+  // Trục chấm và trục duyệt của bài này đều sạch...
+  expect(statusBadge(flagged, "Trạng thái").className).toContain("subm-badge-success");
+  expect(statusBadge(flagged, "Xét duyệt").className).toContain("subm-badge-success");
+  // ...chỉ trục AI là đỏ, và đó là chỗ duy nhất nói "bài này có vấn đề".
+  expect(statusBadge(flagged, "AI sơ bộ").className).toContain("subm-badge-danger");
+  // Vạch nhấn của thẻ lấy mức nặng nhất trong ba nên đỏ theo trục AI, không xanh theo hai trục kia.
+  expect(flagged.className).toContain("subm-card-danger");
 });
 
 test("lọc theo kết luận AI là trục riêng, không lẫn với trạng thái chấm hay trạng thái duyệt", async () => {
@@ -885,7 +990,9 @@ test("Chi tiết AI mở đúng modal và chạy lại làm mới bảng mà kh�
 
   fireEvent.click(screen.getByRole("button", { name: "Chi tiết AI" }));
   const dialog = await screen.findByRole("dialog");
-  expect(within(dialog).getByText(/Chỉ quyết định của Ban Tổ chức/)).toBeTruthy();
+  expect(
+    within(dialog).getByText("AI chỉ tham khảo, không ảnh hưởng điểm số. Ban Tổ chức quyết định cuối cùng."),
+  ).toBeTruthy();
 
   // Modal AI chỉ để đọc và chạy lại: không có thao tác duyệt nào của con người trong đó.
   expect(within(dialog).queryByRole("button", { name: "Không chấp nhận" })).toBeNull();

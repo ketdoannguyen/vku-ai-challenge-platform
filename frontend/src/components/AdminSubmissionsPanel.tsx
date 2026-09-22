@@ -53,7 +53,7 @@ import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { ArtifactLinks } from "./ArtifactLinks";
 import { ConfirmModal } from "./Modal";
 import { SubmissionRejectModal } from "./SubmissionReviewModal";
-import { ErrorBox, Loading } from "./ui";
+import { ErrorBox } from "./ui";
 
 const PAGE_SIZE = 50;
 /** Gõ xong mới gọi server; Enter trong ô tìm kiếm thì áp dụng ngay. */
@@ -356,28 +356,21 @@ export function AdminSubmissionsPanel({
    * thay vì chiếm một dòng riêng trong thẻ.
    */
   function statusCell(submission: AdminSubmissionItem) {
+    const tone = statusTone(submission);
     if (submission.status === "completed") {
-      return (
-        <StatusIcon
-          tone="success"
-          glyph="check"
-          label={SUBMISSION_STATUS_LABEL.completed}
-        />
-      );
+      return <StatusBadge tone={tone} glyph="check" label={SUBMISSION_STATUS_LABEL.completed} />;
     }
     if (submission.status === "failed") {
       return (
-        <StatusIcon
-          tone="danger"
+        <StatusBadge
+          tone={tone}
           glyph="alert"
           label={SUBMISSION_STATUS_LABEL.failed}
           tip={submission.error?.message}
         />
       );
     }
-    return (
-      <StatusIcon tone="danger" glyph="cross" label={SUBMISSION_STATUS_LABEL.rejected} />
-    );
+    return <StatusBadge tone={tone} glyph="cross" label={SUBMISSION_STATUS_LABEL.rejected} />;
   }
 
   /**
@@ -388,16 +381,17 @@ export function AdminSubmissionsPanel({
    * để trong thẻ thì mọi hàng bị từ chối sẽ cao gấp ba lần các hàng còn lại.
    */
   function reviewCell(submission: AdminSubmissionItem) {
+    const tone = reviewTone(submission);
     if (submission.status !== "completed") {
-      return <StatusIcon tone="muted" glyph="dash" label="Không xét duyệt được" />;
+      return <StatusBadge tone={tone} glyph="dash" label="Không xét duyệt được" />;
     }
     if (!submission.review) {
-      return <StatusIcon tone="success" glyph="check" label="Hợp lệ" />;
+      return <StatusBadge tone={tone} glyph="check" label="Hợp lệ" />;
     }
     const rejected = submission.review.status === "rejected";
     return (
-      <StatusIcon
-        tone={rejected ? "danger" : "success"}
+      <StatusBadge
+        tone={tone}
         glyph={rejected ? "cross" : "check"}
         label={REVIEW_STATUS_LABEL[submission.review.status]}
         tip={[submission.review.note, `${submission.review.reviewed_by.name} · ${formatLocal(submission.review.reviewed_at)}`]
@@ -415,27 +409,23 @@ export function AdminSubmissionsPanel({
    */
   function aiCell(submission: AdminSubmissionItem) {
     const projection = submission.ai_review;
+    const tone = aiTone(submission);
     const tip = projection?.updated_at ? `Cập nhật ${formatLocal(projection.updated_at)}` : undefined;
     return (
       <>
         {projection ? (
           projection.verdict ? (
-            <StatusIcon
-              tone={AI_VERDICT_TONE[projection.verdict]}
+            <StatusBadge
+              tone={tone}
               glyph={AI_VERDICT_GLYPH[projection.verdict]}
               label={AI_VERDICT_LABEL[projection.verdict]}
               tip={tip}
             />
           ) : (
-            <StatusIcon
-              tone="info"
-              glyph="clock"
-              label={AI_STATE_LABEL[projection.state]}
-              tip={tip}
-            />
+            <StatusBadge tone={tone} glyph="clock" label={AI_STATE_LABEL[projection.state]} tip={tip} />
           )
         ) : (
-          <StatusIcon tone="muted" glyph="dash" label="Chưa đánh giá" />
+          <StatusBadge tone={tone} glyph="dash" label="Chưa đánh giá" />
         )}
         <button
           type="button"
@@ -509,6 +499,18 @@ export function AdminSubmissionsPanel({
             </p>
           </div>
         </div>
+        {/* Nút này gọi đúng đường tải lại mà nút trong băng "tạm dừng tự động làm mới" đang gọi;
+            khác chỗ nó luôn có mặt nên BTC chủ động làm mới được bất cứ lúc nào, không phải chờ
+            polling cạn ngân sách. Khóa lúc đang tải để hai lượt gọi không chồng nhau. */}
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => requestPage(query.offset)}
+          disabled={busy}
+        >
+          <ButtonIcon>{REFRESH_PATHS}</ButtonIcon>
+          Làm mới
+        </button>
       </div>
 
       {!competitionId && <SubmissionStats stats={data?.stats ?? null} pending={!data && !error} />}
@@ -622,7 +624,19 @@ export function AdminSubmissionsPanel({
       )}
 
       {loading && !data ? (
-        <Loading label="Đang tải danh sách bài nộp..." />
+        // Khung xương thay vòng xoay: ba thẻ giữ đúng nhịp dọc của danh sách thật nên lúc dữ
+        // liệu về trang không nhảy. Con số ba chỉ là chiều cao khung nhìn thường thấy, không
+        // phải con số nghiệp vụ nào. Chữ báo đang tải vẫn còn cho trình đọc màn hình.
+        <>
+          <span className="sr-only" role="status">
+            Đang tải danh sách bài nộp...
+          </span>
+          <div className="subm-skeleton" aria-hidden="true">
+            {[0, 1, 2].map((row) => (
+              <span key={row} className="subm-skeleton-card" />
+            ))}
+          </div>
+        </>
       ) : error && !data ? (
         <div className="admin-section-error admin-submissions-error">
           <ErrorBox error={error} />
@@ -669,31 +683,31 @@ export function AdminSubmissionsPanel({
 
           <ul className="subm-list">
             {data.submissions.map((submission) => (
-              <li key={submission.id} className="subm-card">
+              <li key={submission.id} className={`subm-card subm-card-${cardTone(submission)}`}>
                 <article className="subm-card-body">
                   <dl className="subm-card-tier">
                     <div className="subm-field">
                       <dt>Thời gian</dt>
-                      <dd>{formatLocal(submission.created_at)}</dd>
+                      <dd>
+                        <BlockIcon tone="blue">{CALENDAR_PATHS}</BlockIcon>
+                        <span>{formatLocal(submission.created_at)}</span>
+                      </dd>
                     </div>
                     {!competitionId && (
                       <div className="subm-field subm-field-grow">
                         <dt>Cuộc thi</dt>
                         <dd>
-                          {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở. */}
+                          <BlockIcon tone="blue">{TROPHY_PATHS}</BlockIcon>
+                          {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở; slug chỉ dùng
+                              làm phép thử đó, không hiện ra nữa. */}
                           {submission.competition?.slug ? (
-                            <>
-                              <Link
-                                to={`/admin/competitions/${submission.competition.id}`}
-                                title={submission.competition.name}
-                                className="subm-truncate"
-                              >
-                                {submission.competition.name}
-                              </Link>
-                              <span className="subm-muted subm-truncate">
-                                {submission.competition.slug}
-                              </span>
-                            </>
+                            <Link
+                              to={`/admin/competitions/${submission.competition.id}`}
+                              title={submission.competition.name}
+                              className="subm-truncate"
+                            >
+                              {submission.competition.name}
+                            </Link>
                           ) : (
                             <span>{submission.competition?.name}</span>
                           )}
@@ -703,19 +717,28 @@ export function AdminSubmissionsPanel({
                     <div className="subm-field subm-field-grow">
                       <dt>Đội</dt>
                       <dd>
+                        <BlockIcon tone="gold">{TEAM_PATHS}</BlockIcon>
                         <strong className="subm-truncate">{submission.account.name}</strong>
                         <span className="subm-muted subm-truncate">{submission.account.email}</span>
+                      </dd>
+                    </div>
+                    {/* Điểm chính đứng riêng khỏi cụm chỉ số: đây là con số duy nhất dùng để xếp
+                        hạng, để lẫn với F1/Precision/Recall thì nó không còn nổi nữa. */}
+                    <div className="subm-field">
+                      <dt>Điểm chính</dt>
+                      <dd>
+                        <span className="subm-score">
+                          <BlockIcon tone="gold">{STAR_PATHS}</BlockIcon>
+                          <span className="subm-result-primary-score">
+                            {formatScore(submission.primary_score)}
+                          </span>
+                        </span>
                       </dd>
                     </div>
                     <div className="subm-field subm-field-result">
                       <dt>Kết quả</dt>
                       <dd>
-                        <span className="subm-result-primary">
-                          <span className="subm-result-primary-label">Điểm chính</span>
-                          <span className="subm-result-primary-score">
-                            {formatScore(submission.primary_score)}
-                          </span>
-                        </span>
+                        <BlockIcon tone="blue">{CHART_PATHS}</BlockIcon>
                         <span className="subm-result-metrics">
                           {METRIC_FIELDS.map((metric) => (
                             <span key={metric.key} className="subm-metric">
@@ -730,6 +753,11 @@ export function AdminSubmissionsPanel({
                     </div>
                   </dl>
 
+                  {/* Ba trục phán quyết đứng liền nhau và theo đúng thứ tự đọc: chấm xong chưa
+                      (Trạng thái) → máy nói gì (AI sơ bộ) → người chốt gì (Xét duyệt). Mỗi trục là
+                      một badge tự tô theo kết luận của chính nó; vạch nhấn lề trái thẻ vẫn giữ
+                      mức nặng nhất trong ba, nên thẻ có tín hiệu tổng và từng trục có tín hiệu
+                      riêng, không chỗ nào phải suy ra từ chỗ khác. */}
                   <dl className="subm-card-tier subm-card-tier-detail">
                     <div className="subm-field">
                       <dt>Tệp đã nộp</dt>
@@ -742,18 +770,16 @@ export function AdminSubmissionsPanel({
                       </dd>
                     </div>
                     <div className="subm-field">
+                      <dt>Trạng thái</dt>
+                      <dd>{statusCell(submission)}</dd>
+                    </div>
+                    <div className="subm-field">
                       <dt>AI sơ bộ</dt>
                       <dd>{aiCell(submission)}</dd>
                     </div>
                     <div className="subm-field">
                       <dt>Xét duyệt</dt>
                       <dd>{reviewCell(submission)}</dd>
-                    </div>
-                    {/* Trạng thái chấm điểm đứng cạnh hai trục kia: cả ba đều là kết luận chỉ
-                        còn icon, đứng chung một tầng thì mắt soát một lượt là hết. */}
-                    <div className="subm-field">
-                      <dt>Trạng thái</dt>
-                      <dd>{statusCell(submission)}</dd>
                     </div>
                     <div className="subm-field">
                       <dt>Thao tác</dt>
@@ -767,10 +793,14 @@ export function AdminSubmissionsPanel({
         </div>
       ) : (
         <div className="admin-results-empty">
+          <BlockIcon tone="blue">{FILE_SEARCH_PATHS}</BlockIcon>
           {/* Chưa có dữ liệu khác hẳn bị lọc hết: câu chữ "không phù hợp" ở đây gây hiểu nhầm. */}
           {hasFilters ? (
             <>
               <p>Không có bài nộp phù hợp.</p>
+              <p className="admin-results-empty-hint">
+                Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm.
+              </p>
               <button className="btn btn-secondary btn-sm" type="button" onClick={clearFilters}>
                 Xóa bộ lọc
               </button>
@@ -984,22 +1014,58 @@ const AI_VERDICT_GLYPH: Record<AiVerdict, Glyph> = {
   ERROR: "clock",
 };
 
+/** Tone của vạch nhấn ở lề thẻ. Chỉ ba mức, vì vạch thẻ là tín hiệu "bài này có gì đáng xem không". */
+type CardTone = "success" | "warning" | "danger";
+
+/**
+ * Tone của từng trục phán quyết, tách khỏi hàm dựng icon vì cùng một kết luận phải tô cả icon lẫn
+ * vạch nhấn của thẻ. Để mỗi chỗ tự suy ra thì sớm muộn icon và vạch cũng lệch màu.
+ */
+function statusTone(submission: AdminSubmissionItem): IconTone {
+  return submission.status === "completed" ? "success" : "danger";
+}
+
+function reviewTone(submission: AdminSubmissionItem): IconTone {
+  // Chưa chấm được điểm thì không có gì để xét duyệt - không phải "chờ duyệt".
+  if (submission.status !== "completed") return "muted";
+  return submission.review?.status === "rejected" ? "danger" : "success";
+}
+
+function aiTone(submission: AdminSubmissionItem): IconTone {
+  const projection = submission.ai_review;
+  if (!projection) return "muted";
+  return projection.verdict ? AI_VERDICT_TONE[projection.verdict] : "info";
+}
+
+/**
+ * Mức nặng nhất trong ba trục: đỏ > vàng > xanh. Cố ý không lấy trục "chính": một bài bị AI gắn
+ * cờ nhưng người chưa xét duyệt vẫn cần được nhìn thấy. Suy thẳng từ ba tone chứ không tự đặt lại
+ * thang mức, nếu không vạch nhấn và icon sẽ lệch nhau ở lần đổi thang sau.
+ */
+function cardTone(submission: AdminSubmissionItem): CardTone {
+  const tones = [statusTone(submission), aiTone(submission), reviewTone(submission)];
+  if (tones.includes("danger")) return "danger";
+  if (tones.includes("warning")) return "warning";
+  return "success";
+}
+
 /** Toạ độ khung nhìn của tooltip đang mở; `null` là đóng. */
 type TipAnchor = { left: number; top: number };
 
 /**
- * Một trạng thái trong thẻ bài nộp.
+ * Một trạng thái trong thẻ bài nộp: badge gồm hình dạng, màu và chữ.
  *
- * Chữ không nằm cạnh icon: nhãn `dt` ngay trên đã nói đây là trục nào, còn kết luận thì hình
- * dạng + màu nói thay. Chữ đầy đủ nằm trong `aria-label` (cho trình đọc màn hình) và trong
- * tooltip mở khi trỏ chuột.
+ * Chữ đứng ngay cạnh icon chứ không giấu sau hover. Hình dạng và màu vẫn là kênh chính - người
+ * không phân biệt được màu đọc ra kết luận bằng hình - nhưng chữ nói thẳng kết luận nên không
+ * phải trỏ chuột mới biết, và trên thiết bị cảm ứng thì không có hover để mà trỏ.
  *
- * Tooltip là phần tử thật chứ không phải `::after` vì phải đặt được theo vị trí icon: hộp bám
- * thẳng vào icon bằng CSS thì tràn ra ngoài khung nhìn khi icon nằm sát lề (đo được 38px ở dải
- * 1000-1159px và hơn 100px ở 375px), còn bám vào thẻ thì hộp lại nằm tận lề trái, xa icon.
+ * Tooltip chỉ còn chở phần chi tiết dài (lý do xét duyệt, thời điểm AI cập nhật) chứ không lặp
+ * lại nhãn. Nó là phần tử thật chứ không phải `::after` vì phải đặt được theo vị trí icon: hộp
+ * bám thẳng vào icon bằng CSS thì tràn ra ngoài khung nhìn khi icon nằm sát lề (đo được 38px ở
+ * dải 1000-1159px và hơn 100px ở 375px), còn bám vào thẻ thì hộp lại nằm tận lề trái, xa icon.
  * Chỉ chuột mở được tooltip nên không thêm tab stop nào cho mỗi thẻ.
  */
-function StatusIcon({
+function StatusBadge({
   tone,
   glyph,
   label,
@@ -1051,11 +1117,11 @@ function StatusIcon({
 
   return (
     <span
-      className={`subm-icon subm-icon-${tone}`}
+      className={`subm-badge subm-badge-${tone}`}
       role="img"
       aria-label={label}
-      onMouseEnter={openTip}
-      onMouseLeave={() => setAnchor(null)}
+      onMouseEnter={tip ? openTip : undefined}
+      onMouseLeave={tip ? () => setAnchor(null) : undefined}
     >
       <svg
         viewBox="0 0 24 24"
@@ -1071,19 +1137,21 @@ function StatusIcon({
       >
         {GLYPHS[glyph]}
       </svg>
-      {/* Bản chữ chỉ hiện ở `@media (hover: none)`: ở đó không có hover thì tooltip không bao
-          giờ mở, nên kết luận phải đọc được bằng mắt thường. `role="img"` khiến trình đọc màn
-          hình bỏ qua phần chữ này và chỉ đọc `aria-label`, nên không bị đọc hai lần. */}
-      <span className="subm-icon-label">{label}</span>
-      {/* Luôn nằm trong DOM kể cả khi đóng: `openTip` phải đo được bề ngang bề cao của hộp
-          trước khi biết đặt nó ở đâu. */}
-      <span
-        ref={tipRef}
-        className={anchor ? "subm-tip subm-tip-open" : "subm-tip"}
-        style={anchor ?? undefined}
-      >
-        {tip ? `${label}\n${tip}` : label}
-      </span>
+      {/* `role="img"` + `aria-label` khiến trình đọc màn hình đọc kết luận đúng một lần và bỏ
+          qua phần chữ này, nên chữ ở đây chỉ phục vụ mắt thường. */}
+      <span className="subm-badge-label">{label}</span>
+      {/* Chỉ dựng khi thật sự có phần chi tiết: không có gì để mở thì cũng không cần hộp.
+          Lúc có, hộp phải nằm sẵn trong DOM kể cả khi đóng vì `openTip` phải đo được bề ngang
+          bề cao của nó trước khi biết đặt ở đâu. */}
+      {tip && (
+        <span
+          ref={tipRef}
+          className={anchor ? "subm-tip subm-tip-open" : "subm-tip"}
+          style={anchor ?? undefined}
+        >
+          {tip}
+        </span>
+      )}
     </span>
   );
 }
@@ -1132,6 +1200,33 @@ function ButtonIcon({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Ô icon đứng trước giá trị của một trường ở tầng nhận diện. Ô nền màu là thứ phân biệt nhanh
+ * "đây là thời gian / đội / điểm" khi mắt quét cả danh sách, nên nó chỉ là trang trí: `aria-hidden`
+ * để trình đọc màn hình không đọc thêm một tên không mang thông tin gì mới.
+ *
+ * Cao đúng bằng badge trạng thái ở tầng dưới để hai tầng có cùng nhịp dọc.
+ */
+function BlockIcon({ tone, children }: { tone: "blue" | "gold"; children: ReactNode }) {
+  return (
+    <span className={`subm-block-icon subm-block-icon-${tone}`} aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        focusable="false"
+      >
+        {children}
+      </svg>
+    </span>
+  );
+}
+
 /** Dùng chung cho panel và panel tiêu đề của trang toàn cục. */
 export function IconSubmission({ className }: { className?: string }) {
   return (
@@ -1143,24 +1238,64 @@ export function IconSubmission({ className }: { className?: string }) {
   );
 }
 
+/** Nét vẽ dùng chung cho cả icon tiêu đề (20px) lẫn ô icon trong thẻ (16px). */
+const TROPHY_PATHS = (
+  <>
+    <path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" />
+    <path d="M7 5.5H4.5v1.2a3 3 0 0 0 2.7 3M17 5.5h2.5v1.2a3 3 0 0 1-2.7 3" />
+    <path d="M12 14v3.5M8.5 20.5h7l-.8-3h-5.4l-.8 3Z" />
+  </>
+);
+
+const TEAM_PATHS = (
+  <>
+    <circle cx="9" cy="8" r="3.4" />
+    <path d="M3.5 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.4a4.3 4.3 0 0 1 4.3 4.3v1" />
+    <path d="M16.4 4.9a3.4 3.4 0 0 1 0 6.2M17.6 14.4a4.3 4.3 0 0 1 3.1 4.1v1" />
+  </>
+);
+
+const CALENDAR_PATHS = (
+  <>
+    <rect x="3.5" y="5" width="17" height="15.5" rx="2" />
+    <path d="M3.5 10h17M8 3v3.5M16 3v3.5" />
+    <path d="M12 13v2.6l1.9 1.1" />
+  </>
+);
+
+const STAR_PATHS = <path d="m12 3.6 2.6 5.3 5.8.9-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.8l5.8-.9Z" />;
+
+const CHART_PATHS = (
+  <>
+    <path d="M4 4v16h16" />
+    <path d="M9.5 20v-7M14 20V7M18.5 20v-4.5" />
+  </>
+);
+
+const REFRESH_PATHS = (
+  <>
+    <path d="M3.5 12a8.5 8.5 0 0 1 14.4-6.1" />
+    <path d="M18 2.5v4h-4" />
+    <path d="M20.5 12a8.5 8.5 0 0 1-14.4 6.1" />
+    <path d="M6 21.5v-4h4" />
+  </>
+);
+
+const FILE_SEARCH_PATHS = (
+  <>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+    <path d="M14 3v5h5" />
+    <circle cx="11" cy="14.6" r="2.3" />
+    <path d="m12.7 16.3 2.1 2.1" />
+  </>
+);
+
 function IconTrophy({ className }: { className?: string }) {
-  return (
-    <Glyph className={className}>
-      <path d="M7 4h10v5a5 5 0 0 1-10 0V4Z" />
-      <path d="M7 5.5H4.5v1.2a3 3 0 0 0 2.7 3M17 5.5h2.5v1.2a3 3 0 0 1-2.7 3" />
-      <path d="M12 14v3.5M8.5 20.5h7l-.8-3h-5.4l-.8 3Z" />
-    </Glyph>
-  );
+  return <Glyph className={className}>{TROPHY_PATHS}</Glyph>;
 }
 
 function IconTeam({ className }: { className?: string }) {
-  return (
-    <Glyph className={className}>
-      <circle cx="9" cy="8" r="3.4" />
-      <path d="M3.5 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.4a4.3 4.3 0 0 1 4.3 4.3v1" />
-      <path d="M16.4 4.9a3.4 3.4 0 0 1 0 6.2M17.6 14.4a4.3 4.3 0 0 1 3.1 4.1v1" />
-    </Glyph>
-  );
+  return <Glyph className={className}>{TEAM_PATHS}</Glyph>;
 }
 
 function IconScored({ className }: { className?: string }) {

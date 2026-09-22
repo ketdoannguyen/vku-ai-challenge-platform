@@ -240,11 +240,6 @@ export const FINDING_STATUS_LABEL: Record<FindingStatus, string> = {
   UNCLEAR: "Chưa rõ",
 };
 
-export const CHECKABILITY_LABEL: Record<Checkability, string> = {
-  CHECKABLE_FROM_NOTEBOOK: "Kiểm tra được từ notebook",
-  NOT_CHECKABLE_FROM_NOTEBOOK: "Không kiểm tra được từ notebook",
-};
-
 export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: string }> = [
   { value: "all", label: "Mọi trạng thái AI" },
   { value: "flagged", label: "AI: Có dấu hiệu" },

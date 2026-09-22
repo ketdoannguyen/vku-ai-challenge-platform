@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
-/** Dùng chung cho Modal và drawer điều hướng để hai focus trap không lệch nhau. */
+/**
+ * Dùng chung cho Modal và drawer điều hướng để hai focus trap không lệch nhau.
+ * `summary` nằm trong đây vì `<details>` là control bấm được: thiếu nó, focus trap tính sai phần
+ * tử đầu/cuối và Tab sẽ nhảy khỏi dialog ở đúng chỗ có lịch sử.
+ */
 export const FOCUSABLE =
-  "[autofocus], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
+  "[autofocus], summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex='-1'])";
 
 export function Modal({
   title,

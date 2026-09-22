@@ -795,15 +795,19 @@ này còn là thay đổi **chưa lên production** (xem §1 `docs/PROJECT_STATE
 | Xoá bộ lọc không phát request trùng và hiện empty state đúng | passing | `AdminSubmissionsPage.test.tsx::bộ lọc không khớp thì hiện empty state và xóa bộ lọc không gọi trùng request` |
 | Bốn thẻ thống kê đọc theo bộ lọc hiện tại và **không** đổi sort/phân trang đang xem | passing | `AdminSubmissionsPage.test.tsx::hiện bốn thẻ thống kê theo bộ lọc hiện tại` |
 | Lần tải đầu để chỗ trống + "Đang tải thống kê", không hiện số 0 giả | passing | `AdminSubmissionsPage.test.tsx::chưa có dữ liệu thì thẻ thống kê để chỗ trống thay vì số 0 giả` |
-| Mỗi bài nộp là **một** item duy nhất gồm hai tầng: tầng nhận diện (Thời gian, Cuộc thi, Đội, Kết quả) và tầng xử lý (Tệp đã nộp, AI sơ bộ, Xét duyệt, Trạng thái, Thao tác), đúng thứ tự đó — ba trục phán quyết (chấm điểm, AI, xét duyệt) đứng liền nhau ở tầng dưới, `Trạng thái` không còn ở tầng trên; không còn `table` trong danh sách | passing | `AdminSubmissionsPage.test.tsx::mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường của từng tầng` |
+| Mỗi bài nộp là **một** item duy nhất gồm hai tầng: tầng nhận diện (Thời gian, Cuộc thi, Đội, Kết quả) và tầng xử lý (Tệp đã nộp, Trạng thái, AI sơ bộ, Xét duyệt, Thao tác), đúng thứ tự đó — tầng dưới đọc theo trình tự chấm xong chưa → máy nói gì → người chốt gì, `Trạng thái` không còn ở tầng trên; không còn `table` trong danh sách | passing | `AdminSubmissionsPage.test.tsx::mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường của từng tầng` |
+| Slug cuộc thi **không** hiện trong thẻ (chỉ còn tên, vẫn là link mở trang cuộc thi); bài của cuộc thi đã xoá vẫn hiện tên không link, phân biệt bằng slug rỗng chứ không bằng chữ hiển thị | passing | `AdminSubmissionsPage.test.tsx::hiển thị bảng toàn cục với cuộc thi, đội, trạng thái và điểm` (`queryByText("cup-1")` là `null`), `::cuộc thi đã xóa hiện tên nhưng không có link để mở` |
+| Thẻ bài nộp là **một nền trắng** với **đúng một vạch nhấn**: vạch 4px ở lề trái thẻ, ba cạnh còn lại là viền mảnh 1px. Không tầng nào tô nền riêng, và ba trục phán quyết không mang tín hiệu màu nào — cả thẻ chỉ có một tín hiệu màu và nó nói về cả bài nộp chứ không nói về từng trục | passing | `/tmp/uiverify/rd5-stripe.mjs` (`backgroundColor` của `.subm-card` = `rgb(255, 255, 255)`, `.subm-card-tier-detail` = trong suốt; `border-left-width` = 4px, `border-top-width` = 1px trên cả 50 thẻ) |
+| Màu vạch nhấn lấy **mức nặng nhất trong ba trục**, đỏ > vàng > xanh, suy thẳng từ `statusTone`/`aiTone`/`reviewTone` nên lớp thẻ và tông icon không thể lệch màu. Cố ý không lấy trục "chính": bài bị AI gắn cờ (`FLAGGED` = đỏ) nhưng người chưa xét duyệt vẫn phải nổi lên, và bài AI chưa kết luận (`INCONCLUSIVE` = vàng) vẫn khác bài sạch | passing | `AdminSubmissionsPage.test.tsx::vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục` (năm thẻ: sạch → `subm-card-success`, chưa kết luận → `-warning`, gắn cờ/từ chối/lỗi chấm → `-danger`), `/tmp/uiverify/rd5-stripe.mjs` (`border-left-color` = `rgb(236,22,49)`/`rgb(245,184,0)`/`rgb(16,185,129)` cho ba tông) |
+| Ba trục phán quyết (`Trạng thái`, `AI sơ bộ`, `Xét duyệt`) là trường trơn y hệt `Tệp đã nộp`: **không nền, không viền, không `::before`**, cùng một lề trái với hai trường kia. Kết luận của từng trục chỉ còn ở icon (hình dạng + màu) và ở tooltip | passing | `AdminSubmissionsPage.test.tsx::ba trục phán quyết không mang nền, viền hay vạch riêng - cả thẻ chỉ có một tín hiệu màu` (cả năm trường trong tầng xử lý đều có `className` đúng bằng `subm-field`), `/tmp/uiverify/rd5-stripe.mjs` (`getComputedStyle`: `backgroundColor` trong suốt, `background-image: none`, `border-*-width: 0px`, `::before` = `none/auto` trên mọi thẻ) |
 | Cụm `Kết quả` giữ đủ bốn metric, chỉ `Điểm chính` mang class nhấn vàng (`subm-result-primary-score`), ba metric phụ (`subm-metric`) giữ trung tính | passing | `AdminSubmissionsPage.test.tsx::chỉ Điểm chính trong cụm Kết quả được nhấn, ba metric phụ giữ trung tính` |
 | Ba trục trạng thái (chấm điểm, AI sơ bộ, xét duyệt) chỉ còn icon mang `aria-label`; kết luận tra bằng `role="img"` chứ không bằng chữ nhìn thấy được | passing | `AdminSubmissionsPage.test.tsx::hiển thị bảng toàn cục với cuộc thi, đội, trạng thái và điểm`, `::trường Xét duyệt chỉ còn icon; lý do, người duyệt và thời điểm nằm trong tooltip`, `::trường AI hiện kết luận sơ bộ, bài chưa từng được đánh giá thì ghi rõ là chưa` |
 | Lý do xét duyệt (tới 1000 ký tự), người duyệt, thời điểm và mốc cập nhật AI đi hết vào tooltip của icon, không chiếm dòng nào trong thẻ | passing | Cùng hai test trên, đọc `.subm-tip` trong DOM (dòng đầu là kết luận, các dòng sau là chi tiết; `white-space: pre-line` nên `\n` thành dòng mới) |
-| Chiều cao thẻ ở 1440/1280px là **139px** với mỗi tầng đúng **1 dòng** (`dd` cao nhất 32px, tức không giá trị nào xếp chồng); trước redesign là 235px với cụm Kết quả và AI xếp 3 dòng. Ở 375px thẻ cao **396px** với ba dòng mỗi tầng (`Trạng thái` và `Thao tác` vẫn chung dòng nhờ siết lề/khe ở `@media (max-width: 47.99rem)`) | passing | Chromium headless `/tmp/uiverify/rd2-shots.mjs` (đo `.subm-card`, `offsetTop` của từng trường trong tầng) |
-| Tooltip của icon nằm **ngay trên icon đang trỏ** ở mọi bề rộng 360–1440px (lệch ngang 0px) và không tràn khỏi khung nhìn: `position: fixed` với `left`/`top` do JS đặt từ `getBoundingClientRect()` của icon, kẹp ngang vào trong khung và lật xuống dưới khi hết chỗ phía trên; đóng khi trang cuộn hoặc đổi bề rộng để hộp không ở lại một mình khi icon trôi đi | passing | Chromium headless `/tmp/uiverify/rd2-gaps.mjs` (10 bề rộng, `lệch=0px`, `tràn=0px`) |
-| Các cột giãn cách đều nhau: `justify-content: space-between` + khe `--space-xl` (32px) ở tầng trên, đo được 167px ở 1440px và 127px ở 1280px cho bốn khe tầng dưới; khe không bao giờ nhỏ hơn 32px trên desktop | passing | `/tmp/uiverify/rd2-gaps.mjs` (khe giữa hai trường liền nhau, `tầng1 khe=[32,32,32]`) |
-| Nhãn `dt` và nội dung `dd` của **mọi** cột trong thẻ đều canh giữa: tâm nhãn trùng tâm khối nội dung (lệch 0px) ở cả 9 trường tại 1440/1024/375px. Cột chỉ có icon lấy bề rộng theo nhãn nên icon nằm giữa dưới nhãn (`Xét duyệt` 71px, `Trạng thái` 77px). Canh giữa bằng `text-align`/`justify-content` trên hai hộp nên bề rộng cột giữ nguyên và ellipsis của chuỗi dài vẫn còn bề rộng xác định để cắt — canh giữa bằng `align-items: center` ở `.subm-field` sẽ làm hộp co về đúng nội dung và mất tác dụng cắt | passing | `/tmp/uiverify/rd2-center.mjs` (450 trường, 6 bề rộng, `không cột nào tràn nội dung`), `/tmp/uiverify/rd2-center-rows.mjs` (tâm nhãn so tâm nội dung) |
-| Nền tầng xử lý đậm hơn nền trang (`--surface-container-low` #f1f5f9 so với #f7f9fc) nên thẻ tách khỏi nền ở cả hai đầu; khoảng cách giữa hai thẻ là `--space-lg` (24px) | passing | `/tmp/uiverify/rd-zoom.mjs` (`page` / `card` / `detail` đọc bằng `getComputedStyle`) |
+| Chiều cao thẻ giữ đúng số đo của bản trước vòng nền cột: **139px** ở 1160/1280/1440px với mỗi tầng đúng **1 dòng** (`dd` cao nhất 32px, tức không giá trị nào xếp chồng), **195px** ở 1024px (tầng trên 2 dòng), **261px** ở 768px, **396px** ở 414/375px với ba dòng ở cả hai tầng nhờ siết lề/khe ở `@media (max-width: 47.99rem)`. Trước redesign là 235px với cụm Kết quả và AI xếp 3 dòng | passing | Chromium headless `/tmp/uiverify/rd5-metrics.mjs` (đo `.subm-card`, `offsetTop` của từng trường trong tầng, 1440→375px, `tràn=0px` ở cả 7 bề rộng) |
+| Tooltip của icon nằm **ngay trên icon đang trỏ** ở mọi bề rộng 360–1440px (lệch ngang 0px; tối đa −3px ở 414px khi hộp bị kẹp vào lề phải khung nhìn) và không tràn khỏi khung nhìn: `position: fixed` với `left`/`top` do JS đặt từ `getBoundingClientRect()` của icon, kẹp ngang vào trong khung và lật xuống dưới khi hết chỗ phía trên; đóng khi trang cuộn hoặc đổi bề rộng để hộp không ở lại một mình khi icon trôi đi. Không trường nào trong thẻ chen vào đường này: hộp vẫn `fixed` theo khung nhìn | passing | Chromium headless `/tmp/uiverify/rd2-gaps.mjs` (10 bề rộng, `tràn=0px`) |
+| Các cột giãn cách đều nhau: `justify-content: space-between` + khe `--space-xl` (32px) ở tầng trên; tầng dưới bốn khe đều nhau 166px ở 1440px, 126px ở 1280px và 96px ở 1160px. Khe không bao giờ nhỏ hơn 32px trên desktop | passing | `/tmp/uiverify/rd5-metrics.mjs` (khe giữa hai trường liền nhau, `t1 khe=[32,32,32]`, `t2 khe=[166,166,166,166]` @1440) |
+| Nhãn `dt` và nội dung `dd` của **mọi** cột trong thẻ đều canh giữa: tâm nhãn trùng tâm khối nội dung (lệch 0px) ở cả 9 trường tại 1440/1024/375px. Cột chỉ có icon lấy bề rộng theo nhãn nên icon nằm giữa dưới nhãn. Canh giữa bằng `text-align`/`justify-content` trên hai hộp nên bề rộng cột giữ nguyên và ellipsis của chuỗi dài vẫn còn bề rộng xác định để cắt — canh giữa bằng `align-items: center` ở `.subm-field` sẽ làm hộp co về đúng nội dung và mất tác dụng cắt. Cả năm trường trong tầng xử lý dùng chung một lề trái bằng padding của tầng (24px trên desktop, 16px dưới 48rem) nên nhãn thẳng hàng với nhau | passing | `/tmp/uiverify/rd2-center.mjs` (450 trường, 6 bề rộng, `không cột nào tràn nội dung`), `/tmp/uiverify/rd5-metrics.mjs` (`padding` của `.subm-card-tier-detail` = `10px 24px`) |
+| Cả thẻ dùng chung một nền trắng nên hai tầng không còn phân biệt bằng màu; ranh giới nằm ở đường kẻ `1px` `--vku-border-soft` của `.subm-card-tier-detail`; khoảng cách giữa hai thẻ là `--space-lg` (24px) | passing | `/tmp/uiverify/rd5-stripe.mjs` (`backgroundColor` của `.subm-card-tier-detail` trong suốt trên cả 50 thẻ) |
 | Chữ trạng thái hiện tại chỗ thay vì tooltip khi thiết bị không có hover (`@media (hover: none)`) | passing | `/tmp/uiverify/subm-redesign.mjs` (`hasTouch: true` → `.subm-icon-label` visible) |
 | Panel `Kết quả` trong cuộc thi: không ô lọc/trường Cuộc thi, không lựa chọn sort Cuộc thi, không gọi endpoint toàn cục, không thẻ thống kê, không nút `Lọc`; metric sort vẫn chạy qua endpoint của cuộc thi; lọc trạng thái áp dụng ngay; cụm Kết quả vẫn nổi bật; danh sách không còn vùng cuộn ngang nên **không** có `tabindex` | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở` |
 | Đổi trang giữ hàng cũ rồi thay bằng trang mới; lỗi tải có thông báo + nút thử lại; cuộc thi xoá hiện tên không có link | passing | `AdminSubmissionsPage.test.tsx::đổi trang giữ bảng cũ, báo đang bận rồi render trang mới`, `::lỗi tải danh sách hiện thông báo và nút thử lại gọi lại đúng trang`, `::cuộc thi đã xóa hiện tên nhưng không có link để mở` |
@@ -1178,7 +1182,7 @@ và không rò rỉ giữa hai cuộc thi.
 | **Thí sinh không bao giờ** nhận được gợi ý: `participant_projection` vẫn đúng bốn khoá `{state, verdict, summary, updated_at}`, và chuỗi gợi ý vắng mặt trong mọi response participant | passing | `test_ai_review_api.py::test_a_participant_never_receives_the_summary_written_for_the_admin` |
 | Ô lý do từ chối được **điền sẵn** bản nháp của AI khi `verdict === "FLAGGED"`, kèm dòng nhắc nguồn gốc; **bản admin sửa** mới là thứ được gửi | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
 | Verdict không phải `FLAGGED`: ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
-| Modal chi tiết AI hiện gợi ý **tách khỏi** tóm tắt dài, và vẫn hiện khi verdict không phải FLAGGED để admin tự quyết định | passing | `frontend/src/components/AiReviewDetailModal.test.tsx::modal chi tiết hiện bản nháp model soạn cho thí sinh, tách khỏi tóm tắt dài` |
+| Modal chi tiết AI hiện gợi ý **tách khỏi** tóm tắt dài, và vẫn hiện khi verdict không phải FLAGGED để admin tự quyết định | passing | `frontend/src/components/AiReviewDetailModal.test.tsx::bản nháp model soạn cho thí sinh đứng riêng dưới một nhãn của nó` |
 
 ### Backend - queue và worker
 
@@ -1205,10 +1209,11 @@ và không rò rỉ giữa hai cuộc thi.
 | Panel `Cài đặt`: nạp/lưu cấu hình, key không quay lại form, ô trống giữ key cũ, xoá key phải qua xác nhận, xác nhận gắn với host, kiểm tra kết nối thành công/thất bại, danh sách nguồn nội dung, cảnh báo thiếu khoá mã hoá (không còn banner allowlist) | passing | `frontend/src/components/AiReviewSettingsPanel.test.tsx` (12 case) |
 | Panel nói rõ **không phải** công cụ soạn luật và trỏ về tab `Nội dung` (không có Rule Builder) | passing | `AiReviewSettingsPanel.test.tsx::panel nói rõ đây không phải công cụ soạn luật và chỉ về tab Nội dung` |
 | Bảng admin: cột `Kiểm tra AI` hiện badge + thời điểm, luôn có nút mở chi tiết (kể cả bài legacy để BTC khởi tạo lượt đầu), bộ lọc AI là trục **riêng** gửi `ai_review=` | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
-| Modal chi tiết: lịch sử mới nhất lên đầu, không hiện prompt thô; finding hiện nguyên văn thể lệ + mức kiểm chứng + bằng chứng trong `<pre>`; kết luận hạ cấp được giải thích; lượt hỏng chỉ hiện lỗi đã che; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (11 case) |
+| Modal chi tiết (ADR-041): **một** thẻ kết quả cho đúng lượt canonical (`latest_review_id`, lùi về lượt gần nhất khi thiếu), chỉ bốn dữ kiện (verdict, hoàn tất, thời gian chạy, model); lịch sử cũ **đóng mặc định**, không lặp lượt đang xem và khi đóng chỉ mang đúng bốn dữ kiện; finding hiện nguyên văn thể lệ + lý do + bằng chứng trong `<pre>` (chip `Ngoài notebook` chỉ khi `NOT_CHECKABLE_FROM_NOTEBOOK`); kết luận hạ cấp và notebook bị cắt được nói riêng; lượt hỏng chỉ hiện lỗi đã che; hai nhận xét và hai đoạn của finding nằm chung một khối để lên hai cột khi dialog đủ rộng, đoạn rỗng không dựng; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (38 case) |
+| Chi tiết audit **không** quay lại UI tác nghiệp (ADR-041): `generation`/`Lần #N`, `manual`, `bypass_cache`, `source`, provider/host, phiên bản prompt/normalization/context-policy, `attempts`, `reused_from_review_id`, thống kê cell/dòng notebook, `source_content_slug`, mã `downgrade_codes` | passing | `AiReviewDetailModal.test.tsx::chi tiết audit không quay lại UI: không phiên bản prompt, host, cache, slug hay mã hạ cấp`; Chromium headless 7 fixture, `/tmp/uiverify/airv-verify.mjs` (regex chuỗi cấm) |
 | Ô lý do từ chối được **điền sẵn** bản nháp của AI khi `verdict === "FLAGGED"`, kèm dòng nhắc nguồn gốc đã nối vào `aria-describedby`; admin sửa thì **bản đã sửa** mới là thứ được gửi | passing | `AdminSubmissionsPage.test.tsx::ô lý do được điền sẵn bản nháp của AI, và bản admin sửa mới là thứ được gửi` |
 | Verdict không phải `FLAGGED` (kể cả gợi ý có sẵn trong projection): ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `AdminSubmissionsPage.test.tsx::gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED` |
-| Modal chi tiết hiện gợi ý **tách khỏi** tóm tắt dài (kể cả khi verdict không phải FLAGGED, để admin tự quyết định có gõ lại không) | passing | `AiReviewDetailModal.test.tsx::modal chi tiết hiện bản nháp model soạn cho thí sinh, tách khỏi tóm tắt dài` |
+| Modal chi tiết hiện gợi ý **tách khỏi** tóm tắt dài (kể cả khi verdict không phải FLAGGED, để admin tự quyết định có gõ lại không); model không soạn gợi ý thì không có nhãn nào | passing | `AiReviewDetailModal.test.tsx::bản nháp model soạn cho thí sinh đứng riêng dưới một nhãn của nó`, `::model không soạn gợi ý thì không có nhãn gợi ý nào` |
 | Modal chỉ poll khi còn lượt chờ, dừng khi đóng/tab ẩn và có trần (không poll vô hạn) | passing | `AiReviewDetailModal.test.tsx`; `frontend/src/hooks/usePendingPolling.ts` |
 | Lịch sử participant: mọi state/chuỗi an toàn, disclaimer "BTC quyết định cuối cùng", tắt `participant_visible` thì biến mất, **không** lộ mã kỹ thuật; bài "tốt nhất" vẫn chỉ loại theo quyết định của con người | passing | `frontend/src/pages/MySubmissionsPage.test.tsx` |
 | Trang nộp bài: thành công chấm điểm vẫn ưu tiên hiển thị trước, thêm gợi ý AI đang kiểm tra / lỗi, **không** bắt thí sinh chờ hay poll | passing | `frontend/src/pages/SubmissionPage.test.tsx` |
@@ -1239,7 +1244,7 @@ Harness nằm ở `/tmp/ai-smoke/` (bước `step_a_setup.sh` … `step_i2_exhau
 | Worker bị giết giữa chừng: lease hết hạn được thu hồi và job chạy tiếp, không kẹt | `step_g_lease.sh`; `log_ai-review-worker.txt` |
 | Provider chết → audit row ERROR, lượt nộp và điểm vẫn nguyên; retry hết trần thì dừng hẳn | `step_i_provider_down.sh`, `step_i2_exhaust.sh` |
 | Redaction: participant chỉ thấy state + câu an toàn, không có mã lỗi/provider/model/host/finding; admin thấy đủ finding và bằng chứng | `step_h_redaction.sh` |
-| UI admin (Chromium headless, đăng nhập thật, không mock `/api`): trường AI sơ bộ (lúc chạy còn là cột AI của bảng cũ), cả 7 giá trị lọc, modal chi tiết dựng lại đúng cửa sổ bằng chứng (Cell 2 · dòng 2–3), tab `Cài đặt` với ô key rỗng + "đã lưu" + xác nhận gắn host + nguồn nội dung từ "Quy định cuộc thi" + **không** có Rule Builder | `browser3.mjs`, `browser4.mjs` |
+| UI admin (Chromium headless, đăng nhập thật, không mock `/api`): trường AI sơ bộ (lúc chạy còn là cột AI của bảng cũ), cả 7 giá trị lọc, modal chi tiết dựng lại đúng cửa sổ bằng chứng (Cell 2 · dòng 2–3, thứ tự caption này đã đổi thành `Dòng 2–3 · Cell 2` ở ADR-041), tab `Cài đặt` với ô key rỗng + "đã lưu" + xác nhận gắn host + nguồn nội dung từ "Quy định cuộc thi" + **không** có Rule Builder | `browser3.mjs`, `browser4.mjs` |
 | UI participant: thấy disclaimer và **không** thấy bất kỳ chi tiết kỹ thuật nào | `browser4.mjs` (kiểm bằng "needle" chuỗi cấm) |
 
 ### Chạy lại sau đợt soát lỗi (cùng ngày 2026-09-21)
@@ -1250,7 +1255,8 @@ Sau khi sửa các phát hiện review (#10-#16), stack dev được **build l�
 ở `/tmp/ai-smoke/run/bodies.jsonl`), nên lần này soi được cả **nội dung thật sự gửi model** - thứ mà
 lượt trước không nhìn thấy. Phần UI không chạy lại vì đợt sửa này **không đụng** file frontend nào:
 thay đổi duy nhất nhìn thấy được trên UI là nhãn phiên bản trong modal chi tiết (`prompt ai-review-v2`,
-`notebook-v2`, `context-v2`), và cả bốn oracle browser đều **không** assert chuỗi phiên bản.
+`notebook-v2`, `context-v2`), và cả bốn oracle browser đều **không** assert chuỗi phiên bản. (Nhãn
+phiên bản đó đã bị bỏ hẳn khỏi modal ở ADR-041 - xem mục "Modal chi tiết AI - redesign ADR-041".)
 
 | Quan sát | Kết quả thật |
 |---|---|
@@ -1307,6 +1313,54 @@ diễn tập còn lại trên stack dev.
 
 | Check | Status | Ghi chú |
 |---|---|---|
+### Modal chi tiết AI - redesign ADR-041 (Chromium headless, chạy thật 2026-09-22)
+
+Oracle: `/tmp/uiverify/airv-verify.mjs` + fixture `/tmp/uiverify/airv-fixtures.mjs` (89 assert, 0 fail).
+Bề rộng: oracle riêng `/tmp/uiverify/airv-wide.mjs` (số đo bên dưới).
+Dựng hai dev server từ **cùng một cây nguồn, hai phiên bản**: `5173` = working tree (after, có ADR-041),
+`5174` = `git archive HEAD` (before). Đăng nhập admin thật; chỉ chặn đúng route
+`GET /api/admin/submissions/:id/ai-review` để nạp fixture - mọi request khác đi vào backend thật.
+
+Fixture phủ đủ state matrix và văn bản dài (đều là dữ liệu bịa, không phải bài nộp thật): FLAGGED
+(3 finding gồm một `NOT_CHECKABLE_FROM_NOTEBOOK` và một `UNCLEAR` không có bằng chứng, tên model dài
+51 ký tự, một snippet mà dòng dài nhất ~148 ký tự - dài hơn `<pre>` ở **mọi** bề rộng kể cả 1200px,
+2 lượt cũ), CLEAR, INCONCLUSIVE (hạ cấp từ FLAGGED), ERROR
+(lượt mới nhất hỏng + một lượt cũ thành công), RUNNING lần đầu, RUNNING còn kết quả cũ.
+
+Chiều cao **nội dung** của dialog (`.modal` `scrollHeight`) với **cùng fixture** ở hai bản - đây là
+con số duy nhất so sánh được, vì `getBoundingClientRect().height` bị trần viewport cắt ở 780px:
+
+| Fixture | 1440px before → after | 375px before → after |
+|---|---|---|
+| FLAGGED + 3 finding + text/code dài + 2 lượt cũ | 2231 → **1303** px (−42%) | 3656 → **2125** px (−42%) |
+| CLEAR, không finding | 529 → **462** px | 673 → **590** px |
+| ERROR + một lượt cũ | 657 → **459** px | 923 → **698** px |
+| RUNNING, còn kết quả cũ | 526 → **501** px | 736 → **651** px |
+
+Bề rộng dialog ở 1440px là **1200px** (trần mới, chỉ áp cho modal này qua `.modal:has(.ai-detail)`;
+`.modal-lg` dùng chung với form "Thêm/Sửa nội dung" giữ nguyên 640px). Ở 768px dialog ăn hết chỗ
+overlay chừa (736px), ở 375px vẫn 343px như trước - nên cột 375px của bảng trên không đổi.
+
+| Quan sát bề rộng (1440px, fixture FLAGGED) | Số đo thật |
+|---|---|
+| Dialog 1200px, lề 120px mỗi bên; thẻ kết quả 1142px, `.ai-notes` và `.ai-finding` 1106px | `airv-wide.mjs` |
+| Hai nhận xét cùng một hàng, mỗi cột **541px**; hai đoạn của mỗi finding cùng một hàng, mỗi cột **524px** (3 finding) | như trên |
+| Code: `<pre>` trong **556 → 1070px**; dòng dài nhất của fixture cuộn **573 → 67px** | `airv-verify.mjs` |
+| Sức chứa code ở 1200px: **132 ký tự/dòng** (7,84px/ký tự, vùng chữ 1038px) - mọi dòng ≤120 ký tự nằm trọn | như trên |
+| Dưới 64rem hai đoạn vẫn xếp dọc (375px và 768px: 2 hàng), không tràn ngang ở cả ba bề rộng | như trên |
+
+| Quan sát | Số đo thật |
+|---|---|
+| 375px: hai action xếp dọc, mỗi nút cao **44px** rộng 309px; nút `Xem thêm` cao **44px** | `airv-verify.mjs` |
+| 375px: không tràn ngang (`documentElement.scrollWidth − clientWidth = 0`); dòng code dài tràn **900px bên trong** chính `<pre>` của nó và mép figure **không** vượt mép dialog | như trên |
+| 375px: bảng dữ kiện xếp 2 hàng, dòng `Model` chiếm trọn hàng (45 / 45 / 68px) sau khi thêm `.ai-fact-wide` | như trên |
+| 768px và 1440px: dialog rộng **736px** và **1200px** (trần mới ở bảng trên); bảng dữ kiện một hàng, summary lịch sử một hàng còn thừa 275px tới chevron, không tràn ngang | như trên |
+| Bàn phím: Tab ×30 và Shift+Tab ×12 **không** thoát khỏi `.modal`; focus ring `solid 2px rgb(6, 79, 196)` trên cả `.ai-expand-toggle` và `.ai-history-summary` | như trên |
+| Enter và Space đều mở/đóng được `<details>` lịch sử và đổi `aria-expanded` của nút mở rộng; `aria-controls` trỏ vào phần tử có thật; văn bản đầy đủ (446 ký tự) vẫn nằm trong DOM khi đang clamp | như trên |
+| Giảm chuyển động: spinner `animation-duration: 1e-05s`, chữ `AI đang kiểm tra notebook…` vẫn hiện | như trên |
+| Nút `Chạy lại AI` là nút chính (nền `rgb(6, 79, 196)`), `Tải notebook` là nút phụ nền trắng, đúng thứ tự ở cả ba bề rộng; khi có lượt đang chờ nút chính `disabled` + `opacity 0.5` + `cursor: not-allowed` | như trên |
+| 7 fixture đều không lộ chuỗi audit (`Lần #`, `Bypass`, host provider, `ai-review-v2`, slug, mã downgrade) | như trên |
+
 | Chất lượng kết luận của model thật trên notebook thật | **một lượt, chưa đủ kết luận** | Đã chạy 2026-09-22 trên `deepseek-v4.1-flash` (xem §"Provider thật trên stack dev" ở trên): một notebook nhỏ cho `FLAGGED` + 4 finding có bằng chứng kiểm chứng được, tức **cơ chế** đã chạy trọn với model thật. Đây vẫn là **một** mẫu: chưa đo trên notebook dài/nhiều vi phạm, chưa so nhiều model, và chưa có số về chi phí - nên vẫn phải thử trên provider thật trước khi bật cho cuộc thi chính thức |
 | Hiệu năng vòng reconcile khi collection `submissions` lớn | **chưa kiểm** | ADR-036 ghi rõ đây là nợ chưa đo; index `(ai_review.state, created_at, _id)` đã có nhưng chưa có số liệu |
 | Cửa sổ DNS rebinding giữa lúc kiểm policy và lúc httpx tự phân giải | **chưa kiểm** | Đã biết và ghi trong Consequences của ADR-036, **nặng hơn** từ ADR-037: bỏ allowlist host nghĩa là phép kiểm địa chỉ private lúc phân giải trở thành hàng rào duy nhất trước một domain công khai trỏ vào mạng nội bộ. `trust_env=False` (proxy trong biến môi trường không lái được request) siết lại nhưng không triệt tiêu |
@@ -1319,9 +1373,9 @@ diễn tập còn lại trên stack dev.
 | Lệnh | Kết quả |
 |---|---|
 | `cd backend && uv run pytest -q` | **568 passed** (đợt ADR-035 trước đó: 316; ADR-036→ADR-040 đóng góp 252 case AI, các case cũ vẫn xanh) |
-| `cd frontend && npm test -- --maxWorkers=1` | **451 passed (34 files)** (đợt trước: 410; +41 case AI) |
+| `cd frontend && npm test -- --maxWorkers=1` | **480 passed (34 files)** (đợt trước: 410; +41 case AI của ADR-036→ADR-040; ADR-041 viết lại suite modal 11 → 38 case: 35 case bố cục + 3 case hai cột, và +2 case nhãn gợi ý) |
 | `cd frontend && npx tsc -b` | sạch |
-| `cd frontend && npm run lint` | 0 error |
+| `cd frontend && npm run lint` | 0 error, 25 warning có sẵn (không phát sinh ở `AiReviewDetailModal.tsx`/`Modal.tsx`) |
 | `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
 
 252 case backend nằm trong 12 file `backend/tests/test_ai_review_*.py` (dùng chung fixture ở

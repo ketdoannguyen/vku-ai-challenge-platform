@@ -1699,6 +1699,20 @@ select.input {
   margin-top: 16px;
 }
 
+/* Cổng gõ chữ của `ConfirmModal.requireText`: chặn nút xác nhận tới khi gõ đúng từ khoá. */
+.confirm-modal-guard {
+  margin-top: 12px;
+}
+
+.confirm-modal-guard code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-container);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 /* --- Helpers --- */
 .text-muted {
   color: var(--text-muted);
@@ -6265,82 +6279,290 @@ button.resource-link:disabled {
   min-width: 0;
 }
 
-/* --- Modal chi tiết kiểm tra AI: verdict, lịch sử lượt chạy, finding và bằng chứng --- */
-.ai-detail-disclaimer {
-  margin: 0 0 16px;
-  padding: 10px 14px;
-  border-left: 3px solid var(--vku-blue-700);
-  border-radius: var(--radius-md);
-  background: var(--surface-subtle);
-  font-size: 0.9rem;
-}
-
-.ai-detail-verdict {
+/* Công tắc bật/tắt của tab Cài đặt: một control duy nhất, màu track nói trạng thái bật/tắt. Nó
+   đứng chung hàng với tiêu đề thẻ, cạnh chip xác minh, nên không có nhãn chữ đi kèm. */
+.ai-enable-control {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.ai-detail-verdict p {
-  margin: 0;
-}
-
-.ai-detail-actions {
-  display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: var(--space-sm);
+  align-self: center;
 }
 
-.ai-detail-heading {
-  margin: 0 0 10px;
-  font-size: 1rem;
+.switch-input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-container);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
 }
 
-/* Một lượt trong lịch sử: mỗi lượt là một khối tách bạch, lượt mới nhất đứng đầu. */
-.ai-run-list {
+.switch-input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.24);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.switch-input:checked {
+  border-color: var(--success);
+  background: var(--success);
+}
+
+.switch-input:checked::after {
+  transform: translateX(18px);
+}
+
+.switch-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.switch-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Tắt công tắc thì cả nhóm cấu hình mờ đi: trạng thái nhìn thấy được, không chỉ đoán được. */
+.ai-config-fieldset {
+  min-width: 0;
   margin: 0;
   padding: 0;
-  list-style: none;
+  border: 0;
 }
 
-.ai-run-item {
-  padding: 14px 0;
-  border-top: 1px solid var(--border);
+.ai-config-fieldset:disabled {
+  opacity: 0.55;
 }
 
-.ai-run-head,
-.ai-run-meta {
+.ai-key-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.ai-key-row .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ai-key-row .btn {
+  flex: none;
+}
+
+.ai-behaviour-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.ai-verify-chip-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+/* --- Modal chi tiết kiểm tra AI -------------------------------------------------------------
+   Bốn câu admin phải trả lời được: AI kết luận gì, nội dung nào của cuộc thi có liên quan, vì sao
+   AI đánh giá như vậy, và đoạn code nào là bằng chứng. Mọi chi tiết audit khác đã bị bỏ khỏi UI
+   nên không có style cho chúng ở đây. */
+
+/* Hai hành động xếp ngang và canh phải; "Chạy lại AI" đứng sau vì nó tạo lượt mới. */
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.ai-action-error {
+  margin: 0 0 var(--space-md);
+  color: var(--danger);
+  font-size: var(--text-body-sm);
+}
+
+/* Vùng trạng thái chờ: một `role="status"` duy nhất, không tự lấy focus khi polling trả về. */
+.ai-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin: 0 0 var(--space-md);
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+}
+
+.ai-spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ai-spin 0.8s linear infinite;
+}
+
+/* Trong nút, spinner ăn theo màu chữ: nền nút là accent nên vòng xanh mặc định sẽ tàng hình. */
+.btn .ai-spinner {
+  border-color: currentColor;
+  border-top-color: transparent;
+}
+
+@keyframes ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ai-empty {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-body-sm);
+}
+
+/* Bài có history nhưng projection không còn: nói rõ vì sao kết quả bên dưới vẫn hiện. */
+.ai-notice {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+}
+
+/* Thẻ kết quả của đúng một lượt chạy. Viền trái ăn theo tông verdict, nhưng tông đó luôn đi kèm
+   nhãn chữ ở header nên màu chỉ là lớp nhắc lại, không phải cách duy nhất để đọc trạng thái. */
+.ai-result-card {
+  min-width: 0;
+  padding: var(--space-md);
+  margin-bottom: var(--space-lg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.ai-result-card.tone-success {
+  border-left-color: var(--success);
+}
+
+.ai-result-card.tone-warning {
+  border-left-color: var(--warning);
+}
+
+.ai-result-card.tone-danger {
+  border-left-color: var(--danger);
+}
+
+.ai-result-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: var(--space-sm);
 }
 
-.ai-run-meta {
-  margin-top: 6px;
+.ai-result-title,
+.ai-section-heading {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.ai-result-disclaimer {
+  margin: var(--space-sm) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* Bốn dữ kiện của lượt chạy, verdict là dữ kiện thứ tư nằm ở header. Ba cột khi đủ chỗ, tự xuống
+   dòng khi hẹp - không ép một dòng vì model dài sẽ tràn. */
+.ai-run-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-sm) var(--space-md);
+  margin: var(--space-md) 0 0;
+  padding: var(--space-sm) 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-fact dt {
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-label);
+  font-weight: 500;
 }
 
-.ai-run-item > p {
-  margin: 8px 0 0;
+.ai-fact dd {
+  margin: 0;
+  font-size: var(--text-body-sm);
+  overflow-wrap: anywhere;
+}
+
+.ai-note {
+  margin-top: var(--space-md);
+  min-width: 0;
+}
+
+.ai-note-label {
+  margin: 0 0 var(--space-xs);
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.ai-downgrade {
+  margin: var(--space-md) 0 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-lg);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.ai-note-warning {
+  margin: var(--space-sm) 0 0;
+  color: var(--warning);
+  font-size: 0.8125rem;
 }
 
 .ai-finding-list {
-  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
   padding: 0;
   list-style: none;
 }
 
 .ai-finding {
-  padding: 12px;
-  margin-bottom: 10px;
+  min-width: 0;
+  padding: var(--space-md);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xl);
   background: var(--surface-subtle);
 }
 
@@ -6348,33 +6570,225 @@ button.resource-link:disabled {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
 }
 
-.ai-finding-rule {
-  margin: 8px 0;
-  padding-left: 12px;
-  border-left: 2px solid var(--border);
-  color: var(--text-muted);
-  font-style: italic;
+.ai-finding-title {
+  min-width: 0;
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.ai-finding > p {
-  margin: 6px 0 0;
+.ai-finding-empty {
+  margin: var(--space-md) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+}
+
+/* Nhận xét và điều khoản có thể dài hàng nghìn ký tự. Thu gọn bằng CSS clamp chứ không cắt chuỗi:
+   toàn bộ nội dung vẫn nằm trong DOM nên tìm kiếm trong trang và screen reader vẫn thấy đủ. */
+.ai-expandable {
+  min-width: 0;
+  margin-top: var(--space-sm);
+}
+
+.ai-expandable-text {
+  margin: 0;
+  font-size: var(--text-body-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-expandable-text.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.ai-expand-toggle {
+  min-height: 24px;
+  margin-top: var(--space-xs);
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ai-expand-toggle:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
 }
 
 .ai-evidence {
-  margin: 10px 0 0;
+  margin: var(--space-md) 0 0;
+}
+
+.ai-evidence-meta {
+  color: var(--text-muted);
+  font-size: var(--text-label);
 }
 
 .ai-evidence pre {
-  margin: 4px 0 0;
-  padding: 10px 12px;
+  max-width: 100%;
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-sm) var(--space-md);
   overflow-x: auto;
-  border-radius: var(--radius-md);
-  background: var(--surface-subtle);
-  font-size: 0.82rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
   line-height: 1.5;
+}
+
+.ai-evidence-missing {
+  margin: var(--space-sm) 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+
+/* Lịch sử: mỗi lượt cũ là một `<details>` đóng sẵn, dòng đóng chỉ giữ bốn dữ kiện. */
+.ai-history {
+  margin-top: var(--space-lg);
+}
+
+.ai-history-list {
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-history-list > li + li {
+  margin-top: var(--space-sm);
+}
+
+.ai-history-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.ai-history-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Bỏ marker mặc định nhưng phải thay bằng dấu hiệu mở được, nếu không summary thành dòng chữ
+   trơ và không ai biết nó bấm được. */
+.ai-history-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-history-summary::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-left: auto;
+  flex: none;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(45deg);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.ai-history-item[open] > .ai-history-summary::after {
+  transform: rotate(-135deg);
+}
+
+/* `summary` không nằm trong danh sách focus-visible toàn cục: nó là control mới của riêng modal này. */
+.ai-history-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Nhãn và giá trị là chữ nội tuyến chứ không phải hai cột: dòng đóng phải tự xuống dòng ở 375px
+   thay vì đẩy model dài ra ngoài thẻ. */
+.ai-history-fact {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.ai-history-fact-label {
+  margin-right: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--text-label);
+}
+
+.ai-history-fact-value {
+  overflow-wrap: anywhere;
+}
+
+.ai-history-body {
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+.ai-history-body > p {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-body-sm);
+}
+
+/* Modal này là mặt đọc code, không phải form: trần 640px của `.modal-lg` bắt mỗi dòng code dài
+   phải cuộn trong chính `<pre>` của nó. 1200px là bề rộng đo được ở Chromium để dòng dài nhất của
+   fixture nằm trọn mà vẫn còn lề ở màn 1440px. Chỉ modal này - `.modal-lg` dùng chung với form
+   "Thêm/Sửa nội dung" nên không đụng tới. */
+.modal:has(.ai-detail) {
+  max-width: 1200px;
+}
+
+/* Hai đoạn độc lập của cùng một khối - hai nhận xét của một lượt, và điều khoản với lý do trong một
+   finding - xếp dọc khi hẹp và thành hai cột khi dialog đã đủ rộng cho mỗi cột ~70 ký tự. Đoạn nào
+   không có chữ thì không dựng, nên đoạn còn lại một mình vẫn nằm gọn trong một cột. */
+@media (min-width: 64rem) {
+  .ai-notes,
+  .ai-finding-texts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-md) var(--space-lg);
+    align-items: start;
+  }
+}
+
+/* 375px: lề ngang 28px của `.modal` ăn mất 56px, không còn chỗ cho bảng dữ kiện và code. */
+@media (max-width: 47.99rem) {
+  .modal:has(.ai-detail) {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+
+  .ai-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ai-action {
+    height: auto;
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .ai-expand-toggle {
+    min-height: 44px;
+  }
+
+  /* Tên model dài bị ngắt ở mọi dấu gạch nối, nửa cột là thành một cột chữ dọc. Cho nó chiếm cả
+     hàng để hai dữ kiện ngắn vẫn nằm cạnh nhau mà model chỉ xuống một hai dòng. */
+  .ai-fact-wide {
+    grid-column: 1 / -1;
+  }
 }
 
 /* Mỗi thẻ không còn tiêu đề cột để bấm nên trường và chiều sắp xếp phải có chỗ riêng,
@@ -6436,20 +6850,49 @@ button.resource-link:disabled {
   list-style: none;
 }
 
-/* KHÔNG đặt `overflow: hidden` ở đây: tooltip của icon trạng thái bung lên trên và sẽ bị
-   cắt cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`. */
+/* KHÔNG đặt `overflow: hidden` ở đây: tooltip của badge trạng thái bung lên trên và sẽ bị cắt
+   cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`.
+
+   Cả thẻ một nền trắng với đúng MỘT vạch nhấn: vạch 4px ở lề trái, màu là mức nặng nhất trong
+   ba trục phán quyết. Ngoài vạch đó, tầng nhận diện còn một dải tint rất nhạt chạy từ lề trái
+   vào 35% bề ngang - nó chỉ kéo mắt về phía vạch chứ không tô kín thẻ, nên thẻ vẫn đọc ra là
+   "trắng" và tín hiệu mức nặng vẫn nằm trọn ở vạch. */
 .subm-card {
+  --card-accent: var(--border);
+  --card-tint: var(--surface);
   border: 1px solid var(--border);
+  border-left: 4px solid var(--card-accent);
   border-radius: var(--radius-xl);
   background: var(--surface);
   box-shadow: var(--shadow-card);
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
+/* Mức nặng nhất trong ba trục: đỏ > vàng > xanh. Cố ý không lấy trục "chính": một bài bị AI gắn
+   cờ nhưng người chưa xét duyệt vẫn cần được nhìn thấy. Ba màu lấy đúng thang của thẻ thống kê
+   `.admin-account-stat` bên dưới nên hai chỗ đọc ra cùng một nghĩa; dải tint lấy đúng ba tông
+   nhạt của chúng. */
+.subm-card-danger {
+  --card-accent: var(--vku-red-600);
+  --card-tint: var(--vku-red-50);
+}
+
+.subm-card-warning {
+  --card-accent: var(--vku-yellow-600);
+  --card-tint: var(--vku-yellow-50);
+}
+
+.subm-card-success {
+  --card-accent: var(--palette-data-green);
+  --card-tint: var(--success-soft);
+}
+
 /* Trỏ vào thẻ thì thẻ sáng lên: cùng với khoảng cách rộng, đây là tín hiệu thứ hai cho biết
-   đang ở thẻ nào. */
+   đang ở thẻ nào. Viền trái phải khai lại SAU `border-color` (áp cho cả bốn cạnh): nếu không,
+   điểm nhấn đổi màu theo hover và mất luôn tín hiệu phán quyết. */
 .subm-card:hover {
   border-color: var(--vku-blue-500);
+  border-left-color: var(--card-accent);
   box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 10px 28px rgba(15, 23, 42, 0.08);
 }
 
@@ -6472,23 +6915,19 @@ button.resource-link:disabled {
   gap: var(--space-md) var(--space-xl);
   margin: 0;
   padding: 10px var(--space-lg);
+  /* Dải tint chạy từ lề trái vào 35% rồi tan hẳn vào nền trắng, nên mắt bị kéo về phía vạch
+     nhấn mà nửa phải thẻ vẫn trắng. Bo góc trên tại đây vì `.subm-card` cố ý không cắt tràn. */
+  background: linear-gradient(90deg, var(--card-tint) 0%, var(--surface) 35%);
+  border-radius: calc(var(--radius-xl) - 1px) calc(var(--radius-xl) - 1px) 0 0;
 }
 
-/* Tầng thao tác nằm trên nền chìm để tách khỏi tầng nhận diện mà không cần thêm viền.
-   Nền phải ĐẬM HƠN nền trang (không dùng `--surface-subtle`, gần như trùng màu nền trang): nếu
-   nhạt hơn hoặc bằng thì nửa dưới của thẻ tan vào nền và mắt không còn thấy thẻ kết thúc ở đâu -
-   đó chính là lý do các bài nộp trước đây khó tách khỏi nhau. */
+/* Tầng thao tác tách khỏi tầng nhận diện bằng đường kẻ trên, không bằng nền: nền xám cũ làm nửa
+   dưới thẻ chìm khỏi nửa trên. Khai lại nền trắng để dải tint của `.subm-card-tier` không rỉ
+   xuống đây - hai tầng dùng chung một lớp. */
 .subm-card-tier-detail {
   border-top: 1px solid var(--vku-border-soft);
   border-radius: 0 0 calc(var(--radius-xl) - 1px) calc(var(--radius-xl) - 1px);
-  background: var(--surface-container-low);
-}
-
-/* Nền tầng này trùng màu hover mặc định của nút trung tính nên phải đổi sang bậc đậm hơn,
-   nếu không nút trông như biến mất khi trỏ vào. */
-.subm-card-tier-detail .btn-secondary:hover,
-.subm-card-tier-detail .btn-outline:hover {
-  background: var(--surface-container-high);
+  background: var(--surface);
 }
 
 /* Màn hẹp thì chỗ đắt hơn khoảng thở: siết lề và khe về bậc nhỏ hơn để hai trường cuối tầng
@@ -6519,10 +6958,18 @@ button.resource-link:disabled {
 
    `flex-basis` phải bằng `min-width`: flexbox xuống dòng theo basis chứ không theo bề rộng co
    được, nên basis lớn hơn `min-width` sẽ đẩy trường bạn xuống dòng sớm ở màn hẹp dù hai trường
-   vừa khít nếu co lại. */
+   vừa khít nếu co lại.
+
+   11rem không phải con số cho đẹp: đó là mức mà trường Đội còn đọc được. Giá trị của nó gồm ô
+   icon 28px, tên đội và email; dưới ngưỡng này email teo còn vài ký tự. Vì flexbox xuống dòng
+   theo basis, một basis nhỏ sẽ để Cuộc thi và Đội nằm chung dòng rồi bóp nhau - đo ở 768px với
+   basis 6rem thì cột email chỉ còn 19px.
+
+   Không nâng lên nữa: ở 1280px tầng rộng 1161px, năm trường với khe 32px vừa đúng 1132px, nên
+   basis lớn hơn sẽ đẩy Kết quả xuống dòng thứ hai ngay trên màn desktop. */
 .subm-field-grow {
-  flex: 1 1 6rem;
-  min-width: 6rem;
+  flex: 1 1 11rem;
+  min-width: 11rem;
 }
 
 /* Ngoại lệ của `.subm-field`: cụm Kết quả chứa chỉ số nên co lại thì tự xuống dòng mà vẫn đọc
@@ -6596,35 +7043,51 @@ button.resource-link:disabled {
   margin-right: var(--space-sm);
 }
 
-/* Cụm Kết quả: Điểm chính là metric chính của cuộc thi nên đứng riêng một viên vàng, ba
-   metric phụ nằm cùng dòng nhưng nhỏ và trung tính để không bị đọc nhầm là primary. */
-.subm-field-result dd {
-  gap: var(--space-xs) var(--space-md);
+/* Ô icon của tầng nhận diện. Nền màu là thứ cho mắt bắt đúng trường khi quét cả danh sách:
+   thời gian và cuộc thi là thông tin định danh nên dùng xanh, đội và điểm chính dùng vàng.
+   Cao đúng bằng badge trạng thái ở tầng dưới để hai tầng có cùng nhịp dọc. */
+.subm-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: var(--radius-lg);
 }
 
-.subm-result-primary {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 2px 10px;
-  border: 1px solid var(--vku-yellow-600);
-  border-radius: var(--radius-pill);
+.subm-block-icon-blue {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.subm-block-icon-gold {
   background: var(--vku-yellow-100);
   color: var(--vku-yellow-800);
 }
 
-.subm-result-primary-label {
-  font-size: var(--text-label);
-  font-weight: 700;
-  line-height: var(--leading-label);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
+/* Hộp Điểm chính: con số duy nhất dùng để xếp hạng, nên nó được đóng khung vàng để nổi hơn hẳn
+   ba chỉ số phụ đứng cạnh. Ô icon nằm trong hộp nên hộp chỉ chừa 4px lề trái cho nó. */
+.subm-score {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px 14px 4px 4px;
+  border: 1px solid var(--vku-yellow-600);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--vku-yellow-50), var(--vku-yellow-100));
 }
 
 .subm-result-primary-score {
   font-family: var(--font-mono);
-  font-size: var(--text-body-sm);
+  font-size: var(--text-h3);
   font-weight: 700;
+  color: var(--vku-yellow-800);
+}
+
+/* Cụm chỉ số phụ nằm cùng dòng nhưng nhỏ và trung tính để không bị đọc nhầm là điểm chính. */
+.subm-field-result dd {
+  gap: var(--space-xs) var(--space-md);
 }
 
 /* Cụm chỉ số phụ cũng tự xuống dòng: ở bề rộng hẹp nó là khối rộng nhất trong cụm Kết quả, ép
@@ -6654,47 +7117,61 @@ button.resource-link:disabled {
   font-weight: 600;
 }
 
-/* --- Icon trạng thái: hình dạng + màu nói kết luận, chữ chỉ hiện khi trỏ vào ---
-   Đĩa tròn tint là nền, glyph bên trong là nét trần (không vẽ thêm vòng tròn lồng nhau). */
-.subm-icon {
+/* --- Badge trạng thái: hình dạng, màu và chữ cùng nói một kết luận ---
+   Chữ đứng ngay cạnh icon chứ không giấu sau hover: thiết bị cảm ứng không có hover để trỏ, và
+   ngay trên desktop thì đọc thẳng vẫn nhanh hơn. Hình dạng vẫn là kênh phân biệt chính - người
+   không phân biệt được màu đọc ra kết luận bằng hình - nên badge không dựa vào màu để phân biệt.
+   Cao 28px đúng bằng ô icon ở tầng trên. */
+.subm-badge {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
+  gap: 6px;
+  height: 28px;
+  padding-inline: 10px;
   flex: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-pill);
+  font-size: var(--text-label);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.subm-icon-success {
+.subm-badge-success {
   background: var(--success-soft);
+  border-color: var(--success-border);
   color: var(--success);
 }
 
-.subm-icon-danger {
+.subm-badge-danger {
   background: var(--danger-soft);
+  border-color: var(--danger-border);
   color: var(--danger);
 }
 
-.subm-icon-warning {
+.subm-badge-warning {
   background: var(--warning-soft);
+  border-color: var(--warning-border);
   color: var(--warning);
 }
 
-.subm-icon-info {
+/* Chưa có kết luận (AI đang chạy) là trạng thái chờ, không phải cảnh báo: nền xanh nhạt với viền
+   xám trung tính để nó không bị đọc thành "có vấn đề". */
+.subm-badge-info {
   background: var(--accent-soft);
+  border-color: var(--border);
   color: var(--accent);
 }
 
-.subm-icon-muted {
+.subm-badge-muted {
   background: var(--surface-container);
+  border-color: var(--border);
   color: var(--text-muted);
 }
 
-/* Tooltip nền mực đặc để không bị đọc lẫn với nội dung thẻ. `pre-line` cho phép xuống dòng
-   bằng `\n` - chỗ để ngăn cách kết luận với chi tiết (lý do, thời điểm).
+/* Tooltip nền mực đặc để không bị đọc lẫn với nội dung thẻ. Nó chỉ chở phần chi tiết dài (lý do
+   xét duyệt, thời điểm AI cập nhật) chứ không lặp lại nhãn đã hiện trên badge.
 
-   `position: fixed` + `left`/`top` do JS đặt (xem `StatusIcon`): hộp phải nằm ngay trên icon
+   `position: fixed` + `left`/`top` do JS đặt (xem `StatusBadge`): hộp phải nằm ngay trên icon
    đang trỏ vào, mà bám vào icon bằng CSS thuần thì nó tràn ra ngoài khung nhìn khi icon ở sát
    lề. Đo rect của icon rồi kẹp lại là cách duy nhất thoả cả hai, và việc đó cần JS.
 
@@ -6728,29 +7205,32 @@ button.resource-link:disabled {
   visibility: visible;
 }
 
-/* Chữ nằm sẵn trong DOM nhưng bị ẩn; nó chỉ hiện ở chế độ dự phòng bên dưới. */
-.subm-icon-label {
-  display: none;
+/* Khung xương lúc tải: giữ đúng nhịp dọc của danh sách thật (cùng khe 24px, cùng bề rộng) nên
+   lúc dữ liệu về trang không nhảy. Cao bằng thẻ một dòng ở desktop. */
+.subm-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
 
-/* Thiết bị không có hover thì tooltip không bao giờ mở, nên chữ phải nằm sẵn cạnh icon. Đây là
-   lý do icon vẫn kèm một bản chữ trong DOM. */
-@media (hover: none) {
-  .subm-icon {
-    width: auto;
-    padding: 0 var(--space-sm);
-    gap: var(--space-xs);
-  }
+.subm-skeleton-card {
+  display: block;
+  height: 139px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(90deg, var(--surface-container-low), var(--surface));
+}
 
-  .subm-icon-label {
-    display: inline;
-    font-size: var(--text-label);
-    font-weight: 600;
-  }
+/* Ô icon của trạng thái rỗng nằm trên câu chữ, cách ra một nhịp; gợi ý xuống cỡ nhãn để nó đọc
+   ra là lời mách nước chứ không phải câu kết luận thứ hai. Hai selector đều đặc trưng hơn
+   `.admin-results-empty p` nên không cần `!important`. */
+.admin-results-empty .subm-block-icon {
+  margin-bottom: var(--space-sm);
+}
 
-  .subm-tip {
-    display: none;
-  }
+.admin-results-empty .admin-results-empty-hint {
+  font-size: var(--text-label);
 }
 
 .admin-submissions-error {
