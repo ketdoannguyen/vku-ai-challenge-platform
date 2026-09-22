@@ -1,4 +1,4 @@
-"""Biên SSRF: allowlist khớp chính xác, scheme/port, và địa chỉ thật sau khi phân giải DNS."""
+"""Biên SSRF: host công khai mặc định được phép, scheme/port, và địa chỉ thật sau khi phân giải DNS."""
 
 import pytest
 
@@ -14,14 +14,12 @@ from app.ai_review.url_policy import (
 
 def policy(
     *,
-    hosts=("api.example.com",),
     private=(),
     http=(),
     ports=(443,),
     production=True,
 ) -> EndpointPolicy:
     return EndpointPolicy(
-        allowed_hosts=frozenset(hosts),
         allowed_private_hosts=frozenset(private),
         allowed_http_hosts=frozenset(http),
         allowed_ports=frozenset(ports),
@@ -29,12 +27,32 @@ def policy(
     )
 
 
-def test_allowlisted_https_host_normalizes_and_builds_chat_completions_url():
+def test_https_host_normalizes_and_builds_chat_completions_url():
     endpoint = normalize_endpoint("https://api.example.com/v1/", policy())
     assert endpoint.host == "api.example.com"
     assert endpoint.port == 443
     assert endpoint.base_url == "https://api.example.com/v1"
     assert endpoint.chat_completions_url == "https://api.example.com/v1/chat/completions"
+
+
+def test_any_public_host_is_accepted_without_an_allowlist():
+    # Không còn allowlist host: provider OpenAI-compatible bất kỳ dùng được ngay.
+    endpoint = normalize_endpoint("https://opencode.ai/zen/v1", policy())
+    assert endpoint.host == "opencode.ai"
+    assert endpoint.chat_completions_url == "https://opencode.ai/zen/v1/chat/completions"
+
+    other = normalize_endpoint("https://some-other-provider.test/v1", policy())
+    assert other.host == "some-other-provider.test"
+
+
+def test_public_ip_literals_are_accepted_and_ipv6_authority_is_bracketed():
+    assert normalize_endpoint("https://93.184.216.34/v1", policy()).base_url == (
+        "https://93.184.216.34/v1"
+    )
+    v6 = normalize_endpoint("https://[2606:2800::1]/v1", policy())
+    assert v6.host == "2606:2800::1"
+    assert v6.base_url == "https://[2606:2800::1]/v1"
+    assert v6.chat_completions_url == "https://[2606:2800::1]/v1/chat/completions"
 
 
 def test_default_port_is_omitted_and_custom_port_is_kept():
@@ -45,21 +63,6 @@ def test_default_port_is_omitted_and_custom_port_is_kept():
     assert endpoint.chat_completions_url == (
         "https://api.example.com:8443/chat/completions"
     )
-
-
-def test_host_matching_is_exact_and_rejects_subdomains_and_wildcards():
-    with pytest.raises(UrlPolicyError) as exc:
-        normalize_endpoint("https://evil.api.example.com", policy())
-    assert exc.value.code == constants.AI_HOST_NOT_ALLOWED
-
-    with pytest.raises(UrlPolicyError) as exc:
-        normalize_endpoint("https://api.example.com.evil.test", policy())
-    assert exc.value.code == constants.AI_HOST_NOT_ALLOWED
-
-    # Wildcard trong allowlist không phải cú pháp được hỗ trợ - nó là một hostname literal.
-    wildcard = policy(hosts=("*.example.com",))
-    with pytest.raises(UrlPolicyError):
-        normalize_endpoint("https://api.example.com", wildcard)
 
 
 def test_credentials_query_and_fragment_are_rejected():
@@ -88,7 +91,7 @@ def test_trailing_dot_host_is_rejected_rather_than_silently_normalized():
 def test_port_outside_the_operator_allowlist_is_rejected():
     with pytest.raises(UrlPolicyError) as exc:
         normalize_endpoint("https://api.example.com:9000", policy())
-    assert exc.value.code == constants.AI_HOST_NOT_ALLOWED
+    assert exc.value.code == constants.AI_ENDPOINT_INVALID
 
 
 def test_http_is_allowed_in_development_but_not_in_production_unless_exempted():
@@ -128,6 +131,15 @@ def test_loopback_private_link_local_and_metadata_addresses_are_blocked(monkeypa
     assert exc.value.code == constants.AI_PRIVATE_HOST_NOT_ALLOWED
 
 
+def test_a_public_hostname_resolving_to_a_private_address_is_still_blocked(monkeypatch):
+    # Không còn allowlist host nên đây là lớp duy nhất chặn một domain công khai trỏ vào nội bộ.
+    monkeypatch.setattr(url_policy, "resolve_host", lambda host: ["169.254.169.254"])
+    endpoint = normalize_endpoint("https://metadata.evil.test/v1", policy())
+    with pytest.raises(UrlPolicyError) as exc:
+        assert_network_allowed(endpoint, policy())
+    assert exc.value.code == constants.AI_PRIVATE_HOST_NOT_ALLOWED
+
+
 def test_any_single_private_answer_in_a_mixed_result_is_enough_to_block(monkeypatch):
     monkeypatch.setattr(url_policy, "resolve_host", lambda host: ["93.184.216.34", "127.0.0.1"])
     endpoint = normalize_endpoint("https://api.example.com", policy())
@@ -160,28 +172,25 @@ def test_unresolvable_host_is_a_connection_error_not_a_policy_error(monkeypatch)
     assert exc.value.code == constants.AI_CONNECTION_FAILED
 
 
-def test_empty_allowlist_denies_every_host():
-    with pytest.raises(UrlPolicyError) as exc:
-        normalize_endpoint("https://api.example.com", policy(hosts=()))
-    assert exc.value.code == constants.AI_HOST_NOT_ALLOWED
-
-
 def test_parse_host_list_normalizes_case_idna_and_ignores_blanks():
     hosts = parse_host_list(" API.Example.com , ,xn--vi-qma.example, ")
     assert hosts == frozenset({"api.example.com", "xn--vi-qma.example"})
 
 
-def test_policy_from_settings_reads_every_allowlist(monkeypatch):
+def test_a_wildcard_entry_is_just_a_hostname_that_matches_nothing():
+    # Hai danh sách exception còn lại vẫn khớp chính xác - một `*` ở đó không mở gì cả.
+    assert parse_host_list("*") == frozenset({"*"})
+
+
+def test_policy_from_settings_reads_every_remaining_policy_field(monkeypatch):
     from app.core.config import get_settings
 
     monkeypatch.setenv("APP_ENV", "production")
-    monkeypatch.setenv("AI_REVIEW_ALLOWED_HOSTS", "api.example.com")
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PRIVATE_HOSTS", "internal.example.com")
     monkeypatch.setenv("AI_REVIEW_ALLOWED_HTTP_HOSTS", "plain.example.com")
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PORTS", "443,8443")
     get_settings.cache_clear()
     built = url_policy.policy_from_settings(get_settings())
-    assert built.allowed_hosts == frozenset({"api.example.com"})
     assert built.allowed_private_hosts == frozenset({"internal.example.com"})
     assert built.allowed_http_hosts == frozenset({"plain.example.com"})
     assert built.allowed_ports == frozenset({443, 8443})

@@ -37,10 +37,10 @@ class Settings(BaseSettings):
     session_cookie_secure: str = "auto"
     session_cookie_samesite: str = "lax"
 
-    # AI Notebook Review (ADR-036). Mọi giá trị đều có default để app vẫn boot khi tính năng chưa
-    # được cấu hình: thiếu allowlist nghĩa là không bật được AI, không phải app hỏng.
+    # AI Notebook Review (ADR-036/ADR-037). Mọi giá trị đều có default để app vẫn boot khi tính năng
+    # chưa được cấu hình: thiếu khoá mã hoá nghĩa là không lưu được key, không phải app hỏng. Host
+    # công khai không cần khai gì; hai danh sách dưới chỉ là ngoại lệ hẹp cho provider tự dựng.
     llm_config_encryption_key: str = ""
-    ai_review_allowed_hosts: str = ""
     ai_review_allowed_private_hosts: str = ""
     ai_review_allowed_http_hosts: str = ""
     ai_review_allowed_ports: str = "443"
@@ -56,7 +56,9 @@ class Settings(BaseSettings):
     ai_review_max_snapshot_bytes: int = 8_388_608
     ai_review_max_policy_chars: int = 160_000
     ai_review_max_notebook_chars: int = 160_000
-    ai_review_max_output_tokens: int = 2_500
+    # Ngân sách output của MỘT lượt review. Đây là trần cứng phía mình, không phải giới hạn của
+    # model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng (ADR-039).
+    ai_review_max_output_tokens: int = 8_000
     ai_review_reconcile_batch: int = 100
     # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
     ai_review_heartbeat_file: str = "/tmp/ai-review-worker.heartbeat"

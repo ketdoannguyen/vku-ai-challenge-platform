@@ -118,11 +118,11 @@ services:
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aic_session}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
-      # AI Notebook Review (ADR-036), tất cả dùng `${VAR:-}` chứ KHÔNG `${VAR:?}`: thiếu cấu hình AI
-      # chỉ làm tính năng AI không bật được, tuyệt đối không được chặn deploy (quyết định sản phẩm #3).
-      # Credential Mongo/MinIO ở trên vẫn fail-fast vì thiếu chúng thì stack không chạy được thật.
+      # AI Notebook Review (ADR-036/ADR-037), tất cả dùng `${VAR:-}` chứ KHÔNG `${VAR:?}`: thiếu cấu
+      # hình AI chỉ làm tính năng AI không bật được, tuyệt đối không được chặn deploy (quyết định sản
+      # phẩm #3). Credential Mongo/MinIO ở trên vẫn fail-fast vì thiếu chúng thì stack không chạy được.
+      # Host công khai không cần khai allowlist; hai biến ALLOWED_* chỉ là ngoại lệ hẹp cho dev.
       LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
-      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
@@ -175,7 +175,6 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
       # Cùng lý do với `api`: thiếu cấu hình AI không được chặn deploy.
       LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
-      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
@@ -185,6 +184,9 @@ services:
       AI_REVIEW_MAX_ATTEMPTS: ${AI_REVIEW_MAX_ATTEMPTS:-3}
       AI_REVIEW_CONNECT_TIMEOUT_SECONDS: ${AI_REVIEW_CONNECT_TIMEOUT_SECONDS:-5}
       AI_REVIEW_REQUEST_TIMEOUT_SECONDS: ${AI_REVIEW_REQUEST_TIMEOUT_SECONDS:-60}
+      # Ngân sách output một lượt review (ADR-039): thấp hơn nhu cầu thật của model thì câu trả lời bị
+      # cắt giữa chừng, và lượt đó hỏng với `AI_OUTPUT_TRUNCATED` thay vì ra kết luận thiếu.
+      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-8000}
     # Không expose/publish port nào (master context §13): worker chỉ đi RA Mongo, MinIO và provider.
     volumes:
       - ${PROD_DATA_ROOT:?PROD_DATA_ROOT bắt buộc có trong .env}/app:/data

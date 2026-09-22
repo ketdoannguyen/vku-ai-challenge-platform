@@ -9,6 +9,21 @@ import { Modal } from "./Modal";
 
 const MAX_NOTE_LENGTH = 1000;
 
+/**
+ * Gợi ý của model cho lượt kiểm tra gần nhất, dùng làm bản nháp cho ô lý do.
+ *
+ * Chỉ điền sẵn khi verdict là FLAGGED: đó là lượt đã có ít nhất một vi phạm được server kiểm
+ * chứng. Một verdict bị hạ cấp xuống INCONCLUSIVE nghĩa là máy chủ vừa bác bỏ chính cáo buộc đó,
+ * nên điền sẵn lúc ấy là tự động hoá một lời buộc tội chưa được xác minh.
+ *
+ * Chữ được lưu và gửi đi vẫn là chữ admin đọc lại và sửa trong ô này - không phải bản của model.
+ */
+function prefillNote(submission: AdminSubmissionItem): string {
+  const review = submission.ai_review;
+  if (review?.verdict !== "FLAGGED") return "";
+  return review.participant_summary?.trim() ?? "";
+}
+
 export function SubmissionRejectModal({
   submission,
   onConfirm,
@@ -20,10 +35,11 @@ export function SubmissionRejectModal({
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  const [note, setNote] = useState("");
+  const [note, setNote] = useState(() => prefillNote(submission));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const trimmed = note.trim();
+  const suggested = prefillNote(submission) !== "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -53,6 +69,12 @@ export function SubmissionRejectModal({
           vẫn tính là một lượt nộp, nhưng sẽ không được tính vào kết quả, bảng xếp hạng và file
           xuất.
         </p>
+        {suggested && (
+          <p className="text-muted" id="review-note-suggestion">
+            Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất. Hãy đọc lại và sửa trước khi
+            gửi: thí sinh chỉ nhận đúng chữ bạn để lại trong ô này.
+          </p>
+        )}
         <div className="form-field account-form-wide">
           <label className="field-label account-required" htmlFor="review-note">
             Lý do không chấp nhận
@@ -67,7 +89,7 @@ export function SubmissionRejectModal({
             required
             autoFocus
             aria-invalid={Boolean(error)}
-            aria-describedby="review-note-help"
+            aria-describedby={suggested ? "review-note-suggestion review-note-help" : "review-note-help"}
             disabled={busy}
           />
           <span className="text-muted" id="review-note-help">

@@ -1,8 +1,8 @@
 """Scaffolding dùng chung cho test AI review: dựng dữ liệu, gọi pipeline, và transport giả.
 
-Mọi test AI review đều cần đúng một thứ: một cuộc thi đã bật AI với allowlist, một revision nội dung
-bất biến, một notebook nằm trong object storage giả, và một submission trỏ tới cả ba. Gom vào đây để
-test chỉ còn nói về hành vi mà nó kiểm.
+Mọi test AI review đều cần đúng một thứ: một cuộc thi đã bật AI, một revision nội dung bất biến, một
+notebook nằm trong object storage giả, và một submission trỏ tới cả ba. Gom vào đây để test chỉ còn
+nói về hành vi mà nó kiểm.
 """
 
 import hashlib
@@ -35,11 +35,14 @@ NOTEBOOK_OBJECT_KEY = (
 
 CLEAR_OUTPUT = {"verdict": "CLEAR", "summary": "Không thấy vi phạm.", "findings": []}
 
+# Gợi ý thí sinh đọc được, do model soạn nháp. Chỉ có ở FLAGGED_OUTPUT: nhờ vậy mọi test dùng
+# CLEAR_OUTPUT tự nhiên đi qua nhánh "model không đưa gợi ý" mà không cần một bản sao riêng.
+FLAGGED_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu ban tổ chức cấp."
+
 
 @pytest.fixture()
 def ai_env(monkeypatch):
     monkeypatch.setenv("LLM_CONFIG_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
-    monkeypatch.setenv("AI_REVIEW_ALLOWED_HOSTS", HOST)
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PORTS", "443")
     get_settings.cache_clear()
     yield
@@ -93,6 +96,7 @@ def finding(*, slug="rules", rule=RULE, status="VIOLATION", evidence=((1, 1, 1),
 FLAGGED_OUTPUT = {
     "verdict": "FLAGGED",
     "summary": "Dùng dữ liệu ngoài cuộc thi.",
+    "participant_summary": FLAGGED_HINT,
     "findings": [finding()],
 }
 
@@ -220,6 +224,7 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
             "run_id": run_id,
             "verdict": None,
             "summary": None,
+            "participant_summary": None,
             "latest_review_id": None,
             "requested_at": now,
             "updated_at": now,

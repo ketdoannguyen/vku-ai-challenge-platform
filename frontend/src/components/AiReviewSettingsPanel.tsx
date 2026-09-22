@@ -182,11 +182,6 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
             <code>LLM_CONFIG_ENCRYPTION_KEY</code> trước khi bật.
           </div>
         )}
-        {runtime && !runtime.allowed_hosts_configured && (
-          <div className="status-banner warning">
-            Máy chủ chưa cấu hình allowlist host, nên mọi Base URL đều bị từ chối.
-          </div>
-        )}
         {message && (
           <div className="status-banner success" role="status">
             <span>{message}</span>

@@ -26,7 +26,7 @@ function settings(overrides: Partial<AiReviewSettings["config"]> = {}): AiReview
       updated_at: "2026-09-15T09:00:00Z",
       ...overrides,
     },
-    runtime: { encryption_available: true, allowed_hosts_configured: true },
+    runtime: { encryption_available: true },
     content_source: {
       included_count: 1,
       excluded_count: 1,
@@ -233,7 +233,15 @@ test("kiểm tra kết nối thất bại hiện lỗi thay vì im lặng", asyn
   mockApi(
     route({
       test: () =>
-        json({ error: { code: "AI_HOST_NOT_ALLOWED", message: "Host không nằm trong allowlist." } }, 502),
+        json(
+          {
+            error: {
+              code: "AI_CONNECTION_FAILED",
+              message: "Không kết nối được tới provider.",
+            },
+          },
+          502,
+        ),
     }),
   );
   renderPanel();
@@ -241,7 +249,7 @@ test("kiểm tra kết nối thất bại hiện lỗi thay vì im lặng", asyn
 
   fireEvent.click(screen.getByRole("button", { name: "Kiểm tra kết nối" }));
 
-  expect(await screen.findByText("Host không nằm trong allowlist.")).toBeTruthy();
+  expect(await screen.findByText("Không kết nối được tới provider.")).toBeTruthy();
 });
 
 test("danh sách nguồn nội dung nói rõ page nào sẽ được gửi cho AI", async () => {
@@ -255,20 +263,17 @@ test("danh sách nguồn nội dung nói rõ page nào sẽ được gửi cho A
   expect(screen.getByText(/1 trang sẽ được gửi kèm \(2\.0 KB\), 1 trang bị bỏ qua\./)).toBeTruthy();
 });
 
-test("thiếu khoá mã hoá hoặc allowlist thì cảnh báo trước khi admin bật AI", async () => {
+test("thiếu khoá mã hoá thì cảnh báo trước khi admin bật AI", async () => {
   mockApi(
     route({
-      get: () =>
-        json({
-          ...settings(),
-          runtime: { encryption_available: false, allowed_hosts_configured: false },
-        }),
+      get: () => json({ ...settings(), runtime: { encryption_available: false } }),
     }),
   );
   renderPanel();
 
   expect(await screen.findByText(/Máy chủ chưa có khoá mã hoá/)).toBeTruthy();
-  expect(screen.getByText(/Máy chủ chưa cấu hình allowlist host/)).toBeTruthy();
+  // Host công khai không cần allowlist nữa, nên không còn banner nào về host.
+  expect(screen.queryByText(/allowlist/)).toBeNull();
 });
 
 test("panel nói rõ đây không phải công cụ soạn luật và chỉ về tab Nội dung", async () => {

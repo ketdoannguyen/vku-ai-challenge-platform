@@ -169,6 +169,13 @@ export function AiReviewDetailModal({
                   {AI_VERDICT_LABEL[projection.verdict ?? "ERROR"]}
                 </span>
                 <p>{projection.summary}</p>
+                {/* Bản nháp model soạn cho thí sinh. Hiện cả khi verdict không phải FLAGGED - lúc đó
+                    ô lý do không tự điền, nhưng admin vẫn phải đọc được để tự quyết định. */}
+                {projection.participant_summary && (
+                  <p className="cell-secondary">
+                    Gợi ý ngắn cho thí sinh: {projection.participant_summary}
+                  </p>
+                )}
               </>
             ) : (
               <p className="text-muted">

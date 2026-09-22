@@ -35,6 +35,11 @@ export interface ParticipantAiReview {
 
 /** Projection admin: thêm định danh lượt chạy để đối chiếu với lịch sử. */
 export interface AdminAiReview extends ParticipantAiReview {
+  /**
+   * Câu gợi ý ngắn do model soạn nháp cho thí sinh; `null` khi model không đưa ra câu nào.
+   * Chỉ admin thấy: đây là bản nháp để admin sửa trước khi gửi, không phải thứ thí sinh đọc.
+   */
+  participant_summary: string | null;
   generation: number | null;
   run_id: string | null;
   latest_review_id: string | null;
@@ -57,7 +62,6 @@ export interface AiReviewConfig {
 
 export interface AiReviewRuntime {
   encryption_available: boolean;
-  allowed_hosts_configured: boolean;
 }
 
 export type ContentSourceReason = "OK" | "NO_MARKDOWN" | "UNREADABLE";
@@ -157,6 +161,7 @@ export interface AiReviewRecord {
   /** Kết luận thô của model trước khi server hạ cấp; khác `verdict` khi có downgrade. */
   model_verdict: AiVerdict | null;
   summary: string | null;
+  participant_summary: string | null;
   findings: AiFinding[];
   notebook_stats: AiNotebookStats;
   provider: string | null;

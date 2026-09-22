@@ -1091,7 +1091,7 @@ stack dev thật ở cuối mục.
 | Bật AI khi thiếu model/key/khoá mã hoá/xác nhận → 422 đúng mã (`AI_CONFIG_INCOMPLETE`, `AI_API_KEY_MISSING`, `AI_ENCRYPTION_KEY_MISSING`, `AI_TRANSFER_NOT_ACKNOWLEDGED`) | passing | `test_ai_review_settings.py`, `test_ai_review_crypto.py` |
 | Đổi Base URL sang host khác làm acknowledgement cũ hết hiệu lực; URL chưa hợp lệ thì không xác nhận được host nào | passing | `test_ai_review_settings.py`; `AiReviewSettingsPanel.test.tsx::đổi Base URL sang host khác thì lời xác nhận cũ hết hiệu lực`, `::Base URL chưa hợp lệ thì chưa xác nhận được host nào` |
 | Xoá key là endpoint riêng dùng `$unset`; PUT không bao giờ ghi đè ciphertext đang có | passing | `test_ai_review_api.py`, `test_ai_review_crypto.py` |
-| Test connection dùng giá trị chưa lưu, vẫn qua allowlist, trả `{ok, host, model, latency_ms}`; lỗi provider → 502 với mã đã chuẩn hoá và **không** kèm body upstream | passing | `test_ai_review_provider.py`, `test_ai_review_api.py` |
+| Test connection dùng giá trị chưa lưu, vẫn qua network policy, trả `{ok, host, model, latency_ms}`; lỗi provider → 502 với mã đã chuẩn hoá và **không** kèm body upstream | passing | `test_ai_review_provider.py`, `test_ai_review_api.py` |
 | Thiếu cấu hình AI **không** chặn publish / scoring / nộp bài; cuộc thi tắt AI giữ nguyên response cũ | passing | `test_ai_review_api.py`, `test_ai_review_scoring_isolation.py` |
 | `enabled=true, auto_review=false` chụp snapshot nhưng **không** tạo projection/job; `auto_review=true` tạo desired state + job | passing | `test_ai_review_api.py`, `test_ai_review_queue.py::test_enqueue_creates_one_queued_job_for_the_desired_state` |
 | Snapshot lỗi + auto ⇒ lượt nộp vẫn 201 với `ai_review.state="ERROR"`, **không** gọi provider, và reconciler bảo đảm có audit row | passing | `test_ai_review_api.py`; `test_ai_review_service.py::test_reconcile_writes_an_audit_row_for_a_snapshot_error_without_a_job` |
@@ -1105,12 +1105,16 @@ stack dev thật ở cuối mục.
 
 | Check | Status | Cách verify |
 |---|---|---|
-| Base URL phải qua allowlist khớp **chính xác** host (không wildcard/subdomain), scheme/port hợp lệ, host private bị chặn trừ khi được mở tường minh | passing | `test_ai_review_url_policy.py` |
-| `AI_REVIEW_ALLOWED_HOSTS` khai báo sai cú pháp là lỗi cấu hình vận hành (422 kèm mã `URL_POLICY_INVALID`), **không** phải 500 | passing | `test_ai_review_api.py::test_a_malformed_allowlist_is_a_config_error_not_a_500` |
+| Base URL tới **bất kỳ** hostname/IP công khai nào được chấp nhận mà **không** cần allowlist (ADR-037); scheme/port hợp lệ, host private/metadata bị chặn trừ khi được mở tường minh, IP literal công khai nhận cả IPv4 lẫn IPv6 | passing | `test_ai_review_url_policy.py` |
+| `AI_REVIEW_ALLOWED_PORTS` khai báo sai cú pháp là lỗi cấu hình vận hành (422 kèm mã `AI_ENDPOINT_INVALID`), **không** phải 500 | passing | `test_ai_review_api.py::test_a_malformed_port_policy_is_a_config_error_not_a_500` |
 | Dải chia sẻ `100.64.0.0/10` (CGNAT) bị chặn như host private, dù `ipaddress` không đánh dấu nó là private | passing | `test_ai_review_url_policy.py::test_shared_address_space_is_not_a_public_destination` |
 | Chính sách mạng được kiểm **lại ngay trước mỗi request**, không chỉ lúc lưu cấu hình | passing | `test_ai_review_provider.py` |
 | Redirect bị từ chối (`follow_redirects=False`): mọi 3xx là terminal, không đi theo host chưa duyệt | passing | `test_ai_review_provider.py` |
 | Response provider bị cắt theo byte; vượt trần → lỗi thay vì nuốt cả body | passing | `test_ai_review_provider.py` |
+| Mọi request ra provider mang `User-Agent` của ứng dụng và một header session mờ (ADR-038): worker dùng `run_id` nên retry cùng một lượt review giữ nguyên định danh, connection test dùng UUID mới không lấy từ tài khoản/cuộc thi, và giá trị đó không chứa API key | passing | `test_ai_review_provider.py`, `test_ai_review_service.py::test_the_worker_introduces_itself_to_the_provider_with_the_run_id` |
+| HTTP 400/404/422 **không** còn bị gọi là "model sai": mã terminal `AI_PROVIDER_REQUEST_REJECTED`, message nêu mã HTTP nhưng **không** chứa body upstream (regression cho `MissingSessionID` của opencode.ai) | passing | `test_ai_review_provider.py::test_a_rejected_request_is_not_reported_as_an_invalid_model` |
+| Câu trả lời bị cắt vì hết trần output token (`finish_reason: "length"`) có mã riêng `AI_OUTPUT_TRUNCATED` thay vì lẫn vào `AI_RESPONSE_INVALID`: terminal, message nêu trần hiện tại + tên biến cần sửa và **không** chở nội dung model đã sinh (ADR-039); response có `finish_reason: "stop"` hoặc không có field này vẫn thành công bình thường | passing | `test_ai_review_provider.py::test_an_output_cut_off_by_the_token_cap_is_its_own_error` |
+| Lượt bị cắt **không** tiêu retry: thử lại y nguyên request với cùng ngân sách thì hỏng y nguyên, nên audit row có `AI_OUTPUT_TRUNCATED` sau đúng một lần gọi | passing | `test_ai_review_service.py::test_a_truncated_output_fails_without_burning_retries` |
 | API key chỉ tồn tại dưới dạng ciphertext Fernet; thiếu khoá mã hoá chỉ làm tính năng không bật được, **không** làm API chết | passing | `test_ai_review_crypto.py` |
 | `ai_reviews` không chứa API key, raw prompt hay raw response - chỉ summary/finding đã parse, bằng chứng dựng lại, host, model, versions và ba bộ đếm token | passing | `test_ai_review_service.py::test_the_review_row_never_carries_the_api_key_or_the_raw_prompt` |
 | Đoạn trích bằng chứng do **backend dựng lại** từ notebook đã lưu, không lấy từ model | passing | `test_ai_review_service.py::test_the_evidence_snippet_is_rebuilt_from_the_notebook_not_taken_from_the_model` |
@@ -1159,6 +1163,23 @@ và không rò rỉ giữa hai cuộc thi.
 | Worker **không bao giờ** ghi trục `review` của con người | passing | `::test_the_worker_never_writes_the_human_review_axis` |
 | Chạy lại nhiều lần không làm phình số dòng được tính kết quả | passing | `::test_reruns_never_accumulate_eligible_rows` |
 
+### Backend - gợi ý ngắn cho thí sinh (ADR-040)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `participant_summary` là field **tuỳ chọn**: model bỏ hẳn field vẫn parse được và ra `""`, chuỗi toàn khoảng trắng strip về `""`, chuỗi được strip - "không có gì để nói" không bao giờ làm hỏng một lượt review | passing | `test_ai_review_verdict.py::test_a_model_that_omits_the_participant_summary_is_still_valid`, `::test_a_blank_participant_summary_is_emptied_not_rejected`, `::test_the_participant_summary_is_stripped` |
+| Vượt trần kỹ thuật 200 ký tự (`MAX_PARTICIPANT_SUMMARY_CHARS`) là `ValidationError` - trần rộng, nhưng vẫn là trần | passing | `test_ai_review_verdict.py::test_a_participant_summary_beyond_the_cap_is_invalid` |
+| Gợi ý vào **cả** audit row lẫn `submissions.ai_review`; lượt thiếu gợi ý vẫn `COMPLETED` với projection `null` (chỉ **một** cách biểu diễn "không có gợi ý") | passing | `test_ai_review_service.py::test_the_participant_summary_reaches_the_audit_row_and_the_projection`, `::test_a_run_without_a_participant_summary_is_still_a_completed_review` |
+| Lượt dùng cache mang gợi ý của lượt gốc sang audit row mới | passing | `test_ai_review_service.py::test_the_cached_review_carries_the_participant_summary_forward` |
+| `cache_key` đổi khi `PROMPT_VERSION` đổi - prompt đổi mà không bump version là trả kết luận cũ, admin thấy gợi ý trống mà không có lỗi nào để lần | passing | `test_ai_review_service.py::test_the_cache_key_moves_when_the_prompt_version_moves` |
+| Đường reconcile chạm audit row ghi **trước khi** field tồn tại vẫn chạy: `apply_projection` đọc bằng `.get()` chứ không coi field vắng là bất khả | passing | `test_ai_review_service.py::test_reconcile_attaches_a_result_left_behind_by_a_crash` |
+| Chạy lại (`rerun`) **xoá** gợi ý của lượt cũ trong cùng `$set` reset projection, nên admin không thể từ chối dựa trên cáo buộc đã bị thay thế | passing | `test_ai_review_api.py::test_rerun_clears_the_participant_summary_of_the_superseded_run` |
+| Admin thấy gợi ý ở list và ở `history[]` của endpoint detail | passing | `test_ai_review_api.py::test_the_admin_sees_the_participant_summary_in_the_list_and_the_history` |
+| **Thí sinh không bao giờ** nhận được gợi ý: `participant_projection` vẫn đúng bốn khoá `{state, verdict, summary, updated_at}`, và chuỗi gợi ý vắng mặt trong mọi response participant | passing | `test_ai_review_api.py::test_a_participant_never_receives_the_summary_written_for_the_admin` |
+| Ô lý do từ chối được **điền sẵn** bản nháp của AI khi `verdict === "FLAGGED"`, kèm dòng nhắc nguồn gốc; **bản admin sửa** mới là thứ được gửi | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
+| Verdict không phải `FLAGGED`: ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
+| Modal chi tiết AI hiện gợi ý **tách khỏi** tóm tắt dài, và vẫn hiện khi verdict không phải FLAGGED để admin tự quyết định | passing | `frontend/src/components/AiReviewDetailModal.test.tsx::modal chi tiết hiện bản nháp model soạn cho thí sinh, tách khỏi tóm tắt dài` |
+
 ### Backend - queue và worker
 
 | Check | Status | Cách verify |
@@ -1181,10 +1202,13 @@ và không rò rỉ giữa hai cuộc thi.
 
 | Check | Status | Cách verify |
 |---|---|---|
-| Panel `Cài đặt`: nạp/lưu cấu hình, key không quay lại form, ô trống giữ key cũ, xoá key phải qua xác nhận, xác nhận gắn với host, kiểm tra kết nối thành công/thất bại, danh sách nguồn nội dung, cảnh báo thiếu khoá mã hoá/allowlist | passing | `frontend/src/components/AiReviewSettingsPanel.test.tsx` (12 case) |
+| Panel `Cài đặt`: nạp/lưu cấu hình, key không quay lại form, ô trống giữ key cũ, xoá key phải qua xác nhận, xác nhận gắn với host, kiểm tra kết nối thành công/thất bại, danh sách nguồn nội dung, cảnh báo thiếu khoá mã hoá (không còn banner allowlist) | passing | `frontend/src/components/AiReviewSettingsPanel.test.tsx` (12 case) |
 | Panel nói rõ **không phải** công cụ soạn luật và trỏ về tab `Nội dung` (không có Rule Builder) | passing | `AiReviewSettingsPanel.test.tsx::panel nói rõ đây không phải công cụ soạn luật và chỉ về tab Nội dung` |
 | Bảng admin: cột `Kiểm tra AI` hiện badge + thời điểm, luôn có nút mở chi tiết (kể cả bài legacy để BTC khởi tạo lượt đầu), bộ lọc AI là trục **riêng** gửi `ai_review=` | passing | `frontend/src/pages/AdminSubmissionsPage.test.tsx` |
-| Modal chi tiết: lịch sử mới nhất lên đầu, không hiện prompt thô; finding hiện nguyên văn thể lệ + mức kiểm chứng + bằng chứng trong `<pre>`; kết luận hạ cấp được giải thích; lượt hỏng chỉ hiện lỗi đã che; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (10 case) |
+| Modal chi tiết: lịch sử mới nhất lên đầu, không hiện prompt thô; finding hiện nguyên văn thể lệ + mức kiểm chứng + bằng chứng trong `<pre>`; kết luận hạ cấp được giải thích; lượt hỏng chỉ hiện lỗi đã che; **không** có thao tác duyệt bài của con người | passing | `frontend/src/components/AiReviewDetailModal.test.tsx` (11 case) |
+| Ô lý do từ chối được **điền sẵn** bản nháp của AI khi `verdict === "FLAGGED"`, kèm dòng nhắc nguồn gốc đã nối vào `aria-describedby`; admin sửa thì **bản đã sửa** mới là thứ được gửi | passing | `AdminSubmissionsPage.test.tsx::ô lý do được điền sẵn bản nháp của AI, và bản admin sửa mới là thứ được gửi` |
+| Verdict không phải `FLAGGED` (kể cả gợi ý có sẵn trong projection): ô lý do **trống**, không có dòng nhắc, nút gửi khoá - gợi ý không tự động hoá một cáo buộc chưa xác minh | passing | `AdminSubmissionsPage.test.tsx::gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED` |
+| Modal chi tiết hiện gợi ý **tách khỏi** tóm tắt dài (kể cả khi verdict không phải FLAGGED, để admin tự quyết định có gõ lại không) | passing | `AiReviewDetailModal.test.tsx::modal chi tiết hiện bản nháp model soạn cho thí sinh, tách khỏi tóm tắt dài` |
 | Modal chỉ poll khi còn lượt chờ, dừng khi đóng/tab ẩn và có trần (không poll vô hạn) | passing | `AiReviewDetailModal.test.tsx`; `frontend/src/hooks/usePendingPolling.ts` |
 | Lịch sử participant: mọi state/chuỗi an toàn, disclaimer "BTC quyết định cuối cùng", tắt `participant_visible` thì biến mất, **không** lộ mã kỹ thuật; bài "tốt nhất" vẫn chỉ loại theo quyết định của con người | passing | `frontend/src/pages/MySubmissionsPage.test.tsx` |
 | Trang nộp bài: thành công chấm điểm vẫn ưu tiên hiển thị trước, thêm gợi ý AI đang kiểm tra / lỗi, **không** bắt thí sinh chờ hay poll | passing | `frontend/src/pages/SubmissionPage.test.tsx` |
@@ -1195,7 +1219,9 @@ và không rò rỉ giữa hai cuộc thi.
 Stack: `docker compose up -d --build` với `api` + `web` + `ai-review-worker` (chung image
 `vku-challenge-api`, khác `command`) + Mongo + MinIO sau Nginx ở `http://localhost:8080`. Provider
 là một **stub OpenAI-compatible** tự viết (`/tmp/ai-smoke/stub.py`, container `ai-smoke-stub`) chạy
-trong mạng Compose và được khai báo qua allowlist host của `.env` dev — không dùng provider thật, do
+trong mạng Compose và được khai báo qua `AI_REVIEW_ALLOWED_HOSTS` của `.env` dev (biến này **đã bị
+ADR-037 xoá**; một drill tương đương hôm nay phải khai host stub ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS`
+vì tên container không phân giải ra địa chỉ công khai) — không dùng provider thật, do
 đó không có chi phí và không có dữ liệu nào rời khỏi máy.
 
 Harness nằm ở `/tmp/ai-smoke/` (bước `step_a_setup.sh` … `step_i2_exhaust.sh`, `browser*.mjs`), **cố
@@ -1213,7 +1239,7 @@ Harness nằm ở `/tmp/ai-smoke/` (bước `step_a_setup.sh` … `step_i2_exhau
 | Worker bị giết giữa chừng: lease hết hạn được thu hồi và job chạy tiếp, không kẹt | `step_g_lease.sh`; `log_ai-review-worker.txt` |
 | Provider chết → audit row ERROR, lượt nộp và điểm vẫn nguyên; retry hết trần thì dừng hẳn | `step_i_provider_down.sh`, `step_i2_exhaust.sh` |
 | Redaction: participant chỉ thấy state + câu an toàn, không có mã lỗi/provider/model/host/finding; admin thấy đủ finding và bằng chứng | `step_h_redaction.sh` |
-| UI admin (Chromium headless, đăng nhập thật, không mock `/api`): cột AI, cả 7 giá trị lọc, modal chi tiết dựng lại đúng cửa sổ bằng chứng (Cell 2 · dòng 2–3), tab `Cài đặt` với ô key rỗng + "đã lưu" + xác nhận gắn host + nguồn nội dung từ "Quy định cuộc thi" + **không** có Rule Builder | `browser3.mjs`, `browser4.mjs` |
+| UI admin (Chromium headless, đăng nhập thật, không mock `/api`): trường AI sơ bộ (lúc chạy còn là cột AI của bảng cũ), cả 7 giá trị lọc, modal chi tiết dựng lại đúng cửa sổ bằng chứng (Cell 2 · dòng 2–3), tab `Cài đặt` với ô key rỗng + "đã lưu" + xác nhận gắn host + nguồn nội dung từ "Quy định cuộc thi" + **không** có Rule Builder | `browser3.mjs`, `browser4.mjs` |
 | UI participant: thấy disclaimer và **không** thấy bất kỳ chi tiết kỹ thuật nào | `browser4.mjs` (kiểm bằng "needle" chuỗi cấm) |
 
 ### Chạy lại sau đợt soát lỗi (cùng ngày 2026-09-21)
@@ -1242,13 +1268,48 @@ Hai đường chỉ kiểm được ở tầng đơn vị, **không** dựng l�
 thật: nhánh `matched_count == 0` của `reset_job` (CAS thua) và nhánh `mark_completed` trả `False`
 (fence hụt). Cả hai nằm trong `test_ai_review_queue.py` / `test_ai_review_service.py`.
 
+### Provider thật trên stack dev (chạy thật 2026-09-22)
+
+Lượt đầu tiên **không** dùng stub: cùng stack dev, cùng route admin `POST
+/api/admin/competitions/{id}/ai-review/test` và cùng worker thật, nhưng provider là
+`https://opencode.ai/zen/go/v1` với model `deepseek-v4.1-flash` và một API key thật. Không giá trị
+credential nào được in ra; kiểm rò rỉ dưới bảng này là chạy sau khi xong.
+
+| Quan sát | Kết quả thật |
+|---|---|
+| Kiểm kết nối qua đúng route admin (phiên do server cấp, xoá sau khi xong) | `200 {"ok": true, "host": "opencode.ai", "model": "deepseek-v4.1-flash", "latency_ms": 1519}` - trước ADR-038 cùng cấu hình này trả `502` |
+| Lượt review thật **đầu tiên** hỏng, và mã lỗi báo sai bản chất | audit row `FAILED` với `AI_RESPONSE_INVALID`; đọc phản hồi thô cho thấy `completion_tokens: 2500` **đúng bằng** `ai_review_max_output_tokens`, JSON cắt giữa chuỗi (`json_invalid: EOF while parsing a string at line 50 column 119`) |
+| Chẩn đoán trần là của mình, không phải của model | cùng prompt với `max_tokens: 8000` → `completion_tokens: 3412`, JSON hợp lệ, `verdict FLAGGED`, 6 finding |
+| Sau ADR-039 (trần 8000 + `AI_OUTPUT_TRUNCATED`), lượt review thật **hoàn tất** | audit row generation 4: `status COMPLETED`, `verdict FLAGGED`, `source PROVIDER`, `model_verdict FLAGGED`, `host opencode.ai`, `model deepseek-v4.1-flash`, `duration_ms 17159`, `usage {prompt_tokens 5785, completion_tokens 3508, total_tokens 9293}`, 4 finding, `downgrades ["RULE_NOT_FOUND"]` |
+| Participant nhận projection đã che, không có chi tiết kỹ thuật | `{"state": "COMPLETED", "verdict": "FLAGGED", "generation": 4, "summary": …}` |
+| Không rò rỉ credential/session/nội dung notebook vào log hay document | `grep -cE "sk-\|x-opencode-session\|Bearer \|PARTICIPANT_NOTEBOOK"` trên log `api` + `ai-review-worker` = **0**; row tuần tự hoá có `has_key: false`, `has_prompt: false` |
+
+### ADR-040 trên provider thật (chạy thật 2026-09-22)
+
+Cùng stack, cùng provider thật, image build lại từ working tree có ADR-040. Chạy lại tay bài nộp
+`6ab1e51ae1c926971c8e5a7f` (cuộc thi `ai-challenge`) qua `POST
+/api/admin/submissions/{id}/ai-review/rerun`.
+
+| Quan sát | Kết quả thật |
+|---|---|
+| Bump `PROMPT_VERSION` có hiệu lực thật, không phải phục vụ lại cache cũ | audit row generation 6: `versions {"prompt": "ai-review-v3", "normalization": "notebook-v2", "context_policy": "context-v2"}`, `source: PROVIDER`, `status COMPLETED`, `verdict FLAGGED`, `model_verdict FLAGGED`, `model deepseek-v4.1-flash`, `host opencode.ai`, 2 finding |
+| Model trả đúng thứ được yêu cầu: một câu, ngắn, nêu lỗi **và** cách sửa | `participant_summary = "Đổi OUTPUT_FILE thành submission.csv và cột dự đoán thành label."` - **một câu tiếng Việt, đúng 10 từ**; projection `submissions.ai_review` và response list admin đều mang chuỗi này |
+| Thí sinh **không** nhận gợi ý, và cũng không nhận prose của model | `GET /api/competitions/ai-challenge/submissions/me`: `ai_review` có **đúng bốn khoá** `["state","summary","updated_at","verdict"]`, `summary` là câu cố định *"AI phát hiện dấu hiệu cần ban tổ chức xem lại."*; payload **không** chứa `Đổi OUTPUT_FILE` lẫn đoạn summary dài |
+| UI: ô lý do được điền sẵn, có dòng nhắc nguồn gốc | Modal từ chối (Chromium headless, đăng nhập thật, **không** mock `/api`): `#review-note` = nguyên văn gợi ý; `#review-note-suggestion` tồn tại; `aria-describedby="review-note-suggestion review-note-help"`; nút gửi bật |
+| Chữ tới tay thí sinh là **bản admin đã sửa**, không phải bản của model | sửa thành *"Dùng dữ liệu ngoài cuộc thi; bỏ tệp ngoài và nộp lại."* rồi gửi → banner *"Đã đánh dấu bài nộp là không chấp nhận."*, modal đóng, `pageerror` rỗng; `GET .../submissions/me` sau đó trả `review.note` **đúng bản đã sửa** |
+| Không rò rỉ credential hay nội dung gợi ý vào log | `grep -cE "sk-\|Bearer \|Authorization:\|api_key\|\"prompt\"\|<gợi ý>"` trên log `api` + `ai-review-worker` = **0** ở cả hai |
+
+Bài nộp đã được khôi phục về đúng trạng thái trước drill (`review: {status: "accepted", note: null}`);
+bản thân lượt `rerun` là append-only nên audit row generation 6 vẫn nằm trong lịch sử - đó là dấu vết
+diễn tập còn lại trên stack dev.
+
 ### Chưa kiểm
 
 | Check | Status | Ghi chú |
 |---|---|---|
-| Chất lượng kết luận của model thật trên notebook thật | **chưa kiểm** | Toàn bộ smoke chạy trên stub; đây là câu hỏi về chất lượng prompt/model, không phải về cơ chế, và phải đo trên provider thật trước khi bật cho cuộc thi chính thức |
+| Chất lượng kết luận của model thật trên notebook thật | **một lượt, chưa đủ kết luận** | Đã chạy 2026-09-22 trên `deepseek-v4.1-flash` (xem §"Provider thật trên stack dev" ở trên): một notebook nhỏ cho `FLAGGED` + 4 finding có bằng chứng kiểm chứng được, tức **cơ chế** đã chạy trọn với model thật. Đây vẫn là **một** mẫu: chưa đo trên notebook dài/nhiều vi phạm, chưa so nhiều model, và chưa có số về chi phí - nên vẫn phải thử trên provider thật trước khi bật cho cuộc thi chính thức |
 | Hiệu năng vòng reconcile khi collection `submissions` lớn | **chưa kiểm** | ADR-036 ghi rõ đây là nợ chưa đo; index `(ai_review.state, created_at, _id)` đã có nhưng chưa có số liệu |
-| Cửa sổ DNS rebinding giữa lúc kiểm policy và lúc httpx tự phân giải | **chưa kiểm** | Đã biết và ghi trong Consequences của ADR-036; allowlist khớp chính xác + `trust_env=False` (proxy trong biến môi trường không lái được request) thu hẹp đáng kể nhưng không triệt tiêu |
+| Cửa sổ DNS rebinding giữa lúc kiểm policy và lúc httpx tự phân giải | **chưa kiểm** | Đã biết và ghi trong Consequences của ADR-036, **nặng hơn** từ ADR-037: bỏ allowlist host nghĩa là phép kiểm địa chỉ private lúc phân giải trở thành hàng rào duy nhất trước một domain công khai trỏ vào mạng nội bộ. `trust_env=False` (proxy trong biến môi trường không lái được request) siết lại nhưng không triệt tiêu |
 | Dòng trong notebook **giả được tiêu đề cell** (`=== CELL 9 \| CODE ===` viết trong một cell) | **chưa kiểm** | Chỉ thẻ **khối** được vô hiệu hoá, không phải tiêu đề cell. Kịch bản xấu nhất bị chặn bởi chính hậu kiểm: `snippet` của model bị vứt bỏ và dựng lại từ cell/dòng có thật trong notebook đã lưu, nên kẻ giả mạo chỉ có thể khiến model trỏ nhầm cell - và admin sẽ đọc đúng văn bản thật ở đó. Hệ quả còn lại là chất lượng kết luận, không phải rò rỉ hay bằng chứng bịa |
 | Notebook vượt `max_notebook_chars`: các cell bị lược bỏ thì model không đọc tới | **chưa kiểm** | Cơ chế đã chốt trong code (`verdict.py:96`: CLEAR trên notebook `truncated` bị hạ thành INCONCLUSIVE kèm `DOWNGRADE_NOTEBOOK_TRUNCATED`; trần cũng nằm trong cache key), nhưng **chưa đo** trên notebook thật dài để chọn ngưỡng - một vi phạm nằm ở phần bị cắt sẽ đơn giản là không được nêu, và FLAGGED đã kiểm chứng được thì vẫn giữ nguyên |
 | Hành vi khi `LLM_CONFIG_ENCRYPTION_KEY` bị đổi sau khi đã lưu key | **chưa kiểm** | Hệ quả đã ghi trong ADR-036 (ciphertext cũ không giải mã được); chưa dựng lại tình huống này trên stack |
@@ -1257,24 +1318,24 @@ thật: nhánh `matched_count == 0` của `reset_job` (CAS thua) và nhánh `mar
 
 | Lệnh | Kết quả |
 |---|---|
-| `cd backend && uv run pytest -q` | **549 passed** (đợt ADR-035 trước đó: 316; +233 case AI, các case cũ vẫn xanh) |
-| `cd frontend && npm test -- --maxWorkers=1` | **447 passed (34 files)** (đợt trước: 410; +37 case AI) |
+| `cd backend && uv run pytest -q` | **568 passed** (đợt ADR-035 trước đó: 316; ADR-036→ADR-040 đóng góp 252 case AI, các case cũ vẫn xanh) |
+| `cd frontend && npm test -- --maxWorkers=1` | **451 passed (34 files)** (đợt trước: 410; +41 case AI) |
 | `cd frontend && npx tsc -b` | sạch |
 | `cd frontend && npm run lint` | 0 error |
 | `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
 
-233 case backend nằm trong 12 file `backend/tests/test_ai_review_*.py` (dùng chung fixture ở
+252 case backend nằm trong 12 file `backend/tests/test_ai_review_*.py` (dùng chung fixture ở
 `tests/ai_review_helpers.py`). Số dưới đây là số case **thu được** (`pytest --collect-only`), tức
 đã tính cả các case tham số hoá - đúng bằng thứ mà `pytest -q` đếm:
 
 | File | Số case |
 |---|---|
-| `test_ai_review_service.py` | 42 |
+| `test_ai_review_service.py` | 49 |
 | `test_ai_review_queue.py` | 29 |
-| `test_ai_review_url_policy.py` | 23 |
-| `test_ai_review_api.py` | 23 |
-| `test_ai_review_verdict.py` | 21 |
-| `test_ai_review_provider.py` | 20 |
+| `test_ai_review_url_policy.py` | 25 |
+| `test_ai_review_api.py` | 26 |
+| `test_ai_review_verdict.py` | 25 |
+| `test_ai_review_provider.py` | 23 |
 | `test_ai_review_settings.py` | 17 |
 | `test_ai_review_content_snapshot.py` | 14 |
 | `test_ai_review_notebook.py` | 14 |

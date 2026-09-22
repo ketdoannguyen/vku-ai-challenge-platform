@@ -28,10 +28,10 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-app}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-appsecret}
       MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
-      # AI Notebook Review (ADR-036). Rỗng = tính năng tắt, KHÔNG phải app hỏng: allowlist rỗng
-      # chỉ có nghĩa là không bật được AI, còn mọi luồng nộp bài/chấm điểm vẫn nguyên vẹn.
+      # AI Notebook Review (ADR-036/ADR-037). Rỗng = tính năng tắt, KHÔNG phải app hỏng: thiếu khoá
+      # mã hoá chỉ có nghĩa là không bật được AI, còn mọi luồng nộp bài/chấm điểm vẫn nguyên vẹn.
+      # Host công khai không cần khai; hai biến dưới chỉ là ngoại lệ hẹp cho provider tự dựng.
       LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
-      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
@@ -64,13 +64,15 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-appsecret}
       MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
       LLM_CONFIG_ENCRYPTION_KEY: ${LLM_CONFIG_ENCRYPTION_KEY:-}
-      AI_REVIEW_ALLOWED_HOSTS: ${AI_REVIEW_ALLOWED_HOSTS:-}
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
       AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
       AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
       AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
+      # Ngân sách output một lượt review (ADR-039). Chỉ worker gọi provider thật; route
+      # `.../ai-review/test` của API chạy probe 64 token nên không cần biến này.
+      AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-8000}
     # Không expose/publish port nào: worker chỉ nói chuyện với Mongo, MinIO và provider ra ngoài.
     depends_on:
       mongo:

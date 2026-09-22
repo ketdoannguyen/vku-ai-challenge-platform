@@ -16,7 +16,11 @@ _VERDICT_SUMMARIES = {
 
 
 def participant_projection(submission: dict, participant_visible: bool) -> dict | None:
-    """Projection cho participant; `None` khi cuộc thi không công khai trạng thái AI."""
+    """Projection cho participant; `None` khi cuộc thi không công khai trạng thái AI.
+
+    KHÔNG bao giờ trả `participant_summary`: gợi ý của model là bản nháp cho admin đọc. Chữ duy
+    nhất tới tay thí sinh vẫn là `submissions.review.note` do người duyệt gửi (ADR-035).
+    """
     if not participant_visible:
         return None
     projection = submission.get("ai_review")
@@ -48,6 +52,7 @@ def admin_projection(submission: dict) -> dict | None:
         "state": state,
         "verdict": projection.get("verdict"),
         "summary": projection.get("summary"),
+        "participant_summary": projection.get("participant_summary"),
         "generation": projection.get("generation"),
         "run_id": projection.get("run_id"),
         "latest_review_id": (
@@ -70,6 +75,7 @@ def review_detail(review: dict) -> dict:
         "verdict": review["verdict"],
         "model_verdict": review.get("model_verdict"),
         "summary": review["summary"],
+        "participant_summary": review.get("participant_summary"),
         "findings": review.get("findings") or [],
         "notebook_stats": review.get("notebook_stats") or {},
         "provider": review.get("provider"),

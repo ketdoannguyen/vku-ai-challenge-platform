@@ -149,8 +149,9 @@ async def _run(*, settings, stop: Stop, args: argparse.Namespace) -> int:
     async with mongo_lifespan(settings) as ctx:
         # Worker tự tạo index: nó có thể khởi động trước cả API.
         await service.ensure_indexes(ctx.db)
-        # `trust_env=False`: proxy cấu hình qua biến môi trường sẽ đổi đích thật của request và đi
-        # vòng qua allowlist, nên nó không được phép can thiệp vào đường ra của worker.
+        # `trust_env=False`: proxy cấu hình qua biến môi trường sẽ đổi đích thật của request và
+        # vòng qua network policy (private/metadata vẫn phải bị chặn), nên nó không được phép can
+        # thiệp vào đường ra của worker.
         async with httpx.AsyncClient(trust_env=False) as client:
             await serve(
                 client=client,

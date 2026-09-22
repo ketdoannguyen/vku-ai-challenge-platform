@@ -43,10 +43,7 @@ async def get_ai_review_settings(
     policy = _runtime_policy(runtime)
     return {
         "config": config.public_config(competition),
-        "runtime": {
-            "encryption_available": crypto.encryption_available(),
-            "allowed_hosts_configured": bool(policy.allowed_hosts),
-        },
+        "runtime": {"encryption_available": crypto.encryption_available()},
         "content_source": await content_snapshot.content_source_view(
             db, competition["_id"], settings=runtime
         ),
@@ -139,7 +136,7 @@ async def test_ai_review_connection(
     except config.SettingsError as exc:
         raise api_error(422, exc.code, exc.message)
 
-    # `trust_env=False`: proxy từ biến môi trường sẽ đổi đích thật và đi vòng qua allowlist.
+    # `trust_env=False`: proxy từ biến môi trường sẽ đổi đích thật và vòng qua network policy.
     async with httpx.AsyncClient(trust_env=False) as client:
         try:
             return await provider.test_connection(

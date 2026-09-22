@@ -12,12 +12,13 @@ import httpx
 import pytest
 from bson import ObjectId
 
-from app.ai_review import constants, content_snapshot, prompt, queue, service
+from app.ai_review import constants, content_snapshot, prompt, provider, queue, service
 from app.core.config import get_settings
 from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.ai_review_helpers import (  # noqa: F401 - fixture tái xuất cho pytest
     API_KEY,
     CLEAR_OUTPUT,
+    FLAGGED_HINT,
     FLAGGED_OUTPUT,
     HOST,
     MARKDOWN,
@@ -73,6 +74,26 @@ async def test_a_clean_run_writes_a_completed_review_and_advances_the_projection
     assert job_document["status"] == constants.JOB_COMPLETED
     assert job_document["projection_applied"] is True
     assert job_document["lease_token"] is None
+
+
+async def test_the_worker_introduces_itself_to_the_provider_with_the_run_id(mock_db, ai_env):
+    """Session gửi provider là `run_id`: định danh mờ đã nằm trong job/audit và được queue giữ nguyên
+    qua retry, nên log phía provider ghép được với audit row mà không cần thêm field nào."""
+    await seed(mock_db)
+    seen: list[httpx.Request] = []
+
+    def capture(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": json.dumps(CLEAR_OUTPUT)}}]}
+        )
+
+    job, outcome = await run(mock_db, capture)
+
+    assert outcome == service.OUTCOME_COMPLETED
+    assert len(seen) == 1
+    assert seen[0].headers[provider.PROVIDER_SESSION_HEADER] == job["run_id"]
+    assert seen[0].headers["user-agent"] == provider.PROVIDER_USER_AGENT
 
 
 async def test_the_review_row_never_carries_the_api_key_or_the_raw_prompt(mock_db, ai_env):
@@ -305,8 +326,9 @@ async def test_a_transport_error_that_never_settles_ends_as_an_error_row(mock_db
 @pytest.mark.parametrize(
     ("status", "expected_code"),
     [
+        (400, constants.AI_PROVIDER_REQUEST_REJECTED),
         (401, constants.AI_PROVIDER_UNAUTHORIZED),
-        (404, constants.AI_PROVIDER_MODEL_INVALID),
+        (404, constants.AI_PROVIDER_REQUEST_REJECTED),
     ],
 )
 async def test_terminal_provider_errors_do_not_burn_retries(mock_db, ai_env, status, expected_code):
@@ -325,6 +347,33 @@ async def test_terminal_provider_errors_do_not_burn_retries(mock_db, ai_env, sta
     assert job["status"] == constants.JOB_FAILED
     assert job["attempts"] == 1
     assert (await reviews(mock_db))[0]["error"]["code"] == expected_code
+
+
+async def test_a_truncated_output_fails_without_burning_retries(mock_db, ai_env):
+    """Thử lại y nguyên request với cùng trần token thì hỏng y nguyên, nên đây là lỗi terminal: cái
+    cần đổi là ngân sách output, không phải số lần thử."""
+    submission = await seed(mock_db)
+    calls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": '{"verdict": "CLEAR"'}, "finish_reason": "length"}
+                ]
+            },
+        )
+
+    _, outcome = await run(mock_db, handler)
+
+    assert outcome == service.OUTCOME_FAILED
+    assert len(calls) == 1
+    job = await job_of(mock_db, submission["_id"])
+    assert job["status"] == constants.JOB_FAILED
+    assert job["attempts"] == 1
+    assert (await reviews(mock_db))[0]["error"]["code"] == constants.AI_OUTPUT_TRUNCATED
 
 
 @pytest.mark.parametrize("status", [429, 500])
@@ -399,6 +448,43 @@ async def test_the_same_notebook_and_the_same_content_reuses_the_cached_review(m
 
     stored = await submission_of(mock_db, second["_id"])
     assert stored["ai_review"]["verdict"] == constants.VERDICT_FLAGGED
+
+
+async def test_the_participant_summary_reaches_the_audit_row_and_the_projection(mock_db, ai_env):
+    submission = await seed(mock_db)
+
+    _, outcome = await run(mock_db, handler(FLAGGED_OUTPUT))
+
+    assert outcome == service.OUTCOME_COMPLETED
+    assert (await reviews(mock_db))[0]["participant_summary"] == FLAGGED_HINT
+    stored = await submission_of(mock_db, submission["_id"])
+    assert stored["ai_review"]["participant_summary"] == FLAGGED_HINT
+
+
+async def test_a_run_without_a_participant_summary_is_still_a_completed_review(mock_db, ai_env):
+    """Model không soạn gợi ý: lượt review vẫn xong, chỉ là không có gì để điền sẵn."""
+    submission = await seed(mock_db)
+
+    _, outcome = await run(mock_db, handler(CLEAR_OUTPUT))
+
+    assert outcome == service.OUTCOME_COMPLETED
+    assert (await reviews(mock_db))[0]["participant_summary"] is None
+    stored = await submission_of(mock_db, submission["_id"])
+    assert stored["ai_review"]["participant_summary"] is None
+
+
+async def test_the_cached_review_carries_the_participant_summary_forward(mock_db, ai_env):
+    competition_id = ObjectId()
+    await seed(mock_db, competition_id=competition_id)
+    second = await seed(mock_db, competition_id=competition_id, account_id=ObjectId())
+
+    await run(mock_db, handler(FLAGGED_OUTPUT))
+    await run(mock_db, handler(FLAGGED_OUTPUT))
+
+    cached = [r for r in await reviews(mock_db) if r["source"] == constants.SOURCE_CACHE][0]
+    assert cached["participant_summary"] == FLAGGED_HINT
+    stored = await submission_of(mock_db, second["_id"])
+    assert stored["ai_review"]["participant_summary"] == FLAGGED_HINT
 
 
 async def test_changed_competition_content_invalidates_the_cache(mock_db, ai_env):
@@ -577,6 +663,9 @@ async def test_reconcile_attaches_a_result_left_behind_by_a_crash(mock_db, ai_en
     stored = await submission_of(mock_db, submission["_id"])
     assert stored["ai_review"]["state"] == constants.AI_STATE_COMPLETED
     assert stored["ai_review"]["latest_review_id"] == review_id
+    # Audit row ở đây được gieo từ trước khi có field gợi ý: đường reconcile phải đọc nó bằng `.get()`
+    # chứ không được coi field vắng là bất khả.
+    assert stored["ai_review"]["participant_summary"] is None
     updated = await job_of(mock_db, submission["_id"])
     assert updated["_id"] == job["_id"]
     assert updated["status"] == constants.JOB_COMPLETED
@@ -709,3 +798,21 @@ async def test_the_cache_key_changes_with_every_component_that_reaches_the_model
     ]:
         assert service.cache_key(**(base | {field: value})) != original
     assert service.cache_key(**base) == original
+
+
+def test_the_cache_key_moves_when_the_prompt_version_moves(monkeypatch):
+    """Prompt đổi mà version không đổi thì cache trả kết luận cũ - lượt chạy mới mất gợi ý."""
+    base = {
+        "competition_id": ObjectId(),
+        "content_hash": "c",
+        "notebook_sha256": "n",
+        "provider": constants.PROVIDER_OPENAI_COMPATIBLE,
+        "host": HOST,
+        "model": MODEL,
+        "max_notebook_chars": 160_000,
+    }
+    original = service.cache_key(**base)
+
+    monkeypatch.setattr(constants, "PROMPT_VERSION", "ai-review-v3-next")
+
+    assert service.cache_key(**base) != original

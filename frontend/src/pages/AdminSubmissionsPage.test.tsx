@@ -667,6 +667,61 @@ test("PATCH lỗi thì modal vẫn mở, giữ nguyên lý do và không báo th
   expect(screen.queryByText("Đã đánh dấu bài nộp là không chấp nhận.")).toBeNull();
 });
 
+test("ô lý do được điền sẵn bản nháp của AI, và bản admin sửa mới là thứ được gửi", async () => {
+  const { requests } = mockApi((_url, init) =>
+    init.method === "PATCH" ? jsonResponse({ submission: ROW }) : jsonResponse(pageOf([AI_ROW])),
+  );
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  const note = within(dialog).getByLabelText("Lý do không chấp nhận");
+
+  // Bản nháp của model phải nói rõ nguồn gốc, để admin không gửi thẳng nó mà chưa đọc.
+  expect(note).toHaveValue(AI_HINT);
+  expect(within(dialog).getByText(/AI soạn nháp/)).toBeTruthy();
+
+  fireEvent.change(note, { target: { value: "  Bỏ dữ liệu ngoài rồi nộp lại.  " } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Không chấp nhận" }));
+
+  await waitFor(() => expect(reviewRequests(requests).length).toBe(1));
+  expect(JSON.parse(reviewRequests(requests)[0].body)).toEqual({
+    status: "rejected",
+    note: "Bỏ dữ liệu ngoài rồi nộp lại.",
+  });
+});
+
+test("gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED", async () => {
+  // Verdict khác FLAGGED nghĩa là chưa có vi phạm nào được server xác minh - kể cả khi model có
+  // viết gợi ý, nó cũng không được tự biến thành lời buộc tội.
+  const clearRow: GlobalSubmissionItem = {
+    ...AI_ROW,
+    ai_review: {
+      state: "COMPLETED",
+      verdict: "CLEAR",
+      summary: "Không thấy vi phạm.",
+      participant_summary: AI_HINT,
+      generation: 1,
+      run_id: "run-1",
+      latest_review_id: "r1",
+      requested_at: "2026-09-15T09:10:00Z",
+      updated_at: "2026-09-15T09:11:00Z",
+    },
+  };
+  mockApi(() => jsonResponse(pageOf([clearRow])));
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+
+  // Ô trống, không có dòng nhắc nguồn gốc, và nút vẫn khoá theo đúng luật cũ.
+  expect(within(dialog).getByLabelText("Lý do không chấp nhận")).toHaveValue("");
+  expect(within(dialog).queryByText(/AI soạn nháp/)).toBeNull();
+  expect(within(dialog).getByRole("button", { name: "Không chấp nhận" })).toBeDisabled();
+});
+
 test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   const { requests } = mockApi((_url, init) =>
     init.method === "PATCH"
@@ -717,6 +772,9 @@ test("Hủy và Escape đều không gửi PATCH và trả focus về nút vừa
   expect(reviewRequests(requests)).toEqual([]);
 });
 
+/** Bản nháp model soạn cho thí sinh - chỉ admin thấy, và chỉ được điền sẵn khi verdict là FLAGGED. */
+const AI_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu BTC cấp.";
+
 const AI_ROW: GlobalSubmissionItem = {
   ...ROW,
   // `page` đặt tên đội theo offset, nhưng fixture này đứng riêng nên tự khai tên.
@@ -725,6 +783,7 @@ const AI_ROW: GlobalSubmissionItem = {
     state: "COMPLETED",
     verdict: "FLAGGED",
     summary: "Có một dấu hiệu cần xem lại.",
+    participant_summary: AI_HINT,
     generation: 1,
     run_id: "run-1",
     latest_review_id: "r1",

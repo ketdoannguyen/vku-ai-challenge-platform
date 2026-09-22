@@ -51,6 +51,15 @@ class ModelReviewOutput(BaseModel):
 
     verdict: _VERDICT
     summary: _text(constants.MAX_SUMMARY_CHARS)
+    # Câu gợi ý ngắn để admin duyệt trước khi gửi cho thí sinh. KHÔNG dùng `_text()`: helper đó đặt
+    # `min_length=1`, mà "không có gì để nói" lại là câu trả lời hợp lệ - biến nó thành lỗi là làm
+    # hỏng cả lượt review vì thiếu một field phụ.
+    participant_summary: Annotated[
+        str,
+        StringConstraints(
+            strip_whitespace=True, max_length=constants.MAX_PARTICIPANT_SUMMARY_CHARS
+        ),
+    ] = ""
     findings: list[ModelFinding] = Field(
         default_factory=list, max_length=constants.MAX_FINDINGS
     )

@@ -3,13 +3,14 @@
 Ba lớp, áp dụng ở cả lúc lưu cấu hình, lúc test connection và NGAY TRƯỚC mỗi lần worker gọi provider:
 
 1. Cú pháp: chỉ http/https, không credential/query/fragment, port nằm trong danh sách cho phép.
-2. Đích đến: host phải khớp CHÍNH XÁC một entry allowlist do vận hành kiểm soát. Không wildcard,
-   không khớp subdomain - mỗi đích nhận dữ liệu notebook phải được một người phê duyệt tường minh.
+2. Đích đến: mọi hostname và IP công khai đều được chấp nhận - admin tự nhập Base URL của bất kỳ
+   provider OpenAI-compatible nào. Không có allowlist host: thứ giữ dữ liệu notebook ở đúng chỗ là
+   xác nhận chuyển dữ liệu theo từng host trong `settings`, không phải một biến môi trường.
 3. Địa chỉ thật: mọi IP mà DNS phân giải ra phải là địa chỉ công khai, trừ khi host nằm rõ trong
-   danh sách private exception.
+   danh sách private exception. Đây mới là bước chặn loopback/mạng nội bộ/metadata.
 
-Không có bước nào tự bỏ qua khi allowlist rỗng: allowlist rỗng chỉ đơn giản là không host nào khớp,
-nên AI không bật được trong khi phần còn lại của hệ thống chạy bình thường.
+Hai danh sách exception còn lại vẫn khớp CHÍNH XÁC và đều mặc định rỗng: host nội bộ chỉ vào được
+khi được khai tường minh, và http:// chỉ dùng được ngoài production hoặc cho host được khai riêng.
 """
 
 import ipaddress
@@ -34,9 +35,8 @@ class UrlPolicyError(Exception):
 
 @dataclass(frozen=True)
 class EndpointPolicy:
-    """Ảnh chụp allowlist của vận hành tại thời điểm kiểm tra."""
+    """Ảnh chụp cấu hình mạng của vận hành tại thời điểm kiểm tra."""
 
-    allowed_hosts: frozenset[str]
     allowed_private_hosts: frozenset[str]
     allowed_http_hosts: frozenset[str]
     allowed_ports: frozenset[int]
@@ -59,7 +59,7 @@ def parse_host_list(value: str) -> frozenset[str]:
         item = raw.strip()
         if not item:
             continue
-        normalized = _normalize_host(item, constants.AI_HOST_NOT_ALLOWED, item)
+        normalized = _normalize_host(item, constants.AI_ENDPOINT_INVALID, item)
         hosts.add(normalized)
     return frozenset(hosts)
 
@@ -82,7 +82,6 @@ def parse_port_list(value: str) -> frozenset[int]:
 
 def policy_from_settings(settings) -> EndpointPolicy:
     return EndpointPolicy(
-        allowed_hosts=parse_host_list(settings.ai_review_allowed_hosts),
         allowed_private_hosts=parse_host_list(settings.ai_review_allowed_private_hosts),
         allowed_http_hosts=parse_host_list(settings.ai_review_allowed_http_hosts),
         allowed_ports=parse_port_list(settings.ai_review_allowed_ports),
@@ -117,14 +116,9 @@ def normalize_endpoint(base_url: str, policy: EndpointPolicy) -> NormalizedEndpo
     except ValueError:
         raise UrlPolicyError(constants.AI_ENDPOINT_INVALID, "Port của Base URL không hợp lệ.")
 
-    if host not in policy.allowed_hosts:
-        raise UrlPolicyError(
-            constants.AI_HOST_NOT_ALLOWED,
-            f"Host '{host}' chưa được vận hành cho phép.",
-        )
     if port not in policy.allowed_ports:
         raise UrlPolicyError(
-            constants.AI_HOST_NOT_ALLOWED, f"Port {port} chưa được vận hành cho phép."
+            constants.AI_ENDPOINT_INVALID, f"Port {port} chưa được vận hành cho phép."
         )
     if scheme == "http" and policy.is_production and host not in policy.allowed_http_hosts:
         raise UrlPolicyError(
@@ -189,8 +183,13 @@ def _is_public_address(address: str) -> bool:
 
 
 def _authority(host: str, port: int, scheme: str) -> str:
-    """Bỏ port mặc định cho URL gọn, giữ port lạ để URL ghép ra đúng thứ đã cấu hình."""
-    return host if port == _DEFAULT_PORTS[scheme] else f"{host}:{port}"
+    """Bỏ port mặc định cho URL gọn, giữ port lạ để URL ghép ra đúng thứ đã cấu hình.
+
+    Host được lưu trần (không ngoặc) để so khớp với exception list, nhưng authority của URL phải
+    bọc IPv6 trong ngoặc vuông - nếu không `https://::1/v1` là một URL hỏng.
+    """
+    bracketed = f"[{host}]" if ":" in host else host
+    return bracketed if port == _DEFAULT_PORTS[scheme] else f"{bracketed}:{port}"
 
 
 def _normalize_host(host: str, code: str, original: str) -> str:

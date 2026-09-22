@@ -122,6 +122,7 @@ def initial_projection(*, captured: bool, now: datetime) -> dict:
         "state": constants.AI_STATE_QUEUED if captured else constants.AI_STATE_ERROR,
         "verdict": None if captured else constants.VERDICT_ERROR,
         "summary": None if captured else constants.PARTICIPANT_ERROR_SUMMARY,
+        "participant_summary": None,
         "generation": 1,
         "run_id": uuid4().hex,
         "latest_review_id": None,
@@ -260,6 +261,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
                 "verdict": cached["verdict"],
                 "model_verdict": cached.get("model_verdict"),
                 "summary": cached["summary"],
+                "participant_summary": cached.get("participant_summary") or None,
                 "findings": cached.get("findings") or [],
                 "notebook_stats": snapshot_stats(notebook),
                 "provider": cached.get("provider"),
@@ -295,6 +297,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             model=model,
             messages=prompt.build_messages(revision, notebook, context),
             max_tokens=settings.ai_review_max_output_tokens,
+            # Cả lượt review là một "session" phía provider: retry cùng run phải mang cùng định danh.
+            session_id=job["run_id"],
             settings=settings,
         )
         output = ModelReviewOutput.model_validate_json(result.text)
@@ -326,6 +330,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             "verdict": final_verdict,
             "model_verdict": output.verdict,
             "summary": output.summary,
+            # Chuỗi rỗng từ model được quy về None: chỉ có một cách biểu diễn "không có gợi ý".
+            "participant_summary": output.participant_summary or None,
             "findings": [asdict(finding) for finding in verified],
             "notebook_stats": snapshot_stats(notebook),
             "provider": active["provider"],
@@ -394,6 +400,9 @@ async def apply_projection(db, *, submission_id, generation: int, run_id: str, r
                 ),
                 "ai_review.verdict": review["verdict"],
                 "ai_review.summary": review["summary"],
+                # `.get()` chứ không phải `[...]`: đường reconcile và nhánh trùng khoá đều chạm
+                # những audit row ghi trước khi field này tồn tại.
+                "ai_review.participant_summary": review.get("participant_summary") or None,
                 "ai_review.latest_review_id": review["_id"],
                 "ai_review.updated_at": now,
             }
@@ -552,6 +561,8 @@ async def request_manual_review(db, submission: dict, *, competition: dict, sett
                 "ai_review.state": constants.AI_STATE_QUEUED,
                 "ai_review.verdict": None,
                 "ai_review.summary": None,
+                # Không xoá thì gợi ý của lượt cũ sống dậy và có thể bị dùng để từ chối bài.
+                "ai_review.participant_summary": None,
                 "ai_review.latest_review_id": None,
                 "ai_review.generation": (current or 0) + 1,
                 "ai_review.run_id": uuid4().hex,

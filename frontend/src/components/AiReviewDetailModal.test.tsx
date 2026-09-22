@@ -12,6 +12,9 @@ import { AiReviewDetailModal } from "./AiReviewDetailModal";
 
 const SUBMISSION_ID = "64a000000000000000000009";
 
+/** Bản nháp model soạn cho thí sinh; admin đọc ở đây trước khi tự viết lý do gửi đi. */
+const AI_HINT = "Dùng dữ liệu ngoài cuộc thi; bỏ tệp ngoài.";
+
 const SUBMISSION: AdminSubmissionItem = {
   id: SUBMISSION_ID,
   competition_id: "c1",
@@ -29,6 +32,7 @@ const SUBMISSION: AdminSubmissionItem = {
     state: "COMPLETED",
     verdict: "FLAGGED",
     summary: "Có một dấu hiệu cần xem lại.",
+    participant_summary: AI_HINT,
     generation: 2,
     run_id: "run-2",
     latest_review_id: "r2",
@@ -46,6 +50,7 @@ function record(overrides: Partial<AiReviewRecord> = {}): AiReviewRecord {
     verdict: "CLEAR",
     model_verdict: "CLEAR",
     summary: "Không thấy vi phạm.",
+    participant_summary: null,
     findings: [],
     notebook_stats: {
       cells: 12,
@@ -203,6 +208,15 @@ test("kết luận bị hạ cấp được nói rõ vì sao khác kết luận 
     screen.getByText(/Model trả về “Có dấu hiệu”, đã hạ cấp thành “Chưa đủ căn cứ”/),
   ).toBeTruthy();
   expect(screen.getByText("Hạ cấp: EVIDENCE_MISSING")).toBeTruthy();
+});
+
+test("modal chi tiết hiện bản nháp model soạn cho thí sinh, tách khỏi tóm tắt dài", async () => {
+  mockApi(() => json({ submission: DETAIL.submission }));
+  renderModal();
+
+  await screen.findByText("Lần #2");
+  expect(screen.getByText("Có một dấu hiệu cần xem lại.")).toBeTruthy();
+  expect(screen.getByText(`Gợi ý ngắn cho thí sinh: ${AI_HINT}`)).toBeTruthy();
 });
 
 test("modal không chứa bất kỳ thao tác duyệt bài nào của con người", async () => {

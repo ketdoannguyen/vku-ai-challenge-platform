@@ -55,10 +55,11 @@ def _finding(
     }
 
 
-def _output(verdict, findings=(), summary="Kết luận của model."):
-    return ModelReviewOutput.model_validate(
-        {"verdict": verdict, "summary": summary, "findings": list(findings)}
-    )
+def _output(verdict, findings=(), summary="Kết luận của model.", participant_summary=None):
+    payload = {"verdict": verdict, "summary": summary, "findings": list(findings)}
+    if participant_summary is not None:
+        payload["participant_summary"] = participant_summary
+    return ModelReviewOutput.model_validate(payload)
 
 
 def _evidence(cell=1, start_line=1, end_line=1, snippet="do model tu nghi ra"):
@@ -309,3 +310,27 @@ def test_model_output_rejects_more_findings_than_the_cap():
     too_many = [_finding() for _ in range(constants.MAX_FINDINGS + 1)]
     with pytest.raises(ValidationError):
         _output(constants.VERDICT_FLAGGED, too_many)
+
+
+def test_a_model_that_omits_the_participant_summary_is_still_valid():
+    """Gợi ý cho thí sinh là phần thưởng thêm, không phải điều kiện để một lượt review dùng được."""
+    output = ModelReviewOutput.model_validate(
+        {"verdict": "CLEAR", "summary": "Không thấy vi phạm.", "findings": []}
+    )
+    assert output.participant_summary == ""
+
+
+def test_a_blank_participant_summary_is_emptied_not_rejected():
+    # "Không có gì để nói" là câu trả lời hợp lệ: chuỗi khoảng trắng phải thành rỗng, không phải lỗi.
+    assert _output(constants.VERDICT_CLEAR, participant_summary="   \n ").participant_summary == ""
+
+
+def test_the_participant_summary_is_stripped():
+    output = _output(constants.VERDICT_FLAGGED, participant_summary="  Thiếu tên mô hình.  ")
+    assert output.participant_summary == "Thiếu tên mô hình."
+
+
+def test_a_participant_summary_beyond_the_cap_is_invalid():
+    too_long = "x" * (constants.MAX_PARTICIPANT_SUMMARY_CHARS + 1)
+    with pytest.raises(ValidationError):
+        _output(constants.VERDICT_FLAGGED, participant_summary=too_long)

@@ -10,9 +10,9 @@ from app.ai_review.url_policy import EndpointPolicy
 from app.core.config import get_settings
 
 ENDPOINT_URL = "https://api.example.com/v1/chat/completions"
+SESSION_ID = "run-abc123"
 
 POLICY = EndpointPolicy(
-    allowed_hosts=frozenset({"api.example.com"}),
     allowed_private_hosts=frozenset(),
     allowed_http_hosts=frozenset(),
     allowed_ports=frozenset({443}),
@@ -44,6 +44,7 @@ async def _call(client, endpoint, **overrides):
         "model": "gpt-oss-120b",
         "messages": MESSAGES,
         "max_tokens": 64,
+        "session_id": SESSION_ID,
         "settings": get_settings(),
     }
     options.update(overrides)
@@ -51,7 +52,10 @@ async def _call(client, endpoint, **overrides):
 
 
 def _ok(text: str = '{"verdict": "CLEAR"}') -> httpx.Response:
-    return httpx.Response(200, json={"choices": [{"message": {"content": text}}]})
+    return httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": text}, "finish_reason": "stop"}]},
+    )
 
 
 async def test_successful_call_returns_content_and_sends_a_deterministic_payload(endpoint):
@@ -60,6 +64,8 @@ async def test_successful_call_returns_content_and_sends_a_deterministic_payload
     def handler(request: httpx.Request) -> httpx.Response:
         seen["url"] = str(request.url)
         seen["auth"] = request.headers["authorization"]
+        seen["user_agent"] = request.headers["user-agent"]
+        seen["session"] = request.headers[provider.PROVIDER_SESSION_HEADER]
         seen["body"] = json.loads(request.content)
         return _ok("nội dung model")
 
@@ -70,6 +76,9 @@ async def test_successful_call_returns_content_and_sends_a_deterministic_payload
     assert result.latency_ms >= 0
     assert seen["url"] == ENDPOINT_URL
     assert seen["auth"] == "Bearer sk-test"
+    # Gateway OpenAI-compatible có thể đòi định danh client; gửi cho mọi host thay vì special-case.
+    assert seen["user_agent"] == provider.PROVIDER_USER_AGENT
+    assert seen["session"] == SESSION_ID
     assert seen["body"] == {
         "model": "gpt-oss-120b",
         "messages": MESSAGES,
@@ -86,8 +95,9 @@ async def test_successful_call_returns_content_and_sends_a_deterministic_payload
         (302, constants.AI_PROVIDER_REDIRECT_REJECTED, False),
         (401, constants.AI_PROVIDER_UNAUTHORIZED, False),
         (403, constants.AI_PROVIDER_UNAUTHORIZED, False),
-        (400, constants.AI_PROVIDER_MODEL_INVALID, False),
-        (404, constants.AI_PROVIDER_MODEL_INVALID, False),
+        (400, constants.AI_PROVIDER_REQUEST_REJECTED, False),
+        (404, constants.AI_PROVIDER_REQUEST_REJECTED, False),
+        (422, constants.AI_PROVIDER_REQUEST_REJECTED, False),
         (429, constants.AI_PROVIDER_RATE_LIMITED, True),
         (500, constants.AI_PROVIDER_UNAVAILABLE, True),
         (503, constants.AI_PROVIDER_UNAVAILABLE, True),
@@ -111,6 +121,33 @@ async def test_status_codes_map_to_stable_codes_with_the_right_retry_flag(
     assert exc.value.retryable is retryable
     # Redirect không bao giờ được đi theo: đúng một request tới đúng host đã được duyệt.
     assert calls["n"] == 1
+
+
+async def test_a_rejected_request_is_not_reported_as_an_invalid_model(endpoint):
+    """400 `MissingSessionID` của opencode.ai từng bị gán thành "model sai" - chẩn đoán ngược lại
+    nguyên nhân, nên admin đi sửa đúng cái không hỏng."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "type": "error",
+                "error": {
+                    "type": "MissingSessionID",
+                    "message": "Request is missing x-opencode-session and cannot be routed.",
+                },
+            },
+        )
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint)
+
+    assert exc.value.code == constants.AI_PROVIDER_REQUEST_REJECTED
+    assert exc.value.retryable is False
+    # Body upstream không bao giờ được đọc tới, nên nó không thể lọt vào message hay audit row.
+    assert "MissingSessionID" not in exc.value.message
+    assert "x-opencode-session" not in exc.value.message
 
 
 async def test_response_body_larger_than_the_cap_is_refused(endpoint, monkeypatch):
@@ -144,6 +181,36 @@ async def test_malformed_provider_bodies_are_invalid_responses(endpoint, body):
             await _call(client, endpoint)
     assert exc.value.code == constants.AI_RESPONSE_INVALID
     assert exc.value.retryable is False
+
+
+async def test_an_output_cut_off_by_the_token_cap_is_its_own_error(endpoint):
+    """Vụ thật: deepseek-v4.1-flash cần 3412 token cho một notebook nhỏ, trần đang là 2500, nên JSON
+    đứt giữa chuỗi. Lượt đó bị báo thành `AI_RESPONSE_INVALID` - đúng loại lỗi nhưng giấu mất nguyên
+    nhân, và giấu luôn việc thử lại y nguyên request sẽ hỏng y nguyên."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"verdict": "FLAGGED", "summary": "Notebook vi phạm'},
+                        "finish_reason": "length",
+                    }
+                ]
+            },
+        )
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as exc:
+            await _call(client, endpoint, max_tokens=2_500)
+
+    assert exc.value.code == constants.AI_OUTPUT_TRUNCATED
+    assert exc.value.retryable is False
+    # Thông báo phải chỉ được vào chỗ sửa (trần token), không chở theo nội dung model đã sinh.
+    assert "2500" in exc.value.message
+    assert "AI_REVIEW_MAX_OUTPUT_TOKENS" in exc.value.message
+    assert "Notebook vi phạm" not in exc.value.message
 
 
 async def test_transport_failures_are_retryable_connection_errors(endpoint):
@@ -180,6 +247,8 @@ async def test_connection_test_returns_redacted_metadata(endpoint):
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen["body"] = json.loads(request.content)
+        seen["user_agent"] = request.headers["user-agent"]
+        seen["session"] = request.headers[provider.PROVIDER_SESSION_HEADER]
         return _ok('{"ok": true}')
 
     async with _client(handler) as client:
@@ -201,6 +270,11 @@ async def test_connection_test_returns_redacted_metadata(endpoint):
     # Prompt thử kết nối là cố định và không chứa dữ liệu cuộc thi nào.
     assert "sk-test" not in json.dumps(seen["body"])
     assert seen["body"]["messages"][1]["content"] == provider.TEST_USER_PROMPT
+    # Probe cũng phải tự giới thiệu (opencode.ai từ chối request không có session), nhưng định danh
+    # chỉ là một UUID mờ: không mang competition/account/key nào.
+    assert seen["user_agent"] == provider.PROVIDER_USER_AGENT
+    assert seen["session"] != ""
+    assert "sk-test" not in seen["session"]
 
 
 async def test_connection_test_rejects_a_model_that_does_not_answer_json(endpoint):

@@ -18,6 +18,8 @@ from app.core.config import get_settings
 from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.ai_review_helpers import (  # noqa: F401 - fixture tái xuất cho pytest
     CLEAR_OUTPUT,
+    FLAGGED_HINT,
+    FLAGGED_OUTPUT,
     ai_env,
     ai_indexes,
     handler,
@@ -264,6 +266,22 @@ def test_a_participant_error_projection_never_leaks_the_error_code(client, compe
     assert set(projection) == {"state", "verdict", "summary", "updated_at"}
 
 
+def test_a_participant_never_receives_the_summary_written_for_the_admin(client, competition):
+    """Gợi ý ngắn là bản nháp cho admin đọc; thí sinh chỉ đọc chữ admin đã duyệt và gửi (ADR-035)."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submitted = submit_as_participant(client, competition["id"]).json()
+    run_worker(client, handler(FLAGGED_OUTPUT))
+
+    login_participant(client)
+    listed = client.get(f"/api/competitions/{competition['id']}/submissions/me").json()
+
+    projection = {item["id"]: item for item in listed["submissions"]}[submitted["id"]]["ai_review"]
+    assert projection["verdict"] == constants.VERDICT_FLAGGED
+    assert set(projection) == {"state", "verdict", "summary", "updated_at"}
+    assert projection["summary"] != FLAGGED_HINT
+    assert FLAGGED_HINT not in str(listed)
+
+
 def test_turning_participant_visibility_off_hides_the_projection_from_the_response(
     client, competition
 ):
@@ -392,6 +410,19 @@ def test_the_detail_shows_the_history_without_raw_payload_or_object_key(client, 
         assert forbidden not in serialized
 
 
+def test_the_admin_sees_the_participant_summary_in_the_list_and_the_history(client, competition):
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submitted = submit_as_participant(client, competition["id"]).json()
+    run_worker(client, handler(FLAGGED_OUTPUT))
+
+    item = _admin_list(client, competition["id"])["submissions"][0]
+    assert item["ai_review"]["participant_summary"] == FLAGGED_HINT
+
+    detail = _detail(client, submitted["id"])
+    assert detail["ai_review"]["participant_summary"] == FLAGGED_HINT
+    assert detail["history"][0]["participant_summary"] == FLAGGED_HINT
+
+
 def test_rerun_requires_a_captured_snapshot(client, competition):
     assert enable_ai(client, competition["id"], auto_review=False).status_code == 200
     submitted = submit_as_participant(client, competition["id"]).json()
@@ -454,6 +485,24 @@ def test_rerun_advances_the_generation_and_keeps_older_audit_rows(client, compet
     assert len(documents(client, service.REVIEWS_COLLECTION)) == 2
 
 
+def test_rerun_clears_the_participant_summary_of_the_superseded_run(client, competition):
+    """Gợi ý của lượt cũ không được sống dậy: admin có thể từ chối dựa trên cáo buộc đã bị thay thế."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submitted = submit_as_participant(client, competition["id"]).json()
+    run_worker(client, handler(FLAGGED_OUTPUT))
+    assert document(client, SUBMISSIONS_COLLECTION, {})["ai_review"]["participant_summary"] == (
+        FLAGGED_HINT
+    )
+
+    login(client)
+    started = client.post(f"/api/admin/submissions/{submitted['id']}/ai-review/rerun")
+
+    assert started.status_code == 200, started.text
+    stored = document(client, SUBMISSIONS_COLLECTION, {})["ai_review"]
+    assert stored["state"] == constants.AI_STATE_QUEUED
+    assert stored["participant_summary"] is None
+
+
 def test_rerun_is_refused_while_a_review_is_still_queued(client, competition):
     assert enable_ai(client, competition["id"]).status_code == 200
     submitted = submit_as_participant(client, competition["id"]).json()
@@ -477,8 +526,8 @@ def test_rerun_is_refused_when_the_competition_turned_ai_off(client, competition
     assert response.json()["error"]["code"] == constants.AI_REVIEW_DISABLED
 
 
-def test_a_malformed_allowlist_is_a_config_error_not_a_500(client, competition, monkeypatch):
-    # Allowlist sai định dạng là lỗi cấu hình vận hành: phải trả mã lỗi đọc được, không phải 500.
+def test_a_malformed_port_policy_is_a_config_error_not_a_500(client, competition, monkeypatch):
+    # Chính sách mạng sai định dạng là lỗi cấu hình vận hành: phải trả mã lỗi đọc được, không phải 500.
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PORTS", "khong-phai-so")
     get_settings.cache_clear()
 

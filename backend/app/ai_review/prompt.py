@@ -32,11 +32,14 @@ INCONCLUSIVE; không được kết luận CLEAR.
 chứng là cell và khoảng dòng cụ thể trong notebook.
 - Không đưa phần trăm độ tin cậy. Không dùng PASS/FAIL/ACCEPTED/REJECTED. Verdict chỉ được là \
 CLEAR, FLAGGED hoặc INCONCLUSIVE.
+- `participant_summary` là câu ban tổ chức có thể gửi thẳng cho thí sinh: MỘT câu tiếng Việt, tối \
+đa 10 từ, nêu lỗi chính và cách sửa. Để chuỗi rỗng khi không có vi phạm nào cần sửa.
 
 Định dạng trả về: đúng MỘT JSON object, không văn bản giải thích, không Markdown fence, theo schema:
 
 {"verdict": "CLEAR|FLAGGED|INCONCLUSIVE",
  "summary": "kết luận ngắn gọn bằng tiếng Việt",
+ "participant_summary": "một câu ngắn cho thí sinh, hoặc rỗng",
  "findings": [
    {"source_content_title": "...",
     "source_content_slug": "...",
@@ -46,7 +49,9 @@ CLEAR, FLAGGED hoặc INCONCLUSIVE.
     "reason": "vì sao",
     "evidence": [{"cell": 1, "start_line": 1, "end_line": 2, "snippet": "đoạn trích"}]}]}
 
-Trường `snippet` không bắt buộc: máy chủ tự dựng lại đoạn trích từ đúng cell/dòng bạn nêu."""
+Trường `snippet` không bắt buộc: máy chủ tự dựng lại đoạn trích từ đúng cell/dòng bạn nêu.
+Trường `participant_summary` không bắt buộc, nhưng dài quá 200 ký tự thì cả câu trả lời bị coi là \
+không hợp lệ."""
 
 
 @dataclass(frozen=True)

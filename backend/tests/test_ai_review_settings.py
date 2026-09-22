@@ -1,4 +1,4 @@
-"""Cấu hình AI theo cuộc thi qua API admin: allowlist, xác nhận chuyển dữ liệu, và che secret."""
+"""Cấu hình AI theo cuộc thi qua API admin: base URL, xác nhận chuyển dữ liệu, và che secret."""
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -27,7 +27,6 @@ VALID_CONFIG = {
 @pytest.fixture()
 def ai_env(monkeypatch):
     monkeypatch.setenv("LLM_CONFIG_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
-    monkeypatch.setenv("AI_REVIEW_ALLOWED_HOSTS", HOST)
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PORTS", "443")
     get_settings.cache_clear()
     yield
@@ -85,10 +84,7 @@ def test_get_reports_disabled_defaults_and_runtime_flags(client, ai_env):
         "acknowledged_host": None,
         "updated_at": None,
     }
-    assert body["runtime"] == {
-        "encryption_available": True,
-        "allowed_hosts_configured": True,
-    }
+    assert body["runtime"] == {"encryption_available": True}
     assert body["content_source"] == {
         "included_count": 0,
         "excluded_count": 0,
@@ -134,11 +130,14 @@ def test_draft_url_and_model_can_be_saved_while_disabled(client, ai_env):
     assert config["model"] == "gpt-oss-120b"
 
 
-def test_url_outside_the_operator_allowlist_is_rejected(client, ai_env):
+def test_any_public_provider_host_can_be_saved_without_an_allowlist(client, ai_env):
+    # Không còn allowlist host: opencode.ai hay bất kỳ provider OpenAI-compatible nào đều lưu được.
     competition = _competition(client)
-    response = client.put(_url(client, competition["id"]), json={"base_url": "https://evil.test/v1"})
-    assert response.status_code == 422
-    assert response.json()["error"]["code"] == constants.AI_HOST_NOT_ALLOWED
+    response = client.put(
+        _url(client, competition["id"]), json={"base_url": "https://opencode.ai/zen/v1"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["config"]["base_url"] == "https://opencode.ai/zen/v1"
 
 
 def test_url_that_is_not_a_url_is_rejected(client, ai_env):
@@ -173,7 +172,6 @@ def test_missing_master_key_blocks_enabling_but_not_saving_a_draft(
 
     assert client.get(_url(client, competition["id"])).json()["runtime"] == {
         "encryption_available": False,
-        "allowed_hosts_configured": True,
     }
     draft = client.put(
         _url(client, competition["id"]),
@@ -204,12 +202,12 @@ def test_enabling_with_a_complete_config_stores_only_ciphertext(client, ai_env):
     assert stored["transfer_acknowledgement"]["acknowledged_by"] is not None
 
 
-def test_changing_the_host_invalidates_the_previous_acknowledgement(client, ai_env, monkeypatch):
+def test_changing_the_host_invalidates_the_previous_acknowledgement(client, ai_env):
+    # Mọi host công khai đều lưu được, nhưng lời xác nhận chuyển dữ liệu chỉ có giá trị cho host đã
+    # xác nhận - đây mới là kiểm soát giữ dữ liệu notebook ở đúng chỗ.
     competition = _competition(client)
     assert client.put(_url(client, competition["id"]), json=VALID_CONFIG).status_code == 200
 
-    monkeypatch.setenv("AI_REVIEW_ALLOWED_HOSTS", f"{HOST},api.other.test")
-    get_settings.cache_clear()
     moved = client.put(
         _url(client, competition["id"]), json={"base_url": "https://api.other.test/v1"}
     )

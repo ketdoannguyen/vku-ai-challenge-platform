@@ -12,6 +12,7 @@ output hỏng đều terminal, chỉ lỗi mạng/tải nhất thời mới đư
 import json
 import time
 from dataclasses import dataclass
+from uuid import uuid4
 
 import httpx
 
@@ -23,6 +24,13 @@ TEST_SYSTEM_PROMPT = (
     "Bạn là endpoint kiểm tra kết nối. Chỉ trả về một JSON object, không kèm văn bản nào khác."
 )
 TEST_USER_PROMPT = 'Trả về đúng JSON object sau: {"ok": true}'
+
+# Định danh client gửi kèm MỌI request. Một số gateway OpenAI-compatible đòi client tự giới thiệu và
+# có session id mới định tuyến được (opencode.ai trả 400 `MissingSessionID` nếu thiếu), nên hai header
+# này đi cùng mọi endpoint thay vì rẽ nhánh theo hostname - rẽ nhánh sẽ dựng lại đúng thứ ADR-037 đã bỏ.
+# Giá trị session là định danh MỜ: không bao giờ chứa dữ liệu cuộc thi, thí sinh hay API key.
+PROVIDER_USER_AGENT = "vku-ai-challenge/1.0"
+PROVIDER_SESSION_HEADER = "x-opencode-session"
 
 # Chỉ ba chỉ số này của `usage` được giữ lại; phần còn lại của body provider không bao giờ được lưu.
 _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
@@ -52,9 +60,14 @@ async def chat_completions(
     model: str,
     messages: list[dict],
     max_tokens: int,
+    session_id: str,
     settings,
 ) -> ChatResult:
-    """Gọi provider và trả nội dung message đầu tiên; mọi thất bại là `ProviderError`."""
+    """Gọi provider và trả nội dung message đầu tiên; mọi thất bại là `ProviderError`.
+
+    `session_id` phải là định danh mờ, ổn định trong một lượt review: nó đi thẳng vào header nên
+    cũng là thứ bên thứ ba nhìn thấy.
+    """
     try:
         url_policy.assert_network_allowed(endpoint, policy)
     except url_policy.UrlPolicyError as exc:
@@ -67,7 +80,12 @@ async def chat_completions(
         "max_tokens": max_tokens,
         "stream": False,
     }
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": PROVIDER_USER_AGENT,
+        PROVIDER_SESSION_HEADER: session_id,
+    }
     timeout = httpx.Timeout(
         settings.ai_review_request_timeout_seconds,
         connect=settings.ai_review_connect_timeout_seconds,
@@ -84,7 +102,7 @@ async def chat_completions(
             follow_redirects=False,
         ) as response:
             if response.is_redirect:
-                # Mọi 3xx là terminal: đi theo là tự nguyện gửi dữ liệu tới host chưa được duyệt.
+                # Mọi 3xx là terminal: đi theo là tự nguyện gửi dữ liệu tới một host chưa qua network policy.
                 raise ProviderError(
                     constants.AI_PROVIDER_REDIRECT_REJECTED,
                     "Provider trả về redirect.",
@@ -103,7 +121,7 @@ async def chat_completions(
         ) from exc
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
-    text, usage = _extract(body)
+    text, usage = _extract(body, max_tokens)
     return ChatResult(text=text, latency_ms=elapsed_ms, usage=usage)
 
 
@@ -129,6 +147,9 @@ async def test_connection(
         model=model,
         messages=messages,
         max_tokens=64,
+        # Probe là một request đơn độc nên không có run nào để mượn: dùng một UUID mờ mới. Không lấy
+        # ID của quản trị viên hay cuộc thi - chúng không cần thiết và không nên rời khỏi hệ thống.
+        session_id=uuid4().hex,
         settings=settings,
     )
     _require_json_object(result.text)
@@ -146,9 +167,13 @@ def _status_error(status_code: int) -> ProviderError:
             constants.AI_PROVIDER_UNAUTHORIZED, "Provider từ chối API key.", retryable=False
         )
     if status_code in (400, 404, 422):
+        # Provider từ chối chính request - điều đó KHÔNG chứng minh model sai. Vụ thật: gateway trả
+        # 400 vì thiếu session header. Suy ra "model sai" từ status code là đoán bừa và đẩy admin đi
+        # sửa nhầm chỗ, nên thông báo chỉ nói đúng thứ đã biết (mã HTTP) và nơi cần kiểm.
         return ProviderError(
-            constants.AI_PROVIDER_MODEL_INVALID,
-            "Provider không chấp nhận model đã cấu hình.",
+            constants.AI_PROVIDER_REQUEST_REJECTED,
+            f"Provider từ chối yêu cầu (HTTP {status_code}). "
+            "Kiểm tra Base URL, model và giao thức /chat/completions.",
             retryable=False,
         )
     if status_code == 429:
@@ -181,16 +206,28 @@ async def _read_capped(response: httpx.Response, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def _extract(body: bytes) -> tuple[str, dict | None]:
+def _extract(body: bytes, max_tokens: int) -> tuple[str, dict | None]:
     try:
         payload = json.loads(body)
-        content = payload["choices"][0]["message"]["content"]
+        choice = payload["choices"][0]
+        content = choice["message"]["content"]
+        # Thiếu `finish_reason` không phải lỗi: nhiều gateway không trả field này.
+        finish_reason = choice.get("finish_reason")
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ProviderError(
             constants.AI_RESPONSE_INVALID,
             "Provider trả về body không đúng hợp đồng.",
             retryable=False,
         ) from exc
+    # Kiểm trước `content`: khi hết token, provider có thể trả content rỗng/null, và lúc đó "hết
+    # ngân sách" mới là điều cần nói - không phải "body sai hợp đồng".
+    if finish_reason == "length":
+        raise ProviderError(
+            constants.AI_OUTPUT_TRUNCATED,
+            f"Model bị cắt vì hết trần output token ({max_tokens}). "
+            "Tăng AI_REVIEW_MAX_OUTPUT_TOKENS nếu model cần nhiều hơn.",
+            retryable=False,
+        )
     if not isinstance(content, str):
         raise ProviderError(
             constants.AI_RESPONSE_INVALID,
