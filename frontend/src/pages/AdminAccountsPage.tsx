@@ -128,7 +128,7 @@ export function AdminAccountsPage() {
           </span>
           <div className="page-hero-copy">
             <h1 className="page-hero-title">Quản lý tài khoản</h1>
-            <p className="page-hero-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa tài khoản thí sinh/admin</p>
+            <p className="page-hero-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa và xóa tài khoản thí sinh/admin</p>
             <span className="vku-accent" aria-hidden="true">
               <span className="blue" />
               <span className="red" />
@@ -420,6 +420,7 @@ function AccountRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmingActiveChange, setConfirmingActiveChange] = useState(false);
 
   async function toggleActive() {
@@ -470,6 +471,20 @@ function AccountRow({
                 Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập.
               </span>
             )}
+            <button
+              className="admin-account-action admin-account-action-danger"
+              type="button"
+              disabled={busy || isCurrent}
+              aria-describedby={isCurrent ? `self-delete-reason-${account.id}` : undefined}
+              onClick={() => setDeleting(true)}
+            >
+              Xóa
+            </button>
+            {isCurrent && (
+              <span className="sr-only" id={`self-delete-reason-${account.id}`}>
+                Bạn không thể xóa tài khoản đang đăng nhập.
+              </span>
+            )}
           </span>
         </td>
       </tr>
@@ -481,6 +496,24 @@ function AccountRow({
             setResetting(false);
             onMessage(`Đã đặt lại mật khẩu cho ${account.email}.`);
           }}
+        />
+      )}
+      {deleting && (
+        <ConfirmModal
+          title="Xóa tài khoản"
+          body={`Xóa vĩnh viễn ${account.email}? Tư cách thành viên và các bài nộp chưa được chấm của tài khoản này sẽ bị xóa theo. Thao tác này không hoàn tác được.`}
+          confirmLabel="Xóa vĩnh viễn"
+          danger
+          requireText={account.email}
+          onConfirm={async () => {
+            // 409 (đã có bài chấm điểm / là vết hậu kiểm) nổi lên và hiện trong modal;
+            // chỉ đóng khi backend đã xóa thật.
+            await api.del(`/admin/accounts/${account.id}?confirm_email=${encodeURIComponent(account.email)}`);
+            setDeleting(false);
+            onMessage(`Đã xóa tài khoản ${account.email}.`);
+            onChanged();
+          }}
+          onClose={() => setDeleting(false)}
         />
       )}
       {confirmingActiveChange && (

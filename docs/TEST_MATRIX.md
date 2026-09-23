@@ -43,6 +43,10 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin disable: session chết ngay + login bị chặn; không tự disable chính mình | passing | `backend/tests/test_admin_accounts.py` |
 | Admin accounts query bounds: `limit` 0/-1/201 và `offset` -1 → 422; `limit` 1/200 + offset hợp lệ → 200 | passing | `backend/tests/test_admin_accounts.py` |
 | Admin accounts global stats: `stats.total/admin/participant/active` đúng, không đổi theo `q`/`limit`, cập nhật sau create/disable, account thiếu `active` tính là hoạt động | passing | `backend/tests/test_admin_accounts.py` |
+| Admin delete account: role guard 401 chưa login / 403 participant, 404 id lạ và id sai định dạng | passing | `backend/tests/test_admin_accounts.py` |
+| Admin delete account chốt `confirm_email`: sai → 422 `CONFIRM_EMAIL_MISMATCH` **và không xoá gì**; khớp không phân biệt hoa/thường → 200 | passing | `backend/tests/test_admin_accounts.py` |
+| Admin delete account guard nội dung: không tự xoá chính mình (422); có bài `completed` → 409 `ACCOUNT_HAS_SUBMISSIONS`; có trong `review.reviewed_by` → 409 `ACCOUNT_REFERENCED`; cả hai ca 409 đều để nguyên account | passing | `backend/tests/test_admin_accounts.py` |
+| Admin delete account cascade: xoá `accounts` + `sessions` + `memberships` + bài chưa `completed`, trả đúng bộ đếm `removed`, không đụng account khác; token phiên cũ hết đăng nhập được | passing | `backend/tests/test_admin_accounts.py` |
 | Password policy (≥6 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
 | Login form: error message, loading state, không có link đăng ký | passing | `frontend/src/pages/LoginPage.test.tsx` (vitest) |
 | Protected routes: chưa login → /login; participant → không vào admin | passing | `frontend/src/auth/RequireAuth.test.tsx` |
@@ -144,9 +148,10 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Submit disabled + lý do rõ trước giờ mở/sau deadline (frontend derive, backend vẫn enforce) | passing | `frontend/src/pages/SubmissionPage.test.tsx` |
 | Admin confirm destructive actions: xóa content/asset, đổi mã tham gia, member/account active toggle, thay ground truth | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx`, `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Admin members tải đến 200 dòng (limit=200) + thông tin chung cuộc thi ở detail | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
-| Password admin UI: type=password, minLength 10, autoComplete new-password (create + reset) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
+| Password admin UI: type=password, minLength 6, autoComplete new-password (create + reset) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Admin accounts phân trang thật: mock >200 dòng, Trang sau/trước đổi `offset` và chặn ở biên, tài khoản thứ 201+ tới được bằng UI, đổi từ khóa reset `offset=0`, response trang cũ không ghi đè kết quả mới, trang cuối rỗng thì lùi về trang còn dữ liệu | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Admin accounts UI: bốn ô thống kê đọc `stats` toàn hệ thống (không lấy 50 dòng của page đầu) và không đổi khi tìm kiếm; bảng giữ đủ 5 cột trong vùng cuộn focus được; vai trò/trạng thái luôn có nhãn chữ; admin không tự vô hiệu hóa được (nút khóa, `aria-describedby` tới lý do, không phát PATCH) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
+| Nút Xóa tài khoản: phải gõ đúng email trong modal rồi mới phát DELETE kèm `confirm_email`; 409 (`ACCOUNT_HAS_SUBMISSIONS`) hiện trong modal và modal vẫn mở, dòng vẫn còn trong bảng; admin không tự xóa chính mình (nút khóa kèm lý do, không phát DELETE) | passing | `frontend/src/pages/AdminAccountsPage.test.tsx` |
 | Trần upload động: admin detail + mọi response mutate trả `upload_limits`, list/public không có; env override phản ánh trong response; UI thiếu field thì rơi về `DEFAULT_UPLOAD_LIMITS`; file quá trần bị chặn ở client và không phát request | passing | `backend/tests/test_competitions_admin.py`, `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 
 ## 8. Hardening (Sprint 07) - passing
