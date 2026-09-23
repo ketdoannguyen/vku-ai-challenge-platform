@@ -80,7 +80,7 @@ Quy ước chung:
 | Method | Path | Status | Mô tả |
 |---|---|---|---|
 | GET | `/api/admin/accounts` | implemented | Query: `q` (search email/name, email exact match nếu dạng email), `limit` (1-200, default 50), `offset` (≥0). `limit`/`offset` ngoài khoảng → 422 `VALIDATION_ERROR`. Trả `{accounts: [safe fields], total, limit, offset, stats}` - `total` là số bản ghi khớp `q` (dùng cho phân trang), `stats` là `{total, admin, participant, active}` đếm toàn hệ thống, không phụ thuộc `q`/`limit`/`offset`; account legacy thiếu field `active` được tính là đang hoạt động, khớp `public_account()`. |
-| POST | `/api/admin/accounts` | implemented | Body: `{email, name, password, role}` (role: admin\|participant, default participant). Password tối thiểu 10 ký tự, không space đầu/cuối. 201 + account safe fields; 409 `ACCOUNT_EXISTS`; 422 `VALIDATION_ERROR`. |
+| POST | `/api/admin/accounts` | implemented | Body: `{email, name, password, role}` (role: admin\|participant, default participant). Password tối thiểu 6 ký tự, không space đầu/cuối. 201 + account safe fields; 409 `ACCOUNT_EXISTS`; 422 `VALIDATION_ERROR`. |
 | POST | `/api/admin/accounts/{id}/reset-password` | implemented | Body: `{password}` (cùng policy). 200 `{"ok":true}`; session hiện tại giữ nguyên; 404 `NOT_FOUND`. |
 | PATCH | `/api/admin/accounts/{id}` | implemented | Body: `{active: bool}`. Disable account hủy hiệu lực mọi session của account đó (login bị chặn 403). Không thể tự disable chính mình (422). 200 + account safe fields. |
 

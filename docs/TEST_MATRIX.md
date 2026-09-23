@@ -43,7 +43,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Admin disable: session chết ngay + login bị chặn; không tự disable chính mình | passing | `backend/tests/test_admin_accounts.py` |
 | Admin accounts query bounds: `limit` 0/-1/201 và `offset` -1 → 422; `limit` 1/200 + offset hợp lệ → 200 | passing | `backend/tests/test_admin_accounts.py` |
 | Admin accounts global stats: `stats.total/admin/participant/active` đúng, không đổi theo `q`/`limit`, cập nhật sau create/disable, account thiếu `active` tính là hoạt động | passing | `backend/tests/test_admin_accounts.py` |
-| Password policy (≥10 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
+| Password policy (≥6 ký tự, không space đầu/cuối) | passing | `backend/tests/test_passwords.py` |
 | Login form: error message, loading state, không có link đăng ký | passing | `frontend/src/pages/LoginPage.test.tsx` (vitest) |
 | Protected routes: chưa login → /login; participant → không vào admin | passing | `frontend/src/auth/RequireAuth.test.tsx` |
 | Login end-to-end qua Nginx với Mongo thật + cookie | passing | Sprint 05 isolated smoke đăng nhập admin + participant và gọi API authenticated qua Nginx |

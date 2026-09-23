@@ -18,6 +18,7 @@ def test_verify_malformed_hash_returns_false():
 
 
 def test_password_policy():
-    assert password_policy_error("ngan123") is not None  # <10 ký tự
+    assert password_policy_error("ngan1") is not None  # <6 ký tự
+    assert password_policy_error("du-6ky") is None  # đúng 6 ký tự
     assert password_policy_error("  dau-cach-2-dau  ") is not None
     assert password_policy_error("matkhau-du-do-luong") is None
