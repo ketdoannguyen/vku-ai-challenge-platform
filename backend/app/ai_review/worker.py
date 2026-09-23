@@ -5,6 +5,11 @@ hàng chục giây, và API phải luôn trả lời được kể cả khi LLM 
 
 Vòng lặp có đúng ba nhịp: thu hồi job hết lease, reconcile các khoảng trống, rồi claim và chạy.
 Trong lúc chạy một job, một task phụ gửi heartbeat để lease không hết hạn giữa chừng.
+
+Một tiến trình giữ tối đa `AI_REVIEW_CONCURRENCY` job chạy song song (ADR-046): phần lớn thời gian
+của một job là chờ provider trả lời, nên bốn job cùng lúc không cần bốn nhân CPU. Queue đã an toàn
+cho nhiều runner từ trước - claim là một `find_one_and_update` nguyên tử, và mọi lượt ghi sau đó đều
+đi qua fence `lease_token` - nên song song ở đây không mở thêm đường ghi trùng.
 """
 
 import argparse
@@ -41,59 +46,127 @@ class Stop:
 
 async def serve(*, client: httpx.AsyncClient, db, settings, stop: Stop,
                 max_jobs: int | None = None, once: bool = False) -> int:
-    """Vòng lặp chính; trả số job đã xử lý."""
+    """Vòng lặp chính; trả số job đã xử lý.
+
+    Chạy tối đa `ai_review_concurrency` job cùng lúc. Reconcile vẫn là nhịp DUY NHẤT của tiến trình
+    này: nó chỉ chạy ở vòng lặp, không nằm trong task của job, nên chậm bao nhiêu job cũng không
+    nhân bản vòng quét lên.
+    """
+    concurrency = max(1, settings.ai_review_concurrency)
     worker_id = f"{os.uname().nodename}:{os.getpid()}:{secrets.token_hex(4)}"
-    logger.info("Worker khởi động id=%s once=%s max_jobs=%s", worker_id, once, max_jobs)
+    logger.info(
+        "Worker khởi động id=%s once=%s max_jobs=%s concurrency=%d",
+        worker_id,
+        once,
+        max_jobs,
+        concurrency,
+    )
 
     processed = 0
     next_reconcile_at = 0.0
-    while not stop.requested:
-        if max_jobs is not None and processed >= max_jobs:
-            break
-        _touch(settings.ai_review_heartbeat_file)
+    in_flight: dict[asyncio.Task, str] = {}
+    # Job đã chạy xong nhưng chưa được đếm: callback dọn task chạy ở lượt kế tiếp của event loop,
+    # nên giữa lúc `gather` trả về và lúc counter nhích lên vẫn còn một khe. Bù ở `_harvest`.
+    finished: list[tuple[asyncio.Task, dict]] = []
 
-        now = datetime.now(timezone.utc)
-        if time.monotonic() >= next_reconcile_at:
-            next_reconcile_at = time.monotonic() + settings.ai_review_reconcile_interval_seconds
-            try:
-                await service.recover_expired(db, now=now)
-                stats = await service.reconcile(
-                    db, settings=settings, now=now, limit=settings.ai_review_reconcile_batch
-                )
-            except Exception:
-                logger.exception("Bỏ qua nhịp reconcile do lỗi hạ tầng.")
-            else:
-                if any(stats.values()):
-                    logger.info("reconcile %s", stats)
+    def schedule(job: dict) -> None:
+        """Đưa một job vừa claim vào tập đang chạy; task tự dọn mình khi xong."""
+        task = asyncio.create_task(_run_job(db, job, client=client, settings=settings, stop=stop))
+        in_flight[task] = job["_id"]
+        task.add_done_callback(lambda t: _finish(t, job, in_flight, finished))
 
-        # Mọi lỗi hạ tầng (Mongo chập chờn, DNS hỏng) chỉ được làm mất một nhịp, không được giết
-        # tiến trình: job đang chạy vẫn còn lease để `recover_expired` thu hồi ở vòng sau.
-        try:
-            job = await queue.claim_next(
-                db, worker_id=worker_id, now=now, lease_seconds=settings.ai_review_lease_seconds
-            )
-        except Exception:
-            logger.exception("Không claim được job; thử lại ở nhịp sau.")
-            await _sleep(settings.ai_review_poll_interval_seconds, stop)
-            continue
-        if job is None:
-            if once:
+    def harvest() -> int:
+        """Đếm mọi job đã xong kể cả khi callback chưa kịp chạy; trả về counter mới."""
+        nonlocal processed
+        for task, job in finished:
+            _report(task, job)
+            processed += 1
+        finished.clear()
+        return processed
+
+    try:
+        while not stop.requested:
+            if max_jobs is not None and harvest() >= max_jobs:
                 break
-            await _sleep(settings.ai_review_poll_interval_seconds, stop)
-            continue
+            _touch(settings.ai_review_heartbeat_file)
 
-        try:
-            outcome = await _run_job(db, job, client=client, settings=settings, stop=stop)
-        except Exception:
-            logger.exception("Job %s hỏng ngoài dự kiến; lease sẽ được thu hồi.", job["_id"])
-            outcome = "CRASHED"
-        processed += 1
-        logger.info(
-            "job=%s submission=%s outcome=%s", job["_id"], job["submission_id"], outcome
-        )
+            now = datetime.now(timezone.utc)
+            if time.monotonic() >= next_reconcile_at:
+                next_reconcile_at = (
+                    time.monotonic() + settings.ai_review_reconcile_interval_seconds
+                )
+                try:
+                    await service.recover_expired(db, now=now)
+                    stats = await service.reconcile(
+                        db, settings=settings, now=now, limit=settings.ai_review_reconcile_batch
+                    )
+                except Exception:
+                    logger.exception("Bỏ qua nhịp reconcile do lỗi hạ tầng.")
+                else:
+                    if any(stats.values()):
+                        logger.info("reconcile %s", stats)
 
+            # Lấp đầy slot trước khi chờ: claim bao nhiêu job thì chạy bấy nhiêu. Chỉ claim khi còn
+            # slot, nên `max_jobs` không bao giờ bị vượt bởi một loạt claim liền nhau.
+            while len(in_flight) < concurrency and not stop.requested:
+                if max_jobs is not None and harvest() + len(in_flight) >= max_jobs:
+                    break
+                # Mọi lỗi hạ tầng (Mongo chập chờn, DNS hỏng) chỉ được làm mất một nhịp, không được
+                # giết tiến trình: job đang chạy vẫn còn lease để `recover_expired` thu hồi sau.
+                try:
+                    job = await queue.claim_next(
+                        db,
+                        worker_id=worker_id,
+                        now=datetime.now(timezone.utc),
+                        lease_seconds=settings.ai_review_lease_seconds,
+                    )
+                except Exception:
+                    logger.exception("Không claim được job; thử lại ở nhịp sau.")
+                    break
+                if job is None:
+                    break
+                schedule(job)
+
+            if not in_flight:
+                if once:
+                    break
+                await _sleep(settings.ai_review_poll_interval_seconds, stop)
+                continue
+
+            # Chờ job kế tiếp xong, nhưng không lâu hơn một lượt gọi provider: `_touch` ở đầu vòng
+            # sau là thứ giữ healthcheck sống, nên khoảng chờ không được dài hơn nhịp đó.
+            await asyncio.wait(
+                set(in_flight),
+                timeout=settings.ai_review_request_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+    finally:
+        # Dừng ở ranh giới job: ngừng claim, nhưng KHÔNG cắt ngang lượt gọi provider đang chạy -
+        # hợp đồng này là lý do `stop_grace_period` của container có nghĩa.
+        if in_flight:
+            await asyncio.gather(*in_flight, return_exceptions=True)
+
+    processed = harvest()
     logger.info("Worker dừng id=%s đã xử lý %d job.", worker_id, processed)
     return processed
+
+
+def _finish(task: asyncio.Task, job: dict, in_flight: dict, finished: list) -> None:
+    """Dọn task đã xong khỏi tập đang chạy; việc đếm và ghi log để `serve.harvest` làm."""
+    in_flight.pop(task, None)
+    finished.append((task, job))
+
+
+def _report(task: asyncio.Task, job: dict) -> None:
+    """Ghi kết quả một job đã xong; một job hỏng không được làm sập cả vòng lặp."""
+    try:
+        outcome = task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Job %s hỏng ngoài dự kiến; lease sẽ được thu hồi.", job["_id"])
+        outcome = "CRASHED"
+    logger.info("job=%s submission=%s outcome=%s", job["_id"], job["submission_id"], outcome)
 
 
 async def _run_job(db, job: dict, *, client, settings, stop: Stop) -> str:

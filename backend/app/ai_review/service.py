@@ -13,7 +13,7 @@ Ba nguyên tắc xuyên suốt module:
 import hashlib
 import logging
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from pymongo import ReturnDocument
@@ -340,6 +340,12 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             message="Output model không dùng được.", snapshot=snapshot,
         )
 
+    # `now` được ghim ở ĐẦU hàm, còn lượt gọi provider chạy xong sau đó `result.latency_ms` - độ trễ
+    # do chính client provider đo. Mốc kết thúc thật là điểm bắt đầu cộng độ trễ đó; ghi thẳng `now`
+    # sẽ báo "hoàn tất" sớm hơn thực tế đúng bằng một lượt review, và mọi phép đo rút hàng đợi dựng
+    # trên nó đều hụt đi một lượt. Chỉ nhích `now` cho lượt THÀNH CÔNG: lượt lỗi không có độ trễ đo
+    # được, nên chúng giữ nguyên mốc bắt đầu (xem `_finish_error`).
+    finished_at = now + timedelta(milliseconds=result.latency_ms)
     review = await insert_review(
         db,
         _base_document(job, now=now, snapshot=snapshot)
@@ -363,11 +369,11 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             "usage": result.usage,
             "latency_ms": result.latency_ms,
             "started_at": job.get("started_at") or now,
-            "completed_at": now,
+            "completed_at": finished_at,
             "duration_ms": result.latency_ms,
         },
     )
-    return await _settle(db, job, review, now=now, outcome=OUTCOME_COMPLETED)
+    return await _settle(db, job, review, now=finished_at, outcome=OUTCOME_COMPLETED)
 
 
 async def find_cached_review(db, competition_id, key: str) -> dict | None:

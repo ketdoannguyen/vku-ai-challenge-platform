@@ -294,6 +294,8 @@ Một row cho mỗi bài, **reset theo `generation`** khi admin chạy lại, th
 
 Claim nguyên tử bằng `find_one_and_update` trên điều kiện `status=QUEUED AND run_after<=now`, ghi `lease_token`/`claimed_by`/`lease_expires_at`. **Mọi** lần ghi về sau đều kiểm lại `lease_token` + `generation` + `run_id`, nên một worker bị treo rồi tỉnh dậy không thể ghi đè kết quả của lượt mới hơn. Lỗi tạm thời ⇒ requeue với backoff mũ có jitter (`run_after`).
 
+`completed_at` là lúc job **kết thúc thật**: với lượt thành công nó bằng `completed_at` của audit row (`created_at + duration_ms` của lượt gọi provider), không phải lúc job được claim. Đây là mốc dùng để đo thời gian rút hàng đợi.
+
 ### 11.4 `ai_reviews` - audit append-only
 
 Một terminal record cho mỗi `(submission_id, generation)`.
@@ -348,6 +350,8 @@ Indexes:
 - `(submission_id, created_at DESC)` - lịch sử của một bài
 
 `run_id` được lưu và là khoá nghiệp vụ để đối chiếu với job, nhưng ràng buộc duy nhất nằm ở `(submission_id, generation)` - đó mới là thứ phân biệt hai lượt chạy của cùng một bài.
+
+Ba mốc thời gian của một lượt thành công: `created_at` là lúc worker bắt đầu xử lý job, `duration_ms` là độ trễ **đo được** của riêng lượt gọi provider, và `completed_at` = `created_at + duration_ms`, tức lúc lượt gọi kết thúc. Job tương ứng trong `ai_review_jobs` chốt ở đúng `completed_at` đó. Vì vậy đọc `completed_at` là đã có mốc kết thúc thật - **không** cộng thêm `duration_ms` lần nữa. Lượt đọc cache (`source=CACHE`) có `duration_ms=0` vì không gọi provider; lượt lỗi (`_finish_error`) giữ `completed_at = created_at` vì không có độ trễ nào đo được.
 
 **Không lưu**: API key, full Base URL (chỉ host), raw prompt, raw notebook/policy payload, raw provider response. `error.message` chỉ chứa thông điệp đã che; khi parse output model thất bại, message của Pydantic có thể chứa nguyên văn output nên log chỉ ghi `type(exc).__name__`.
 

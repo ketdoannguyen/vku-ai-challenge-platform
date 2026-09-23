@@ -1238,6 +1238,41 @@ và không rò rỉ giữa hai cuộc thi.
 | Một `(submission_id, generation)` không bao giờ sinh hoặc ghi đè audit row thứ hai | passing | `test_ai_review_service.py::test_a_repeated_generation_cannot_produce_or_overwrite_a_second_audit_row` |
 | Cache key đổi theo **mọi** thành phần đi tới model (prompt/normalizer/context policy/host/model) **và** theo trần ký tự notebook (`max_notebook_chars`, vì nó quyết định phần nào của notebook thực sự được gửi) | passing | `::test_the_cache_key_changes_with_every_component_that_reaches_the_model` |
 | ERROR không bao giờ được cache; chạy tay luôn bỏ qua cache | passing | `::test_bypass_cache_reruns_the_provider_for_an_identical_submission`; `test_ai_review_service.py` (nhóm cache) |
+| `completed_at` của audit row là lúc lượt gọi provider **kết thúc** (mốc bắt đầu + `duration_ms` đã đo), và job trong hàng đợi chốt ở **cùng** mốc đó - không phải lúc job bắt đầu được xử lý | passing | `test_ai_review_service.py::test_moc_hoan_tat_cua_luot_thanh_cong_la_luc_goi_provider_xong` (transport giả ngủ 30 ms nên `duration_ms` là số thật, không phải 0 may rủi) |
+
+### Backend - nhiều lượt review song song trong một tiến trình (ADR-046)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Bốn lượt gọi provider **chồng lên nhau thật** trong một tiến trình worker, không phải xử lý theo lô | passing | `test_ai_review_worker.py::test_four_jobs_call_the_provider_at_the_same_time` (barrier: cả bốn task phải cùng tới điểm hẹn mới đi tiếp) |
+| Một job hỏng không làm hỏng ba job anh em đang chạy cùng lượt | passing | `::test_one_exploding_job_does_not_take_down_its_siblings` |
+| `--max-jobs` không bị vượt khi concurrency > 1 (claim chỉ xảy ra khi còn slot) | passing | `::test_a_burst_of_claims_never_overshoots_max_jobs` |
+| Tín hiệu dừng ngừng claim job mới nhưng **join** các job đang bay, không cắt ngang lượt gọi provider | passing | `::test_a_stop_lets_the_jobs_already_in_flight_finish` |
+| Healthcheck vẫn tươi khi cả bốn slot đều bận (nhịp `_touch` không bị `asyncio.wait` chặn) | passing | `::test_the_loop_keeps_touching_the_heartbeat_while_all_slots_are_busy` |
+| Concurrency ngoài `[1, 16]` làm worker thoát mã 2 thay vì clamp ngầm | passing | `::test_main_refuses_a_concurrency_outside_the_supported_range` (0 và 17), `::test_four_workers_pass_the_config_gate` |
+| Bất biến heartbeat < lease vẫn giữ cùng lúc với ràng buộc concurrency | passing | `test_ai_review_settings.py` (nhóm `ai_review_worker_config_valid`) |
+
+### Harness kiểm thử tải, phần thuần (ADR-046)
+
+`backend/scripts/ai_review_load.py` là công cụ vận hành chứ không phải module của `app`, nên phần
+**thuần** của nó được ghim bằng `test_ai_review_load_harness.py` - không case nào ở đó gọi mạng, Mongo
+hay provider. Phần chạy thật chỉ chứng minh được bằng một chiến dịch thật.
+
+| Check | Status | Cách verify |
+|---|---|---|
+| 60 notebook **khác bytes** nhau (và ổn định cho từng người): trùng bytes là cache biến 60 lượt gọi provider thành 1 lượt gọi + 59 lượt đọc cache, và phép đo tải mất hết ý nghĩa | passing | `test_notebook_khac_bytes_giua_cac_nguoi_dung_nhung_on_dinh_cho_tung_nguoi` (đã mutate thử: gộp `{user}` trong `notebook_bytes` làm test **gãy**, tức nó bắt được đúng lỗi này) |
+| Notebook sinh ra là ipynb hợp lệ, qua được `validate_notebook`, và khác nhau giữa hai run-tag | passing | `test_notebook_la_ipynb_hop_le_va_khac_nhau_giua_hai_run_tag` |
+| Ground truth và CSV dự đoán khớp **đúng tập ID** và nhãn nằm trong tập nhãn, có đủ hai lớp | passing | `test_ground_truth_va_prediction_khop_dung_tap_id_va_nam_trong_tap_nhan` (lệch một ID là mọi lượt nộp hỏng ở bước chấm điểm với `SUBMISSION_ID_MISMATCH`) |
+| Hai người dùng nộp hai bài khác nhau | passing | `test_hai_nguoi_dung_khac_nhau_nop_hai_bai_khac_nhau` |
+| Email account test dùng miền thật, không rơi vào `.local`/`.test`/`.invalid` | passing | `test_account_test_dung_mien_that_de_khong_bi_tu_choi_o_buoc_tao` |
+| Percentile lấy giá trị **đã đo**, không nội suy | passing | `test_percentile_lay_gia_tri_that_da_do_khong_noi_suy` |
+| Mốc kết thúc một lượt AI là `completed_at` của review, **không** cộng thêm `duration_ms` (server đã cộng sẵn) | passing | `test_drain_tinh_tu_dong_ho_server_chu_khong_phai_luc_quan_sat` |
+| Summary đếm đủ trùng lặp / thiếu / chưa tới terminal, phân biệt "chưa từng nộp được" với "nộp rồi mà chưa có kết luận" | passing | `test_summary_dem_du_trung_lap_thieu_va_trang_thai_cuoi` |
+| Một lượt chạy sạch đạt **toàn bộ** cổng; mỗi khuyết điểm làm **gãy đúng cổng của nó** (4 khuyết điểm: cache hit, verdict ERROR, thiếu terminal, nộp lỗi) | passing | `test_mot_luot_chay_sach_dat_toan_bo_cong`, `test_mot_khuyet_diem_lam_gay_dung_cong_cua_no` |
+| Bốn cổng đối chiếu Mongo (đếm bài nộp/job/audit, job còn lại, lượt phải chạy lại, số host provider) gãy riêng lẻ được | passing | `test_cong_mongo_bat_duoc_job_con_lai_va_luot_phai_chay_lai` |
+| Báo cáo ghi rõ cổng nào không đạt thay vì chỉ nói "xong" | passing | `test_bao_cao_ghi_ro_cong_nao_khong_dat` |
+| `--resume` bỏ bản ghi đăng nhập của lượt trước (nếu không, phép đếm cộng dồn qua các lượt) | passing | `test_resume_giu_ban_ghi_nop_bo_ban_ghi_dang_nhap` |
+| Hàng rào an toàn: thiếu `--acknowledge-load-test`, `--users 0`, `--concurrency > --users`, run-tag sai định dạng đều bị từ chối **trước** khi gọi mạng; `--dry-run` không gọi mạng | passing | `test_stage_tu_choi_chay_khi_thieu_xac_nhan_moi_truong_that`, `test_stage_tu_choi_khi_thieu_hoac_lech_so_nguoi_dung`, `test_run_tag_sai_dinh_dang_bi_tu_choi_truoc_khi_goi_mang`, `test_dry_run_khong_goi_mang` |
 
 ### Frontend
 
