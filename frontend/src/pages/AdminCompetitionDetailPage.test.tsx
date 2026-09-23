@@ -176,9 +176,9 @@ const TAB_LABELS = [
   "Hình ảnh",
   "Tài nguyên",
   "Chấm điểm",
-  "Cài đặt",
   "Kết quả",
   "Thành viên & mã tham gia",
+  "Cài đặt",
 ];
 
 /** Danh sách tabindex kỳ vọng khi chỉ tab ở vị trí `focusedIndex` nhận focus. */
@@ -289,17 +289,17 @@ test("rail quản trị: roving tabindex - chỉ focused tab có tabIndex=0, Arr
   expect(tabIndexes()).toEqual(tabsWithFocusAt(2));
 
   fireEvent.keyDown(railTab("Tài nguyên"), { key: "End" });
-  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
+  expect(railTab("Cài đặt")).toHaveFocus();
   expect(tabIndexes()).toEqual(tabsWithFocusAt(TAB_LABELS.length - 1));
 
-  fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "Home" });
+  fireEvent.keyDown(railTab("Cài đặt"), { key: "Home" });
   expect(railTab("Nội dung")).toHaveFocus();
   expect(tabIndexes()).toEqual(tabsWithFocusAt(0));
 
   // Wrap ở biên: trái từ tab đầu về tab cuối, phải từ tab cuối về tab đầu.
   fireEvent.keyDown(railTab("Nội dung"), { key: "ArrowLeft" });
-  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
-  fireEvent.keyDown(railTab("Thành viên & mã tham gia"), { key: "ArrowRight" });
+  expect(railTab("Cài đặt")).toHaveFocus();
+  fireEvent.keyDown(railTab("Cài đặt"), { key: "ArrowRight" });
   expect(railTab("Nội dung")).toHaveFocus();
 });
 
@@ -315,7 +315,7 @@ test("rail quản trị: Arrow/Home/End dời focus nhưng chưa đổi panel đ
   expect(railTab("Hình ảnh")).toHaveAttribute("aria-selected", "false");
 
   fireEvent.keyDown(railTab("Hình ảnh"), { key: "End" });
-  expect(railTab("Thành viên & mã tham gia")).toHaveFocus();
+  expect(railTab("Cài đặt")).toHaveFocus();
   expect(screen.getByRole("tabpanel", { name: "Nội dung" })).toBe(contentsPanel);
 });
 
@@ -1821,9 +1821,9 @@ test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không s
     ["Hình ảnh", ["blue", "yellow", "red"]],
     ["Tài nguyên", ["yellow"]],
     ["Chấm điểm", ["blue", "red", "yellow"]],
-    ["Cài đặt", ["blue", "yellow"]],
     ["Kết quả", ["yellow", "blue"]],
     ["Thành viên & mã tham gia", ["red", "blue"]],
+    ["Cài đặt", ["blue", "yellow"]],
   ] as Array<[string, string[]]>) {
     fireEvent.click(railTab(name));
     const panel = await screen.findByRole("tabpanel", { name });

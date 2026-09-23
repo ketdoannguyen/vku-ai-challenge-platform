@@ -48,7 +48,7 @@ import {
 import { downloadArtifact } from "../lib/downloadArtifact";
 import { SLUG_MAX } from "../lib/slug";
 
-type Tab = "contents" | "assets" | "resources" | "scoring" | "settings" | "members" | "results";
+type Tab = "contents" | "assets" | "resources" | "scoring" | "results" | "members" | "settings";
 
 type IconComponent = (props: { className?: string }) => ReactNode;
 
@@ -58,11 +58,11 @@ const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }
   { key: "assets", label: "Hình ảnh", Icon: IconImage },
   { key: "resources", label: "Tài nguyên", Icon: IconFolder },
   { key: "scoring", label: "Chấm điểm", Icon: IconGauge },
-  // Cấu hình AI là chuyện của từng cuộc thi, không phải thiết lập toàn hệ thống, nên đứng cạnh
-  // Chấm điểm thay vì tách sang trang riêng.
-  { key: "settings", label: "Cài đặt", Icon: IconSparkle },
   { key: "results", label: "Kết quả", Icon: IconTrophy },
   { key: "members", label: "Thành viên & mã tham gia", Icon: IconUsers },
+  // Cấu hình AI là chuyện của từng cuộc thi, không phải thiết lập toàn hệ thống, nên nằm cùng
+  // trang thay vì tách sang trang riêng. Để cuối rail vì là việc dọn dẹp sau cùng.
+  { key: "settings", label: "Cài đặt", Icon: IconSparkle },
 ];
 
 /**
