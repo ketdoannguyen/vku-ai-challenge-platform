@@ -51,6 +51,7 @@ function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
+      if (init?.method === "DELETE") return json({ deleted: true });
       if (init?.method === "PATCH") return json({ ...ACCOUNT, active: false });
       const params = new URL(url, "http://localhost").searchParams;
       const q = (params.get("q") ?? "").toLowerCase();
@@ -350,6 +351,83 @@ test("admin không thể tự vô hiệu hóa: nút bị khóa kèm lý do và k
   fireEvent.click(disable);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
+});
+
+test("xóa tài khoản: phải gõ đúng email rồi mới gọi DELETE kèm confirm_email", async () => {
+  mockApi();
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa" }));
+  expect(screen.getByRole("dialog", { name: "Xóa tài khoản" })).toBeTruthy();
+  expect(calls.some((call) => call.init?.method === "DELETE")).toBe(false);
+
+  const confirm = screen.getByRole("button", { name: "Xóa vĩnh viễn" });
+  const guard = screen.getByLabelText(/để xác nhận/);
+
+  fireEvent.change(guard, { target: { value: "sai@vku.vn" } });
+  expect(confirm).toBeDisabled();
+  fireEvent.click(confirm);
+  expect(calls.some((call) => call.init?.method === "DELETE")).toBe(false);
+
+  fireEvent.change(guard, { target: { value: ACCOUNT.email } });
+  expect(confirm).not.toBeDisabled();
+  fireEvent.click(confirm);
+
+  await waitFor(() => expect(calls.some((call) => call.init?.method === "DELETE")).toBe(true));
+  const remove = calls.find((call) => call.init?.method === "DELETE");
+  expect(remove?.url).toContain(`/admin/accounts/${ACCOUNT.id}?confirm_email=team%40vku.vn`);
+});
+
+test("xóa tài khoản có bài đã chấm: 409 hiện trong modal, modal vẫn mở", async () => {
+  calls.length = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (init?.method === "DELETE") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "ACCOUNT_HAS_SUBMISSIONS",
+              message: "Tài khoản đã có bài nộp được chấm điểm. Hãy dùng Vô hiệu hoá thay vì xoá.",
+            },
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return json({ accounts: [ACCOUNT], total: 1, limit: 50, offset: 0, stats: statsOf([ACCOUNT]) });
+    }),
+  );
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa" }));
+  fireEvent.change(screen.getByLabelText(/để xác nhận/), { target: { value: ACCOUNT.email } });
+  fireEvent.click(screen.getByRole("button", { name: "Xóa vĩnh viễn" }));
+
+  expect(await screen.findByText(/Hãy dùng Vô hiệu hoá thay vì xoá/)).toBeTruthy();
+  // Modal còn nguyên để admin đọc lý do, và tài khoản không bị xoá khỏi bảng.
+  expect(screen.getByRole("dialog", { name: "Xóa tài khoản" })).toBeTruthy();
+  const region = screen.getByRole("region", { name: "Bảng tài khoản" });
+  expect(within(region).getByText("team@vku.vn")).toBeTruthy();
+});
+
+test("admin không thể tự xóa: nút bị khóa kèm lý do và không phát DELETE", async () => {
+  mockCurrentAccountId = ACCOUNT.id;
+  mockApi();
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  const remove = screen.getByRole("button", { name: "Xóa" });
+  expect(remove).toBeDisabled();
+  expect(remove.getAttribute("aria-describedby")).toBe(`self-delete-reason-${ACCOUNT.id}`);
+  expect(screen.getByText("Bạn không thể xóa tài khoản đang đăng nhập.")).toBeTruthy();
+
+  fireEvent.click(remove);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(calls.some((call) => call.init?.method === "DELETE")).toBe(false);
 });
 
 test("tiêu đề tab đặt theo tên trang", async () => {

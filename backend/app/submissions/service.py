@@ -1,7 +1,9 @@
 """Submission persistence and safe result representations."""
 
+import logging
 import re
 from datetime import datetime
+from pathlib import Path
 
 from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -11,9 +13,14 @@ from app.accounts.service import ACCOUNTS_COLLECTION
 from app.ai_review import constants as ai_constants
 from app.ai_review import serializers as ai_serializers
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.content import storage
+from app.core.config import get_settings
 from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
+
+logger = logging.getLogger(__name__)
 
 SUBMISSIONS_COLLECTION = "submissions"
 # Bộ đếm quota theo ngày nằm trên membership: `quota_day` là khoá ngày UTC, `quota_used` là số
@@ -168,6 +175,45 @@ async def has_completed_submission(db, competition_id, account_id=None) -> bool:
     if account_id is not None:
         query["account_id"] = account_id
     return await db[SUBMISSIONS_COLLECTION].count_documents(query, limit=1) > 0
+
+
+async def has_graded_submission(db, account_id) -> bool:
+    """Bài đã chấm điểm của một account, không giới hạn cuộc thi.
+
+    Xoá member thì hỏi theo từng cuộc thi, còn xoá account phải hỏi trên toàn bộ lịch sử - một bài
+    `completed` ở bất kỳ cuộc thi nào cũng đủ để tài khoản đó không được xoá.
+    """
+    query = {"account_id": account_id, "status": "completed"}
+    return await db[SUBMISSIONS_COLLECTION].count_documents(query, limit=1) > 0
+
+
+async def delete_submissions_matching(db, query: dict) -> int:
+    """Xoá các submission khớp `query`, kèm file local và artifact MinIO.
+
+    Người gọi phải tự loại bài đã chấm điểm khỏi `query` - hàm này không tự chặn. Dọn file là
+    best-effort: lỗi chỉ được log, vì bản ghi DB đã mất mới là điều kiện đúng của thao tác.
+    """
+    records = [
+        record async for record in db[SUBMISSIONS_COLLECTION].find(query)
+    ]
+    for record in records:
+        relative = record.get("file_path")
+        if relative:
+            try:
+                storage.ensure_within(Path(get_settings().data_dir), Path(relative)).unlink(
+                    missing_ok=True
+                )
+            except (OSError, ValueError):
+                logger.warning("Cannot remove submission file %s", relative)
+        for entry in (record.get("artifacts") or {}).values():
+            object_key = entry.get("object_key") if isinstance(entry, dict) else None
+            if object_key:
+                await artifact_storage.remove_object(object_key)
+    if records:
+        await db[SUBMISSIONS_COLLECTION].delete_many(
+            {"_id": {"$in": [record["_id"] for record in records]}}
+        )
+    return len(records)
 
 
 async def completed_today_count(db, competition_id, account_id, now: datetime) -> int:

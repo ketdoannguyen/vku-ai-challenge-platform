@@ -2,7 +2,6 @@
 
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -13,11 +12,8 @@ from app.accounts.service import ACCOUNTS_COLLECTION, find_account_by_email
 from app.auth.dependencies import AdminAccount
 from app.auth.passwords import hash_password
 from app.competitions.admin_router import _get_competition_or_404
-from app.content import storage
-from app.core.config import get_settings
 from app.core.errors import api_error
 from app.memberships import service
-from app.submission_artifacts import storage as artifact_storage
 from app.submissions import service as submissions_service
 
 logger = logging.getLogger(__name__)
@@ -175,7 +171,16 @@ async def delete_member(
             "Thành viên đã có bài nộp được chấm điểm. Hãy dùng Vô hiệu hóa thay vì xoá.",
         )
 
-    removed = await _delete_incomplete_submissions(db, competition["_id"], oid)
+    # Bài đã chấm điểm không bao giờ bị đụng tới; ở đây chỉ còn bài chưa xong nên luật đó đã được
+    # chốt bởi guard `has_completed_submission` ngay trên.
+    removed = await submissions_service.delete_submissions_matching(
+        db,
+        {
+            "competition_id": competition["_id"],
+            "account_id": oid,
+            "status": {"$ne": "completed"},
+        },
+    )
     # Membership xoá sau cùng: nếu bước trên lỗi thì lần gọi lại vẫn còn bản ghi để chạy tiếp.
     await db[service.MEMBERSHIPS_COLLECTION].delete_one({"_id": membership["_id"]})
     logger.info(
@@ -186,35 +191,3 @@ async def delete_member(
         removed,
     )
     return {"deleted": True, "account_id": str(oid)}
-
-
-async def _delete_incomplete_submissions(db, competition_id, account_id) -> int:
-    """Dọn bài nộp chưa hoàn thành của một account; bài đã chấm điểm không bao giờ bị đụng tới."""
-    records = [
-        record
-        async for record in db[submissions_service.SUBMISSIONS_COLLECTION].find(
-            {
-                "competition_id": competition_id,
-                "account_id": account_id,
-                "status": {"$ne": "completed"},
-            }
-        )
-    ]
-    for record in records:
-        relative = record.get("file_path")
-        if relative:
-            try:
-                storage.ensure_within(Path(get_settings().data_dir), Path(relative)).unlink(
-                    missing_ok=True
-                )
-            except (OSError, ValueError):
-                logger.warning("Cannot remove submission file %s", relative)
-        for entry in (record.get("artifacts") or {}).values():
-            object_key = entry.get("object_key") if isinstance(entry, dict) else None
-            if object_key:
-                await artifact_storage.remove_object(object_key)
-    if records:
-        await db[submissions_service.SUBMISSIONS_COLLECTION].delete_many(
-            {"_id": {"$in": [record["_id"] for record in records]}}
-        )
-    return len(records)

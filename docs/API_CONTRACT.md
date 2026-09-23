@@ -83,6 +83,7 @@ Quy ước chung:
 | POST | `/api/admin/accounts` | implemented | Body: `{email, name, password, role}` (role: admin\|participant, default participant). Password tối thiểu 6 ký tự, không space đầu/cuối. 201 + account safe fields; 409 `ACCOUNT_EXISTS`; 422 `VALIDATION_ERROR`. |
 | POST | `/api/admin/accounts/{id}/reset-password` | implemented | Body: `{password}` (cùng policy). 200 `{"ok":true}`; session hiện tại giữ nguyên; 404 `NOT_FOUND`. |
 | PATCH | `/api/admin/accounts/{id}` | implemented | Body: `{active: bool}`. Disable account hủy hiệu lực mọi session của account đó (login bị chặn 403). Không thể tự disable chính mình (422). 200 + account safe fields. |
+| DELETE | `/api/admin/accounts/{id}` | implemented | Query **bắt buộc**: `confirm_email` (so với `account.email` sau `trim().lower()`, nên gõ hoa/thường đều được). Guard theo thứ tự: sai email → 422 `CONFIRM_EMAIL_MISMATCH`; tự xoá chính mình → 422 `VALIDATION_ERROR`; có submission `status=completed` ở **bất kỳ** cuộc thi nào → 409 `ACCOUNT_HAS_SUBMISSIONS`; có mặt trong `submissions.review.reviewed_by` hoặc `competitions.ai_review_config.updated_by` → 409 `ACCOUNT_REFERENCED`; id không tồn tại hoặc sai định dạng → 404 `NOT_FOUND`. Thành công 200 `{deleted:true, account_id, email, removed:{ai_review_jobs, ai_reviews, submissions, memberships, sessions}}`. Cascade con-trước-cha-sau, `accounts` xoá cuối cùng (ADR-047). |
 
 Mọi endpoint admin yêu cầu role `admin`: 401 `UNAUTHORIZED` nếu chưa đăng nhập, 403 `FORBIDDEN` nếu participant.
 
