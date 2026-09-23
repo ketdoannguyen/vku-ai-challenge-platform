@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
+import {
+  AI_PARTICIPANT_DISCLAIMER,
+  AI_STATE_LABEL,
+  AI_VERDICT_LABEL,
+  AI_VERDICT_TONE,
+  hasPendingAiReview,
+} from "../api/aiReview";
 import { formatLocal } from "../api/competitions";
 import {
   fetchMySubmissions,
@@ -9,6 +16,7 @@ import {
 } from "../api/results";
 import { ArtifactLinks } from "../components/ArtifactLinks";
 import { ErrorBox, Loading } from "../components/ui";
+import { usePendingPolling } from "../hooks/usePendingPolling";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 const PAGE_SIZE = 50;
@@ -98,6 +106,10 @@ export function MySubmissionsPage() {
   }
 
   const busy = loading || refreshing;
+  // Còn lượt AI đang chạy thì tự làm mới; hết ngân sách thì dừng và để thí sinh tự bấm Làm mới.
+  const pollExhausted = usePendingPolling(hasPendingAiReview(data?.submissions ?? []), () =>
+    requestPage(query.offset),
+  );
 
   // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
   if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
@@ -144,6 +156,9 @@ export function MySubmissionsPage() {
   const shownFrom = data.offset + 1;
   const shownTo = Math.min(data.offset + PAGE_SIZE, data.total);
   const hasNext = data.offset + PAGE_SIZE < data.total;
+  // Cột AI chỉ có nghĩa khi cuộc thi thật sự công khai kết luận cho thí sinh. Bật AI sau khi đã
+  // có bài nộp khiến trang trộn hai loại dòng, nên điều kiện là "có ít nhất một dòng".
+  const showsAi = data.submissions.some((submission) => submission.ai_review);
 
   // Xác định submission có primary_score cao nhất trong trang hiện tại
   const bestSubmissionId = data.submissions.reduce<string | null>((bestId, current) => {
@@ -279,6 +294,9 @@ export function MySubmissionsPage() {
               <th scope="col" className="subm-col-id">Submission / thời gian</th>
               <th scope="col" className="subm-col-file">Tệp đã nộp</th>
               <th scope="col" className="subm-col-status">Trạng thái</th>
+              {showsAi && (
+                <th scope="col" className="subm-col-ai">AI sơ bộ</th>
+              )}
               <th scope="col" className="subm-col-num">F1</th>
               <th scope="col" className="subm-col-num">Precision</th>
               <th scope="col" className="subm-col-num">Recall</th>
@@ -352,6 +370,29 @@ export function MySubmissionsPage() {
                       </span>
                     )}
                   </td>
+                  {showsAi && (
+                    <td className="subm-ai-cell">
+                      {/* Thí sinh chỉ nhận trạng thái, kết luận và một câu tóm tắt an toàn. */}
+                      {submission.ai_review ? (
+                        <>
+                          <span
+                            className={`status-badge ${
+                              submission.ai_review.verdict
+                                ? AI_VERDICT_TONE[submission.ai_review.verdict]
+                                : "neutral"
+                            }`}
+                          >
+                            {submission.ai_review.verdict
+                              ? AI_VERDICT_LABEL[submission.ai_review.verdict]
+                              : AI_STATE_LABEL[submission.ai_review.state]}
+                          </span>
+                          <span className="cell-secondary">{submission.ai_review.summary}</span>
+                        </>
+                      ) : (
+                        <span className="cell-secondary">—</span>
+                      )}
+                    </td>
+                  )}
                   <td className="subm-score-cell score-cell">
                     {formatScore(submission.metrics?.f1)}
                   </td>
@@ -370,6 +411,15 @@ export function MySubmissionsPage() {
           </tbody>
         </table>
       </div>
+
+      {showsAi && <p className="subm-ai-note text-muted">{AI_PARTICIPANT_DISCLAIMER}</p>}
+
+      {/* Polling tự dừng sau ngân sách lượt; nói rõ để không bị đọc thành "AI đã chạy xong". */}
+      {pollExhausted && (
+        <div className="status-banner warning" role="status">
+          <span>Đã tạm dừng tự động làm mới. Bấm “Làm mới” để xem trạng thái AI mới nhất.</span>
+        </div>
+      )}
 
       {/* Phân trang */}
       {data.total > PAGE_SIZE && (

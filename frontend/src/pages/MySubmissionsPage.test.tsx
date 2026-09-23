@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { AI_PARTICIPANT_DISCLAIMER } from "../api/aiReview";
 import type { Competition } from "../api/competitions";
+import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
+import { flushTimers, setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
 
 const COMPETITION = {
@@ -82,7 +85,58 @@ function mockPagedFetch({ total = 120, gateOffset }: { total?: number; gateOffse
   return { urls, release };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  setDocumentHidden(false);
+});
+
+/** Cột AI của một dòng, tra theo class để không phụ thuộc thứ tự cột. */
+function aiCellOf(row: HTMLElement): HTMLElement {
+  return row.querySelector(".subm-ai-cell") as HTMLElement;
+}
+
+/** Một trang một dòng với projection AI thay đổi được, dùng cho cột AI và vòng poll. */
+function pagesWithAi(pending: boolean) {
+  return {
+    submissions: [
+      {
+        id: "s-ai",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+        primary_score: 0.9,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts: {
+          prediction: { filename: "ai.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+        ai_review: {
+          state: pending ? "QUEUED" : "COMPLETED",
+          verdict: pending ? null : "CLEAR",
+          summary: pending ? "Đang chờ kiểm tra." : "Không thấy vi phạm.",
+          updated_at: "2026-09-15T09:05:00Z",
+        },
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  };
+}
+
+/** Fetch trả body tính lại mỗi lần gọi, để đổi câu trả lời giữa các nhịp poll. */
+function mockMutableResponse(body: () => unknown) {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return jsonResponse(body());
+    }),
+  );
+  return { urls };
+}
 
 test("hiển thị history newest-first với nút tải artifact, status và metrics", async () => {
   mockResponse({
@@ -422,4 +476,196 @@ test("trang chỉ có bài bị từ chối thì không hiện điểm cao nhấ
 
   expect(screen.queryByText("Điểm cao nhất trong trang:")).toBeNull();
   expect(screen.queryByText("Tốt nhất")).toBeNull();
+});
+
+test("cột AI chỉ hiện kết luận an toàn, kèm câu nhắc và không lộ chi tiết kỹ thuật", async () => {
+  mockResponse({
+    submissions: [
+      {
+        ...pagesWithAi(false).submissions[0],
+        // Server không gửi những field này; nhét vào fixture để chắc rằng UI cũng không vẽ chúng
+        // nếu một ngày projection rộng ra.
+        ai_review: {
+          state: "COMPLETED",
+          verdict: "FLAGGED",
+          summary: "Có một dấu hiệu cần xem lại.",
+          updated_at: "2026-09-15T09:05:00Z",
+          provider_host: "api.example.com",
+          model: "gpt-oss-120b",
+          error: { code: "AI_PROVIDER_UNAUTHORIZED", message: "Nhà cung cấp từ chối API key." },
+          findings: [{ rule_text: "Không dùng dữ liệu ngoài." }],
+        },
+      },
+      {
+        id: "s-cu",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.5, precision: 0.4, recall: 0.3 },
+        primary_score: 0.5,
+        created_at: "2026-09-14T09:00:00Z",
+        artifacts: {
+          prediction: { filename: "cu.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByTitle("cu.csv");
+
+  const rows = screen.getAllByRole("row");
+  expect(within(rows[0]).getByText("AI sơ bộ")).toBeTruthy();
+  expect(within(aiCellOf(rows[1])).getByText("Có dấu hiệu")).toBeTruthy();
+  expect(within(aiCellOf(rows[1])).getByText("Có một dấu hiệu cần xem lại.")).toBeTruthy();
+
+  // Bài nộp từ lúc cuộc thi chưa bật AI: thiếu dữ liệu chứ không phải "không phát hiện".
+  const legacyCell = aiCellOf(rows[2]);
+  expect(legacyCell.textContent).toBe("—");
+
+  expect(screen.getByText(AI_PARTICIPANT_DISCLAIMER)).toBeTruthy();
+  const seen = document.body.textContent ?? "";
+  for (const secret of ["api.example.com", "gpt-oss-120b", "AI_PROVIDER_UNAUTHORIZED", "findings"]) {
+    expect(seen).not.toContain(secret);
+  }
+});
+
+test("chưa công khai kết luận AI cho thí sinh thì không có cột AI lẫn câu nhắc", async () => {
+  mockResponse({
+    submissions: [
+      {
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+        primary_score: 0.9,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts: {
+          prediction: { filename: "only.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByTitle("only.csv");
+
+  expect(screen.queryByText("AI sơ bộ")).toBeNull();
+  expect(screen.queryByText(AI_PARTICIPANT_DISCLAIMER)).toBeNull();
+  expect(document.querySelector(".subm-ai-cell")).toBeNull();
+});
+
+test("kết luận AI không đổi việc chọn bài tốt nhất: chỉ từ chối của con người mới loại bài", async () => {
+  mockResponse({
+    submissions: [
+      {
+        id: "s2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.95, precision: 0.9, recall: 0.9 },
+        primary_score: 0.95,
+        created_at: "2026-09-16T10:00:00Z",
+        review: null,
+        ai_review: {
+          state: "COMPLETED",
+          verdict: "FLAGGED",
+          summary: "Có dấu hiệu cần xem lại.",
+          updated_at: "2026-09-16T10:05:00Z",
+        },
+        artifacts: {
+          prediction: { filename: "flagged.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+      {
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.7, precision: 0.6, recall: 0.5 },
+        primary_score: 0.7,
+        created_at: "2026-09-15T09:00:00Z",
+        review: { status: "rejected", note: "Notebook sai kiến trúc." },
+        ai_review: {
+          state: "COMPLETED",
+          verdict: "CLEAR",
+          summary: "Không thấy vi phạm.",
+          updated_at: "2026-09-15T09:05:00Z",
+        },
+        artifacts: {
+          prediction: { filename: "clear.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByTitle("flagged.csv");
+
+  const rows = screen.getAllByRole("row");
+  // Bài điểm cao có verdict xấu vẫn là bài tốt nhất: verdict AI không phải phán quyết.
+  expect(within(rows[1]).getByText("Tốt nhất")).toBeTruthy();
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.950000");
+  // Bài ngược lại - AI sạch nhưng người từ chối - thì mất suất, đúng như trước khi có AI.
+  expect(within(rows[2]).queryByText("Tốt nhất")).toBeNull();
+  expect(within(rows[2]).getByText("Không chấp nhận")).toBeTruthy();
+});
+
+test("còn lượt AI đang chạy thì trang tự làm mới theo nhịp, hết lượt thì dừng", async () => {
+  vi.useFakeTimers();
+  let pending = true;
+  const { urls } = mockMutableResponse(() => pagesWithAi(pending));
+
+  renderPage();
+  await flushTimers();
+  expect(urls).toHaveLength(1);
+
+  await flushTimers(POLL_INTERVAL_MS * 2);
+  expect(urls).toHaveLength(3);
+
+  pending = false;
+  await flushTimers(POLL_INTERVAL_MS);
+  expect(urls).toHaveLength(4);
+  await flushTimers(POLL_INTERVAL_MS * 5);
+  expect(urls).toHaveLength(4);
+});
+
+test("hết ngân sách poll thì trang nói rõ đã dừng thay vì quay mãi", async () => {
+  vi.useFakeTimers();
+  const { urls } = mockMutableResponse(() => pagesWithAi(true));
+
+  renderPage();
+  await flushTimers();
+  await flushTimers(POLL_INTERVAL_MS * MAX_POLLS);
+
+  // Ngân sách đếm theo lượt gọi thật: dừng ở MAX_POLLS lượt poll, cộng lượt tải đầu.
+  expect(urls).toHaveLength(MAX_POLLS + 1);
+  expect(screen.getByText(/Đã tạm dừng tự động làm mới/)).toBeTruthy();
+
+  await flushTimers(POLL_INTERVAL_MS * 3);
+  expect(urls).toHaveLength(MAX_POLLS + 1);
+});
+
+test("tab bị ẩn thì ngừng tốn lượt poll chờ AI", async () => {
+  vi.useFakeTimers();
+  const { urls } = mockMutableResponse(() => pagesWithAi(true));
+
+  renderPage();
+  await flushTimers();
+  expect(urls).toHaveLength(1);
+
+  setDocumentHidden(true);
+  await flushTimers(POLL_INTERVAL_MS * 3);
+  expect(urls).toHaveLength(1);
+
+  setDocumentHidden(false);
+  await flushTimers(POLL_INTERVAL_MS);
+  expect(urls).toHaveLength(2);
 });

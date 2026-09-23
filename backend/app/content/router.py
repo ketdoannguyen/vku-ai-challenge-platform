@@ -98,9 +98,6 @@ async def _visible_competition(db, slug: str) -> dict:
 
 def _read_markdown(content: dict) -> str:
     try:
-        path = storage.ensure_within(
-            Path(get_settings().data_dir), Path(content["markdown_path"])
-        )
-        return storage.read_bytes(path).decode("utf-8")
-    except (ValueError, OSError, UnicodeDecodeError):
+        return storage.read_markdown(get_settings().data_dir, content["markdown_path"])
+    except storage.ContentFileMissing:
         raise api_error(404, "CONTENT_FILE_MISSING", "File Markdown không tồn tại.")

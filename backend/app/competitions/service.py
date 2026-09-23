@@ -325,14 +325,23 @@ async def delete_competition_cascade(db, competition: dict) -> None:
     Mongo standalone không có transaction: nếu một bước lỗi giữa đường thì cuộc thi vẫn còn
     và lệnh gọi lại chạy tiếp được, thay vì để lại dữ liệu con mồ côi không ai xoá.
     """
+    from app.ai_review import queue as ai_queue
+    from app.ai_review import service as ai_service
+    from app.ai_review.content_snapshot import delete_revisions
     from app.content.service import CONTENTS_COLLECTION
     from app.memberships.service import MEMBERSHIPS_COLLECTION
     from app.submissions.service import SUBMISSIONS_COLLECTION
 
     competition_id = competition["_id"]
+    # Job và audit row AI đứng trước submission: cả hai tham chiếu tới nó, xoá ngược thứ tự sẽ để
+    # lại job trỏ vào một bài không còn tồn tại.
+    await db[ai_queue.JOBS_COLLECTION].delete_many({"competition_id": competition_id})
+    await db[ai_service.REVIEWS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[SUBMISSIONS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[MEMBERSHIPS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[CONTENTS_COLLECTION].delete_many({"competition_id": competition_id})
+    # Revision đứng sau submission/review vì chúng tham chiếu tới nó.
+    await delete_revisions(db, competition_id)
     await db[COMPETITIONS_COLLECTION].delete_one({"_id": competition_id})
 
 

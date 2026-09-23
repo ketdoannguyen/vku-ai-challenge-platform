@@ -61,6 +61,39 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Payload chấm điểm đã xong, chưa ghép projection AI. */
+const SCORED = {
+  id: "submission-1",
+  competition_id: COMPETITION.id,
+  status: "completed",
+  metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
+  primary_score: 0.5,
+  created_at: "2026-09-15T00:00:00Z",
+  quota_remaining: 4,
+};
+
+/** Trả lời lượt nộp bằng payload đã cho và ghi lại số request để chứng minh trang không poll. */
+function mockSubmit(payload: unknown) {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify(payload), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  return urls;
+}
+
+function submitOnce() {
+  selectCsv();
+  selectNotebook();
+  fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
+}
+
 test("hiển thị rule summary và chỉ mở nút nộp khi đã đủ hai tệp", () => {
   renderPage();
   const rules = screen.getByLabelText("Quy định file submission");
@@ -318,4 +351,64 @@ test("khóa form khi chưa là member hoặc scoring chưa ready", async () => {
     submission_config: { ...COMPETITION.submission_config, ready: false },
   });
   expect(await waitFor(() => screen.getByText("Cuộc thi chưa sẵn sàng chấm điểm."))).toBeTruthy();
+});
+
+test("lượt AI còn chạy chỉ là dòng nhắc: điểm đã có ngay và trang không chờ, không poll", async () => {
+  const urls = mockSubmit({
+    ...SCORED,
+    ai_review: {
+      state: "QUEUED",
+      verdict: null,
+      summary: "AI đang kiểm tra notebook.",
+      updated_at: null,
+    },
+  });
+  renderPage();
+  submitOnce();
+
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  expect(screen.getAllByText("0.500000")).toHaveLength(3);
+  expect(
+    screen.getByText("AI đang kiểm tra notebook (kết quả sơ bộ, không ảnh hưởng điểm số)."),
+  ).toBeTruthy();
+
+  // Chấm điểm xong là xong: đúng một request, không có vòng poll nào cho AI.
+  expect(urls).toHaveLength(1);
+});
+
+test("lượt AI đã xong hoặc chưa từng chạy thì không hiện dòng nhắc", async () => {
+  mockSubmit({
+    ...SCORED,
+    ai_review: {
+      state: "COMPLETED",
+      verdict: "CLEAR",
+      summary: "AI không phát hiện dấu hiệu vi phạm thể lệ trong notebook.",
+      updated_at: "2026-09-15T00:01:00Z",
+    },
+  });
+  renderPage();
+  submitOnce();
+
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  expect(screen.queryByText(/AI đang kiểm tra notebook \(/)).toBeNull();
+});
+
+test("lượt AI hỏng không bị nói thành đang kiểm tra", async () => {
+  mockSubmit({
+    ...SCORED,
+    ai_review: {
+      state: "ERROR",
+      verdict: "ERROR",
+      summary: "AI chưa thể hoàn tất kiểm tra.",
+      updated_at: "2026-09-15T00:01:00Z",
+    },
+  });
+  renderPage();
+  submitOnce();
+
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  // Lượt hỏng là chuyện đã xong, không phải đang chờ: nói "đang kiểm tra" ở đây là nói dối.
+  expect(screen.queryByText(/AI đang kiểm tra notebook \(/)).toBeNull();
+  // Trang kết quả chỉ nói về điểm; trạng thái AI nằm ở lịch sử bài nộp.
+  expect(screen.queryByText("AI chưa thể hoàn tất kiểm tra.")).toBeNull();
 });

@@ -268,12 +268,9 @@ async def _read_limited(file: UploadFile, limit_mb: int) -> bytes:
 
 
 def _read_markdown(content: dict) -> str:
-    path = storage.ensure_within(
-        Path(get_settings().data_dir), Path(content["markdown_path"])
-    )
     try:
-        return storage.read_bytes(path).decode("utf-8")
-    except (OSError, UnicodeDecodeError):
+        return storage.read_markdown(get_settings().data_dir, content["markdown_path"])
+    except storage.ContentFileMissing:
         raise api_error(404, "CONTENT_FILE_MISSING", "File Markdown không tồn tại.")
 
 

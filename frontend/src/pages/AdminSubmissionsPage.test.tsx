@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import type { AdminAiReview, AiReviewDetail } from "../api/aiReview";
 import type { AdminSubmissionsResponse, GlobalSubmissionItem } from "../api/results";
+import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
+import { flushTimers, setDocumentHidden } from "../test/timers";
 import { AdminSubmissionsPage } from "./AdminSubmissionsPage";
 
 const ROW: GlobalSubmissionItem = {
@@ -19,6 +22,8 @@ const ROW: GlobalSubmissionItem = {
   competition: { id: "c1", slug: "cup-1", name: "Cup 1" },
   // Chưa từng bị xét duyệt: mặc định hợp lệ.
   review: null,
+  // Cuộc thi chưa từng bật AI lúc nộp bài.
+  ai_review: null,
 };
 
 const STATS = { total: 3, competitions: 2, teams: 2, completed: 2 };
@@ -109,6 +114,8 @@ function statsRegion() {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  setDocumentHidden(false);
 });
 
 test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái và điểm", async () => {
@@ -121,10 +128,12 @@ test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái v�
     "href",
     "/admin/competitions/c1",
   );
-  expect(screen.getByText("cup-1")).toBeTruthy();
-  // Nhãn trạng thái trùng với nhãn trong ô lọc nên phải đọc trong bảng.
-  const region = screen.getByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
-  expect(within(region).getByText("Đã chấm điểm")).toBeTruthy();
+  // Slug là định danh kỹ thuật, không còn chỗ trong thẻ: tên cuộc thi đã đủ để nhận ra.
+  expect(screen.queryByText("cup-1")).toBeNull();
+  // Trạng thái chỉ còn icon, kết luận nằm trong `aria-label`; nhãn chữ trùng với ô lọc nên chỉ
+  // tra được bằng role.
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
+  expect(within(region).getByRole("img", { name: "Đã chấm điểm" })).toBeTruthy();
   expect(screen.getAllByText("0.900000").length).toBeGreaterThan(0);
   expect(screen.getByText("1 bài nộp trong bộ lọc hiện tại.")).toBeTruthy();
 
@@ -214,76 +223,114 @@ test("gõ tìm kiếm chỉ gọi server sau khi ngừng gõ, Enter áp dụng n
   expect(lastParams(urls).get("offset")).toBe("0");
 });
 
-test("bảy cột sắp xếp được với thứ tự mặc định riêng của từng cột", async () => {
-  const { urls } = mockApi();
-  renderPage();
-  await screen.findByText("Đội 0");
-
-  // Mặc định ban đầu: hàng mới nhất trước.
-  expect(screen.getByRole("columnheader", { name: /^Thời gian/ })).toHaveAttribute(
-    "aria-sort",
-    "descending",
-  );
-
-  const columns: Array<[RegExp, string, string]> = [
-    [/^Cuộc thi/, "competition", "asc"],
-    [/^Đội/, "team", "asc"],
-    [/^F1$/, "f1", "desc"],
-    [/^Precision/, "precision", "desc"],
-    [/^Recall/, "recall", "desc"],
-    [/Điểm chính/, "primary_score", "desc"],
-    [/^Thời gian/, "created_at", "desc"],
-  ];
-
-  for (const [label, field, order] of columns) {
-    fireEvent.click(within(screen.getByRole("columnheader", { name: label })).getByRole("button"));
-    await waitFor(() => expect(lastParams(urls).get("sort")).toBe(field));
-    expect(lastParams(urls).get("order")).toBe(order);
-    expect(lastParams(urls).get("offset")).toBe("0");
-    expect(screen.getByRole("columnheader", { name: label })).toHaveAttribute(
-      "aria-sort",
-      order === "asc" ? "ascending" : "descending",
-    );
-  }
-
-  // Bấm lại cột đang chọn thì đảo chiều; rời cột rồi quay lại thì về lại mặc định của cột.
-  const primaryHeader = () => screen.getByRole("columnheader", { name: /Điểm chính/ });
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
-  expect(lastParams(urls).get("order")).toBe("desc");
-
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
-
-  fireEvent.click(within(screen.getByRole("columnheader", { name: /^Đội/ })).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("team"));
-  fireEvent.click(within(primaryHeader()).getByRole("button"));
-  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
-  expect(lastParams(urls).get("order")).toBe("desc");
-
-  // Cột không sắp xếp được thì không được mang trạng thái aria-sort.
-  expect(screen.getByRole("columnheader", { name: "Trạng thái" })).not.toHaveAttribute(
-    "aria-sort",
-  );
-  expect(screen.getByRole("columnheader", { name: "Tệp đã nộp" })).not.toHaveAttribute(
-    "aria-sort",
-  );
-});
-
-test("chỉ cột Điểm chính được đánh dấu nổi bật", async () => {
+test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường của từng tầng", async () => {
   mockApi();
   renderPage();
   await screen.findByText("Đội 0");
 
-  const primary = screen.getByRole("columnheader", { name: /Điểm chính/ });
-  expect(primary.className).toContain("primary-col");
-  expect(screen.getByRole("columnheader", { name: /^F1$/ }).className).not.toContain("primary-col");
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
+  // Một bài nộp vẫn là một item duy nhất, không tách thành hai dòng.
+  const items = within(region).getAllByRole("listitem");
+  expect(items).toHaveLength(1);
 
-  const cells = within(screen.getByText("Đội 0").closest("tr") as HTMLElement).getAllByRole("cell");
-  // Điểm chính là cột cuối; F1 là cột điểm đầu tiên sau hai cột xét duyệt/thao tác.
-  expect(cells[cells.length - 1].className).toContain("primary-score");
-  expect(cells[cells.length - 1].className).toContain("primary-col");
-  expect(cells[cells.length - 4].className).not.toContain("primary-col");
+  const tiers = Array.from(items[0].querySelectorAll(".subm-card-tier")) as HTMLElement[];
+  expect(tiers).toHaveLength(2);
+  const labelsOf = (tier: HTMLElement) =>
+    Array.from(tier.querySelectorAll("dt")).map((dt) => dt.textContent);
+
+  expect(labelsOf(tiers[0])).toEqual([
+    "Thời gian",
+    "Cuộc thi",
+    "Đội",
+    "Điểm chính",
+    "Kết quả",
+  ]);
+  // Tầng dưới theo đúng thứ tự đọc: chấm xong chưa → máy nói gì → người chốt gì, thao tác cuối.
+  expect(labelsOf(tiers[1])).toEqual([
+    "Tệp đã nộp",
+    "Trạng thái",
+    "AI sơ bộ",
+    "Xét duyệt",
+    "Thao tác",
+  ]);
+
+  // Điểm chính đứng riêng trong hộp của nó; cụm Kết quả chỉ còn ba metric phụ.
+  expect(fieldValue(items[0], "Điểm chính").querySelector(".subm-score")).toBeTruthy();
+  expect(fieldValue(items[0], "Kết quả").querySelectorAll(".subm-metric")).toHaveLength(3);
+});
+
+test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có thứ tự mặc định riêng", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const field = screen.getByLabelText("Sắp xếp theo");
+  // Mặc định ban đầu: bài mới nhất trước.
+  expect(field).toHaveValue("created_at");
+  expect(screen.getByRole("button", { name: "Giảm dần" })).toBeTruthy();
+
+  const fields: Array<[string, string, string, string]> = [
+    ["competition", "asc", "Tăng dần", "Cuộc thi"],
+    ["team", "asc", "Tăng dần", "Đội"],
+    ["f1", "desc", "Giảm dần", "F1"],
+    ["precision", "desc", "Giảm dần", "Precision"],
+    ["recall", "desc", "Giảm dần", "Recall"],
+    ["primary_score", "desc", "Giảm dần", "Điểm chính"],
+    ["created_at", "desc", "Giảm dần", "Thời gian"],
+  ];
+
+  for (const [sort, order, direction, label] of fields) {
+    fireEvent.change(field, { target: { value: sort } });
+    await waitFor(() => expect(lastParams(urls).get("sort")).toBe(sort));
+    expect(lastParams(urls).get("order")).toBe(order);
+    expect(lastParams(urls).get("offset")).toBe("0");
+    expect(field).toHaveValue(sort);
+    // Mỗi lựa chọn đều có nhãn đọc được và nút đảo chiều nói đúng chiều đang áp dụng.
+    expect(within(field).getByRole("option", { name: label })).toBeTruthy();
+    expect(screen.getByRole("button", { name: direction })).toBeTruthy();
+  }
+
+  // Rời trường rồi quay lại thì về lại thứ tự mặc định của trường đó, không giữ chiều cũ.
+  fireEvent.change(field, { target: { value: "team" } });
+  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
+  fireEvent.change(field, { target: { value: "primary_score" } });
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
+  expect(lastParams(urls).get("order")).toBe("desc");
+
+  // Nút đảo chiều lật chiều của trường đang chọn, và đây là đường duy nhất để lật.
+  fireEvent.click(screen.getByRole("button", { name: "Giảm dần" }));
+  await waitFor(() => expect(lastParams(urls).get("order")).toBe("asc"));
+  expect(lastParams(urls).get("sort")).toBe("primary_score");
+  expect(screen.getByRole("button", { name: "Tăng dần" })).toBeTruthy();
+});
+
+test("Điểm chính đứng riêng trong hộp vàng, ba metric phụ giữ trung tính", async () => {
+  mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const primary = fieldValue(itemOf("Đội 0"), "Điểm chính");
+  expect(primary.querySelector(".subm-score .subm-result-primary-score")).toHaveTextContent(
+    "0.900000",
+  );
+  // Hộp điểm có ô icon vàng riêng, không mượn ô icon của trường nào khác.
+  expect(primary.querySelector(".subm-score .subm-block-icon-gold")).toBeTruthy();
+
+  const result = fieldValue(itemOf("Đội 0"), "Kết quả");
+  // Điểm chính không nằm lẫn trong nhóm metric phụ.
+  expect(result.querySelector(".subm-result-primary-score")).toBeNull();
+
+  for (const [label, value] of [
+    ["F1", "0.900000"],
+    ["Precision", "0.800000"],
+    ["Recall", "0.700000"],
+  ]) {
+    const metric = Array.from(result.querySelectorAll(".subm-metric")).find(
+      (node) => node.querySelector(".subm-metric-label")?.textContent === label,
+    ) as HTMLElement;
+    expect(metric, `không có metric "${label}"`).toBeTruthy();
+    expect(metric.querySelector(".subm-metric-value")).toHaveTextContent(value);
+  }
 });
 
 test("hiện bốn thẻ thống kê theo bộ lọc hiện tại", async () => {
@@ -345,7 +392,7 @@ test("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới",
   await screen.findByText("Đội 0");
   fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
 
-  const region = screen.getByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   expect(region).toHaveAttribute("aria-busy", "true");
   expect(screen.getByText("Đội 0")).toBeTruthy();
   expect(screen.getByRole("status")).toHaveTextContent("Đang cập nhật…");
@@ -355,6 +402,58 @@ test("đổi trang giữ bảng cũ, báo đang bận rồi render trang mới",
   expect(screen.queryByText("Đội 0")).toBeNull();
   expect(region).toHaveAttribute("aria-busy", "false");
   expect(screen.getByRole("status")).toHaveTextContent("Đã hiển thị 51–100 trong số 120 bài nộp");
+});
+
+test("nút Làm mới tải lại đúng trang đang xem và tự khoá trong lúc chờ", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const { urls } = mockApi(async (url) => {
+    calls += 1;
+    // Lượt thứ ba chính là nút Làm mới; giữ nó lại để bắt được trạng thái đang bận.
+    if (calls === 3) await gate;
+    return jsonResponse(url.includes("offset=50") ? page(50, 120) : page(0, 120));
+  });
+
+  renderPage();
+  await screen.findByText("Đội 0");
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await screen.findByText("Đội 50");
+
+  const refresh = screen.getByRole("button", { name: "Làm mới" });
+  fireEvent.click(refresh);
+
+  // Đang tải thì nút khoá, nên hai lượt gọi không chồng lên nhau.
+  expect(refresh).toBeDisabled();
+
+  release();
+  await waitFor(() => expect(refresh).not.toBeDisabled());
+  // Tải lại trang đang xem chứ không nhảy về trang đầu.
+  expect(lastParams(urls).get("offset")).toBe("50");
+});
+
+test("lần tải đầu hiện khung xương ba thẻ, không để trống", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  mockApi(async () => {
+    await gate;
+    return jsonResponse(page(0, 1));
+  });
+
+  const { container } = renderPage();
+
+  // Ba thẻ giữ đúng nhịp dọc của danh sách thật nên lúc dữ liệu về trang không nhảy.
+  expect(container.querySelectorAll(".subm-skeleton-card")).toHaveLength(3);
+  // Khung xương là trang trí; chữ báo đang tải mới là thứ trình đọc màn hình đọc.
+  expect(screen.getByText("Đang tải danh sách bài nộp...")).toBeTruthy();
+
+  release();
+  expect(await screen.findByText("Đội 0")).toBeTruthy();
+  expect(container.querySelector(".subm-skeleton")).toBeNull();
 });
 
 test("cuộc thi đã xóa hiện tên nhưng không có link để mở", async () => {
@@ -461,7 +560,39 @@ function row(
   };
 }
 
-test("cột Xét duyệt hiện lý do, người duyệt và thời điểm; bài lỗi chấm không xét duyệt được", async () => {
+/** Thẻ bài nộp của một đội: mỗi bài nộp là đúng một `li`. */
+function itemOf(name: string): HTMLElement {
+  return screen.getByText(name).closest("li") as HTMLElement;
+}
+
+/** Giá trị của một trường trong thẻ, tra theo nhãn `dt` nên thêm trường mới không lệch assertion. */
+function fieldValue(item: HTMLElement, label: string): HTMLElement {
+  const term = Array.from(item.querySelectorAll("dt")).find((dt) => dt.textContent === label);
+  expect(term, `không có trường "${label}"`).toBeTruthy();
+  return (term as HTMLElement).nextElementSibling as HTMLElement;
+}
+
+/**
+ * Badge của một trục trạng thái. Chữ kết luận giờ hiện ngay trên badge, nhưng assertion vẫn tra
+ * qua `aria-label`: đó mới là tên trình đọc màn hình đọc, và nó không đổi theo CSS.
+ */
+function statusBadge(item: HTMLElement, label: string): HTMLElement {
+  const badge = fieldValue(item, label).querySelector<HTMLElement>(".subm-badge");
+  expect(badge, `không có badge trạng thái ở trường "${label}"`).toBeTruthy();
+  return badge as HTMLElement;
+}
+
+/**
+ * Tooltip của một icon trạng thái. Nó là phần tử thật chứ không phải `::after` vì phải đặt được
+ * theo vị trí icon, nên nội dung đọc thẳng từ DOM thay vì từ một thuộc tính.
+ */
+function statusTip(item: HTMLElement, label: string): HTMLElement {
+  const tip = statusBadge(item, label).querySelector<HTMLElement>(".subm-tip");
+  expect(tip, `không có tooltip ở trường "${label}"`).toBeTruthy();
+  return tip as HTMLElement;
+}
+
+test("trường Xét duyệt là badge có chữ; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
   mockApi(() =>
     jsonResponse({
       ...page(0, 3),
@@ -474,27 +605,40 @@ test("cột Xét duyệt hiện lý do, người duyệt và thời điểm; bà
   );
   renderPage();
 
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   await within(region).findByText("Đội bị từ chối");
 
-  const rejectedRow = within(region).getByText("Đội bị từ chối").closest("tr") as HTMLElement;
-  expect(within(rejectedRow).getByText("Không chấp nhận")).toBeTruthy();
-  expect(within(rejectedRow).getByText(REJECTED_REVIEW.note)).toBeTruthy();
-  expect(within(rejectedRow).getByText(/Admin A/)).toBeTruthy();
-  expect(within(rejectedRow).getByRole("button", { name: "Khôi phục" })).toBeTruthy();
+  const rejectedItem = itemOf("Đội bị từ chối");
+  const rejectedReview = statusBadge(rejectedItem, "Xét duyệt");
+  expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
+  // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
+  // và thời điểm vào tooltip, cách nhau bằng xuống dòng. Nhãn kết luận đã hiện ngay trên badge
+  // nên tooltip không lặp lại nó nữa.
+  const rejectedTip = statusTip(rejectedItem, "Xét duyệt").textContent ?? "";
+  expect(rejectedTip).toContain(REJECTED_REVIEW.note);
+  expect(rejectedTip).toContain("Admin A");
+  expect(rejectedTip).not.toContain("Không chấp nhận");
+  expect(
+    within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
+  ).toBeTruthy();
 
   // Chưa từng bị xét duyệt nghĩa là hợp lệ, và chỉ có thao tác từ chối.
-  const validRow = within(region).getByText("Đội hợp lệ").closest("tr") as HTMLElement;
-  expect(within(validRow).getByText("Hợp lệ")).toBeTruthy();
-  expect(within(validRow).getByRole("button", { name: "Không chấp nhận" })).toBeTruthy();
+  const validItem = itemOf("Đội hợp lệ");
+  expect(statusBadge(validItem, "Xét duyệt")).toHaveAttribute("aria-label", "Hợp lệ");
+  expect(
+    within(fieldValue(validItem, "Thao tác")).getByRole("button", { name: "Không chấp nhận" }),
+  ).toBeTruthy();
 
-  // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai ô đều là gạch, không có thao tác.
-  const failedRow = within(region).getByText("Đội lỗi chấm").closest("tr") as HTMLElement;
-  const failedCells = within(failedRow).getAllByRole("cell");
-  expect(failedCells[5]).toHaveTextContent("—");
-  expect(failedCells[6]).toHaveTextContent("—");
-  // Ô thao tác chỉ có gạch; nút tải artifact ở cột khác không tính.
-  expect(within(failedCells[6]).queryByRole("button")).toBeNull();
+  // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai trường đều là gạch, không có thao tác.
+  const failedItem = itemOf("Đội lỗi chấm");
+  expect(statusBadge(failedItem, "Xét duyệt")).toHaveAttribute(
+    "aria-label",
+    "Không xét duyệt được",
+  );
+  expect(fieldValue(failedItem, "Thao tác")).toHaveTextContent("—");
+  expect(within(fieldValue(failedItem, "Thao tác")).queryByRole("button")).toBeNull();
+  // Gạch chỉ dành cho hai trường phụ thuộc trạng thái chấm; tệp của bài lỗi vẫn tải được.
+  expect(within(fieldValue(failedItem, "Tệp đã nộp")).getAllByRole("button")).toHaveLength(2);
 });
 
 test("lọc theo trạng thái duyệt là trục riêng, không lẫn với trạng thái chấm", async () => {
@@ -587,6 +731,61 @@ test("PATCH lỗi thì modal vẫn mở, giữ nguyên lý do và không báo th
   expect(screen.queryByText("Đã đánh dấu bài nộp là không chấp nhận.")).toBeNull();
 });
 
+test("ô lý do được điền sẵn bản nháp của AI, và bản admin sửa mới là thứ được gửi", async () => {
+  const { requests } = mockApi((_url, init) =>
+    init.method === "PATCH" ? jsonResponse({ submission: ROW }) : jsonResponse(pageOf([AI_ROW])),
+  );
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  const note = within(dialog).getByLabelText("Lý do không chấp nhận");
+
+  // Bản nháp của model phải nói rõ nguồn gốc, để admin không gửi thẳng nó mà chưa đọc.
+  expect(note).toHaveValue(AI_HINT);
+  expect(within(dialog).getByText(/AI soạn nháp/)).toBeTruthy();
+
+  fireEvent.change(note, { target: { value: "  Bỏ dữ liệu ngoài rồi nộp lại.  " } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Không chấp nhận" }));
+
+  await waitFor(() => expect(reviewRequests(requests).length).toBe(1));
+  expect(JSON.parse(reviewRequests(requests)[0].body)).toEqual({
+    status: "rejected",
+    note: "Bỏ dữ liệu ngoài rồi nộp lại.",
+  });
+});
+
+test("gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED", async () => {
+  // Verdict khác FLAGGED nghĩa là chưa có vi phạm nào được server xác minh - kể cả khi model có
+  // viết gợi ý, nó cũng không được tự biến thành lời buộc tội.
+  const clearRow: GlobalSubmissionItem = {
+    ...AI_ROW,
+    ai_review: {
+      state: "COMPLETED",
+      verdict: "CLEAR",
+      summary: "Không thấy vi phạm.",
+      participant_summary: AI_HINT,
+      generation: 1,
+      run_id: "run-1",
+      latest_review_id: "r1",
+      requested_at: "2026-09-15T09:10:00Z",
+      updated_at: "2026-09-15T09:11:00Z",
+    },
+  };
+  mockApi(() => jsonResponse(pageOf([clearRow])));
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+
+  // Ô trống, không có dòng nhắc nguồn gốc, và nút vẫn khoá theo đúng luật cũ.
+  expect(within(dialog).getByLabelText("Lý do không chấp nhận")).toHaveValue("");
+  expect(within(dialog).queryByText(/AI soạn nháp/)).toBeNull();
+  expect(within(dialog).getByRole("button", { name: "Không chấp nhận" })).toBeDisabled();
+});
+
 test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   const { requests } = mockApi((_url, init) =>
     init.method === "PATCH"
@@ -598,7 +797,7 @@ test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   );
   renderPage();
 
-  const region = await screen.findByRole("region", { name: "Bảng bài nộp toàn hệ thống" });
+  const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   await within(region).findByText("Không chấp nhận");
 
   fireEvent.click(within(region).getByRole("button", { name: "Khôi phục" }));
@@ -635,4 +834,312 @@ test("Hủy và Escape đều không gửi PATCH và trả focus về nút vừa
   expect(document.activeElement).toBe(trigger);
 
   expect(reviewRequests(requests)).toEqual([]);
+});
+
+/** Bản nháp model soạn cho thí sinh - chỉ admin thấy, và chỉ được điền sẵn khi verdict là FLAGGED. */
+const AI_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu BTC cấp.";
+
+/** Projection AI đứng riêng khỏi `AI_ROW` để bài khác đổi được kết luận mà giữ nguyên phần còn lại. */
+const AI_PROJECTION: AdminAiReview = {
+  state: "COMPLETED",
+  verdict: "FLAGGED",
+  summary: "Có một dấu hiệu cần xem lại.",
+  participant_summary: AI_HINT,
+  generation: 1,
+  run_id: "run-1",
+  latest_review_id: "r1",
+  requested_at: "2026-09-15T09:10:00Z",
+  updated_at: "2026-09-15T09:11:00Z",
+};
+
+const AI_ROW: GlobalSubmissionItem = {
+  ...ROW,
+  // `page` đặt tên đội theo offset, nhưng fixture này đứng riêng nên tự khai tên.
+  account: { id: "a1", name: "Đội 0", email: "team@vku.vn" },
+  ai_review: AI_PROJECTION,
+};
+
+const AI_DETAIL: AiReviewDetail = {
+  submission: {
+    id: "s-0",
+    submission_no: 3,
+    status: "completed",
+    created_at: "2026-09-15T09:00:00Z",
+    account: { id: "a1", name: "Đội 0", email: "team@vku.vn" },
+    competition: { id: "c1", slug: "cup-1", name: "Cup 1" },
+  },
+  ai_review: AI_ROW.ai_review,
+  content_snapshot: {
+    state: "CAPTURED",
+    revision_id: "rev-1",
+    content_hash: "a".repeat(64),
+    error_code: null,
+    captured_at: "2026-09-15T09:00:00Z",
+  },
+  // `latest_review_id` chỉ có nghĩa khi record đó thật sự nằm trong history; modal đọc kết luận
+  // từ record chứ không từ projection.
+  history: [
+    {
+      id: "r1",
+      run_id: "run-1",
+      generation: 1,
+      status: "COMPLETED",
+      verdict: "FLAGGED",
+      model_verdict: "FLAGGED",
+      summary: "Có một dấu hiệu cần xem lại.",
+      participant_summary: AI_HINT,
+      findings: [],
+      notebook_stats: {
+        cells: 12,
+        code_cells: 8,
+        markdown_cells: 4,
+        lines: 210,
+        truncated: false,
+        omitted_cells: 0,
+      },
+      provider: "openai-compatible",
+      provider_host: "api.example.com",
+      model: "gpt-oss-120b",
+      versions: {
+        prompt: "ai-review-v3",
+        normalization: "notebook-v1",
+        context_policy: "context-v2",
+        canonicalization: null,
+        rule_ref: null,
+        verifier: null,
+      },
+      source: "PROVIDER",
+      reused_from_review_id: null,
+      bypass_cache: false,
+      manual: false,
+      attempts: 1,
+      downgrade_codes: [],
+      error: null,
+      started_at: "2026-09-15T09:10:00Z",
+      completed_at: "2026-09-15T09:10:02Z",
+      duration_ms: 2000,
+      created_at: "2026-09-15T09:10:02Z",
+    },
+  ],
+};
+
+/** Một trang có đúng những bài nộp được đưa vào, giữ nguyên tổng số để phân trang. */
+function pageOf(submissions: GlobalSubmissionItem[], total = submissions.length, offset = 0) {
+  return { ...page(offset, total), submissions };
+}
+
+test("trường AI hiện kết luận sơ bộ, bài chưa từng được đánh giá thì ghi rõ là chưa", async () => {
+  mockApi(() =>
+    jsonResponse(
+      pageOf([
+        AI_ROW,
+        { ...ROW, id: "s-1", account: { id: "a2", name: "Đội cũ", email: "cu@vku.vn" } },
+      ]),
+    ),
+  );
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const flaggedItem = itemOf("Đội 0");
+  const flaggedIcon = statusBadge(flaggedItem, "AI sơ bộ");
+  expect(flaggedIcon).toHaveAttribute("aria-label", "Có dấu hiệu");
+  // Thời điểm cập nhật không chiếm thêm dòng nào trong thẻ, chỉ vào tooltip.
+  expect(statusTip(flaggedItem, "AI sơ bộ").textContent).toContain("Cập nhật");
+  expect(within(fieldValue(flaggedItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
+    .toBeTruthy();
+
+  // Bài nộp từ lúc cuộc thi chưa bật AI không có projection. Thiếu dữ liệu không phải bằng chứng
+  // sạch, nên ô này không được hiện "Không phát hiện". Nút vẫn phải có: đó là đường duy nhất để BTC
+  // mở modal và khởi tạo lượt kiểm tra cho bài cũ.
+  const legacyItem = itemOf("Đội cũ");
+  expect(statusBadge(legacyItem, "AI sơ bộ")).toHaveAttribute("aria-label", "Chưa đánh giá");
+  expect(within(fieldValue(legacyItem, "AI sơ bộ")).getByRole("button", { name: "Chi tiết AI" }))
+    .toBeTruthy();
+
+  // AI sơ bộ đứng cạnh xét duyệt của người, nhưng là hai trường riêng biệt.
+  expect(statusBadge(legacyItem, "Xét duyệt")).not.toHaveAttribute(
+    "aria-label",
+    "Chưa đánh giá",
+  );
+});
+
+test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", async () => {
+  mockApi(() =>
+    jsonResponse(
+      pageOf([
+        row("s-clean", "Đội sạch"),
+        // AI không kết luận được: cảnh báo, chưa phải vi phạm.
+        row("s-unsure", "Đội AI chưa kết luận", {
+          ai_review: { ...AI_PROJECTION, verdict: "INCONCLUSIVE" },
+        }),
+        row("s-flagged", "Đội bị AI gắn cờ", { ai_review: AI_ROW.ai_review }),
+        row("s-rejected", "Đội bị từ chối", { review: REJECTED_REVIEW }),
+        row("s-failed", "Đội lỗi chấm", { status: "failed" }),
+      ]),
+    ),
+  );
+  renderPage();
+  await screen.findByText("Đội sạch");
+
+  // Sạch: không trục nào đáng xem nên vạch xanh.
+  expect(itemOf("Đội sạch").className).toContain("subm-card-success");
+
+  // Chưa kết luận được là vàng, dù trạng thái chấm và xét duyệt đều sạch.
+  expect(itemOf("Đội AI chưa kết luận").className).toContain("subm-card-warning");
+
+  // Gắn cờ đã là đỏ, dù chưa ai từ chối.
+  expect(itemOf("Đội bị AI gắn cờ").className).toContain("subm-card-danger");
+
+  // Từ chối cũng đỏ, và đỏ ở đây đến từ trục xét duyệt chứ không phải trục trạng thái.
+  expect(itemOf("Đội bị từ chối").className).toContain("subm-card-danger");
+
+  // Lỗi chấm cũng đỏ.
+  expect(itemOf("Đội lỗi chấm").className).toContain("subm-card-danger");
+});
+
+test("mỗi trục phán quyết mang tông của chính nó, còn vạch thẻ vẫn là mức nặng nhất", async () => {
+  mockApi(() =>
+    jsonResponse(
+      pageOf([row("s-flagged", "Đội bị AI gắn cờ", { ai_review: AI_ROW.ai_review })]),
+    ),
+  );
+  renderPage();
+  await screen.findByText("Đội bị AI gắn cờ");
+
+  const flagged = itemOf("Đội bị AI gắn cờ");
+  // Trục chấm và trục duyệt của bài này đều sạch...
+  expect(statusBadge(flagged, "Trạng thái").className).toContain("subm-badge-success");
+  expect(statusBadge(flagged, "Xét duyệt").className).toContain("subm-badge-success");
+  // ...chỉ trục AI là đỏ, và đó là chỗ duy nhất nói "bài này có vấn đề".
+  expect(statusBadge(flagged, "AI sơ bộ").className).toContain("subm-badge-danger");
+  // Vạch nhấn của thẻ lấy mức nặng nhất trong ba nên đỏ theo trục AI, không xanh theo hai trục kia.
+  expect(flagged.className).toContain("subm-card-danger");
+});
+
+test("lọc theo kết luận AI là trục riêng, không lẫn với trạng thái chấm hay trạng thái duyệt", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+  expect(lastParams(urls).get("ai_review")).toBe("all");
+
+  fireEvent.change(screen.getByLabelText("Lọc theo kết luận AI"), {
+    target: { value: "flagged" },
+  });
+  await waitFor(() => expect(lastParams(urls).get("ai_review")).toBe("flagged"));
+  expect(lastParams(urls).has("status")).toBe(false);
+  expect(lastParams(urls).has("review")).toBe(false);
+  expect(lastParams(urls).get("offset")).toBe("0");
+
+  // Bộ lọc AI không được kéo theo bộ lọc duyệt vừa đặt: đổi cái này không xóa cái kia.
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái duyệt"), {
+    target: { value: "accepted" },
+  });
+  await waitFor(() => expect(lastParams(urls).get("review")).toBe("accepted"));
+  expect(lastParams(urls).get("ai_review")).toBe("flagged");
+});
+
+test("Chi tiết AI mở đúng modal và chạy lại làm mới bảng mà không đụng tới trục duyệt", async () => {
+  const { urls, requests } = mockApi((url) => {
+    if (url.includes("/ai-review/rerun")) return jsonResponse({ submission: ROW });
+    if (url.includes("/ai-review")) return jsonResponse(AI_DETAIL);
+    return jsonResponse(pageOf([AI_ROW], 120));
+  });
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Chi tiết AI" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(
+    within(dialog).getByText("AI chỉ tham khảo, không ảnh hưởng điểm số. Ban Tổ chức quyết định cuối cùng."),
+  ).toBeTruthy();
+
+  // Modal AI chỉ để đọc và chạy lại: không có thao tác duyệt nào của con người trong đó.
+  expect(within(dialog).queryByRole("button", { name: "Không chấp nhận" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: "Khôi phục" })).toBeNull();
+
+  const before = urls.length;
+  fireEvent.click(within(dialog).getByRole("button", { name: "Chạy lại AI" }));
+  const confirm = await screen.findByRole("dialog", { name: "Chạy lại kiểm tra AI" });
+  fireEvent.click(within(confirm).getByRole("button", { name: "Chạy lại" }));
+
+  await waitFor(() =>
+    expect(requests.some((item) => item.url.endsWith("/ai-review/rerun"))).toBe(true),
+  );
+  await waitFor(() => expect(urls.length).toBeGreaterThan(before));
+  expect(lastParams(urls).get("ai_review")).toBe("all");
+  // Chạy lại AI không phải xét duyệt: không có PATCH nào được gửi.
+  expect(reviewRequests(requests)).toEqual([]);
+});
+
+test("không có lượt AI nào đang chạy thì bảng không tự gọi lại", async () => {
+  vi.useFakeTimers();
+  const { urls } = mockApi(() => jsonResponse(pageOf([AI_ROW])));
+
+  renderPage();
+  await flushTimers();
+  expect(urls).toHaveLength(1);
+
+  // Kết luận đã xong thì bảng đứng yên: không có lý do gì để quay vòng tải.
+  await flushTimers(POLL_INTERVAL_MS * 5);
+  expect(urls).toHaveLength(1);
+});
+
+test("còn lượt AI đang chạy thì tự làm mới theo nhịp, hết lượt thì dừng", async () => {
+  vi.useFakeTimers();
+  let pending = true;
+  const { urls } = mockApi(() =>
+    jsonResponse(
+      pageOf([
+        {
+          ...AI_ROW,
+          ai_review: pending
+            ? { ...AI_ROW.ai_review!, state: "QUEUED", verdict: null }
+            : AI_ROW.ai_review,
+        },
+      ]),
+    ),
+  );
+
+  renderPage();
+  await flushTimers();
+  expect(urls).toHaveLength(1);
+
+  await flushTimers(POLL_INTERVAL_MS * 2);
+  expect(urls).toHaveLength(3);
+
+  // Lượt AI đã xong ở lần tải kế tiếp: vòng poll tự tắt, không cần ai bảo.
+  pending = false;
+  await flushTimers(POLL_INTERVAL_MS);
+  expect(urls).toHaveLength(4);
+  await flushTimers(POLL_INTERVAL_MS * 5);
+  expect(urls).toHaveLength(4);
+});
+
+test("tab bị ẩn thì ngừng tốn lượt poll, và dừng hẳn sau ngân sách", async () => {
+  vi.useFakeTimers();
+  const pending = { ...AI_ROW.ai_review!, state: "QUEUED" as const, verdict: null };
+  const { urls } = mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: pending }])));
+
+  renderPage();
+  await flushTimers();
+  expect(urls).toHaveLength(1);
+
+  // Ẩn tab trước khi hết nhịp: không lượt nào được tiêu.
+  setDocumentHidden(true);
+  await flushTimers(POLL_INTERVAL_MS * 3);
+  expect(urls).toHaveLength(1);
+
+  // Quay lại tab thì nhịp chạy tiếp.
+  setDocumentHidden(false);
+  await flushTimers(POLL_INTERVAL_MS);
+  expect(urls.length).toBe(2);
+
+  await flushTimers(POLL_INTERVAL_MS * MAX_POLLS);
+  // Ngân sách đếm theo lượt thật sự gọi: dừng ở MAX_POLLS lượt poll, cộng lượt tải đầu.
+  expect(urls).toHaveLength(MAX_POLLS + 1);
+  expect(screen.getByText(/Đã tạm dừng tự động làm mới/)).toBeTruthy();
+
+  // Đã cạn ngân sách thì không tự quay lại nữa; đây là lúc nút Làm mới có việc.
+  await flushTimers(POLL_INTERVAL_MS * 3);
+  expect(urls).toHaveLength(MAX_POLLS + 1);
 });

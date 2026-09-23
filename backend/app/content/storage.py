@@ -61,6 +61,19 @@ def read_bytes(path: Path) -> bytes:
         return stream.read()
 
 
+class ContentFileMissing(Exception):
+    """Markdown của content không đọc được: thiếu file, symlink, đường dẫn sai, hoặc không phải UTF-8."""
+
+
+def read_markdown(data_dir: str | Path, markdown_path: str) -> str:
+    """Đọc Markdown qua `ensure_within` + `O_NOFOLLOW`; mọi trục trặc đều thành một lỗi tường minh."""
+    try:
+        path = ensure_within(Path(data_dir), Path(markdown_path))
+        return read_bytes(path).decode("utf-8")
+    except (ValueError, OSError, UnicodeDecodeError) as exc:
+        raise ContentFileMissing(markdown_path) from exc
+
+
 def validate_asset(filename: str, data: bytes) -> tuple[str, str]:
     extension = Path(filename).suffix.lower()
     spec = ASSET_TYPES.get(extension)

@@ -1,65 +1,112 @@
 vku-ai-challenge-platform/
-├── backend/
-│   ├── app/
-│   │   ├── accounts/
+├── .github
+│   ├── scripts
+│   │   └── previous-version.mjs
+│   └── workflows
+│       ├── deploy-worker.yml
+│       └── release-gate.yml
+├── backend
+│   ├── app
+│   │   ├── accounts
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
 │   │   │   └── service.py
-│   │   ├── auth/
+│   │   ├── ai_review
+│   │   │   ├── __init__.py
+│   │   │   ├── admin_router.py
+│   │   │   ├── constants.py
+│   │   │   ├── content_snapshot.py
+│   │   │   ├── crypto.py
+│   │   │   ├── models.py
+│   │   │   ├── notebook.py
+│   │   │   ├── prompt.py
+│   │   │   ├── provider.py
+│   │   │   ├── queue.py
+│   │   │   ├── serializers.py
+│   │   │   ├── service.py
+│   │   │   ├── settings.py
+│   │   │   ├── url_policy.py
+│   │   │   ├── verdict.py
+│   │   │   └── worker.py
+│   │   ├── auth
 │   │   │   ├── __init__.py
 │   │   │   ├── dependencies.py
 │   │   │   ├── passwords.py
 │   │   │   ├── rate_limit.py
 │   │   │   ├── router.py
 │   │   │   └── sessions.py
-│   │   ├── competitions/
+│   │   ├── competitions
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
 │   │   │   ├── router.py
-│   │   │   └── service.py
-│   │   ├── content/
+│   │   │   ├── service.py
+│   │   │   ├── starter_notebook.ipynb
+│   │   │   └── starter_notebook.py
+│   │   ├── content
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
 │   │   │   ├── router.py
 │   │   │   ├── service.py
 │   │   │   └── storage.py
-│   │   ├── core/
+│   │   ├── core
 │   │   │   ├── __init__.py
 │   │   │   ├── config.py
 │   │   │   ├── database.py
 │   │   │   ├── datetimes.py
 │   │   │   ├── errors.py
 │   │   │   └── slugs.py
-│   │   ├── leaderboard/
+│   │   ├── leaderboard
 │   │   │   ├── __init__.py
 │   │   │   ├── router.py
 │   │   │   └── service.py
-│   │   ├── memberships/
+│   │   ├── memberships
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
 │   │   │   ├── router.py
 │   │   │   └── service.py
-│   │   ├── scoring/
+│   │   ├── scoring
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
 │   │   │   ├── readiness.py
 │   │   │   ├── service.py
 │   │   │   └── storage.py
-│   │   ├── submissions/
+│   │   ├── submission_artifacts
+│   │   │   ├── __init__.py
+│   │   │   ├── naming.py
+│   │   │   ├── storage.py
+│   │   │   └── validation.py
+│   │   ├── submissions
 │   │   │   ├── __init__.py
 │   │   │   ├── admin_router.py
+│   │   │   ├── artifacts.py
 │   │   │   ├── router.py
 │   │   │   └── service.py
 │   │   ├── __init__.py
 │   │   └── main.py
-│   ├── scripts/
+│   ├── scripts
 │   │   ├── create_admin.py
 │   │   └── import_accounts.py
-│   ├── tests/
+│   ├── tests
 │   │   ├── __init__.py
+│   │   ├── ai_review_helpers.py
 │   │   ├── conftest.py
+│   │   ├── fake_minio.py
 │   │   ├── helpers.py
+│   │   ├── test_account_slugs.py
 │   │   ├── test_admin_accounts.py
+│   │   ├── test_admin_submissions.py
+│   │   ├── test_ai_review_api.py
+│   │   ├── test_ai_review_content_snapshot.py
+│   │   ├── test_ai_review_crypto.py
+│   │   ├── test_ai_review_notebook.py
+│   │   ├── test_ai_review_provider.py
+│   │   ├── test_ai_review_queue.py
+│   │   ├── test_ai_review_scoring_isolation.py
+│   │   ├── test_ai_review_service.py
+│   │   ├── test_ai_review_settings.py
+│   │   ├── test_ai_review_url_policy.py
+│   │   ├── test_ai_review_verdict.py
+│   │   ├── test_ai_review_worker.py
 │   │   ├── test_auth.py
 │   │   ├── test_competitions_admin.py
 │   │   ├── test_competitions_delete.py
@@ -75,78 +122,109 @@ vku-ai-challenge-platform/
 │   │   ├── test_results.py
 │   │   ├── test_scoring.py
 │   │   ├── test_scoring_admin.py
+│   │   ├── test_starter_notebook.py
+│   │   ├── test_submission_artifacts.py
+│   │   ├── test_submission_downloads.py
+│   │   ├── test_submission_review.py
 │   │   └── test_submissions.py
 │   ├── .dockerignore
 │   ├── Dockerfile
 │   ├── pyproject.toml
 │   └── uv.lock
-├── deploy/
+├── deploy
+│   ├── vps
+│   │   ├── tests
+│   │   │   ├── auto-deploy.test.sh
+│   │   │   └── backup-prod.test.sh
+│   │   ├── auto-deploy.sh
+│   │   ├── install-auto-deploy.sh
+│   │   ├── vku-deploy.service
+│   │   └── vku-deploy.timer
+│   ├── docker-compose.tunnel.named.yml
 │   ├── production.env.example
 │   ├── vku-backup.service
 │   └── vku-backup.timer
-├── docs/
+├── docs
 │   ├── API_CONTRACT.md
 │   ├── DATA_MODEL.md
 │   ├── DECISIONS.md
 │   ├── DEPLOYMENT.md
 │   ├── PROJECT_STATE.md
-│   └── TEST_MATRIX.md
-├── frontend/
-│   ├── public/
-│   │   ├── fonts/
+│   ├── TEST_MATRIX.md
+│   └── VPS_PRODUCTION_ACCESS.md
+├── frontend
+│   ├── public
+│   │   ├── fonts
 │   │   │   ├── inter-latin-ext.woff2
 │   │   │   ├── inter-latin.woff2
 │   │   │   ├── inter-vietnamese.woff2
 │   │   │   ├── jetbrains-mono-latin-ext.woff2
 │   │   │   ├── jetbrains-mono-latin.woff2
 │   │   │   └── jetbrains-mono-vietnamese.woff2
+│   │   ├── _headers
 │   │   ├── favicon.png
 │   │   ├── favicon.svg
 │   │   ├── icons.svg
 │   │   └── vku-logo.png
-│   ├── src/
-│   │   ├── api/
+│   ├── src
+│   │   ├── api
+│   │   │   ├── aiReview.ts
 │   │   │   ├── client.test.ts
 │   │   │   ├── client.ts
 │   │   │   ├── competitions.ts
 │   │   │   ├── contents.ts
 │   │   │   └── results.ts
-│   │   ├── auth/
+│   │   ├── auth
 │   │   │   ├── AuthContext.tsx
 │   │   │   ├── RequireAuth.test.tsx
 │   │   │   ├── RequireAuth.tsx
 │   │   │   ├── returnTo.test.ts
 │   │   │   └── returnTo.ts
-│   │   ├── components/
+│   │   ├── components
 │   │   │   ├── AdminCompetitionManagement.test.tsx
 │   │   │   ├── AdminCompetitionManagement.tsx
+│   │   │   ├── AdminSubmissionsPanel.tsx
+│   │   │   ├── AiReviewDetailModal.test.tsx
+│   │   │   ├── AiReviewDetailModal.tsx
+│   │   │   ├── AiReviewSettingsPanel.test.tsx
+│   │   │   ├── AiReviewSettingsPanel.tsx
+│   │   │   ├── ArtifactLinks.test.tsx
+│   │   │   ├── ArtifactLinks.tsx
 │   │   │   ├── CompetitionResources.tsx
 │   │   │   ├── JoinControl.test.tsx
 │   │   │   ├── JoinControl.tsx
 │   │   │   ├── Modal.tsx
+│   │   │   ├── SubmissionReviewModal.tsx
 │   │   │   ├── ui.test.tsx
 │   │   │   └── ui.tsx
-│   │   ├── hooks/
+│   │   ├── hooks
+│   │   │   ├── useAutoSlug.ts
 │   │   │   ├── useCountdown.test.tsx
 │   │   │   ├── useCountdown.ts
 │   │   │   ├── useDocumentTitle.ts
+│   │   │   ├── usePendingPolling.ts
 │   │   │   └── useRouteFocus.ts
-│   │   ├── lib/
+│   │   ├── lib
 │   │   │   ├── competitionResources.test.ts
 │   │   │   ├── competitionResources.ts
 │   │   │   ├── countdown.test.ts
 │   │   │   ├── countdown.ts
+│   │   │   ├── downloadArtifact.ts
+│   │   │   ├── slug.test.ts
+│   │   │   ├── slug.ts
+│   │   │   ├── submissionRequirements.test.ts
+│   │   │   ├── submissionRequirements.ts
 │   │   │   └── vkuInfo.ts
-│   │   ├── markdown/
-│   │   │   ├── headingHierarchy.ts
+│   │   ├── markdown
 │   │   │   ├── MarkdownCodeBlock.test.tsx
 │   │   │   ├── MarkdownCodeBlock.tsx
 │   │   │   ├── MarkdownImage.tsx
 │   │   │   ├── MarkdownView.test.tsx
 │   │   │   ├── MarkdownView.tsx
+│   │   │   ├── headingHierarchy.ts
 │   │   │   ├── resolveMarkdownAssetUrl.test.ts
 │   │   │   └── resolveMarkdownAssetUrl.ts
-│   │   ├── pages/
+│   │   ├── pages
 │   │   │   ├── AboutPage.test.tsx
 │   │   │   ├── AboutPage.tsx
 │   │   │   ├── AdminAccountsPage.test.tsx
@@ -155,9 +233,13 @@ vku-ai-challenge-platform/
 │   │   │   ├── AdminCompetitionDetailPage.tsx
 │   │   │   ├── AdminCompetitionsPage.test.tsx
 │   │   │   ├── AdminCompetitionsPage.tsx
+│   │   │   ├── AdminSubmissionsPage.test.tsx
+│   │   │   ├── AdminSubmissionsPage.tsx
 │   │   │   ├── CompetitionContentPanel.tsx
 │   │   │   ├── CompetitionDetailPage.test.tsx
 │   │   │   ├── CompetitionDetailPage.tsx
+│   │   │   ├── CompetitionGuidePage.test.tsx
+│   │   │   ├── CompetitionGuidePage.tsx
 │   │   │   ├── CompetitionOverview.test.tsx
 │   │   │   ├── DashboardPage.test.tsx
 │   │   │   ├── DashboardPage.tsx
@@ -172,13 +254,17 @@ vku-ai-challenge-platform/
 │   │   │   ├── SubmissionPage.tsx
 │   │   │   ├── SupportPage.test.tsx
 │   │   │   └── SupportPage.tsx
-│   │   ├── test/
+│   │   ├── test
 │   │   │   ├── designSystemGuard.test.ts
-│   │   │   └── setup.ts
+│   │   │   ├── setup.ts
+│   │   │   └── timers.ts
 │   │   ├── App.test.tsx
 │   │   ├── App.tsx
 │   │   ├── index.css
 │   │   └── main.tsx
+│   ├── worker
+│   │   ├── index.test.ts
+│   │   └── index.ts
 │   ├── .dockerignore
 │   ├── .gitignore
 │   ├── .oxlintrc.json
@@ -191,15 +277,18 @@ vku-ai-challenge-platform/
 │   ├── tsconfig.json
 │   ├── tsconfig.node.json
 │   ├── vite.config.ts
-│   └── vitest.config.ts
-├── scripts/
+│   ├── vitest.config.ts
+│   └── wrangler.jsonc
+├── scripts
 │   ├── backup_prod.sh
-│   └── dev_up.sh
+│   ├── dev_up.sh
+│   ├── minio_init.sh
+│   └── minio_smoke.sh
 ├── .editorconfig
 ├── .env.example
 ├── .gitignore
 ├── DESIGN.md
-├── docker-compose.prod.yml
-├── docker-compose.yml
 ├── MARKDOWN_RENDERER_DESIGN.md
-└── README.md
+├── README.md
+├── docker-compose.prod.yml
+└── docker-compose.yml

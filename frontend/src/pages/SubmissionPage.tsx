@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
+import type { ParticipantAiReview } from "../api/aiReview";
 import { api } from "../api/client";
 import { METRIC_LABEL, formatLocal } from "../api/competitions";
 import { ErrorBox, FileButton } from "../components/ui";
@@ -22,6 +23,8 @@ interface SubmissionResult {
   primary_score: number;
   created_at: string;
   quota_remaining: number;
+  /** Vắng mặt khi cuộc thi chưa bật AI hoặc không công khai kết luận cho thí sinh. */
+  ai_review?: ParticipantAiReview;
 }
 
 const METRICS = ["f1", "precision", "recall"] as const;
@@ -150,6 +153,10 @@ export function SubmissionPage() {
     }
   }
 
+  // Trang này cố ý không poll: điểm số đã xong, còn lượt AI thì xem ở lịch sử bài nộp.
+  const aiPending =
+    result?.ai_review?.state === "QUEUED" || result?.ai_review?.state === "RUNNING";
+
   return (
     <div className="submission-page sub-workspace">
       {/* Cột trái: Khu vực nộp bài / Kết quả chấm điểm */}
@@ -271,6 +278,12 @@ export function SubmissionPage() {
               <p className="sub-result-lead">
                 Hệ thống đã kiểm tra và đối soát kết quả dự đoán với Public Ground Truth.
               </p>
+              {/* Kết quả chấm điểm vẫn là nội dung chính; dòng này chỉ báo còn việc chạy nền. */}
+              {aiPending && (
+                <p className="sub-result-ai-note text-muted" role="status">
+                  AI đang kiểm tra notebook (kết quả sơ bộ, không ảnh hưởng điểm số).
+                </p>
+              )}
             </div>
 
             <div className="metric-grid sub-result-cards">

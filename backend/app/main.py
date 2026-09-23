@@ -9,6 +9,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.accounts import service as accounts_service
 from app.accounts.admin_router import router as admin_accounts_router
+from app.ai_review import service as ai_review_service
+from app.ai_review.admin_router import router as admin_ai_review_router
 from app.auth import sessions as sessions_module
 from app.competitions import service as competitions_service
 from app.competitions.admin_router import router as admin_competitions_router
@@ -49,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await memberships_service.ensure_indexes(ctx.db)
         await content_service.ensure_indexes(ctx.db)
         await submissions_service.ensure_indexes(ctx.db)
+        await ai_review_service.ensure_indexes(ctx.db)
         yield
 
 
@@ -136,6 +139,7 @@ app.include_router(admin_accounts_router)
 app.include_router(admin_competitions_router)
 app.include_router(admin_memberships_router)
 app.include_router(admin_content_router)
+app.include_router(admin_ai_review_router)
 app.include_router(admin_scoring_router)
 app.include_router(admin_submissions_router)
 app.include_router(admin_submissions_global_router)

@@ -37,6 +37,50 @@ class Settings(BaseSettings):
     session_cookie_secure: str = "auto"
     session_cookie_samesite: str = "lax"
 
+    # AI Notebook Review (ADR-036/ADR-037). Mọi giá trị đều có default để app vẫn boot khi tính năng
+    # chưa được cấu hình: thiếu khoá mã hoá nghĩa là không lưu được key, không phải app hỏng. Host
+    # công khai không cần khai gì; hai danh sách dưới chỉ là ngoại lệ hẹp cho provider tự dựng.
+    llm_config_encryption_key: str = ""
+    ai_review_allowed_private_hosts: str = ""
+    ai_review_allowed_http_hosts: str = ""
+    ai_review_allowed_ports: str = "443"
+    ai_review_poll_interval_seconds: float = 5
+    ai_review_reconcile_interval_seconds: int = 60
+    ai_review_lease_seconds: int = 180
+    ai_review_heartbeat_seconds: int = 45
+    ai_review_max_attempts: int = 3
+    ai_review_connect_timeout_seconds: float = 5
+    ai_review_request_timeout_seconds: float = 60
+    ai_review_max_response_bytes: int = 1_048_576
+    # Trần snapshot luôn thấp an toàn so với giới hạn 16 MiB của một document Mongo.
+    ai_review_max_snapshot_bytes: int = 8_388_608
+    ai_review_max_policy_chars: int = 160_000
+    ai_review_max_notebook_chars: int = 160_000
+    # Ngân sách output của MỘT lượt review. Đây là trần cứng phía mình, không phải giới hạn của
+    # model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng (ADR-039). Từ ADR-044 prompt
+    # dặn model một ngân sách mềm thấp hơn (8000) để nó tự kết thúc, nên trần này chỉ còn là lưới an
+    # toàn - nới lên 12000 để nó gần như không bao giờ chạm.
+    ai_review_max_output_tokens: int = 12_000
+    ai_review_reconcile_batch: int = 100
+    # Số job MỘT worker chạy song song (ADR-046). Mặc định 1 = hành vi tuần tự cũ. Đây là trần cứng
+    # của chính mình chứ không phải giới hạn provider: mỗi slot thêm là một request đồng thời ra
+    # ngoài, nên phải nâng theo hạn mức RPM/TPM thật của provider.
+    ai_review_concurrency: int = 1
+    # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
+    ai_review_heartbeat_file: str = "/tmp/ai-review-worker.heartbeat"
+
+    @property
+    def ai_review_worker_config_valid(self) -> bool:
+        """Heartbeat phải ngắn hơn lease, nếu không worker có thể mất job vào tay chính nó.
+
+        Concurrency bị chặn ở cả hai đầu: 0 sẽ treo worker mà không claim gì, còn số quá lớn thì
+        vượt xa thứ một VM hai vCPU phục vụ được - cấu hình sai phải thoát ngay, không clamp ngầm.
+        """
+        return (
+            0 < self.ai_review_heartbeat_seconds < self.ai_review_lease_seconds
+            and 1 <= self.ai_review_concurrency <= 16
+        )
+
     @property
     def cookie_secure(self) -> bool:
         if self.session_cookie_secure == "auto":
