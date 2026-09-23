@@ -92,16 +92,16 @@ test("loads the first page of accounts and protects passwords", async () => {
   expect(calls).toHaveLength(1);
 
   fireEvent.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
-  const password = screen.getByLabelText(/Mật khẩu \(tối thiểu 10 ký tự\)/) as HTMLInputElement;
+  const password = screen.getByLabelText(/Mật khẩu \(tối thiểu 6 ký tự\)/) as HTMLInputElement;
   expect(password.type).toBe("password");
-  expect(password.minLength).toBe(10);
+  expect(password.minLength).toBe(6);
   expect(password.autocomplete).toBe("new-password");
   fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Đặt lại MK" }));
   const resetPassword = screen.getByLabelText(/Mật khẩu mới/) as HTMLInputElement;
   expect(resetPassword.type).toBe("password");
-  expect(resetPassword.minLength).toBe(10);
+  expect(resetPassword.minLength).toBe(6);
   expect(resetPassword.autocomplete).toBe("new-password");
 });
 

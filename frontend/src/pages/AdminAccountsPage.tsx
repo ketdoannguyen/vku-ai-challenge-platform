@@ -577,9 +577,9 @@ function CreateAccountModal({ onClose, onCreated }: { onClose: () => void; onCre
             <input id="new-name" className="input" value={name} onChange={(event) => setName(event.target.value)} required />
           </div>
           <div className="form-field account-form-wide">
-            <label className="field-label account-required" htmlFor="new-password">Mật khẩu (tối thiểu 10 ký tự)</label>
+            <label className="field-label account-required" htmlFor="new-password">Mật khẩu (tối thiểu 6 ký tự)</label>
             <div className="password-field">
-              <input id="new-password" className="input" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} autoComplete="new-password" required />
+              <input id="new-password" className="input" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={6} autoComplete="new-password" required />
               <PasswordToggle visible={passwordVisible} onToggle={() => setPasswordVisible((value) => !value)} />
             </div>
           </div>
@@ -618,9 +618,9 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
     <Modal title={`Đặt lại mật khẩu - ${account.email}`} onClose={onClose} variant="account-form">
       <form className="account-form-modal" onSubmit={submit}>
         <div className="form-field">
-          <label className="field-label account-required" htmlFor="reset-password">Mật khẩu mới (tối thiểu 10 ký tự)</label>
+          <label className="field-label account-required" htmlFor="reset-password">Mật khẩu mới (tối thiểu 6 ký tự)</label>
           <div className="password-field">
-            <input id="reset-password" className="input" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={10} autoComplete="new-password" required autoFocus />
+            <input id="reset-password" className="input" type={passwordVisible ? "text" : "password"} value={password} onChange={(event) => setPassword(event.target.value)} minLength={6} autoComplete="new-password" required autoFocus />
             <PasswordToggle visible={passwordVisible} onToggle={() => setPasswordVisible((value) => !value)} />
           </div>
         </div>

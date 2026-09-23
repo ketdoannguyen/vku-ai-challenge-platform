@@ -663,7 +663,7 @@ dcp exec api python scripts/create_admin.py admin@vku.udn.vn "ADMIN NKD"
 trong RAM của tiến trình API, không lưu vào Mongo, nên restart `api` sẽ xoá bộ đếm.
 
 Script idempotent: email đã tồn tại thì thoát code 1 và không ghi đè. Import thí sinh hàng loạt bằng
-`dcp exec api python scripts/import_accounts.py <file.csv>` (header `email,name,password`, policy ≥10 ký tự);
+`dcp exec api python scripts/import_accounts.py <file.csv>` (header `email,name,password`, policy ≥6 ký tự);
 copy CSV vào container bằng `docker compose cp` rồi xoá file tạm sau khi import.
 
 ## 10. Backup và restore
