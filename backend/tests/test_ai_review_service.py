@@ -7,6 +7,7 @@ hành vi của pipeline - cái gì được gọi, cái gì được ghi, và c�
 import hashlib
 import json
 import re
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -82,6 +83,37 @@ async def test_a_clean_run_writes_a_completed_review_and_advances_the_projection
     assert job_document["status"] == constants.JOB_COMPLETED
     assert job_document["projection_applied"] is True
     assert job_document["lease_token"] is None
+
+
+async def test_moc_hoan_tat_cua_luot_thanh_cong_la_luc_goi_provider_xong(mock_db, ai_env):
+    """`completed_at` phải là lúc lượt gọi provider KẾT THÚC, không phải lúc job bắt đầu.
+
+    `process_job` ghim `now` ở đầu hàm rồi mới gọi provider; ghi thẳng `now` vào `completed_at` làm
+    mốc hoàn tất sớm hơn thực tế đúng bằng độ trễ provider - modal admin hiện sai giờ, và mọi phép
+    đo rút hàng đợi dựng trên `completed_at` đều hụt đi một lượt. Transport giả ở đây ngủ 30 ms nên
+    `duration_ms` là một số thật, không phải 0 may rủi.
+    """
+    await seed(mock_db)
+    now = datetime(2026, 9, 23, 10, 0, 0, tzinfo=timezone.utc)
+
+    def slow(request: httpx.Request) -> dict:
+        time.sleep(0.03)
+        return CLEAR_OUTPUT
+
+    job, outcome = await run(mock_db, handler(slow), now=now)
+    assert outcome == service.OUTCOME_COMPLETED
+
+    review = (await reviews(mock_db))[0]
+    assert review["duration_ms"] >= 25
+    # `created_at` của audit row chính là `now` lúc vào hàm, nên đẳng thức dưới đây khoá đúng công
+    # thức: mốc hoàn tất = mốc bắt đầu + độ trễ đã đo.
+    assert review["created_at"].replace(tzinfo=timezone.utc) == now
+    assert review["completed_at"] - review["created_at"] == timedelta(
+        milliseconds=review["duration_ms"]
+    )
+    # Job trong hàng đợi phải chốt ở CÙNG mốc đó, nếu không hai bản ghi kể hai câu chuyện khác nhau.
+    job_document = await job_of(mock_db, job["submission_id"])
+    assert job_document["completed_at"] == review["completed_at"]
 
 
 async def test_the_worker_introduces_itself_to_the_provider_with_the_run_id(mock_db, ai_env):

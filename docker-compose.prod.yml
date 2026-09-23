@@ -181,6 +181,10 @@ services:
       AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
       AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
       AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
+      # Số job MỘT worker chạy song song (ADR-046). 1 = tuần tự như trước. Nâng lên là tăng số
+      # request đồng thời ra provider, nên phải theo hạn mức thật của provider; trần của mình là 16
+      # và worker từ chối khởi động ngoài khoảng [1, 16].
+      AI_REVIEW_CONCURRENCY: ${AI_REVIEW_CONCURRENCY:-1}
       AI_REVIEW_MAX_ATTEMPTS: ${AI_REVIEW_MAX_ATTEMPTS:-3}
       AI_REVIEW_CONNECT_TIMEOUT_SECONDS: ${AI_REVIEW_CONNECT_TIMEOUT_SECONDS:-5}
       AI_REVIEW_REQUEST_TIMEOUT_SECONDS: ${AI_REVIEW_REQUEST_TIMEOUT_SECONDS:-60}

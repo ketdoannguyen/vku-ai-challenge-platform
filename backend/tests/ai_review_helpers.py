@@ -46,6 +46,9 @@ FLAGGED_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu ban
 def ai_env(monkeypatch):
     monkeypatch.setenv("LLM_CONFIG_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
     monkeypatch.setenv("AI_REVIEW_ALLOWED_PORTS", "443")
+    # Ghim số job song song về 1: mọi test hiện có mô tả luồng TUẦN TỰ, và một biến môi trường lọt
+    # vào từ máy chạy test không được phép đổi nghĩa của chúng. Test nào muốn song song thì tự đặt.
+    monkeypatch.setenv("AI_REVIEW_CONCURRENCY", "1")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

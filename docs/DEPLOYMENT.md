@@ -142,6 +142,7 @@ bật được. Đây là điều kiện để một sự cố cấu hình AI kh
 | `AI_REVIEW_ALLOWED_HTTP_HOSTS` | Cho phép `http://` thay vì bắt buộc `https://`. **Chỉ dùng khi phát triển** |
 | `AI_REVIEW_ALLOWED_PORTS` | Mặc định `443` |
 | `AI_REVIEW_POLL_INTERVAL_SECONDS` / `AI_REVIEW_LEASE_SECONDS` / `AI_REVIEW_HEARTBEAT_SECONDS` | Nhịp của worker. **`HEARTBEAT` bắt buộc nhỏ hơn `LEASE`**, nếu không worker thoát mã 2 ngay lúc khởi động |
+| `AI_REVIEW_CONCURRENCY` | Số lượt review chạy song song trong **một** tiến trình worker (ADR-046), mặc định `1`. Phải trong `[1, 16]`; ngoài khoảng làm worker thoát mã 2. Đây là trần phía **provider**, không phải trần CPU: xem §14.6 |
 | `AI_REVIEW_MAX_ATTEMPTS` / `AI_REVIEW_CONNECT_TIMEOUT_SECONDS` / `AI_REVIEW_REQUEST_TIMEOUT_SECONDS` | Trần retry và timeout gọi provider |
 | `AI_REVIEW_MAX_OUTPUT_TOKENS` | **Trần cứng** output của một lượt review (ADR-039, ADR-044), mặc định `12000`. Trần này là của mình, không phải giới hạn của model: đặt thấp hơn nhu cầu thật thì câu trả lời bị cắt giữa chừng và lượt đó hỏng với `AI_OUTPUT_TRUNCATED`. Từ ADR-044 prompt đã dặn model một **ngân sách mềm** 8000 token để nó tự kết thúc, nên trần này chỉ còn là lưới an toàn - để cao hơn hẳn ngân sách mềm, và tăng khi đổi sang model dài dòng hơn |
 
@@ -1002,6 +1003,91 @@ trần cứng nằm **ngay dưới** ngân sách mềm mà prompt vừa dặn.
 ADR-045 **không** cần migration và **không** cần env mới: chỉ mục quy định được dẫn xuất lúc worker
 đọc `competition_content_revisions`, nên không có bước backfill nào phải chạy trước khi deploy, và
 `canonical_content_hash` của mọi revision cũ giữ nguyên giá trị.
+
+### 14.6 Chạy nhiều lượt review song song (ADR-046)
+
+`AI_REVIEW_CONCURRENCY` là số job một **tiến trình** worker chạy cùng lúc, mặc định `1`. Với 40-80 đội
+cùng nộp trong vài phút, để `1` nghĩa là người nộp cuối chờ bằng **tổng** độ trễ của mọi lượt trước đó.
+
+Đổi giá trị = sửa env rồi tạo lại **đúng một service**:
+
+```bash
+sudoedit /srv/vku-ai-challenge/.env      # AI_REVIEW_CONCURRENCY=4
+cd /srv/vku-ai-challenge/repo
+sudo docker compose --env-file /srv/vku-ai-challenge/.env -f docker-compose.prod.yml \
+     up -d --no-deps --no-build ai-review-worker
+```
+
+`--no-deps` là bắt buộc: `api` và `web` không liên quan tới thay đổi này, và tạo lại `api` sẽ khiến
+nginx trong `web` proxy vào IP đã chết cho tới khi chính `web` được tạo lại (`deploy/vps/auto-deploy.sh`
+làm việc đó tự động khi backend đổi; ở đây ta cố tình không đổi backend).
+
+Xác nhận giá trị đã có hiệu lực - `docker compose ps` **không** cho biết concurrency, phải đọc log
+hoặc env trong container:
+
+```bash
+dcp logs ai-review-worker | grep 'Worker khởi động' | tail -1   # ... concurrency=4
+dcp exec ai-review-worker printenv AI_REVIEW_CONCURRENCY
+```
+
+Hàng đợi và số job đang chạy:
+
+```bash
+dcp exec mongo sh -c "mongosh --quiet $MONGO_AUTH --eval '
+  db.getSiblingDB(\"ai_challenge\").ai_review_jobs.aggregate([
+    {\$group: {_id: \"\$status\", n: {\$sum: 1}}}, {\$sort: {n: -1}}])'"
+```
+
+`RUNNING` trùng với concurrency là bình thường (mỗi job đang bay giữ một lease). `RUNNING` **quá**
+concurrency trong nhiều phút nghĩa là có lease đã hết hạn mà chưa được thu hồi - đọc
+`dcp logs --tail=100 ai-review-worker` tìm dòng `reconcile` / `Mất lease`.
+
+**Hạ concurrency** (rollback rẻ nhất khi provider bắt đầu trả 429 hàng loạt): đặt về `2` rồi `1`, chạy
+lại đúng lệnh `up -d --no-deps` ở trên. Không cần rollback stack: job đang bay vẫn đi tới cùng vì
+worker dừng ở ranh giới job, và `--no-deps` không đụng `api`/`web`.
+
+**Không** dùng replica (`--scale ai-review-worker=4`): `deploy/vps/auto-deploy.sh` xác minh mỗi service
+bằng **một** container ID nên nhiều bản sao làm deployer không kiểm tra được, và `--scale` không sống
+qua lần deploy kế tiếp. Lý do đầy đủ ở ADR-046.
+
+Đây là trần phía **provider**, không phải trần CPU: bốn slot cùng chờ provider là RAM và CPU gần như
+đứng yên, còn thứ thật sự bị chia sẻ là quota/rate limit của provider. Nâng lên nữa chỉ đổi "chờ lâu"
+thành "429 hàng loạt".
+
+### 14.7 Kiểm thử tải có bằng chứng
+
+`backend/scripts/ai_review_load.py` là harness đóng vai N người dùng thật qua API chính thức: tạo cuộc
+thi + account + membership bằng endpoint admin, mỗi người đăng nhập một lần, nộp **một** CSV và **một**
+notebook, rồi poll tới trạng thái cuối. Nó ghi NDJSON từng request (status, độ trễ, mã lỗi - không ghi
+mật khẩu/phiên/API key), đối chiếu chéo với Mongo, và in báo cáo kèm bảng cổng go/no-go.
+
+```bash
+cd backend
+AI_REVIEW_LOAD_ADMIN_EMAIL=... AI_REVIEW_LOAD_ADMIN_PASSWORD=... AI_REVIEW_LOAD_PROVIDER_KEY=... \
+uv run python scripts/ai_review_load.py stage \
+  --base-url https://<host> --run-tag stage60-20260923 --users 60 --concurrency 60 \
+  --ai-base-url https://<provider>/v1 --ai-model <model> \
+  --mongo-uri "<uri chỉ đọc>" --acknowledge-load-test
+```
+
+Ba điều bắt buộc phải nhớ trước khi chạy nó ở đâu đó:
+
+- `--acknowledge-load-test` là cổng chặn: không có nó thì lệnh từ chối chạy, và slug luôn mang tiền tố
+  `loadtest-` để một lượt chạy nhầm không bao giờ đụng vào cuộc thi thật.
+- Key provider đọc từ **biến môi trường**, không bao giờ từ argv (argv lộ trong `ps`).
+- Cuộc thi mỗi stage phải **biệt lập** (một `--run-tag` = một slug): `PUT /scoring` và `/ground-truth`
+  khoá lại ngay khi có bài nộp hoàn tất, nên tái dùng một cuộc thi đã chạy không cấu hình lại được.
+
+Dọn dẹp sau khi đo xong (`cleanup` đóng rồi xoá cuộc thi, gỡ account khỏi membership và **vô hiệu hoá**
+account - không xoá qua Mongo):
+
+```bash
+uv run python scripts/ai_review_load.py cleanup --base-url ... --run-tag stage60-20260923
+```
+
+Báo cáo đầy đủ của chiến dịch production nằm ở `docs/`; các bất biến của harness (notebook phải khác
+bytes giữa các người dùng, hai file CSV phải khớp tập ID, một lượt hỏng phải làm gãy cổng) được ghim
+bằng test ở `backend/tests/test_ai_review_load_harness.py`.
 
 ## Vận hành thường ngày
 

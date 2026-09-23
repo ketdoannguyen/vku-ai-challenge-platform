@@ -70,6 +70,9 @@ services:
       AI_REVIEW_POLL_INTERVAL_SECONDS: ${AI_REVIEW_POLL_INTERVAL_SECONDS:-5}
       AI_REVIEW_LEASE_SECONDS: ${AI_REVIEW_LEASE_SECONDS:-180}
       AI_REVIEW_HEARTBEAT_SECONDS: ${AI_REVIEW_HEARTBEAT_SECONDS:-45}
+      # Số job một worker chạy song song (ADR-046). 1 = tuần tự; chỉ nâng khi biết hạn mức đồng thời
+      # của provider, vì mỗi slot là một request nữa cùng bay ra ngoài.
+      AI_REVIEW_CONCURRENCY: ${AI_REVIEW_CONCURRENCY:-1}
       # Trần cứng output một lượt review (ADR-039, ADR-044). Chỉ worker gọi provider thật; route
       # `.../ai-review/test` của API chạy probe 64 token nên không cần biến này.
       AI_REVIEW_MAX_OUTPUT_TOKENS: ${AI_REVIEW_MAX_OUTPUT_TOKENS:-12000}

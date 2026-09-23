@@ -62,13 +62,24 @@ class Settings(BaseSettings):
     # toàn - nới lên 12000 để nó gần như không bao giờ chạm.
     ai_review_max_output_tokens: int = 12_000
     ai_review_reconcile_batch: int = 100
+    # Số job MỘT worker chạy song song (ADR-046). Mặc định 1 = hành vi tuần tự cũ. Đây là trần cứng
+    # của chính mình chứ không phải giới hạn provider: mỗi slot thêm là một request đồng thời ra
+    # ngoài, nên phải nâng theo hạn mức RPM/TPM thật của provider.
+    ai_review_concurrency: int = 1
     # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
     ai_review_heartbeat_file: str = "/tmp/ai-review-worker.heartbeat"
 
     @property
     def ai_review_worker_config_valid(self) -> bool:
-        """Heartbeat phải ngắn hơn lease, nếu không worker có thể mất job vào tay chính nó."""
-        return 0 < self.ai_review_heartbeat_seconds < self.ai_review_lease_seconds
+        """Heartbeat phải ngắn hơn lease, nếu không worker có thể mất job vào tay chính nó.
+
+        Concurrency bị chặn ở cả hai đầu: 0 sẽ treo worker mà không claim gì, còn số quá lớn thì
+        vượt xa thứ một VM hai vCPU phục vụ được - cấu hình sai phải thoát ngay, không clamp ngầm.
+        """
+        return (
+            0 < self.ai_review_heartbeat_seconds < self.ai_review_lease_seconds
+            and 1 <= self.ai_review_concurrency <= 16
+        )
 
     @property
     def cookie_secure(self) -> bool:
