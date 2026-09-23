@@ -1,4 +1,4 @@
-"""Admin account API: list/search, create, reset password, enable/disable. Chỉ admin."""
+"""Admin account API: list/search, create, reset password, enable/disable, delete. Chỉ admin."""
 
 import logging
 import re
@@ -12,14 +12,17 @@ from bson.errors import InvalidId
 from app.accounts.service import (
     ACCOUNTS_COLLECTION,
     AccountCreate,
+    account_audit_references,
     account_stats,
     create_account,
+    delete_account_cascade,
     find_account_by_email,
     public_account,
 )
 from app.auth.dependencies import AdminAccount
 from app.auth.passwords import hash_password, password_policy_error
 from app.core.errors import api_error
+from app.submissions import service as submissions_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/accounts")
@@ -101,6 +104,49 @@ async def reset_password(account_id: str, body: ResetPasswordBody, request: Requ
     )
     logger.info("Admin %s reset password of %s", admin["email"], account["email"])
     return {"ok": True}
+
+
+@router.delete("/{account_id}")
+async def delete_account(
+    account_id: str,
+    request: Request,
+    admin: AdminAccount,
+    confirm_email: str = Query(...),
+) -> dict:
+    """Xoá tài khoản kèm dữ liệu con. Lịch sử thi đấu không bao giờ bị xoá theo.
+
+    `confirm_email` buộc admin gõ đúng email, cùng kiểu chốt với `confirm_slug` của xoá cuộc thi -
+    thao tác này không hoàn tác được. Tài khoản đã có bài được chấm điểm, hoặc đang là vết hậu
+    kiểm, phải dùng Vô hiệu hoá thay vì xoá.
+    """
+    db = request.app.state.mongo.db
+    account = await _get_account_or_404(db, account_id)
+    if confirm_email.strip().lower() != account["email"]:
+        raise api_error(
+            422, "CONFIRM_EMAIL_MISMATCH", "Email xác nhận không khớp với tài khoản cần xoá."
+        )
+    if account["_id"] == admin["_id"]:
+        raise api_error(422, "VALIDATION_ERROR", "Không thể tự xoá tài khoản của chính bạn.")
+    if await submissions_service.has_graded_submission(db, account["_id"]):
+        raise api_error(
+            409,
+            "ACCOUNT_HAS_SUBMISSIONS",
+            "Tài khoản đã có bài nộp được chấm điểm. Hãy dùng Vô hiệu hoá thay vì xoá.",
+        )
+    if await account_audit_references(db, account["_id"]):
+        raise api_error(
+            409,
+            "ACCOUNT_REFERENCED",
+            "Tài khoản đang là vết hậu kiểm (người duyệt bài hoặc người sửa cấu hình AI), không thể xoá.",
+        )
+    removed = await delete_account_cascade(db, account)
+    logger.info("Admin %s deleted account %s removed=%s", admin["email"], account["email"], removed)
+    return {
+        "deleted": True,
+        "account_id": str(account["_id"]),
+        "email": account["email"],
+        "removed": removed,
+    }
 
 
 @router.patch("/{account_id}")

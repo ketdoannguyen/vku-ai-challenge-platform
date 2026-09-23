@@ -124,3 +124,59 @@ def public_account(account: dict) -> dict:
         "role": account["role"],
         "active": account.get("active", True),
     }
+
+
+async def account_audit_references(db: AsyncIOMotorDatabase, account_id) -> bool:
+    """Account có nằm trong vết hậu kiểm không: người duyệt bài, hoặc người sửa cấu hình AI.
+
+    Chỉ admin mới xuất hiện ở hai chỗ này, và cả hai đều là vết không được phép trỏ vào hư không -
+    xoá account đi thì hậu kiểm mất đường truy về người đã ra quyết định.
+    """
+    from app.ai_review.settings import CONFIG_FIELD
+    from app.competitions.service import COMPETITIONS_COLLECTION
+    from app.submissions.service import REVIEW_FIELD, SUBMISSIONS_COLLECTION
+
+    if await db[SUBMISSIONS_COLLECTION].count_documents(
+        {f"{REVIEW_FIELD}.reviewed_by": account_id}, limit=1
+    ):
+        return True
+    return (
+        await db[COMPETITIONS_COLLECTION].count_documents(
+            {f"{CONFIG_FIELD}.updated_by": account_id}, limit=1
+        )
+        > 0
+    )
+
+
+async def delete_account_cascade(db: AsyncIOMotorDatabase, account: dict) -> dict[str, int]:
+    """Xoá account kèm toàn bộ dữ liệu con. Con trước cha sau, gọi lại được nếu lỗi giữa đường.
+
+    Mongo standalone không có transaction: account chỉ mất ở bước cuối, nên một bước hỏng giữa
+    đường vẫn còn bản ghi để lần gọi sau chạy tiếp, thay vì để lại dữ liệu con mồ côi.
+
+    Người gọi phải chặn trước tài khoản có bài đã chấm điểm - hàm này không tự kiểm.
+    """
+    from app.ai_review import queue as ai_queue
+    from app.ai_review import service as ai_service
+    from app.auth.sessions import SESSIONS_COLLECTION
+    from app.memberships.service import MEMBERSHIPS_COLLECTION
+    from app.submissions import service as submissions_service
+
+    account_id = account["_id"]
+    # Job và audit row AI đứng trước submission: cả hai tham chiếu tới nó.
+    jobs = await db[ai_queue.JOBS_COLLECTION].delete_many({"account_id": account_id})
+    reviews = await db[ai_service.REVIEWS_COLLECTION].delete_many({"account_id": account_id})
+    submissions = await submissions_service.delete_submissions_matching(
+        db, {"account_id": account_id, "status": {"$ne": "completed"}}
+    )
+    memberships = await db[MEMBERSHIPS_COLLECTION].delete_many({"account_id": account_id})
+    # Session phải đi cùng account: bỏ sót thì token cũ vẫn đăng nhập được vào tài khoản đã xoá.
+    sessions = await db[SESSIONS_COLLECTION].delete_many({"account_id": account_id})
+    await db[ACCOUNTS_COLLECTION].delete_one({"_id": account_id})
+    return {
+        "ai_review_jobs": jobs.deleted_count,
+        "ai_reviews": reviews.deleted_count,
+        "submissions": submissions,
+        "memberships": memberships.deleted_count,
+        "sessions": sessions.deleted_count,
+    }
