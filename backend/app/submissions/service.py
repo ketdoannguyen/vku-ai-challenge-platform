@@ -45,11 +45,10 @@ MAX_REVIEW_NOTE_LENGTH = 1000
 
 # Allowlist sort/order của bảng quản trị: không bao giờ nội suy trực tiếp từ query vào `$sort`.
 # Bảng theo một cuộc thi không có cột cuộc thi nên không nhận `competition` - sort đó vô nghĩa ở đó.
-SCOPED_SORT_FIELDS = ("created_at", "team", "primary_score", "f1", "precision", "recall")
+SCOPED_SORT_FIELDS = ("created_at", "team", "primary_score")
 SORT_FIELDS = (*SCOPED_SORT_FIELDS, "competition")
 SORT_ORDERS = ("asc", "desc")
 # Sort theo chỉ số đọc từ `metrics.*`; sort theo tên account/cuộc thi phải lookup mới có khoá.
-METRIC_SORT_FIELDS = ("f1", "precision", "recall")
 LOOKUP_SORT_FIELDS = ("team", "competition")
 DEFAULT_SORT = "created_at"
 DEFAULT_ORDER = "desc"
@@ -435,8 +434,24 @@ async def matching_account_ids(db, query: str) -> list[ObjectId] | None:
     return [account["_id"] async for account in cursor]
 
 
-def sort_spec(sort: str, order: str) -> list[tuple[str, int]]:
-    """Khóa sort luôn kết thúc bằng `_id` để tie-break ổn định giữa các trang."""
+def metric_sort_fields(competition: dict) -> tuple[str, ...]:
+    """Khóa metric được phép sort, lấy từ hợp đồng kết quả của chính cuộc thi đó.
+
+    Bảng toàn cục trộn nhiều cuộc thi với thang đo khác nhau nên không sort theo khóa metric.
+    """
+    from app.scoring import contracts
+
+    return tuple(metric.key for metric in contracts.result_contract(competition).metrics)
+
+
+def sort_spec(
+    sort: str, order: str, *, metric_fields: tuple[str, ...] = ()
+) -> list[tuple[str, int]]:
+    """Khóa sort luôn kết thúc bằng `_id` để tie-break ổn định giữa các trang.
+
+    `metric_fields` là các khóa metric đã được hợp đồng của cuộc thi xác nhận - chỉ những khóa
+    này mới được nội suy vào `metrics.<key>`.
+    """
     direction = 1 if order == "asc" else -1
     if sort == "team":
         return [
@@ -452,7 +467,7 @@ def sort_spec(sort: str, order: str) -> list[tuple[str, int]]:
             ("created_at", direction),
             ("_id", direction),
         ]
-    if sort in METRIC_SORT_FIELDS:
+    if sort in metric_fields:
         # Record lỗi chấm điểm không có `metrics`: Mongo xếp null/missing lên đầu khi tăng dần.
         return [
             (f"metrics.{sort}", direction),
@@ -508,24 +523,30 @@ def _lookup_stages(sort: str) -> list[dict]:
 
 
 async def list_admin_submissions(
-    db, query: dict, *, sort: str, order: str, limit: int, offset: int
+    db,
+    query: dict,
+    *,
+    sort: str,
+    order: str,
+    limit: int,
+    offset: int,
+    metric_fields: tuple[str, ...] = (),
 ) -> list[dict]:
     """Một trang submission cho quản trị; `team`/`competition` cần lookup nên phải aggregation."""
     collection = db[SUBMISSIONS_COLLECTION]
+    spec = sort_spec(sort, order, metric_fields=metric_fields)
     if sort in LOOKUP_SORT_FIELDS:
         cursor = collection.aggregate(
             [
                 {"$match": query},
                 *_lookup_stages(sort),
-                {"$sort": dict(sort_spec(sort, order))},
+                {"$sort": dict(spec)},
                 {"$skip": offset},
                 {"$limit": limit},
             ]
         )
         return [document async for document in cursor]
-    cursor = (
-        collection.find(query).sort(sort_spec(sort, order)).skip(offset).limit(limit)
-    )
+    cursor = collection.find(query).sort(spec).skip(offset).limit(limit)
     return [document async for document in cursor]
 
 

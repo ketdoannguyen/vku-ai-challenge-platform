@@ -225,7 +225,7 @@ test("create validates end time after start time before API call", async () => {
   expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some((call) => call[1]?.method === "POST")).toBe(false);
 });
 
-test("edit form khóa slug và disable metric khi published", async () => {
+test("edit form khóa slug khi published", async () => {
   const published = { ...DRAFT, status: "published" as const };
   mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [published] }, status: 200 } : { body: {}, status: 500 }));
   render(
@@ -237,8 +237,8 @@ test("edit form khóa slug và disable metric khi published", async () => {
   fireEvent.click(await screen.findByRole("menuitem", { name: "Sửa" }));
   const slugInput = await screen.findByLabelText(/Slug \(không đổi được\)/);
   expect((slugInput as HTMLInputElement).disabled).toBe(true);
-  const metricSelect = screen.getByLabelText("Chỉ số chính") as HTMLSelectElement;
-  expect(metricSelect.disabled).toBe(true);
+  // Cách chấm không chọn ở form này nữa: metric chính do hợp đồng kết quả ở tab Chấm điểm quyết định.
+  expect(screen.queryByLabelText("Chỉ số chính")).toBeNull();
 });
 
 /**

@@ -10,7 +10,8 @@ import {
 import { formatLocal } from "../api/competitions";
 import {
   fetchMySubmissions,
-  formatScore,
+  formatMetric,
+  resultContract,
   SUBMISSION_STATUS_LABEL,
   type SubmissionsResponse,
 } from "../api/results";
@@ -23,6 +24,8 @@ const PAGE_SIZE = 50;
 
 export function MySubmissionsPage() {
   const { competition } = useOutletContext<CompetitionContext>();
+  // Cuộc thi v2 khai báo metric riêng, nên cột chỉ số lấy từ hợp đồng thay vì cố định f1/precision/recall.
+  const contract = resultContract(competition.submission_config);
   const [data, setData] = useState<SubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -160,25 +163,32 @@ export function MySubmissionsPage() {
   // có bài nộp khiến trang trộn hai loại dòng, nên điều kiện là "có ít nhất một dòng".
   const showsAi = data.submissions.some((submission) => submission.ai_review);
 
-  // Xác định submission có primary_score cao nhất trong trang hiện tại
-  const bestSubmissionId = data.submissions.reduce<string | null>((bestId, current) => {
-    // Bài bị admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả.
-    if (
-      current.status !== "completed" ||
-      current.review?.status === "rejected" ||
-      typeof current.primary_score !== "number"
-    ) {
-      return bestId;
-    }
-    if (!bestId) return current.id;
-    const bestScore =
-      data.submissions.find((s) => s.id === bestId)?.primary_score ?? -Infinity;
-    return current.primary_score > bestScore ? current.id : bestId;
-  }, null);
+  // Bài tốt nhất trong trang hiện tại. Chiều so sánh lấy từ hợp đồng kết quả vì có cuộc thi lấy
+  // metric nhỏ hơn làm điểm tốt (loss, RMSE), nên "điểm cao là nhất" chỉ đúng một chiều. Bài bị
+  // admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả.
+  const best = data.submissions.reduce<{ id: string; score: number } | null>(
+    (winner, submission) => {
+      if (
+        submission.status !== "completed" ||
+        submission.review?.status === "rejected" ||
+        typeof submission.primary_score !== "number"
+      ) {
+        return winner;
+      }
+      const score = submission.primary_score;
+      if (winner === null) return { id: submission.id, score };
+      const better = contract.higher_is_better ? score > winner.score : score < winner.score;
+      return better ? { id: submission.id, score } : winner;
+    },
+    null,
+  );
+  const bestSubmissionId = best?.id ?? null;
+  const bestScoreVal = best?.score ?? null;
 
-  const bestScoreVal = bestSubmissionId
-    ? data.submissions.find((s) => s.id === bestSubmissionId)?.primary_score
-    : null;
+  // Số thập phân của điểm tốt nhất phải theo metric chính trong hợp đồng; hợp đồng chưa chọn metric
+  // chính thì giữ mức 4 của hợp đồng v1 để con số không đổi định dạng.
+  const bestScoreDecimals =
+    contract.metrics.find((metric) => metric.key === contract.primary_metric)?.decimals ?? 4;
 
   return (
     <section className="subm-page">
@@ -221,9 +231,9 @@ export function MySubmissionsPage() {
             <>
               <span>•</span>
               <span className="subm-summary-best">
-                <span>Điểm cao nhất trong trang:</span>
+                <span>Điểm tốt nhất trong trang:</span>
                 <strong className="subm-summary-score">
-                  {formatScore(bestScoreVal)}
+                  {formatMetric(bestScoreVal, bestScoreDecimals)}
                 </strong>
               </span>
             </>
@@ -280,7 +290,7 @@ export function MySubmissionsPage() {
         </>
       )}
 
-      {/* Bảng 7 cột kết quả */}
+      {/* Bảng kết quả: số cột chỉ số và nhãn của chúng theo hợp đồng của cuộc thi. */}
       <div
         className="subm-table-wrap table-wrap"
         aria-busy={busy}
@@ -297,10 +307,15 @@ export function MySubmissionsPage() {
               {showsAi && (
                 <th scope="col" className="subm-col-ai">AI sơ bộ</th>
               )}
-              <th scope="col" className="subm-col-num">F1</th>
-              <th scope="col" className="subm-col-num">Precision</th>
-              <th scope="col" className="subm-col-num">Recall</th>
-              <th scope="col" className="subm-col-primary">Điểm chính</th>
+              {contract.metrics.map((metric) => (
+                <th
+                  key={metric.key}
+                  scope="col"
+                  className={metric.key === contract.primary_metric ? "subm-col-primary" : "subm-col-num"}
+                >
+                  {metric.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -393,18 +408,20 @@ export function MySubmissionsPage() {
                       )}
                     </td>
                   )}
-                  <td className="subm-score-cell score-cell">
-                    {formatScore(submission.metrics?.f1)}
-                  </td>
-                  <td className="subm-score-cell score-cell">
-                    {formatScore(submission.metrics?.precision)}
-                  </td>
-                  <td className="subm-score-cell score-cell">
-                    {formatScore(submission.metrics?.recall)}
-                  </td>
-                  <td className="subm-primary-score-cell score-cell primary-score">
-                    {formatScore(submission.primary_score)}
-                  </td>
+                  {/* Điểm chính là giá trị của metric chính trong hợp đồng, nên không vẽ thêm cột
+                      "Điểm chính" để tránh hiện cùng một con số ở hai chỗ. */}
+                  {contract.metrics.map((metric) => (
+                    <td
+                      key={metric.key}
+                      className={
+                        metric.key === contract.primary_metric
+                          ? "subm-primary-score-cell score-cell primary-score"
+                          : "subm-score-cell score-cell"
+                      }
+                    >
+                      {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                    </td>
+                  ))}
                 </tr>
               );
             })}

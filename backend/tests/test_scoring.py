@@ -5,9 +5,9 @@ import warnings
 import pytest
 
 from app.scoring import service as scoring_service
+from app.scoring.errors import ScoringValidationError
 from app.scoring.service import (
     ScoringConfig,
-    ScoringValidationError,
     load_ground_truth,
     score_submission,
     validate_config,

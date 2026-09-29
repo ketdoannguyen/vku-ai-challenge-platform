@@ -2,7 +2,12 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AdminAiReview, AiReviewDetail } from "../api/aiReview";
-import type { AdminSubmissionsResponse, GlobalSubmissionItem } from "../api/results";
+import type {
+  AdminSubmissionsResponse,
+  GlobalSubmissionItem,
+  ResultContract,
+} from "../api/results";
+import { AdminSubmissionsPanel } from "../components/AdminSubmissionsPanel";
 import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
 import { flushTimers, setDocumentHidden } from "../test/timers";
 import { AdminSubmissionsPage } from "./AdminSubmissionsPage";
@@ -61,9 +66,13 @@ const COMPETITION_OPTIONS = {
   ],
 };
 
-/** Danh sách cuộc thi cho ô lọc tách khỏi các request bảng bài nộp. */
+/**
+ * Danh sách cuộc thi cho ô lọc tách khỏi các request bảng bài nộp. So khớp cả đường dẫn chứ không
+ * phải chuỗi con: bảng khóa cuộc thi gọi `/api/admin/competitions/{id}/submissions`, cũng chứa
+ * tiền tố đó.
+ */
 function isOptionsRequest(url: string) {
-  return url.includes("/api/admin/competitions");
+  return new URL(url, "http://localhost").pathname === "/api/admin/competitions";
 }
 
 function mockApi(
@@ -134,7 +143,8 @@ test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái v�
   // tra được bằng role.
   const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
   expect(within(region).getByRole("img", { name: "Đã chấm điểm" })).toBeTruthy();
-  expect(screen.getAllByText("0.900000").length).toBeGreaterThan(0);
+  // Response cũ không có `result_contract` nên được mô tả lại thành bộ ba v1 với 4 số thập phân.
+  expect(screen.getAllByText("0.9000").length).toBeGreaterThan(0);
   expect(screen.getByText("1 bài nộp trong bộ lọc hiện tại.")).toBeTruthy();
 
   // Mặc định: mới nhất trước, không gửi tham số lọc rỗng lên server.
@@ -254,12 +264,13 @@ test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường c
     "Thao tác",
   ]);
 
-  // Điểm chính đứng riêng trong hộp của nó; cụm Kết quả chỉ còn ba metric phụ.
+  // Điểm chính đứng riêng trong hộp của nó; cụm Kết quả chỉ còn hai metric phụ của hợp đồng v1
+  // (f1 là metric chính nên không được hiện lại).
   expect(fieldValue(items[0], "Điểm chính").querySelector(".subm-score")).toBeTruthy();
-  expect(fieldValue(items[0], "Kết quả").querySelectorAll(".subm-metric")).toHaveLength(3);
+  expect(fieldValue(items[0], "Kết quả").querySelectorAll(".subm-metric")).toHaveLength(2);
 });
 
-test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có thứ tự mặc định riêng", async () => {
+test("bảng toàn cục chỉ sắp xếp theo bốn trường cố định, mỗi trường có thứ tự mặc định riêng", async () => {
   const { urls } = mockApi();
   renderPage();
   await screen.findByText("Đội 0");
@@ -269,24 +280,29 @@ test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có
   expect(field).toHaveValue("created_at");
   expect(screen.getByRole("button", { name: "Giảm dần" })).toBeTruthy();
 
-  const fields: Array<[string, string, string, string]> = [
-    ["competition", "asc", "Tăng dần", "Cuộc thi"],
-    ["team", "asc", "Tăng dần", "Đội"],
-    ["f1", "desc", "Giảm dần", "F1"],
-    ["precision", "desc", "Giảm dần", "Precision"],
-    ["recall", "desc", "Giảm dần", "Recall"],
-    ["primary_score", "desc", "Giảm dần", "Điểm chính"],
-    ["created_at", "desc", "Giảm dần", "Thời gian"],
+  // Bảng toàn cục trộn nhiều thang điểm nên backend từ chối sort theo metric: thanh này chỉ còn
+  // bốn trường cố định, không có F1/Precision/Recall như hồi metric còn cứng.
+  expect(within(field).getAllByRole("option").map((option) => option.textContent)).toEqual([
+    "Thời gian",
+    "Cuộc thi",
+    "Đội",
+    "Điểm chính",
+  ]);
+
+  const fields: Array<[string, string, string]> = [
+    ["competition", "asc", "Tăng dần"],
+    ["team", "asc", "Tăng dần"],
+    ["primary_score", "desc", "Giảm dần"],
+    ["created_at", "desc", "Giảm dần"],
   ];
 
-  for (const [sort, order, direction, label] of fields) {
+  for (const [sort, order, direction] of fields) {
     fireEvent.change(field, { target: { value: sort } });
     await waitFor(() => expect(lastParams(urls).get("sort")).toBe(sort));
     expect(lastParams(urls).get("order")).toBe(order);
     expect(lastParams(urls).get("offset")).toBe("0");
     expect(field).toHaveValue(sort);
-    // Mỗi lựa chọn đều có nhãn đọc được và nút đảo chiều nói đúng chiều đang áp dụng.
-    expect(within(field).getByRole("option", { name: label })).toBeTruthy();
+    // Nút đảo chiều nói đúng chiều đang áp dụng.
     expect(screen.getByRole("button", { name: direction })).toBeTruthy();
   }
 
@@ -304,15 +320,13 @@ test("thanh sắp xếp đổi trường và đảo chiều, mỗi trường có
   expect(screen.getByRole("button", { name: "Tăng dần" })).toBeTruthy();
 });
 
-test("Điểm chính đứng riêng trong hộp vàng, ba metric phụ giữ trung tính", async () => {
+test("Điểm chính đứng riêng trong hộp vàng, các metric phụ giữ trung tính", async () => {
   mockApi();
   renderPage();
   await screen.findByText("Đội 0");
 
   const primary = fieldValue(itemOf("Đội 0"), "Điểm chính");
-  expect(primary.querySelector(".subm-score .subm-result-primary-score")).toHaveTextContent(
-    "0.900000",
-  );
+  expect(primary.querySelector(".subm-score .subm-result-primary-score")).toHaveTextContent("0.9000");
   // Hộp điểm có ô icon vàng riêng, không mượn ô icon của trường nào khác.
   expect(primary.querySelector(".subm-score .subm-block-icon-gold")).toBeTruthy();
 
@@ -321,9 +335,8 @@ test("Điểm chính đứng riêng trong hộp vàng, ba metric phụ giữ tru
   expect(result.querySelector(".subm-result-primary-score")).toBeNull();
 
   for (const [label, value] of [
-    ["F1", "0.900000"],
-    ["Precision", "0.800000"],
-    ["Recall", "0.700000"],
+    ["Precision", "0.8000"],
+    ["Recall", "0.7000"],
   ]) {
     const metric = Array.from(result.querySelectorAll(".subm-metric")).find(
       (node) => node.querySelector(".subm-metric-label")?.textContent === label,
@@ -331,6 +344,163 @@ test("Điểm chính đứng riêng trong hộp vàng, ba metric phụ giữ tru
     expect(metric, `không có metric "${label}"`).toBeTruthy();
     expect(metric.querySelector(".subm-metric-value")).toHaveTextContent(value);
   }
+
+  // f1 là metric chính nên chỉ hiện ở hộp Điểm chính, không lặp lại lần thứ hai ở cụm Kết quả.
+  expect(
+    Array.from(result.querySelectorAll(".subm-metric-label")).map((node) => node.textContent),
+  ).toEqual(["Precision", "Recall"]);
+});
+
+/** Hợp đồng của một cuộc thi trong trang toàn cục: bộ metric khác hẳn ba cột v1. */
+const CUP_ONE_CONTRACT: ResultContract = {
+  metrics: [
+    { key: "accuracy", label: "Độ chính xác", decimals: 2 },
+    { key: "latency", label: "Độ trễ", decimals: 1 },
+  ],
+  primary_metric: "accuracy",
+  higher_is_better: true,
+};
+
+test("bảng toàn cục gắn nhãn metric theo hợp đồng của từng cuộc thi trong trang", async () => {
+  mockApi(() =>
+    jsonResponse({
+      ...pageOf([
+        row("s-contract", "Đội hợp đồng riêng", {
+          metrics: { accuracy: 0.9876, latency: 12.34 },
+          primary_score: 0.9876,
+        }),
+        // Cuộc thi không có trong `competitions` của trang: mô tả lại thành bộ ba v1 chứ không
+        // bỏ trắng cụm Kết quả.
+        row("s-legacy", "Đội hợp đồng cũ", {
+          competition_id: "c9",
+          competition: { id: "c9", slug: "", name: "Cuộc thi đã xóa" },
+        }),
+      ]),
+      competitions: [
+        { id: "c1", slug: "cup-1", name: "Cup 1", result_contract: CUP_ONE_CONTRACT },
+      ],
+    }),
+  );
+  renderPage();
+  await screen.findByText("Đội hợp đồng riêng");
+
+  // Nhãn, thứ tự và số thập phân của cụm Kết quả đều theo hợp đồng của cuộc thi của dòng đó.
+  const custom = fieldValue(itemOf("Đội hợp đồng riêng"), "Kết quả");
+  expect(
+    Array.from(custom.querySelectorAll(".subm-metric-label")).map((node) => node.textContent),
+  ).toEqual(["Độ trễ"]);
+  expect(custom.querySelector(".subm-metric-value")).toHaveTextContent("12.3");
+  // Điểm chính lấy số thập phân từ định nghĩa metric chính của cùng hợp đồng.
+  expect(
+    fieldValue(itemOf("Đội hợp đồng riêng"), "Điểm chính").querySelector(
+      ".subm-result-primary-score",
+    ),
+  ).toHaveTextContent("0.99");
+
+  const legacy = fieldValue(itemOf("Đội hợp đồng cũ"), "Kết quả");
+  expect(
+    Array.from(legacy.querySelectorAll(".subm-metric-label")).map((node) => node.textContent),
+  ).toEqual(["Precision", "Recall"]);
+  expect(
+    fieldValue(itemOf("Đội hợp đồng cũ"), "Điểm chính").querySelector(
+      ".subm-result-primary-score",
+    ),
+  ).toHaveTextContent("0.9000");
+});
+
+test("hợp đồng không còn metric phụ nào thì cụm Kết quả là gạch mờ, không phải cụm rỗng", async () => {
+  mockApi(() =>
+    jsonResponse({
+      ...pageOf([
+        row("s-draft", "Đội chưa khai metric", {
+          competition_id: "c2",
+          competition: { id: "c2", slug: "cup-2", name: "Cup 2" },
+        }),
+      ]),
+      competitions: [
+        // Bản nháp v2 chưa khai metric nào: hợp đồng rỗng, không được dựng lại ba cột cũ.
+        {
+          id: "c2",
+          slug: "cup-2",
+          name: "Cup 2",
+          result_contract: { metrics: [], primary_metric: null, higher_is_better: true },
+        },
+      ],
+    }),
+  );
+  renderPage();
+  await screen.findByText("Đội chưa khai metric");
+
+  const result = fieldValue(itemOf("Đội chưa khai metric"), "Kết quả");
+  expect(result.querySelectorAll(".subm-metric")).toHaveLength(0);
+  expect(result.querySelector(".subm-muted")).toHaveTextContent("—");
+  // Chưa chọn metric chính thì Điểm chính lùi về 4 số thập phân như bộ chấm v1.
+  expect(
+    fieldValue(itemOf("Đội chưa khai metric"), "Điểm chính").querySelector(
+      ".subm-result-primary-score",
+    ),
+  ).toHaveTextContent("0.9000");
+});
+
+/** Hợp đồng của cuộc thi đang khóa, có metric phụ càng nhỏ càng tốt. */
+const LOCKED_CONTRACT: ResultContract = {
+  metrics: [
+    { key: "f1", label: "F1", decimals: 3 },
+    { key: "rmse", label: "RMSE", decimals: 2 },
+  ],
+  primary_metric: "f1",
+  higher_is_better: false,
+};
+
+test("bảng khóa cuộc thi lấy metric và chiều sắp xếp từ hợp đồng của prop", async () => {
+  const { urls } = mockApi(() =>
+    jsonResponse(
+      pageOf([
+        row("s-locked", "Đội khóa", { metrics: { f1: 0.9, rmse: 0.1234 }, primary_score: 0.9 }),
+      ]),
+    ),
+  );
+  render(
+    <MemoryRouter initialEntries={["/admin/competitions/c1"]}>
+      <AdminSubmissionsPanel
+        competitionId="c1"
+        resultContract={LOCKED_CONTRACT}
+        title="Danh sách submissions"
+        listLabel="Danh sách bài nộp của cuộc thi"
+      />
+    </MemoryRouter>,
+  );
+  await screen.findByText("Đội khóa");
+
+  // Endpoint theo cuộc thi không trả hợp đồng: nhãn và số thập phân đến từ prop.
+  const result = fieldValue(itemOf("Đội khóa"), "Kết quả");
+  expect(
+    Array.from(result.querySelectorAll(".subm-metric-label")).map((node) => node.textContent),
+  ).toEqual(["RMSE"]);
+  expect(result.querySelector(".subm-metric-value")).toHaveTextContent("0.12");
+  expect(
+    fieldValue(itemOf("Đội khóa"), "Điểm chính").querySelector(".subm-result-primary-score"),
+  ).toHaveTextContent("0.900");
+
+  const field = screen.getByLabelText("Sắp xếp theo");
+  // Mọi dòng cùng một cuộc thi nên trường "Cuộc thi" bị bỏ; bù lại có metric của hợp đồng,
+  // nhưng không có metric chính vì nó đã là "Điểm chính".
+  expect(within(field).queryByRole("option", { name: "Cuộc thi" })).toBeNull();
+  expect(within(field).getByRole("option", { name: "RMSE" })).toBeTruthy();
+  expect(within(field).queryByRole("option", { name: "F1" })).toBeNull();
+
+  fireEvent.change(field, { target: { value: "rmse" } });
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("rmse"));
+  // RMSE càng nhỏ càng tốt nên chiều mặc định là tăng dần, không phải giảm dần.
+  expect(lastParams(urls).get("order")).toBe("asc");
+  expect(lastParams(urls).get("offset")).toBe("0");
+  expect(screen.getByRole("button", { name: "Tăng dần" })).toBeTruthy();
+  expect(urls.at(-1)).toContain("/api/admin/competitions/c1/submissions?");
+
+  // Cột "Điểm chính" cũng lấy chiều từ hợp đồng, không mặc định "điểm cao là nhất".
+  fireEvent.change(field, { target: { value: "primary_score" } });
+  await waitFor(() => expect(lastParams(urls).get("sort")).toBe("primary_score"));
+  expect(lastParams(urls).get("order")).toBe("asc");
 });
 
 test("hiện bốn thẻ thống kê theo bộ lọc hiện tại", async () => {

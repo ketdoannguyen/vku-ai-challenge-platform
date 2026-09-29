@@ -159,6 +159,44 @@ notebook của thí sinh sẽ đi tới đâu trước khi bật AI.
 Hai host ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS`/`_HTTP_HOSTS` chỉ nên có mặt trên môi trường phát triển;
 đây là danh sách **mở khoá**, nên một entry ở đây nới rộng biên chứ không thu hẹp nó.
 
+### 3.3 Bộ chấm Python (ADR-048) - **chưa nối vào production**
+
+Trạng thái thật, đọc trước khi định bật: **`docker-compose.prod.yml` chưa có service `evaluator-runner`
+và chưa có nhóm biến `EVALUATOR_*`**. Hệ quả trên production hiện tại: mọi lượt chấm của một cuộc thi
+v2 trả `503 EVALUATOR_UNAVAILABLE` (API không phân giải được `http://evaluator-runner:8100`) - cuộc
+thi v1 **không** bị ảnh hưởng, vì chúng không đi qua runner. Đây là **cố ý**: thêm một service mà
+deployer không quản thì nó không bao giờ được `up`, và một service "có khai nhưng không chạy" còn tệ
+hơn không khai, vì nó làm người vận hành tin rằng tính năng đã sẵn sàng.
+
+Để bật trên production cần **đủ bốn** việc, không việc nào tự động:
+
+1. **Build image runtime** trên VM (không service/script nào làm hộ):
+   `sudo docker build -t vku-evaluator-runtime:1 evaluator-runtime` - chạy từ repo trên VM. Thiếu bước
+   này thì runner vẫn lên nhưng **mọi** lượt chấm hỏng (`/health` trả `"docker": true` vì nó chỉ kiểm
+   docker CLI, không kiểm image tồn tại - lỗi hiện ra ở lượt chấm đầu tiên).
+2. **Khai service `evaluator-runner`** trong `docker-compose.prod.yml` (mẫu ở `docker-compose.yml`:
+   cùng image backend, `target: runner`, mount `/var/run/docker.sock`, `expose 8100`, không publish
+   port, không route Nginx) cùng nhóm biến `EVALUATOR_*` cho service `api`.
+3. **Dạy deployer biết service thứ tư**: `deploy/vps/auto-deploy.sh` hiện chỉ quản `api`,
+   `ai-review-worker`, `web` (map thay đổi → service, thứ tự `up`, nhánh rollback `rm -sf` cho service
+   chưa tồn tại ở bản cũ). Không sửa thì container runner không bao giờ được tạo lại theo SHA, và một
+   rollback sẽ để nó chạy mã của bản vừa hỏng. Sửa deployer trong repo **không** tự áp dụng lên VM -
+   phải chạy lại `install-auto-deploy.sh` từ commit đã duyệt.
+4. **Cấp quyền cho runner**: nó là tiến trình **duy nhất** được mount docker socket. Trên VM một
+   người dùng, điều đó nghĩa là runner có quyền tương đương root trên host - chấp nhận được **chỉ vì**
+   code chấm của admin chạy trong container con với `--network none --read-only --cap-drop ALL
+   --user 65534:65534`, và tiến trình runner không bao giờ `exec` code đó. Đừng nới hai cờ đó.
+
+Môi trường **dev** thì đã sẵn: `docker-compose.yml` có service, chỉ cần build image runtime một lần
+(`docker build -t vku-evaluator-runtime:1 evaluator-runtime`) rồi `docker compose up -d --build`.
+
+| Biến (dev) | Ý nghĩa |
+|---|---|
+| `EVALUATOR_RUNTIME_IMAGE` | Image của container chấm, mặc định `vku-evaluator-runtime:1`. **Chỉ runner đọc**, và **phải build tay**. Đổi giá trị này **không** tự làm bằng chứng chạy thử hết hiệu lực: vân tay tính theo runtime đã **ghim** trong cấu hình lúc chạy thử, không theo biến này - cố ý, vì `scoring/test` bị khoá sau bài nộp đầu tiên nên đóng cửa theo biến sẽ chặn vĩnh viễn đường chấm của cuộc thi đang sống. Bù lại, điểm sau đó do image **mới** sinh ra: muốn có bằng chứng cho image mới thì phải chạy thử lại lúc cuộc thi còn sửa được |
+| `EVALUATOR_TIMEOUT_SECONDS` | Trần một lượt chấm, mặc định `30`. API dùng timeout `+15 s` để runner kịp trả mã lỗi trước khi API bỏ cuộc |
+| `EVALUATOR_MAX_CONCURRENCY` | Số lượt chấm song song trong **một** process runner, mặc định `2`. Hết slot thì **từ chối** (`EVALUATOR_UNAVAILABLE`) chứ không xếp hàng. VPS chỉ có 2 lõi (ADR-046) - nâng phải chắc còn CPU/RAM cho từng slot |
+| `EVALUATOR_RUNNER_URL` | `http://evaluator-runner:8100`, **chỉ `api` đọc**. Sai giá trị = mọi lượt chấm v2 trả 503 |
+
 ### 3.1 MinIO: bootstrap bucket và credential (ADR-028)
 
 Artifact của submission (CSV dự đoán + notebook) nằm trong MinIO private, không có route Nginx, không

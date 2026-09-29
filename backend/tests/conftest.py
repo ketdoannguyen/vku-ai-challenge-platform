@@ -52,6 +52,17 @@ def fake_artifact_storage(monkeypatch):
 
 
 @pytest.fixture()
+def fake_runner(monkeypatch):
+    """Thay tiến trình chấm thật bằng runner giả; xem `tests.helpers.FakeRunner`."""
+    from app.scoring import evaluator_client
+    from tests.helpers import FakeRunner
+
+    runner = FakeRunner()
+    monkeypatch.setattr(evaluator_client, "EvaluatorClient", runner)
+    return runner
+
+
+@pytest.fixture()
 def mock_db():
     return AsyncMongoMockClient().test_db
 

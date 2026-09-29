@@ -2,12 +2,13 @@
 
 import hashlib
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, File, Query, Request, Response, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from app.accounts import service as accounts_service
 from app.ai_review import constants as ai_constants
@@ -19,8 +20,11 @@ from app.core.config import get_settings
 from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
+from app.scoring import csv_validation, evaluator_client, execution, models, revisions
+from app.scoring import output_validation
 from app.scoring import service as scoring_service
 from app.scoring import storage as scoring_storage
+from app.scoring.errors import EvaluatorError, ScoringValidationError
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts import validation as artifact_validation
 from app.submission_artifacts.naming import (
@@ -33,6 +37,26 @@ from app.submissions import service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/competitions")
+
+SCORING_NOT_READY_MESSAGE = "Cuộc thi chưa sẵn sàng chấm điểm."
+# Lỗi thuộc về file thí sinh: trả mã riêng để em biết phải sửa gì. Mọi lỗi còn lại - ground truth
+# hỏng, hợp đồng metric lệch, bộ chấm lỗi, runner bận - là lỗi hệ thống mà thí sinh không sửa được.
+_STUDENT_ERROR_CODES = frozenset(
+    {
+        csv_validation.SCHEMA_INVALID,
+        csv_validation.VALUE_INVALID,
+        csv_validation.DUPLICATE_IDS,
+        csv_validation.ID_MISMATCH,
+    }
+)
+
+
+@dataclass(frozen=True)
+class _Scored:
+    metrics: dict[str, float]
+    primary_score: float
+    # Dấu vết của lượt chấm v2; v1 để None vì bộ chấm và công thức là cố định trong mã nguồn.
+    scoring_ref: dict | None = None
 
 
 @router.post("/{competition_id}/submissions", status_code=201)
@@ -60,7 +84,7 @@ async def submit_submission(
     if now > as_utc(competition["end_at"]):
         raise api_error(422, "SUBMISSION_DEADLINE_PASSED", "Đã hết hạn nộp bài.")
 
-    config = _ready_config(competition)
+    config = _scoring_config(competition)
     quota = competition["quota_per_day"]
     # Chặn sớm cho khỏi chấm điểm khi đã hết lượt; đây chỉ là đường nhanh vì phép đếm không nguyên
     # tử. Cổng chặn thật là `reserve_quota_slot` ngay trước khi upload.
@@ -73,13 +97,6 @@ async def submit_submission(
             "SUBMISSION_QUOTA_EXCEEDED",
             "Bạn đã dùng hết lượt nộp bài hôm nay.",
         )
-
-    ground_truth_data = _read_ground_truth(competition)
-    try:
-        ground_truth = scoring_service.load_ground_truth(ground_truth_data, config)
-    except scoring_service.ScoringValidationError:
-        logger.error("Stored ground truth is invalid competition=%s", competition["_id"])
-        raise api_error(422, "SCORING_NOT_READY", "Cuộc thi chưa sẵn sàng chấm điểm.")
 
     if Path(file.filename or "").suffix.lower() != ".csv":
         logger.info(
@@ -112,25 +129,7 @@ async def submit_submission(
         )
         raise api_error(422, exc.code, exc.message)
 
-    try:
-        result = scoring_service.score_submission(
-            data, ground_truth, config, competition["primary_metric"]
-        )
-    except scoring_service.ScoringValidationError as exc:
-        logger.info(
-            "Submission rejected competition=%s account=%s code=%s",
-            competition["_id"],
-            account["_id"],
-            exc.code,
-        )
-        raise api_error(422, exc.code, exc.message)
-    except Exception:
-        logger.exception(
-            "Submission scoring failed competition=%s account=%s",
-            competition["_id"],
-            account["_id"],
-        )
-        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
+    scored = await _score_or_fail(competition, config, data, account=account)
 
     # Giữ lượt nguyên tử TRƯỚC khi cấp số và upload: phép đếm ở trên không nguyên tử nên nhiều
     # request song song cùng lọt qua, còn `$inc` có điều kiện trên một document membership thì
@@ -177,10 +176,13 @@ async def submit_submission(
             },
         },
         "status": "completed",
-        "metrics": result.metrics,
-        "primary_score": result.primary_score,
+        "metrics": scored.metrics,
+        "primary_score": scored.primary_score,
         "created_at": now,
     }
+    if scored.scoring_ref is not None:
+        # Vân tay của lượt chấm v2: đối chiếu lại được bài nộp với đúng bộ chấm đã sinh ra điểm.
+        document["scoring_ref"] = scored.scoring_ref
     try:
         snapshot, projection = await _ai_state(db, competition, settings, now)
         if snapshot is not None:
@@ -376,23 +378,152 @@ async def _competition_or_404(db, competition_id: str) -> dict:
     return competition
 
 
-def _ready_config(competition: dict) -> scoring_service.ScoringConfig:
+def _scoring_config(
+    competition: dict,
+) -> scoring_service.ScoringConfig | models.ScoringConfigV2:
+    """Cấu hình chấm đang dùng của cuộc thi: bộ chấm Python của v2, hoặc cấu hình cột cố định của v1."""
     if not competition.get("ground_truth"):
-        raise api_error(422, "SCORING_NOT_READY", "Cuộc thi chưa sẵn sàng chấm điểm.")
+        raise _scoring_not_ready()
+    try:
+        config_v2 = models.stored_config(competition)
+    except Exception:
+        config_v2 = None
+    if config_v2 is not None:
+        return config_v2
     try:
         config = scoring_service.config_from_competition(competition)
     except Exception:
         config = None
     if config is None:
-        raise api_error(422, "SCORING_NOT_READY", "Cuộc thi chưa sẵn sàng chấm điểm.")
+        raise _scoring_not_ready()
     return config
 
 
-def _read_ground_truth(competition: dict) -> bytes:
+async def _score_or_fail(
+    competition: dict, config, data: bytes, *, account: dict
+) -> _Scored:
+    """Chấm bài nộp, dịch mọi lỗi sang HTTP.
+
+    Lỗi thuộc về file của thí sinh giữ mã riêng để em biết đường sửa; lỗi của cấu hình chấm và của
+    bộ chấm là chuyện nội bộ - thí sinh chỉ nhận một câu chung, chi tiết đi vào log.
+    """
     try:
-        return scoring_storage.read_ground_truth(competition)
+        if isinstance(config, models.ScoringConfigV2):
+            return await _score_v2(competition, config, data)
+        return _score_v1(competition, config, data)
+    except ScoringValidationError as exc:
+        if exc.code not in _STUDENT_ERROR_CODES:
+            logger.error(
+                "Scoring unusable competition=%s code=%s message=%s",
+                competition["_id"],
+                exc.code,
+                exc.message,
+            )
+            raise _scoring_not_ready()
+        logger.info(
+            "Submission rejected competition=%s account=%s code=%s",
+            competition["_id"],
+            account["_id"],
+            exc.code,
+        )
+        raise api_error(422, exc.code, exc.message)
+    except EvaluatorError as exc:
+        logger.error(
+            "Evaluator failed competition=%s account=%s code=%s detail=%s",
+            competition["_id"],
+            account["_id"],
+            exc.code,
+            exc.detail,
+        )
+        if exc.code == evaluator_client.UNAVAILABLE:
+            raise api_error(
+                503, "EVALUATOR_UNAVAILABLE", "Hệ thống chấm đang bận, vui lòng thử lại sau."
+            )
+        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
+    except HTTPException:
+        # "Cuộc thi chưa sẵn sàng" đã được dịch sẵn ở tầng đọc file; không bọc lại thành lỗi 500.
+        raise
+    except Exception:
+        logger.exception(
+            "Submission scoring failed competition=%s account=%s",
+            competition["_id"],
+            account["_id"],
+        )
+        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
+
+
+def _score_v1(
+    competition: dict, config: scoring_service.ScoringConfig, data: bytes
+) -> _Scored:
+    """Bộ chấm cố định của v1: backend tự tính f1/precision/recall từ cột prediction."""
+    ground_truth_data = _read_ground_truth(competition)
+    ground_truth = scoring_service.load_ground_truth(ground_truth_data, config)
+    result = scoring_service.score_submission(
+        data, ground_truth, config, competition["primary_metric"]
+    )
+    return _Scored(metrics=result.metrics, primary_score=result.primary_score)
+
+
+async def _score_v2(
+    competition: dict, config: models.ScoringConfigV2, data: bytes
+) -> _Scored:
+    """Bộ chấm Python của admin: backend kiểm dữ liệu, gọi runner rồi đối chiếu hợp đồng metric."""
+    source = _read_evaluator_source(competition, config)
+    ground_truth_data = _read_ground_truth(competition)
+    evaluation = await execution.evaluate(
+        config,
+        source=source,
+        ground_truth_data=ground_truth_data,
+        submission_data=data,
+    )
+    if config.output_contract is None:
+        raise ScoringValidationError("SCORING_TEST_REQUIRED", "Cuộc thi chưa khai báo metric.")
+    return _Scored(
+        metrics=evaluation.metrics,
+        primary_score=output_validation.primary_score(
+            evaluation.metrics, config.output_contract
+        ),
+        scoring_ref={
+            "version": 2,
+            "revision": config.revision,
+            "config_fingerprint": evaluation.config_fingerprint,
+            "source_sha256": config.evaluator.source_sha256,
+            "ground_truth_sha256": revisions.sha256_bytes(ground_truth_data),
+            "submission_sha256": revisions.sha256_bytes(data),
+            "runtime_id": evaluation.runtime_id,
+        },
+    )
+
+
+def _read_evaluator_source(competition: dict, config: models.ScoringConfigV2) -> str:
+    """Source đã xác minh lúc publish phải đúng là source đang chạy."""
+    try:
+        raw = scoring_storage.read_evaluator_source(config.evaluator)
+        source = raw.decode("utf-8")
+    except (KeyError, OSError, ValueError, UnicodeDecodeError):
+        logger.error("Evaluator source unreadable competition=%s", competition["_id"])
+        raise _scoring_not_ready()
+    if revisions.sha256_bytes(raw) != config.evaluator.source_sha256:
+        logger.error("Evaluator source changed competition=%s", competition["_id"])
+        raise _scoring_not_ready()
+    return source
+
+
+def _read_ground_truth(competition: dict) -> bytes:
+    """Ground truth đang dùng; khác bản đã xác minh lúc publish cũng là cuộc thi không còn sẵn sàng."""
+    try:
+        data = scoring_storage.read_ground_truth(competition)
     except (KeyError, OSError, ValueError):
-        raise api_error(422, "SCORING_NOT_READY", "Cuộc thi chưa sẵn sàng chấm điểm.")
+        raise _scoring_not_ready()
+    stored_sha = (competition.get("ground_truth") or {}).get("sha256")
+    if stored_sha and stored_sha != revisions.sha256_bytes(data):
+        logger.error("Ground truth changed competition=%s", competition["_id"])
+        raise _scoring_not_ready()
+    return data
+
+
+def _scoring_not_ready():
+    return api_error(422, "SCORING_NOT_READY", SCORING_NOT_READY_MESSAGE)
 
 
 async def _read_limited(file: UploadFile, limit_mb: int) -> bytes:

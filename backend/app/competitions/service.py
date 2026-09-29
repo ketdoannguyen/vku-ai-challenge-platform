@@ -245,19 +245,41 @@ def _is_active_member(membership: dict | None) -> bool:
 
 
 def _submission_config(competition: dict, *, include_pos_label: bool) -> dict:
-    """`pos_label` là nhãn dương thật nên chỉ trả cho admin và thành viên đang hoạt động."""
+    """Dạng bài nộp và metric mà UI cần, đọc theo đúng đời cấu hình của cuộc thi.
+
+    `pos_label` là nhãn dương thật nên chỉ trả cho admin và thành viên đang hoạt động. Cuộc thi v1
+    giữ nguyên hình dạng cũ; v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
+    """
     from app.core.config import get_settings
+    from app.scoring import contracts, models
     from app.scoring.storage import ground_truth_available
 
-    config = competition.get("scoring_config")
+    is_v2 = models.is_v2(competition)
+    config = None if is_v2 else competition.get("scoring_config")
+    config_v2 = models.stored_config_or_none(competition)
+    ranking = contracts.ranking(competition)
     payload = {
-        "ready": bool(config and ground_truth_available(competition)),
-        "id_column": config["id_column"] if config else None,
-        "prediction_column": config["prediction_column"] if config else None,
-        "average": config["average"] if config else None,
+        "ready": bool((config or config_v2) and ground_truth_available(competition)),
+        "version": 2 if is_v2 else 1,
         "max_upload_mb": get_settings().max_upload_mb,
         "max_notebook_mb": get_settings().max_notebook_mb,
+        "primary_metric": ranking[0] if ranking else None,
+        "higher_is_better": ranking[1] if ranking else None,
+        "result_contract": contracts.contract_payload(competition),
     }
+    if is_v2:
+        # Cấu hình v2 hỏng đọc ra None: coi như chưa cấu hình để trang hiển thị đúng trạng thái chờ,
+        # thay vì lộ một schema sai. Readiness đã chặn publish và nộp bài cho bản hỏng từ trước.
+        schema = config_v2.input_schema.submission if config_v2 else None
+        return {
+            **payload,
+            "ready": payload["ready"] and schema is not None,
+            "id_column": schema.id_column if schema else None,
+            "columns": [column.model_dump() for column in schema.columns] if schema else [],
+        }
+    payload["id_column"] = config["id_column"] if config else None
+    payload["prediction_column"] = config["prediction_column"] if config else None
+    payload["average"] = config["average"] if config else None
     if include_pos_label:
         payload["pos_label"] = config.get("pos_label") if config else None
     return payload

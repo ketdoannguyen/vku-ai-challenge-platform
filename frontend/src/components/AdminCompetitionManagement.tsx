@@ -4,7 +4,6 @@ import type { AdminCompetition, Competition, CompetitionResource } from "../api/
 import {
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
-  METRIC_LABEL,
   isoToLocalInput,
   localInputToIso,
 } from "../api/competitions";
@@ -389,9 +388,6 @@ export function CompetitionFormModal({
   const [joinMode, setJoinMode] = useState<Competition["join_mode"]>(
     competition?.join_mode ?? "open",
   );
-  const [metric, setMetric] = useState<Competition["primary_metric"]>(
-    competition?.primary_metric ?? "f1",
-  );
   const [quota, setQuota] = useState(
     String(competition?.quota_per_day ?? 5),
   );
@@ -408,7 +404,6 @@ export function CompetitionFormModal({
   const title = isEdit
     ? `Sửa cuộc thi - ${competition.slug}`
     : "Tạo cuộc thi";
-  const metricLocked = isEdit && competition.status === "published";
 
   function updateResource(index: number, patch: Partial<CompetitionResource>) {
     setResources((rows) =>
@@ -440,6 +435,8 @@ export function CompetitionFormModal({
     }
 
     setBusy(true);
+    // Cố ý không gửi primary_metric: cách chấm của cuộc thi v2 do bộ chấm Python và
+    // result_contract khai báo ở tab "Chấm điểm" quyết định, field này chỉ còn là dấu vết dữ liệu v1.
     const payload = {
       name,
       slug: slug.trim().toLowerCase(),
@@ -447,7 +444,6 @@ export function CompetitionFormModal({
       start_at: localInputToIso(startAt),
       end_at: localInputToIso(endAt),
       join_mode: joinMode,
-      primary_metric: metric,
       quota_per_day: Number(quota),
       leaderboard_visible: leaderboardVisible,
       resources: resourcesPayload,
@@ -626,33 +622,6 @@ export function CompetitionFormModal({
             icon={<IconGauge />}
           >
             <div className="ac-form-grid">
-              <div className="ac-form-field">
-                <div className="ac-form-label-row">
-                  <label className="ac-required" htmlFor="comp-metric">
-                    Chỉ số chính
-                  </label>
-                  {metricLocked && <IconLock className="ac-form-lock" />}
-                </div>
-                <select
-                  id="comp-metric"
-                  className="ac-form-control ac-form-mono"
-                  value={metric}
-                  onChange={(event) =>
-                    setMetric(
-                      event.target.value as Competition["primary_metric"],
-                    )
-                  }
-                  disabled={metricLocked}
-                >
-                  <option value="f1">{METRIC_LABEL.f1}</option>
-                  <option value="precision">{METRIC_LABEL.precision}</option>
-                  <option value="recall">{METRIC_LABEL.recall}</option>
-                </select>
-                {metricLocked && (
-                  <small>Cuộc thi đã publish - không thể đổi chỉ số chính.</small>
-                )}
-              </div>
-
               <div className="ac-form-field">
                 <label className="ac-required" htmlFor="comp-quota">
                   Giới hạn nộp bài (lượt/ngày)

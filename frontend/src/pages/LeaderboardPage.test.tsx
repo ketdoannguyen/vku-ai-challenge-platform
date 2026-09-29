@@ -12,6 +12,41 @@ const COMPETITION = {
   leaderboard_visible: true,
 } as Competition;
 
+/**
+ * Cuộc thi v2 khai báo metric riêng. `primary_metric` của document vẫn là "f1" (field v1 còn sót
+ * lại) nên test này chứng minh bảng đọc hợp đồng chứ không đọc field cũ đó.
+ */
+const V2_COMPETITION: Competition = {
+  ...COMPETITION,
+  submission_config: {
+    ready: true,
+    version: 2,
+    max_upload_mb: 50,
+    max_notebook_mb: 20,
+    id_column: null,
+    primary_metric: "loss",
+    result_contract: {
+      metrics: [{ key: "loss", label: "Loss", decimals: 3 }],
+      primary_metric: "loss",
+      higher_is_better: false,
+    },
+  },
+};
+
+/** Bản nháp v2 chưa khai báo metric: hợp đồng rỗng, không metric nào là chỉ số chính. */
+const V2_DRAFT_COMPETITION: Competition = {
+  ...COMPETITION,
+  submission_config: {
+    ready: false,
+    version: 2,
+    max_upload_mb: 50,
+    max_notebook_mb: 20,
+    id_column: null,
+    primary_metric: null,
+    result_contract: { metrics: [], primary_metric: null, higher_is_better: true },
+  },
+};
+
 function renderPage(competition: Competition = COMPETITION) {
   return render(
     <MemoryRouter initialEntries={["/competitions/results-cup/leaderboard"]}>
@@ -78,11 +113,14 @@ function page(overrides: Record<string, unknown> = {}) {
 }
 
 function entry(rank: number, name: string, overrides: Record<string, unknown> = {}) {
+  const score = 1 - rank / 100;
   return {
     rank,
     display_name: name,
-    primary_score: 1 - rank / 100,
-    metrics: { f1: 1 - rank / 100, precision: 0.5, recall: 0.5 },
+    // Backend luôn đặt `primary_score` bằng giá trị metric chính trong `metrics`; fixture giữ đúng
+    // quan hệ đó để dòng dữ liệu không tự mâu thuẫn khi bảng chỉ đọc `metrics`.
+    primary_score: score,
+    metrics: { f1: score, precision: 0.5, recall: 0.5 },
     best_submission_id: `s${rank}`,
     best_submission_at: "2026-09-15T08:00:00Z",
     total_submissions: 1,
@@ -98,8 +136,8 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
     page({
       total: 2,
       entries: [
-        entry(1, "Đội Sớm", { primary_score: 0.91, total_submissions: 3 }),
-        entry(2, "Thí Sinh", { primary_score: 0.9, is_current_user: true, total_submissions: 2 }),
+        entry(1, "Đội Sớm", { total_submissions: 3 }),
+        entry(2, "Thí Sinh", { is_current_user: true, total_submissions: 2 }),
       ],
     }),
   );
@@ -107,9 +145,21 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
   renderPage();
 
   expect(await screen.findByText("Đội Sớm")).toBeTruthy();
-  const current = screen.getByText("Thí Sinh").closest("tr");
+  const current = screen.getByText("Thí Sinh").closest("tr") as HTMLElement;
   expect(current).toHaveClass("current-user-row");
-  expect(current).toHaveTextContent("0.900000");
+  // Bốn chữ số theo hợp đồng v1 (trước đây là sáu chữ số của formatScore).
+  expect(current).toHaveTextContent("0.9800");
+  // Không còn cột "Điểm chính" trùng: F1 là metric chính nên chỉ có đúng một cột mang giá trị đó.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+  expect(within(current).getByText("0.9800")).toHaveClass("primary-score");
+  expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
 test("leaderboard hidden hiển thị thông báo và không gọi API", () => {
@@ -124,6 +174,8 @@ test("leaderboard visible nhưng chưa có điểm hiển thị empty state", as
   mockResponse(page());
   renderPage();
   expect(await screen.findByText("Chưa có kết quả xếp hạng.")).toBeTruthy();
+  // Chưa có dòng nào thì mô tả lấy metric chính từ hợp đồng của cuộc thi.
+  expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
 test("hạng của bạn vẫn hiện khi nằm ngoài trang đang xem", async () => {
@@ -142,6 +194,8 @@ test("hạng của bạn vẫn hiện khi nằm ngoài trang đang xem", async (
   const strip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
   expect(strip).toHaveTextContent("#27");
   expect(strip).toHaveTextContent("/30");
+  // Điểm chính của thẻ hạng cũng theo số thập phân của metric chính (f1: 4).
+  expect(strip).toHaveTextContent("0.7300");
   expect(strip).toHaveTextContent("Hạng của bạn nằm ngoài trang này.");
   // Không có dòng nào của mình trong trang thì không được giả highlight.
   expect(document.querySelectorAll(".current-user-row")).toHaveLength(0);
@@ -342,4 +396,52 @@ test("trang rỗng nhưng vẫn còn dữ liệu thì mời quay lại, không b
   expect(await screen.findByText("Trang này không có dữ liệu.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Về trang trước" })).toBeTruthy();
   expect(screen.queryByText("Chưa có kết quả xếp hạng.")).toBeNull();
+});
+
+test("cuộc thi v2 hiển thị cột theo hợp đồng, đúng số thập phân và đánh dấu chỉ số chính", async () => {
+  const lossEntry = entry(1, "Đội Loss", {
+    primary_score: 0.1234,
+    metrics: { loss: 0.1234 },
+    is_current_user: true,
+  });
+  mockResponse(page({ primary_metric: "loss", total: 1, entries: [lossEntry], me: lossEntry }));
+
+  renderPage(V2_COMPETITION);
+
+  expect(await screen.findByText("Đội Loss")).toBeTruthy();
+  // Cột lấy từ hợp đồng: không còn F1/Precision/Recall của bộ chấm v1.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "Loss",
+    "Đạt lúc",
+  ]);
+  const row = screen.getByText("Đội Loss").closest("tr") as HTMLElement;
+  // Ba chữ số theo khai báo của admin, không phải bốn mặc định.
+  expect(within(row).getByText("0.123")).toHaveClass("primary-score");
+  // Thẻ hạng của người xem dùng cùng số thập phân của metric chính.
+  const strip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(strip).toHaveTextContent("0.123");
+  expect(screen.getByText(/Xếp theo Loss tốt nhất/)).toBeTruthy();
+});
+
+test("cuộc thi v2 chưa khai báo metric: không nêu tên metric, không đánh dấu chính, lùi 4 số thập phân", async () => {
+  const draftEntry = entry(1, "Đội Nháp", { metrics: {}, primary_score: 0.5 });
+  mockResponse(page({ primary_metric: null, total: 1, entries: [draftEntry], me: draftEntry }));
+
+  renderPage(V2_DRAFT_COMPETITION);
+
+  expect(await screen.findByText("Đội Nháp")).toBeTruthy();
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "Đạt lúc",
+  ]);
+  expect(document.querySelector(".primary-score")).toBeNull();
+  // Không có định nghĩa metric chính để đọc số thập phân thì lùi về 4 như bộ chấm v1.
+  const strip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(strip).toHaveTextContent("0.5000");
+  // Chưa chọn metric chính thì câu mô tả không được lộ "null"/"undefined".
+  const lead = screen.getByText(/Xếp theo điểm chấm của cuộc thi/);
+  expect(lead.textContent).not.toMatch(/null|undefined/);
 });

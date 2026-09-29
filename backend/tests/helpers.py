@@ -155,3 +155,163 @@ def account_slug_by_email(client, email: str) -> str | None:
         return account.get("slug")
 
     return asyncio.run(load())
+
+
+# --- Bộ chấm Python (v2) -------------------------------------------------------------------------
+
+V2_RUNTIME_ID = "vku-evaluator-runtime:test"
+# Schema nhỏ kiểu NLP: ID chuỗi, nhãn enum, một cột đặc trưng để thấy rõ việc căn dòng.
+V2_SCHEMA = {
+    "ground_truth": {
+        "id_column": "id",
+        "allow_extra_columns": False,
+        "columns": [
+            {"name": "id", "type": "string"},
+            {"name": "label", "type": "integer", "allowed_values": [0, 1]},
+            {"name": "predict_type", "type": "string", "allowed_values": ["A", "B"]},
+        ],
+    },
+    "submission": {
+        "id_column": "id",
+        "allow_extra_columns": False,
+        "columns": [
+            {"name": "id", "type": "string"},
+            {"name": "predict_type", "type": "string", "allowed_values": ["A", "B"]},
+        ],
+    },
+}
+V2_GROUND_TRUTH = b"id,label,predict_type\n1,1,A\n2,0,B\n3,1,A\n4,0,B\n"
+# Thứ tự dòng đảo so với ground truth: bộ chấm phải nhận bản đã căn theo thứ tự ID.
+V2_SUBMISSION = b"id,predict_type\n2,B\n1,A\n4,B\n3,A\n"
+V2_PREPARED_SUBMISSION = "id,predict_type\r\n1,A\r\n2,B\r\n3,A\r\n4,B\r\n"
+V2_SOURCE = (
+    "import csv\n"
+    "\n"
+    "def evaluate(ground_truth_path, submission_path):\n"
+    "    with open(ground_truth_path, newline='') as handle:\n"
+    "        truth = list(csv.DictReader(handle))\n"
+    "    return {'accuracy': 1.0, 'n_items': float(len(truth))}\n"
+)
+V2_CONTRACT = {
+    "metrics": [
+        {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+        {"key": "n_items", "label": "Số mẫu", "decimals": 0},
+    ],
+    "primary_metric": "accuracy",
+    "higher_is_better": True,
+}
+
+
+def put_scoring_v2(
+    client,
+    competition_id: str,
+    *,
+    expected_revision: int,
+    source_code: str | None = V2_SOURCE,
+    output_contract: dict | None = None,
+    input_schema: dict | None = None,
+    name: str = "Bộ chấm thử",
+):
+    """Lưu cấu hình v2; `source_code=None` để kiểm tra nhánh thiếu source."""
+    return client.put(
+        f"/api/admin/competitions/{competition_id}/scoring",
+        json={
+            "version": 2,
+            "expected_revision": expected_revision,
+            "input_schema": input_schema or V2_SCHEMA,
+            "evaluator": {"name": name, "source_code": source_code},
+            "output_contract": output_contract,
+        },
+    )
+
+
+def upload_v2_ground_truth(
+    client, competition_id: str, *, expected_revision: int, data: bytes = V2_GROUND_TRUTH
+):
+    return client.put(
+        f"/api/admin/competitions/{competition_id}/ground-truth",
+        files={"file": ("ground_truth.csv", data, "text/csv")},
+        data={"expected_revision": str(expected_revision)},
+    )
+
+
+def run_scoring_test_v2(
+    client, competition_id: str, *, expected_revision: int, data: bytes = V2_SUBMISSION
+):
+    return client.post(
+        f"/api/admin/competitions/{competition_id}/scoring/test",
+        files={"file": ("sample.csv", data, "text/csv")},
+        data={"expected_revision": str(expected_revision)},
+    )
+
+
+def publish_v2_competition(
+    client,
+    slug: str = "v2-cup",
+    *,
+    quota: int = 5,
+    output_contract: dict | None = None,
+) -> dict:
+    """Cuộc thi v2 đã publish: đã xác minh bộ chấm bằng một lượt chạy thử, participant đã join."""
+    now = datetime.now(timezone.utc)
+    login(client)
+    created = client.post(
+        "/api/admin/competitions",
+        json={
+            "slug": slug,
+            "name": slug,
+            "start_at": (now - timedelta(days=1)).isoformat(),
+            "end_at": (now + timedelta(days=1)).isoformat(),
+            "primary_metric": "f1",
+            "quota_per_day": quota,
+        },
+    )
+    assert created.status_code == 201
+    competition = created.json()
+    assert put_scoring_v2(
+        client,
+        competition["id"],
+        expected_revision=0,
+        output_contract=output_contract or V2_CONTRACT,
+    ).status_code == 200
+    uploaded = upload_v2_ground_truth(client, competition["id"], expected_revision=1)
+    assert uploaded.status_code == 200, uploaded.text
+    tested = run_scoring_test_v2(client, competition["id"], expected_revision=2)
+    assert tested.status_code == 200, tested.text
+    published = client.post(f"/api/admin/competitions/{competition['id']}/publish")
+    assert published.status_code == 200, published.text
+    login_participant(client)
+    assert client.post(f"/api/competitions/{slug}/join", json={}).status_code == 200
+    return competition
+
+
+class FakeRunner:
+    """Runner giả: thay docker bằng một hàm trả metrics theo kịch bản của từng test.
+
+    API dựng client bằng chính object này, nên mọi phép kiểm tra CSV, hợp đồng và dấu vân tay trong
+    `app.scoring.execution` vẫn chạy thật - chỉ có tiến trình chấm là giả.
+    """
+
+    def __init__(self, metrics: dict | None = None):
+        self.metrics = dict(metrics or {"accuracy": 0.75, "n_items": 4.0})
+        self.error: Exception | None = None
+        self.calls: list[dict] = []
+
+    def __call__(self, settings) -> "FakeRunner":
+        return self
+
+    async def evaluate(self, *, source_code: str, ground_truth_csv: str, submission_csv: str):
+        from app.scoring.evaluator_client import EvaluatorResult
+
+        self.calls.append(
+            {
+                "source_code": source_code,
+                "ground_truth_csv": ground_truth_csv,
+                "submission_csv": submission_csv,
+            }
+        )
+        if self.error is not None:
+            raise self.error
+        return EvaluatorResult(
+            metrics=dict(self.metrics), runtime_id=V2_RUNTIME_ID, duration_ms=7
+        )

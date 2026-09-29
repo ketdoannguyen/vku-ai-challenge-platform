@@ -7,23 +7,43 @@ import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
 import { flushTimers, setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
 
-const COMPETITION = {
+const COMPETITION: Competition = {
   id: "64a000000000000000000001",
   slug: "results-cup",
   name: "Results Cup",
+  short_description: "",
+  status: "published",
+  start_at: "2026-01-01T00:00:00Z",
+  end_at: "2027-01-01T00:00:00Z",
+  join_mode: "open",
   primary_metric: "f1",
-} as Competition;
+  quota_per_day: 5,
+  leaderboard_visible: true,
+  resources: [],
+  join_code_configured: false,
+  membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  // Cuộc thi v1: response chưa có result_contract nên trang mô tả lại thành f1/precision/recall, 4 chữ số.
+  submission_config: {
+    ready: true,
+    id_column: "id",
+    prediction_column: "prediction",
+    average: "binary",
+    pos_label: "1",
+    max_upload_mb: 10,
+    max_notebook_mb: 20,
+  },
+};
 
 /** Vùng thông báo của dải phân trang - trang còn live region riêng cho phản hồi sao chép ID. */
 function pagerStatus(): HTMLElement {
   return within(document.querySelector(".subm-pagination-footer") as HTMLElement).getByRole("status");
 }
 
-function renderPage() {
+function renderPage(competition: Competition = COMPETITION) {
   return render(
     <MemoryRouter initialEntries={["/competitions/results-cup/submissions"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition: COMPETITION, contents: [] }} />}>
+        <Route element={<Outlet context={{ competition, contents: [] }} />}>
           <Route path="/competitions/:slug/submissions" element={<MySubmissionsPage />} />
         </Route>
       </Routes>
@@ -179,7 +199,10 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(screen.getByTitle("solution.ipynb")).toBeTruthy();
   expect(screen.getByTitle("first.csv")).toBeTruthy();
   expect(screen.getByText("Không thể chấm điểm bài nộp.")).toBeTruthy();
-  expect(screen.getAllByText("0.900000").length).toBeGreaterThan(0);
+  // Hợp đồng v1 vẫn hiện đủ ba cột f1/precision/recall, mỗi số bốn chữ số theo hợp đồng.
+  expect(screen.getAllByText("0.9000").length).toBeGreaterThan(0);
+  expect(screen.getByText("0.8000")).toBeTruthy();
+  expect(screen.getByText("0.7000")).toBeTruthy();
 
   const rows = screen.getAllByRole("row");
   // Dòng mới nhất có đủ hai nút; dòng legacy chỉ còn nút CSV.
@@ -187,6 +210,101 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(within(rows[1]).getByRole("button", { name: "Notebook" })).toBeTruthy();
   expect(within(rows[2]).getAllByRole("button")).toHaveLength(2);
   expect(within(rows[2]).queryByRole("button", { name: "Notebook" })).toBeNull();
+});
+
+/** Cuộc thi v2 khai báo metric riêng: nhãn cột và số thập phân phải lấy từ hợp đồng, không phải bộ ba cố định. */
+const V2_COMPETITION: Competition = {
+  ...COMPETITION,
+  submission_config: {
+    ...COMPETITION.submission_config,
+    version: 2,
+    primary_metric: "accuracy",
+    higher_is_better: true,
+    result_contract: {
+      metrics: [
+        { key: "accuracy", label: "Độ chính xác", decimals: 2 },
+        { key: "n_items", label: "Số mẫu", decimals: 0 },
+      ],
+      primary_metric: "accuracy",
+      higher_is_better: true,
+    },
+  },
+};
+
+test("cuộc thi v2 hiện metric, nhãn và số thập phân theo hợp đồng", async () => {
+  mockResponse({
+    submissions: [
+      {
+        id: "s-v2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { accuracy: 0.9125, n_items: 1200 },
+        primary_score: 0.9125,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts: {
+          prediction: { filename: "v2.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(V2_COMPETITION);
+  await screen.findByTitle("v2.csv");
+
+  const rows = screen.getAllByRole("row");
+  // Cột theo đúng thứ tự hợp đồng; nhãn lấy từ hợp đồng thay vì F1/Precision/Recall.
+  expect(within(rows[0]).getByText("Độ chính xác")).toBeTruthy();
+  expect(within(rows[0]).getByText("Số mẫu")).toBeTruthy();
+  expect(within(rows[0]).queryByText("F1")).toBeNull();
+
+  const cells = Array.from(rows[1].querySelectorAll(".score-cell"));
+  expect(cells.map((cell) => cell.textContent)).toEqual(["0.91", "1200"]);
+  // Metric chính giữ đánh dấu nổi bật, và số của nó chỉ hiện một lần vì không còn cột "Điểm chính" riêng.
+  expect(cells[0].className).toContain("primary-score");
+  expect(cells[1].className).not.toContain("primary-score");
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.91");
+});
+
+test("bản nháp v2 chưa khai báo metric: ẩn cụm chỉ số thay vì hiện null/undefined", async () => {
+  const draft: Competition = {
+    ...COMPETITION,
+    submission_config: {
+      ...COMPETITION.submission_config,
+      version: 2,
+      result_contract: { metrics: [], primary_metric: null, higher_is_better: true },
+    },
+  };
+  mockResponse({
+    submissions: [
+      {
+        id: "s-draft",
+        competition_id: COMPETITION.id,
+        status: "failed",
+        metrics: null,
+        primary_score: null,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts: { prediction: null, notebook: null },
+        error: {
+          code: "SCORING_TEST_REQUIRED",
+          message: "Cần chọn metric chính trước khi chấm điểm.",
+        },
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(draft);
+  await screen.findByText("Cần chọn metric chính trước khi chấm điểm.");
+
+  const rows = screen.getAllByRole("row");
+  expect(rows[1].querySelectorAll(".score-cell")).toHaveLength(0);
+  const seen = document.body.textContent ?? "";
+  expect(seen).not.toContain("null");
+  expect(seen).not.toContain("undefined");
 });
 
 test("hiển thị empty state khi chưa có submission", async () => {
@@ -439,18 +557,74 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
   expect(within(rejectedRow).getByText("Đã chấm điểm")).toBeTruthy();
   expect(within(rejectedRow).getByText("Không chấp nhận")).toBeTruthy();
   expect(within(rejectedRow).getByText(`Lý do: ${REJECTED_NOTE}`)).toBeTruthy();
-  // Minh bạch: metrics và cả hai artifact vẫn còn (F1 và Điểm chính cùng bằng 0.95).
-  expect(within(rejectedRow).getAllByText("0.950000").length).toBe(2);
+  // Minh bạch: metrics và cả hai artifact vẫn còn; điểm chính là cột metric chính nên chỉ hiện một lần.
+  expect(within(rejectedRow).getAllByText("0.9500")).toHaveLength(1);
   expect(within(rejectedRow).getAllByRole("button")).toHaveLength(3);
   expect(within(rejectedRow).getByRole("button", { name: "Notebook" })).toBeTruthy();
   expect(within(rejectedRow).queryByText("Tốt nhất")).toBeNull();
 
-  // Bài hợp lệ thấp điểm hơn giữ badge "Tốt nhất" và là điểm cao nhất trong trang.
+  // Bài hợp lệ thấp điểm hơn giữ badge "Tốt nhất" và là điểm tốt nhất trong trang.
   expect(within(rows[2]).getByText("Tốt nhất")).toBeTruthy();
-  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.700000");
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.7000");
 });
 
-test("trang chỉ có bài bị từ chối thì không hiện điểm cao nhất", async () => {
+test("điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn là tốt hơn", async () => {
+  // Cuộc thi v2 khai `higher_is_better: false`: bài loss thấp nhất mới là bài tốt nhất.
+  const lossCompetition: Competition = {
+    ...COMPETITION,
+    submission_config: {
+      ...COMPETITION.submission_config,
+      version: 2,
+      primary_metric: "loss",
+      higher_is_better: false,
+      result_contract: {
+        metrics: [{ key: "loss", label: "Loss", decimals: 4 }],
+        primary_metric: "loss",
+        higher_is_better: false,
+      },
+    },
+  };
+  mockResponse({
+    submissions: [
+      {
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { loss: 0.4 },
+        primary_score: 0.4,
+        created_at: "2026-09-16T10:00:00Z",
+        artifacts: {
+          prediction: { filename: "higher-loss.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+      {
+        id: "s2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { loss: 0.1 },
+        primary_score: 0.1,
+        created_at: "2026-09-15T10:00:00Z",
+        artifacts: {
+          prediction: { filename: "lower-loss.csv", size_bytes: 128, available: true },
+          notebook: null,
+        },
+      },
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(lossCompetition);
+  await screen.findByTitle("lower-loss.csv");
+
+  const rows = screen.getAllByRole("row");
+  expect(within(rows[2]).getByText("Tốt nhất")).toBeTruthy();
+  expect(within(rows[1]).queryByText("Tốt nhất")).toBeNull();
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.1000");
+});
+
+test("trang chỉ có bài bị từ chối thì không hiện điểm tốt nhất", async () => {
   mockResponse({
     submissions: [
       {
@@ -474,7 +648,7 @@ test("trang chỉ có bài bị từ chối thì không hiện điểm cao nhấ
   renderPage();
   await screen.findByTitle("only.csv");
 
-  expect(screen.queryByText("Điểm cao nhất trong trang:")).toBeNull();
+  expect(screen.queryByText("Điểm tốt nhất trong trang:")).toBeNull();
   expect(screen.queryByText("Tốt nhất")).toBeNull();
 });
 
@@ -612,7 +786,7 @@ test("kết luận AI không đổi việc chọn bài tốt nhất: chỉ từ 
   const rows = screen.getAllByRole("row");
   // Bài điểm cao có verdict xấu vẫn là bài tốt nhất: verdict AI không phải phán quyết.
   expect(within(rows[1]).getByText("Tốt nhất")).toBeTruthy();
-  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.950000");
+  expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.9500");
   // Bài ngược lại - AI sạch nhưng người từ chối - thì mất suất, đúng như trước khi có AI.
   expect(within(rows[2]).queryByText("Tốt nhất")).toBeNull();
   expect(within(rows[2]).getByText("Không chấp nhận")).toBeTruthy();

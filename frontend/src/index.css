@@ -5283,7 +5283,7 @@ button.resource-link:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-/* "Điểm cao nhất trong trang" là một mệnh đề trọn vẹn, không được tách dòng giữa nhãn
+/* "Điểm tốt nhất trong trang" là một mệnh đề trọn vẹn, không được tách dòng giữa nhãn
    và số liệu. */
 .subm-summary-best {
   display: inline-flex;

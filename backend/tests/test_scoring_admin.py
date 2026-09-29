@@ -82,11 +82,25 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
             "message": "Cần cấu hình chấm điểm trước khi publish cuộc thi.",
         },
         "locked": False,
+        "version": 1,
         "config": None,
+        "scoring": None,
         "ground_truth": None,
         "primary_metric": "f1",
+        "higher_is_better": True,
+        # Cuộc thi chưa cấu hình vẫn hiển thị hợp đồng v1: ba metric cố định của bộ chấm sklearn.
+        "result_contract": {
+            "metrics": [
+                {"key": "f1", "label": "F1", "decimals": 4},
+                {"key": "precision", "label": "Precision", "decimals": 4},
+                {"key": "recall", "label": "Recall", "decimals": 4},
+            ],
+            "primary_metric": "f1",
+            "higher_is_better": True,
+        },
         "quota_per_day": 5,
         "max_upload_mb": 10,
+        "source_limit_kb": 256,
     }
 
     configured = _put_config(client, cid)
@@ -135,11 +149,23 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
     # Participant chưa join vẫn thấy cấu hình, nhưng pos_label (nhãn dương thật) bị giấu.
     assert public.json()["submission_config"] == {
         "ready": True,
+        "version": 1,
         "id_column": "id",
         "prediction_column": "prediction",
         "average": "binary",
         "max_upload_mb": 10,
         "max_notebook_mb": 20,
+        "primary_metric": "f1",
+        "higher_is_better": True,
+        "result_contract": {
+            "metrics": [
+                {"key": "f1", "label": "F1", "decimals": 4},
+                {"key": "precision", "label": "Precision", "decimals": 4},
+                {"key": "recall", "label": "Recall", "decimals": 4},
+            ],
+            "primary_metric": "f1",
+            "higher_is_better": True,
+        },
     }
     assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404
 

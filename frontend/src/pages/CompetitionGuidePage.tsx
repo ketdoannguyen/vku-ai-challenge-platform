@@ -5,12 +5,13 @@
  * và dùng chung nguồn dữ liệu với tab Nộp bài để hai nơi không lệch nhau.
  */
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import type { SubmissionConfig } from "../api/competitions";
+import { metricLabel, resultContract } from "../api/results";
 import { ErrorBox } from "../components/ui";
 import { downloadArtifact } from "../lib/downloadArtifact";
-import { SAMPLE_ROWS, submissionColumns } from "../lib/submissionRequirements";
+import { submissionSchema } from "../lib/submissionRequirements";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 /** Nhãn `average` của sklearn - API trả khoá thô, UI cần chữ đọc được. */
@@ -25,16 +26,28 @@ const NOT_CONFIGURED = "chưa cấu hình";
 /** Tên file dự phòng khi backend không kèm `Content-Disposition`. */
 const STARTER_NOTEBOOK_FILENAME = "starter-notebook.ipynb";
 
+/**
+ * Cách tính điểm bằng chữ cho thí sinh. Cuộc thi v2 chấm bằng bộ chấm Python nên điều cần nói là
+ * chỉ số chính, không phải `average` của sklearn (cấu hình v1 còn sót lại, không dùng để chấm nữa).
+ */
+function scoringLabel(config: SubmissionConfig): string {
+  if (config.version !== 2) {
+    return config.average ? AVERAGE_LABEL[config.average] : NOT_CONFIGURED;
+  }
+  const label = metricLabel(resultContract(config), config.primary_metric);
+  return label ? `${label} (chỉ số chính)` : NOT_CONFIGURED;
+}
+
 export function CompetitionGuidePage() {
   const { competition } = useOutletContext<CompetitionContext>();
   const config = competition.submission_config;
-  const columns = submissionColumns(config);
+  const schema = submissionSchema(config);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   const csvSample = [
-    `${columns.id},${columns.prediction}`,
-    ...SAMPLE_ROWS.map(([id, prediction]) => `${id},${prediction}`),
+    schema.columns.map((column) => column.name).join(","),
+    ...schema.rows.map((row) => row.join(",")),
   ].join("\n");
 
   async function downloadStarterNotebook() {
@@ -61,8 +74,14 @@ export function CompetitionGuidePage() {
         <h3 className="ov-block-title">Hai tệp bắt buộc trong mỗi lượt nộp</h3>
         <ul className="ov-facts">
           <li>
-            <strong>1. Tệp dự đoán (.csv)</strong> — gồm đúng hai cột <code>{columns.id}</code> và{" "}
-            <code>{columns.prediction}</code>; dung lượng tối đa {config.max_upload_mb} MiB.
+            <strong>1. Tệp dự đoán (.csv)</strong> — gồm đúng {schema.columns.length} cột:{" "}
+            {schema.columns.map((column, index) => (
+              <Fragment key={column.name}>
+                {index > 0 && ", "}
+                <code>{column.name}</code>
+              </Fragment>
+            ))}
+            . Dung lượng tối đa {config.max_upload_mb} MiB.
           </li>
           <li>
             <strong>2. Notebook (.ipynb)</strong> — notebook Jupyter tái lập được kết quả đã nộp;
@@ -70,8 +89,8 @@ export function CompetitionGuidePage() {
           </li>
           <li>
             Lượt nộp thiếu một trong hai tệp sẽ bị từ chối. Cách tính điểm của cuộc thi:{" "}
-            <strong>{config.average ? AVERAGE_LABEL[config.average] : NOT_CONFIGURED}</strong>
-            {config.average === "binary" && config.pos_label != null && (
+            <strong>{scoringLabel(config)}</strong>
+            {config.version !== 2 && config.average === "binary" && config.pos_label != null && (
               <> (nhãn dương: <strong>{config.pos_label}</strong>)</>
             )}
             .
@@ -80,12 +99,12 @@ export function CompetitionGuidePage() {
       </section>
 
       <section className="ov-block">
-        <h3 className="ov-block-title">Định dạng tệp prediction.csv</h3>
+        <h3 className="ov-block-title">Định dạng tệp CSV dự đoán</h3>
         <p className="ov-facts">
-          Dòng đầu tiên ghi tên hai cột; mỗi dòng sau tương ứng với một bản ghi trong tập Test.
-          Tên cột phải viết đúng chữ thường và không thêm cột nào khác.
+          Dòng đầu tiên ghi tên các cột; mỗi dòng sau tương ứng với một bản ghi trong tập Test.
+          Tên cột phải viết đúng như khai báo của cuộc thi và không thêm cột nào khác.
         </p>
-        <pre className="guide-code" aria-label="Ví dụ nội dung prediction.csv">
+        <pre className="guide-code" aria-label="Ví dụ nội dung tệp CSV dự đoán">
           <code>{csvSample}</code>
         </pre>
       </section>

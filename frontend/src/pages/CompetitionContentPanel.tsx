@@ -3,7 +3,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
 import type { Competition, SubmissionConfig } from "../api/competitions";
-import { METRIC_LABEL, formatLocal } from "../api/competitions";
+import { formatLocal, primaryMetricLabel } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
@@ -32,8 +32,8 @@ const AVERAGE_LABEL: Record<NonNullable<SubmissionConfig["average"]>, string> = 
 const NOT_CONFIGURED = "Chưa cấu hình";
 
 /** `pos_label` chỉ có với admin/thành viên đang hoạt động; undefined nghĩa là không được phép biết. */
-function configValue(value: string | null): string {
-  return value === null || value === "" ? NOT_CONFIGURED : value;
+function configValue(value: string | null | undefined): string {
+  return value ? value : NOT_CONFIGURED;
 }
 
 /** Vì sao chưa nộp được bài - chỉ gọi khi canSubmit sai, tức chưa tham gia và cuộc thi còn nhận bài. */
@@ -85,18 +85,33 @@ export function CompetitionOverview() {
         <h3 className="ov-block-title">Quy cách bài nộp</h3>
         <ul className="ov-facts">
           <li>
-            <strong>Chỉ số chính.</strong> <span>{METRIC_LABEL[c.primary_metric]}</span>
+            <strong>Chỉ số chính.</strong> <span>{primaryMetricLabel(c)}</span>
           </li>
           <li>
             <strong>Cột ID.</strong> <span>{configValue(config.id_column)}</span>
           </li>
-          <li>
-            <strong>Cột dự đoán.</strong> <span>{configValue(config.prediction_column)}</span>
-          </li>
-          <li>
-            <strong>Cách tính điểm.</strong>{" "}
-            <span>{config.average ? AVERAGE_LABEL[config.average] : NOT_CONFIGURED}</span>
-          </li>
+          {config.version === 2 ? (
+            // Bộ chấm Python đọc schema do BTC khai báo: không còn một cột dự đoán duy nhất, và
+            // cách tính điểm nằm trong code chấm nên Tổng quan không mô tả lại được.
+            <li>
+              <strong>Các cột bài nộp.</strong>{" "}
+              <span>
+                {config.columns?.length
+                  ? config.columns.map((column) => column.name).join(", ")
+                  : NOT_CONFIGURED}
+              </span>
+            </li>
+          ) : (
+            <>
+              <li>
+                <strong>Cột dự đoán.</strong> <span>{configValue(config.prediction_column)}</span>
+              </li>
+              <li>
+                <strong>Cách tính điểm.</strong>{" "}
+                <span>{config.average ? AVERAGE_LABEL[config.average] : NOT_CONFIGURED}</span>
+              </li>
+            </>
+          )}
           {/* Backend bỏ hẳn khoá này với người không phải thành viên: nhãn dương là dữ liệu ground truth. */}
           {config.pos_label !== undefined && (
             <li>
