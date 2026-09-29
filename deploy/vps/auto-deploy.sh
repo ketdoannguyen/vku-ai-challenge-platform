@@ -15,11 +15,14 @@
 #     Riêng `cloudflared` còn đang chạy Quick Tunnel: restart nó là đổi URL công khai và làm chết
 #     `API_ORIGIN` của Worker.
 #   - Chỉ dùng `docker compose build/up/ps/exec`, không `down`, không `down -v`, không prune. Ngoại lệ
-#     duy nhất: `rm -sf ai-review-worker` khi rollback qua commit giới thiệu worker (ADR-036) - đúng
-#     một service, không đụng gì khác.
+#     duy nhất: `rm -sf <service>` khi rollback về một bản **chưa khai** service đó - đúng một
+#     container, không đụng gì khác. Đã dùng cho `ai-review-worker` (ADR-036) và `evaluator-runner`
+#     (ADR-048).
 #   - Mỗi SHA lỗi chỉ thử một lần; muốn thử lại thì push commit mới (không sửa state tay).
 #   - `minio`/`minio-init` nằm NGOÀI override theo SHA. Release cần artifact backend mà MinIO chưa
 #     bootstrap thì deploy dừng trước khi thay api/web và in lệnh bootstrap (ADR-028, §13 kế hoạch).
+#   - Image runtime của bộ chấm (`vku-evaluator-runtime`) cũng nằm NGOÀI override: deployer chỉ kiểm nó
+#     **tồn tại** trước khi thay container, không bao giờ build và không bao giờ xoá nó.
 
 set -euo pipefail
 
@@ -37,7 +40,13 @@ WAIT_TIMEOUT="${WAIT_TIMEOUT:-180}"
 DEPLOY_REF="refs/vku-deploy/$BRANCH"
 IMAGE_API="vku-challenge-api"
 IMAGE_WEB="vku-challenge-web"
+IMAGE_RUNNER="vku-challenge-runner"
 WORKER_SERVICE="ai-review-worker"
+RUNNER_SERVICE="evaluator-runner"
+# Image của **container chấm** (khác image của tiến trình runner): `evaluator-runtime/Dockerfile`, do
+# người vận hành build tay trên VM. Đây là giá trị mặc định trong compose khi `.env` không khai
+# `EVALUATOR_RUNTIME_IMAGE` - đổi một nơi phải đổi cả hai.
+RUNTIME_IMAGE_DEFAULT="vku-evaluator-runtime:1"
 RUNTIME_OVERRIDE="$STATE_DIR/runtime-override.yml"
 ROLLBACK_OVERRIDE="$STATE_DIR/rollback-override.yml"
 
@@ -93,10 +102,15 @@ history_add() {
 # Image của một service. Worker dùng CHUNG image backend với `api` (cùng Dockerfile, chỉ khác
 # `command`), nên nó không bao giờ có image riêng: build một lần, rollback một lần, và không có
 # đường nào để api/worker lệch code nhau.
+#
+# Runner thì **có** image riêng: cùng build context nhưng khác stage (`target: runner` - stage đó có
+# thêm docker CLI, thứ chỉ tiến trình này được phép có). Dùng chung tag với `api` sẽ khiến hai stage
+# khác nhau tranh nhau một cái tên, và lượt `up` sau đó không còn biết container nào đang chạy code gì.
 image_for_service() {
   case "$1" in
     api|"$WORKER_SERVICE") printf '%s' "$IMAGE_API" ;;
     web) printf '%s' "$IMAGE_WEB" ;;
+    "$RUNNER_SERVICE") printf '%s' "$IMAGE_RUNNER" ;;
     *) return 1 ;;
   esac
 }
@@ -145,10 +159,16 @@ map_changed_paths() {
       # nginx trong `web` trỏ thẳng `proxy_pass http://api:8000` và không có `resolver`, nên nó
       # phân giải IP của `api` đúng một lần lúc khởi động. `api` được tạo lại là mang IP mới, còn
       # `web` cũ sẽ proxy vào IP đã chết cho tới khi chính nó được tạo lại.
-      # Worker chạy đúng source backend đó, nên nó đi kèm `api` trong mọi lượt backend đổi.
-      backend/*) NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
+      # Worker chạy đúng source backend đó, nên nó đi kèm `api` trong mọi lượt backend đổi. Runner
+      # cũng chạy source đó (khác stage), nên đi kèm luôn - code sandbox nằm trong backend.
+      backend/*) NEED_API=1; NEED_WORKER=1; NEED_WEB=1; NEED_RUNNER=1 ;;
       frontend/*) NEED_WEB=1 ;;
-      docker-compose.prod.yml) NEED_API=1; NEED_WORKER=1; NEED_WEB=1 ;;
+      docker-compose.prod.yml) NEED_API=1; NEED_WORKER=1; NEED_WEB=1; NEED_RUNNER=1 ;;
+      # `evaluator-runtime/*` là image của **container chấm**, không phải của tiến trình runner: đổi
+      # nó không đổi một dòng code nào của service nào. Nhưng runner phân giải image đó thành ID nội
+      # dung **lúc khởi động**, nên container runner phải được tạo lại thì mới dùng bản mới. Deployer
+      # không build image này (người vận hành build tay) - chỉ kiểm nó tồn tại ở preflight bên dưới.
+      evaluator-runtime/*) NEED_RUNNER=1 ;;
       *)
         is_no_container_path "$path" || die "đường dẫn chưa được phân loại trong $path: $path - dừng để operator xử lý"
         ;;
@@ -184,8 +204,8 @@ verify_services() {
 }
 
 # `minio`/`minio-init` là hạ tầng dùng chung, KHÔNG nằm trong override theo SHA (deployer chỉ quản
-# `api`, `ai-review-worker` và `web`), nên một release cần artifact backend có thể gặp stack chưa
-# từng bootstrap MinIO.
+# `api`, `ai-review-worker`, `evaluator-runner` và `web`), nên một release cần artifact backend có thể
+# gặp stack chưa từng bootstrap MinIO.
 # Nhận biết bằng chính compose file của SHA mục tiêu: release cũ chưa khai `minio` thì không cần.
 needs_minio() {
   grep -qE '^[[:space:]]+minio:[[:space:]]*$' "$COMPOSE_FILE"
@@ -222,6 +242,37 @@ check_minio_bootstrap() {
   return 0
 }
 
+# Image runtime của bộ chấm, đọc từ CÙNG file env mà Compose đọc. Đọc thẳng file thay vì hỏi
+# `docker compose config`: lệnh đó in ra cả credential của stack, và nguyên tắc ở đầu file cấm điều đó.
+# `tail -n1` để hành vi trùng với Compose khi một biến bị khai hai lần (lần sau thắng).
+runtime_image() {
+  local value
+  value="$(grep -E '^[[:space:]]*EVALUATOR_RUNTIME_IMAGE=' "$ENV_FILE" 2>/dev/null |
+    tail -n1 | cut -d= -f2-)" || true
+  value="${value%$'\r'}"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf '%s' "${value:-$RUNTIME_IMAGE_DEFAULT}"
+}
+
+# Container chấm không lên được nếu image runtime vắng mặt, và khi đó **mọi** lượt chấm v2 trả 503 chứ
+# không phải một lỗi lẻ tẻ. Deployer không build image này (build tay trên VM, xem DEPLOYMENT.md §3.3)
+# nên việc duy nhất nó làm được - và phải làm - là kiểm nó tồn tại TRƯỚC khi thay container.
+check_runtime_image() {
+  local image
+  image="$(runtime_image)"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    log "Runner chấm: không thấy image runtime '$image' trên máy này"
+    return 1
+  fi
+  # Nói rõ việc deployer KHÔNG làm, để không ai đọc log rồi tin rằng đổi `evaluator-runtime/*` trong
+  # repo là đủ: image này chỉ đổi khi có người build lại nó bằng tay.
+  log "Runner chấm: image runtime '$image' đã có (deployer không build và không xoá image này)"
+  return 0
+}
+
 # Kiểm tra end-to-end qua đúng đường đi thật của người dùng trong Docker network: nginx -> FastAPI ->
 # Mongo. Không dùng `cloudflared` làm oracle vì nó đang là Quick Tunnel và không thuộc phạm vi deploy.
 check_health() {
@@ -238,11 +289,15 @@ check_health() {
 
 # Giữ lại đúng hai bộ image của lần thành công hiện tại và lần trước; xoá các tag SHA cũ hơn.
 # Chỉ `docker rmi` theo đúng tag của project, không prune, không chạm volume.
+#
+# Danh sách repo dưới đây là danh sách ĐÓNG, và `vku-evaluator-runtime` **không** nằm trong đó - cố ý:
+# nó được tham chiếu bằng tag trong `.env` chứ không theo SHA, nên không có bản "cũ hơn" nào để dọn, và
+# xoá nó là làm mọi lượt chấm v2 trả 503 cho tới khi có người build lại bằng tay.
 prune_images() {
   local keep_a="$1" keep_b="$2" repo tag keep
   while read -r repo tag; do
     case "$repo" in
-      "$IMAGE_API"|"$IMAGE_WEB") ;;
+      "$IMAGE_API"|"$IMAGE_WEB"|"$IMAGE_RUNNER") ;;
       *) continue ;;
     esac
     # `:prod` là tag cố định trong compose file: giữ để các lệnh thủ công trong runbook vẫn chạy.
@@ -270,11 +325,21 @@ has_image() {
 
 # Một service có được KHAI trong compose của release tại SHA đó hay không. Đọc đúng file compose của
 # SHA cũ bằng `git show` thay vì bản đang nằm trong working tree: lúc rollback, working tree đang ở SHA
-# mục tiêu nên nó luôn khai worker, kể cả khi bản cũ chưa từng có service này.
+# mục tiêu nên nó luôn khai `ai-review-worker`/`evaluator-runner`, kể cả khi bản cũ chưa từng có
+# service đó.
 release_defines_service() {
   local sha="$1" svc="$2" content
   content="$(git_repo show "$sha:$COMPOSE_REL" 2>/dev/null)" || return 1
   grep -qE "^[[:space:]]+$svc:[[:space:]]*$" <<<"$content"
+}
+
+# Service chỉ tồn tại từ release giới thiệu nó (`ai-review-worker` từ ADR-036, `evaluator-runner` từ
+# ADR-048). Với hai service này, chạy `up` bằng image cũ là dựng một container sai: worker cũ không có
+# module `app.ai_review.worker` (crash-loop, `--wait` cháy hết thời gian chờ), còn runner cũ không có
+# `app.evaluator_runner.server`. Cả hai đều làm rollback thất bại vì một service mà người dùng cuối
+# không cần để làm việc. `api`/`web` thì có từ bản đầu tiên, không cần kiểm.
+is_newer_service() {
+  [ "$1" = "$WORKER_SERVICE" ] || [ "$1" = "$RUNNER_SERVICE" ]
 }
 
 # Khôi phục image của lần deploy thành công trước đó. KHÔNG build lại source cũ: build lại là một
@@ -285,19 +350,21 @@ do_rollback() {
   local svc
   local -a services=()
 
-  # Worker chỉ tồn tại từ release giới thiệu nó. Chạy `up ai-review-worker` bằng image cũ không có
-  # module `app.ai_review.worker` là dựng một container crash-loop, và `--wait` sẽ cháy hết thời gian
-  # chờ - rollback thất bại vì một service mà người dùng cuối không cần để làm việc. Bỏ nó khỏi lượt
-  # rollback và dọn container còn sót của release vừa hỏng.
+  # Bỏ khỏi lượt rollback những service mà bản cũ **chưa khai**, và dọn container còn sót của release
+  # vừa hỏng - để lại nó là để nó chạy mã của bản vừa hỏng.
   for svc in "$@"; do
-    if [ "$svc" = "$WORKER_SERVICE" ] && ! release_defines_service "$sha" "$WORKER_SERVICE"; then
-      log "Rollback: bản ${sha:0:12} chưa khai $WORKER_SERVICE - dọn container thay vì chạy lại nó."
-      compose "$RUNTIME_OVERRIDE" rm -sf "$WORKER_SERVICE" >/dev/null 2>&1 ||
-        log "Không dọn được container $WORKER_SERVICE (có thể chưa từng tồn tại) - bỏ qua"
+    if is_newer_service "$svc" && ! release_defines_service "$sha" "$svc"; then
+      log "Rollback: bản ${sha:0:12} chưa khai $svc - dọn container thay vì chạy lại nó."
+      compose "$RUNTIME_OVERRIDE" rm -sf "$svc" >/dev/null 2>&1 ||
+        log "Không dọn được container $svc (có thể chưa từng tồn tại) - bỏ qua"
       continue
     fi
     services+=("$svc")
   done
+  # Không còn service nào để dựng lại: hoặc lượt rollback này rỗng (lỗi gọi), hoặc nó chỉ có service mà
+  # bản cũ không khai. Trường hợp sau không tới được bằng đường deploy thường - một service mới chỉ
+  # xuất hiện khi compose đổi, mà compose đổi thì `api`/`worker`/`web` cùng vào lượt - nên đây vẫn là
+  # một lỗi, không phải một lượt rollback hợp lệ.
   [ "${#services[@]}" -gt 0 ] || { log "LỖI: rollback không còn service nào để chạy"; return 1; }
   log "ROLLBACK: đưa ${services[*]} về image của ${sha:0:12}"
 
@@ -457,18 +524,31 @@ done < <(git_repo diff --name-only "$LAST_SUCCESS" "$TARGET")
 NEED_API=0
 NEED_WORKER=0
 NEED_WEB=0
+NEED_RUNNER=0
 if [ "${#CHANGED[@]}" -eq 0 ]; then
-  # Không đọc được diff (object cũ đã mất): chọn hướng an toàn là deploy lại cả ba.
-  log "Cảnh báo: không tính được diff ${LAST_SUCCESS:0:12}..${TARGET:0:12}; deploy lại cả api, worker và web"
+  # Không đọc được diff (object cũ đã mất): chọn hướng an toàn là deploy lại cả bốn.
+  log "Cảnh báo: không tính được diff ${LAST_SUCCESS:0:12}..${TARGET:0:12}; deploy lại cả api, worker, runner và web"
   NEED_API=1
   NEED_WORKER=1
   NEED_WEB=1
+  NEED_RUNNER=1
 else
   map_changed_paths "${CHANGED[@]}"
 fi
 
-# Thứ tự trong mảng LÀ thứ tự `up`: api -> worker -> web.
+# Runner chỉ được đưa vào lượt deploy khi compose của CHÍNH SHA đó khai service này. Ở bản chưa có
+# ADR-048 (và ở mọi release trước khi `docker-compose.prod.yml` khai nó), `up evaluator-runner` là một
+# lệnh sai - compose từ chối và cả lượt deploy hỏng vì một service chưa tồn tại.
+if [ "$NEED_RUNNER" -eq 1 ] && ! release_defines_service "$TARGET" "$RUNNER_SERVICE"; then
+  log "Bản ${TARGET:0:12} chưa khai $RUNNER_SERVICE - không đưa service này vào lượt deploy."
+  NEED_RUNNER=0
+fi
+
+# Thứ tự trong mảng LÀ thứ tự `up`: runner -> api -> worker -> web.
+# Runner đứng trước vì API gọi nó ở mỗi lượt chấm: nếu runner không lên được thì lượt deploy phải hỏng
+# TRƯỚC khi `api` bị thay, để production ở lại bản cũ còn nguyên vẹn thay vì nửa mới nửa cũ.
 declare -a SERVICES=()
+[ "$NEED_RUNNER" -eq 1 ] && SERVICES+=("$RUNNER_SERVICE")
 [ "$NEED_API" -eq 1 ] && SERVICES+=(api)
 [ "$NEED_WORKER" -eq 1 ] && SERVICES+=("$WORKER_SERVICE")
 [ "$NEED_WEB" -eq 1 ] && SERVICES+=(web)
@@ -513,12 +593,31 @@ if [ "$NEED_API" -eq 1 ] && needs_minio && ! check_minio_bootstrap; then
    Chi tiết xem docs/DEPLOYMENT.md (ADR-028)."
 fi
 
+# ---------------------------------------------------------------- preflight image runtime (ADR-048)
+# Cùng chỗ đứng với preflight MinIO và cùng lý do: kiểm TRƯỚC `build` nên dừng ở đây thì production vẫn
+# nguyên vẹn. Thiếu image runtime thì runner vẫn lên nhưng `/health` là `degraded` và **mọi** lượt chấm
+# v2 trả 503 - hỏng im lặng đúng vào lúc cuộc thi đang chạy.
+#
+# Cũng KHÔNG ghi `last-failed-sha`, cùng lý do: đây là một thao tác tay còn thiếu chứ không phải commit
+# hỏng, và cách sửa là build image rồi để lượt timer kế tiếp deploy nốt chính SHA đó.
+if [ "$NEED_RUNNER" -eq 1 ] && ! check_runtime_image; then
+  printf 'Thiếu image runtime cho %s\n' "$TARGET" >"$STATE_DIR/last-failure.txt"
+  history_add "$TARGET" "runtime-image-missing" "${SERVICES[*]}"
+  git_repo checkout --detach "$LAST_SUCCESS" >/dev/null 2>&1 ||
+    log "Cảnh báo: không checkout lại được ${LAST_SUCCESS:0:12}"
+  die "Không thấy image runtime của bộ chấm nên KHÔNG thay container nào (production vẫn chạy ${LAST_SUCCESS:0:12}).
+   Build tay trên VM rồi để lượt timer sau deploy tiếp:
+     sudo docker build -t $(runtime_image) evaluator-runtime
+   Chi tiết xem docs/DEPLOYMENT.md §3.3 (ADR-048)."
+fi
+
 # Compose chỉ được phép chạy tuần tự: hai build song song trên cùng VM nhỏ dễ làm healthcheck của
 # lần `up` trước đó hết thời gian chờ.
 export COMPOSE_PARALLEL_LIMIT=1
 
-# Đúng hai image tồn tại trong stack: backend (`api` + worker dùng chung) và web. Worker không bao giờ
-# tự đứng ra build - `build api ai-review-worker` là build lại đúng source đó lần thứ hai.
+# Ba image tồn tại trong stack: backend (`api` + worker dùng chung), web, và runner (`target: runner`).
+# Worker không bao giờ tự đứng ra build - `build api ai-review-worker` là build lại đúng source đó lần
+# thứ hai. Runner thì ngược lại: nó là stage khác nên phải build riêng.
 declare -a BUILD_SERVICES=()
 for svc in "${SERVICES[@]}"; do
   [ "$svc" = "$WORKER_SERVICE" ] && continue
@@ -534,8 +633,9 @@ if ! compose "$RUNTIME_OVERRIDE" build "${BUILD_SERVICES[@]}"; then
   die "build ${TARGET:0:12} thất bại; production vẫn đang chạy ${LAST_SUCCESS:0:12}"
 fi
 
-# `SERVICES` đã xếp sẵn api -> worker -> web: nginx của `web` phân giải IP của `api` lúc khởi động nên
-# `api` phải được tạo trước, và worker không phụ thuộc gì vào `web`.
+# `SERVICES` đã xếp sẵn runner -> api -> worker -> web: runner phải sẵn sàng trước khi `api` (bên gọi
+# nó) được thay, nginx của `web` phân giải IP của `api` lúc khởi động nên `api` phải được tạo trước
+# `web`, và worker không phụ thuộc gì vào `web`.
 if ! compose "$RUNTIME_OVERRIDE" up -d --no-deps --no-build --wait --wait-timeout "$WAIT_TIMEOUT" "${SERVICES[@]}"; then
   state_set last-failed-sha "$TARGET"
   printf 'up/health thất bại cho %s\n' "$TARGET" >"$STATE_DIR/last-failure.txt"
