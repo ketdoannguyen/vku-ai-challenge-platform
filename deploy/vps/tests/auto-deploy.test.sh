@@ -198,9 +198,20 @@ case "$cmd" in
     exit 0
     ;;
   image)
-    # `docker image inspect <ref>`: exit 0 nghĩa là image tồn tại. Chỉ ảnh hưởng nhánh rollback.
+    # `docker image inspect <ref>`: exit 0 nghĩa là image tồn tại. Hai nhánh dùng nó với hai ý nghĩa
+    # khác nhau nên phải phân biệt bằng chính ref: preflight image runtime, và nhánh rollback.
+    ref="${!#}"
+    case "$ref" in
+      vku-evaluator-runtime*)
+        if [ "${FAKE_NO_RUNTIME_IMAGE:-}" = "1" ]; then
+          echo "docker giả: không thấy image runtime ${ref}" >&2
+          exit 1
+        fi
+        exit 0
+        ;;
+    esac
     if [ "${FAKE_NO_OLD_IMAGE:-}" = "1" ]; then
-      echo "docker giả: không thấy image ${!#}" >&2
+      echo "docker giả: không thấy image ${ref}" >&2
       exit 1
     fi
     exit 0
@@ -252,7 +263,7 @@ begin() {
   OUT=""
   STATUS=0
   unset FAKE_FAIL_BUILD FAKE_BAD_LABEL FAKE_HEALTH_FAIL FAKE_NO_OLD_IMAGE FAKE_FAIL_UP
-  unset FAKE_MINIO_HEALTH FAKE_MINIO_INIT_EXIT
+  unset FAKE_MINIO_HEALTH FAKE_MINIO_INIT_EXIT FAKE_NO_RUNTIME_IMAGE
   mkdir -p "$ROOT/bin" "$ROOT/state"
   : >"$ROOT/env"
   git init --bare -q "$ROOT/origin.git"
@@ -296,6 +307,31 @@ commit() {
 
 detach_to() { git -C "$REPO_DIR" checkout -q --detach "$1" >&2; }
 
+# Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production cộng thêm service
+# `evaluator-runner` (release B). Các case về runner phải commit nội dung thật chứ không phải marker
+# như `commit()`: `release_defines_service` đọc chính file này bằng `git show` để biết bản đó có khai
+# service hay không, nên một marker sẽ làm mọi case về runner đo sai thứ cần đo.
+commit_compose_with_runner() {
+  local msg="$1" n tip
+  n=$(( $(cat "$ROOT/counter" 2>/dev/null || echo 0) + 1 ))
+  printf '%s' "$n" >"$ROOT/counter"
+  tip="$(git -C "$ROOT/origin.git" rev-parse --verify --quiet refs/heads/release || true)"
+  if [ -n "$tip" ]; then detach_to "$tip"; fi
+  cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
+  cat >>"$REPO_DIR/docker-compose.prod.yml" <<'YAML'
+
+  evaluator-runner:
+    build:
+      context: ./backend
+      target: runner
+    image: vku-challenge-runner:prod
+YAML
+  git -C "$REPO_DIR" add -A >&2
+  git -C "$REPO_DIR" -c user.name=harness -c user.email=harness@test commit -q -m "$msg" >&2
+  git -C "$REPO_DIR" push -q origin HEAD:refs/heads/release >&2
+  git -C "$REPO_DIR" rev-parse HEAD
+}
+
 # Trạng thái đầu của mọi kịch bản: release có đúng một commit nền `BASE`, và worktree đang ở chính
 # `BASE` đó - tức VM đang chạy bản cũ còn nhánh release thì đi tiếp.
 setup_base() {
@@ -335,6 +371,7 @@ run_deploy() {
       FAKE_FAIL_UP="${FAKE_FAIL_UP:-}" \
       FAKE_MINIO_HEALTH="${FAKE_MINIO_HEALTH:-healthy}" \
       FAKE_MINIO_INIT_EXIT="${FAKE_MINIO_INIT_EXIT:-0}" \
+      FAKE_NO_RUNTIME_IMAGE="${FAKE_NO_RUNTIME_IMAGE:-}" \
       PATH="$ROOT/bin:$PATH" \
       bash "$SCRIPT" "$@" 2>&1
   )"
@@ -402,6 +439,10 @@ expect_eq "worker dùng chung image với api" "$(running_image ai-review-worker
 expect_eq "image backend đúng tag SHA" "$(running_image api)" "vku-challenge-api:${BE:0:12}"
 expect_eq "ghi last-success" "$(state_read last-success-sha)" "$BE"
 expect_eq "không xoá last-failed (chưa từng lỗi)" "$(state_read last-failed-sha)" ""
+# Bản đang deploy chưa khai `evaluator-runner` (compose production trước ADR-048): deployer phải bỏ
+# service đó ra chứ không `up` một service không tồn tại trong compose - lệnh đó làm hỏng cả lượt.
+expect_in "nói rõ vì sao bỏ runner" "$OUT" "chưa khai evaluator-runner"
+expect_not_in "không đụng tới runner" "$(docker_log)" "evaluator-runner"
 
 begin "frontend-only: chỉ deploy web"
 setup_deployed
@@ -423,6 +464,83 @@ expect_status "đổi compose thì deploy thành công" 0
 expect_in "build api web" "$(docker_log)" "build api web"
 expect_eq "revision worker khớp SHA mục tiêu" "$(running_revision ai-review-worker)" "$COMPOSE_SHA"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$COMPOSE_SHA"
+
+begin "release khai evaluator-runner: deploy runner trước api, image riêng"
+setup_deployed
+RB="$(commit_compose_with_runner "release B")"
+detach_to "$BASE"
+run_deploy
+expect_status "deploy release có runner thành công" 0
+# Image runtime phải được kiểm TRƯỚC khi thay container: thiếu nó thì runner lên ở trạng thái
+# `degraded` và mọi lượt chấm v2 trả 503 - hỏng im lặng đúng lúc cuộc thi đang chạy.
+expect_in "kiểm image runtime trước khi build" "$(docker_log)" "image inspect vku-evaluator-runtime:1"
+expect_in "build cả ba image, runner trước" "$(docker_log)" "build evaluator-runner api web"
+expect_in "up bốn service, runner trước api" "$(docker_log)" \
+  "up -d --no-deps --no-build --wait --wait-timeout 180 evaluator-runner api ai-review-worker web"
+expect_eq "revision runner khớp SHA mục tiêu" "$(running_revision evaluator-runner)" "$RB"
+# Runner KHÔNG dùng chung tag với api: cùng build context nhưng khác stage, nên nó phải có image riêng
+# thì lượt `up` sau mới biết container nào đang chạy code gì.
+expect_eq "runner có image riêng theo SHA" "$(running_image evaluator-runner)" "vku-challenge-runner:${RB:0:12}"
+expect_eq "api vẫn dùng image backend" "$(running_image api)" "vku-challenge-api:${RB:0:12}"
+expect_eq "state tiến" "$(state_read last-success-sha)" "$RB"
+
+begin "thiếu image runtime: dừng trước khi thay container nào"
+setup_deployed
+RB="$(commit_compose_with_runner "release B")"
+detach_to "$BASE"
+FAKE_NO_RUNTIME_IMAGE=1
+run_deploy
+expect_status "thiếu image runtime thì dừng" 1
+expect_in "nói rõ không thấy image" "$OUT" "không thấy image runtime"
+expect_in "in lệnh build tay" "$OUT" "docker build -t vku-evaluator-runtime:1 evaluator-runtime"
+expect_in "nói rõ production chưa bị chạm" "$OUT" "KHÔNG thay container nào"
+expect_eq "không build, không up" "$(docker_mutations)" "0"
+expect_eq "state không tiến" "$(state_read last-success-sha)" "$BASE"
+# Không ghi last-failed: đây là thao tác tay còn thiếu, không phải commit hỏng - build image xong thì
+# lượt timer kế tiếp phải deploy được chính SHA này.
+expect_eq "không khoá SHA mục tiêu lại" "$(state_read last-failed-sha)" ""
+expect_in "ghi history để còn dấu vết" "$(state_read history.log)" "runtime-image-missing"
+expect_eq "worktree trả về bản đang chạy" "$(git -C "$REPO_DIR" rev-parse HEAD)" "$BASE"
+
+begin "evaluator-runtime-only: chỉ tạo lại container runner"
+setup_deployed
+RB="$(commit_compose_with_runner "release B")"
+run_deploy
+expect_status "deploy release có runner thành công" 0
+: >"$ROOT/docker.log"
+ER="$(advance "sua runtime" evaluator-runtime/entrypoint.py)"
+run_deploy
+expect_status "chỉ đổi evaluator-runtime vẫn deploy được" 0
+# Runner phân giải image runtime thành ID nội dung LÚC KHỞI ĐỘNG, nên đổi image runtime phải tạo lại
+# container - đó là toàn bộ lý do `evaluator-runtime/*` được map vào service này.
+expect_in "tạo lại đúng container runner" "$(docker_log)" \
+  "up -d --no-deps --no-build --wait --wait-timeout 180 evaluator-runner"
+expect_not_in "không đụng api" "$(docker_log)" "evaluator-runner api"
+expect_in "vẫn kiểm image runtime" "$(docker_log)" "image inspect vku-evaluator-runtime:1"
+expect_eq "revision runner khớp SHA mới" "$(running_revision evaluator-runner)" "$ER"
+expect_eq "api không bị tạo lại" "$(running_revision api)" "$RB"
+expect_eq "state tiến" "$(state_read last-success-sha)" "$ER"
+
+begin "rollback qua release giới thiệu runner: dọn container runner"
+setup_deployed
+state_write running.api.revision "$BASE"
+state_write running.web.revision "$BASE"
+RB="$(commit_compose_with_runner "release B")"
+detach_to "$BASE"
+FAKE_BAD_LABEL="$RB"
+run_deploy
+expect_status "deploy hỏng thì thất bại" 1
+expect_in "nói rõ vì sao bỏ runner" "$OUT" "chưa khai evaluator-runner"
+expect_in "rollback chỉ còn api, worker, web" "$OUT" "đưa api ai-review-worker web về image của ${BASE:0:12}"
+# Điểm mấu chốt: KHÔNG được đưa runner vào override rollback - bản cũ không có module
+# `app.evaluator_runner.server`, nên `up` bằng image cũ là dựng container crash-loop và `--wait` cháy
+# hết thời gian chờ.
+expect_not_in "override rollback không khai runner" \
+  "$(cat "$ROOT/state/rollback-override.yml")" "evaluator-runner"
+expect_eq "dọn container runner còn sót của release hỏng" \
+  "$(grep -c 'rm -sf evaluator-runner' "$ROOT/docker.log")" "1"
+expect_eq "api chạy lại bản cũ" "$(running_revision api)" "$BASE"
+expect_eq "state vẫn ở bản cũ" "$(state_read last-success-sha)" "$BASE"
 
 # ADR-028: `minio`/`minio-init` nằm ngoài override theo SHA nên deployer phải tự kiểm. Điều đáng
 # kiểm không phải "có chạy kiểm tra hay không" mà là "khi thiếu thì có dừng TRƯỚC khi thay api/web".
@@ -670,8 +788,8 @@ expect_eq "đánh dấu SHA lỗi" "$(state_read last-failed-sha)" "$TARGET"
 begin "audit lệnh Compose: đủ cờ, không chạm mongo/cloudflared/down/volume"
 setup_deployed
 advance "backend" backend/app.py >/dev/null
-printf 'vku-challenge-api:%s\nvku-challenge-api:prod\nvku-challenge-web:%s\nvku-challenge-api:deadbeef0000\n' \
-  "${BASE:0:12}" "${BASE:0:12}" >"$ROOT/state/images.txt"
+printf 'vku-challenge-api:%s\nvku-challenge-api:prod\nvku-challenge-web:%s\nvku-challenge-api:deadbeef0000\nvku-challenge-runner:%s\nvku-challenge-runner:cafebabe0000\nvku-evaluator-runtime:1\n' \
+  "${BASE:0:12}" "${BASE:0:12}" "${BASE:0:12}" >"$ROOT/state/images.txt"
 run_deploy
 expect_status "deploy thành công" 0
 LOG="$(docker_log)"
@@ -704,6 +822,10 @@ expect_eq "giữ tag :prod cho lệnh thủ công" \
   "$(grep -c 'vku-challenge-api:prod' "$ROOT/state/images.txt")" "1"
 expect_eq "tag SHA cũ đã bị xoá" "$(grep -c 'deadbeef0000' "$ROOT/state/images.txt")" "0"
 expect_eq "tag của SHA đang chạy được giữ" "$(grep -c "vku-challenge-api:${BASE:0:12}" "$ROOT/state/images.txt")" "1"
+expect_eq "tag runner cũ cũng bị xoá" "$(grep -c 'cafebabe0000' "$ROOT/state/images.txt")" "0"
+# Image runtime của bộ chấm KHÔNG nằm trong danh sách dọn: nó được tham chiếu bằng tag trong `.env`
+# chứ không theo SHA, nên xoá nó là làm mọi lượt chấm v2 trả 503 cho tới khi có người build lại tay.
+expect_eq "không bao giờ xoá image runtime" "$(grep -c 'vku-evaluator-runtime:1' "$ROOT/state/images.txt")" "1"
 
 begin "an toàn: từ chối chạy khi không phải root"
 setup_base
