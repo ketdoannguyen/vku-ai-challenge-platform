@@ -69,6 +69,19 @@ class Settings(BaseSettings):
     # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
     ai_review_heartbeat_file: str = "/tmp/ai-review-worker.heartbeat"
 
+    # Bộ chấm Python do admin cung cấp (ADR-048). `evaluator_runtime_image` chỉ runner đọc: image là
+    # một phần của môi trường chấm nên nó không bao giờ đến từ nội dung request.
+    evaluator_runner_url: str = "http://evaluator-runner:8100"
+    evaluator_runner_port: int = 8100
+    evaluator_runtime_image: str = "vku-evaluator-runtime:1"
+    evaluator_timeout_seconds: int = 30
+    evaluator_max_concurrency: int = 2
+
+    @property
+    def evaluator_client_timeout_seconds(self) -> float:
+        """Chờ lâu hơn trần của runner một nhịp để lỗi timeout đến từ phía biết lý do."""
+        return self.evaluator_timeout_seconds + 15
+
     @property
     def ai_review_worker_config_valid(self) -> bool:
         """Heartbeat phải ngắn hơn lease, nếu không worker có thể mất job vào tay chính nó.

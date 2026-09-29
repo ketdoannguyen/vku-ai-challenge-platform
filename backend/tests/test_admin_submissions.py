@@ -289,7 +289,8 @@ def test_global_list_sorts_by_competition_name(client):
     ]
 
 
-def test_global_list_sorts_by_metrics_with_stable_pagination(client):
+def test_scoped_list_sorts_by_contract_metrics_with_stable_pagination(client):
+    """Bảng theo cuộc thi sort được theo đúng các khóa metric trong hợp đồng kết quả của nó."""
     participant = _account_id(client, "thi.sinh@vku.vn")
     cup = _create_competition(client, "cup-metrics", "Cup Metrics")
     low = _submission(client, cup, participant, score=0.3, created_at=BASE, submission_no=1)
@@ -312,15 +313,16 @@ def test_global_list_sorts_by_metrics_with_stable_pagination(client):
         )
     )
     _login(client)
+    url = f"/api/admin/competitions/{cup}/submissions"
 
-    descending = _list(client, sort="precision", order="desc")
+    descending = client.get(url, params={"sort": "precision", "order": "desc"}).json()
     assert [row["id"] for row in descending["submissions"]] == [
         str(high),
         str(low),
         str(failed),
     ]
 
-    ascending = _list(client, sort="recall", order="asc")
+    ascending = client.get(url, params={"sort": "recall", "order": "asc"}).json()
     assert [row["id"] for row in ascending["submissions"]] == [
         str(failed),
         str(low),
@@ -328,10 +330,35 @@ def test_global_list_sorts_by_metrics_with_stable_pagination(client):
     ]
 
     # Phân trang trên cột metric không được trùng hoặc mất dòng.
-    first = _list(client, sort="f1", order="desc", limit=2, offset=0)["submissions"]
-    second = _list(client, sort="f1", order="desc", limit=2, offset=2)["submissions"]
-    assert [row["id"] for row in first] == [str(high), str(low)]
-    assert [row["id"] for row in second] == [str(failed)]
+    first = client.get(url, params={"sort": "f1", "order": "desc", "limit": 2}).json()
+    second = client.get(
+        url, params={"sort": "f1", "order": "desc", "limit": 2, "offset": 2}
+    ).json()
+    assert [row["id"] for row in first["submissions"]] == [str(high), str(low)]
+    assert [row["id"] for row in second["submissions"]] == [str(failed)]
+
+    # Khóa metric không nằm trong hợp đồng của cuộc thi thì bị từ chối, không nội suy vào query.
+    rejected = client.get(url, params={"sort": "accuracy"})
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_global_list_rejects_metric_sorts(client):
+    """Bảng toàn cục trộn nhiều cuộc thi: điểm của các công thức khác nhau không so sánh được."""
+    seeded = _seed_portfolio(client)
+
+    for field in ("f1", "precision", "recall", "accuracy"):
+        response = client.get(GLOBAL_URL, params={"sort": field})
+        assert response.status_code == 422, field
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    # Sắp theo số điểm chính vẫn giữ được, chỉ là sắp số chứ không phải xếp hạng liên cuộc thi.
+    by_score = _list(client, sort="primary_score", order="desc")["submissions"]
+    assert [row["id"] for row in by_score] == [
+        str(seeded["middle"]),
+        str(seeded["newest"]),
+        str(seeded["oldest"]),
+    ]
 
 
 def test_global_list_returns_stats_for_current_filter(client):

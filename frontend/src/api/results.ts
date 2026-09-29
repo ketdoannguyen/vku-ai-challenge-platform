@@ -1,10 +1,60 @@
 import type { AdminAiReview, ParticipantAiReview } from "./aiReview";
 import { api } from "./client";
 
-export interface Metrics {
-  f1: number;
-  precision: number;
-  recall: number;
+/** Một metric trong hợp đồng kết quả: khóa tra kết quả, nhãn hiển thị và số thập phân. */
+export interface MetricDefinition {
+  key: string;
+  label: string;
+  decimals: number;
+}
+
+/** Hợp đồng kết quả của cuộc thi: thứ tự cột, metric chính và chiều xếp hạng. */
+export interface ResultContract {
+  metrics: MetricDefinition[];
+  /** Bản nháp chưa chọn metric chính - UI phải nói "chưa cấu hình", không mặc định về F1. */
+  primary_metric: string | null;
+  higher_is_better: boolean;
+}
+
+/**
+ * Khóa metric → giá trị. Cuộc thi v2 trả bộ khóa do admin khai báo trong code chấm; cuộc thi v1
+ * giữ đúng ba khóa f1/precision/recall.
+ */
+export type Metrics = Record<string, number>;
+
+/** Ba metric cố định của bộ chấm sklearn, cũng là hợp đồng mô tả lại cho cuộc thi v1. */
+const LEGACY_CONTRACT: ResultContract = {
+  metrics: [
+    { key: "f1", label: "F1", decimals: 4 },
+    { key: "precision", label: "Precision", decimals: 4 },
+    { key: "recall", label: "Recall", decimals: 4 },
+  ],
+  primary_metric: "f1",
+  higher_is_better: true,
+};
+
+const EMPTY_CONTRACT: ResultContract = {
+  metrics: [],
+  primary_metric: null,
+  higher_is_better: true,
+};
+
+/**
+ * Hợp đồng để render. Response hiện tại đã có `result_contract`; response cũ chưa có field này
+ * được mô tả lại thành ba metric v1 để màn hình không phải biết mình đang đọc bản ghi đời nào.
+ * Bản nháp v2 chưa khai báo metric trả hợp đồng rỗng thay vì dựng lại ba cột cũ.
+ */
+export function resultContract(
+  config: { result_contract?: ResultContract; version?: number } | null | undefined,
+): ResultContract {
+  if (config?.result_contract) return config.result_contract;
+  return config?.version === 2 ? EMPTY_CONTRACT : LEGACY_CONTRACT;
+}
+
+/** Nhãn của một metric trong hợp đồng; `null` khi chưa chọn metric chính. */
+export function metricLabel(contract: ResultContract, key: string | null | undefined): string | null {
+  if (!key) return null;
+  return contract.metrics.find((metric) => metric.key === key)?.label ?? key;
 }
 
 /** Metadata một artifact đã lưu; backend không trả object key hay nơi lưu trữ. */
@@ -71,16 +121,20 @@ export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
   rejected: "Không chấp nhận",
 };
 
-/** Cột sắp xếp bảng submission của admin - khớp `SORT_FIELDS` phía backend. */
-export type AdminSortField =
-  | "created_at"
-  | "competition"
-  | "team"
-  | "primary_score"
-  | "f1"
-  | "precision"
-  | "recall";
+/**
+ * Cột sắp xếp bảng submission của admin. Bốn trường cố định luôn dùng được; ngoài ra backend còn
+ * nhận khóa metric khi bảng đã khóa vào một cuộc thi, nên đây là chuỗi chứ không phải union kín.
+ */
+export type AdminSortField = string;
 export type AdminSortOrder = "asc" | "desc";
+
+/** Bốn trường sắp xếp dùng được ở mọi bảng, kể cả bảng toàn cục trộn nhiều cuộc thi. */
+export const ADMIN_SORT_FIELDS: ReadonlyArray<{ value: AdminSortField; label: string; globalOnly?: boolean }> = [
+  { value: "created_at", label: "Thời gian" },
+  { value: "competition", label: "Cuộc thi", globalOnly: true },
+  { value: "team", label: "Đội" },
+  { value: "primary_score", label: "Điểm chính" },
+];
 
 /** Tổng quan bảng bài nộp toàn cục, tính trên cả bộ lọc đang xem chứ không phải trang hiện tại. */
 export interface AdminSubmissionStats {
@@ -106,6 +160,14 @@ export interface GlobalSubmissionItem extends AdminSubmissionItem {
   competition?: { id: string; slug: string; name: string };
 }
 
+/** Cuộc thi kèm hợp đồng kết quả của nó, để bảng toàn cục gắn nhãn metric đúng cho từng hàng. */
+export interface CompetitionContract {
+  id: string;
+  slug: string;
+  name: string;
+  result_contract: ResultContract;
+}
+
 export interface AdminSubmissionsResponse {
   submissions: GlobalSubmissionItem[];
   total: number;
@@ -115,6 +177,8 @@ export interface AdminSubmissionsResponse {
   order: AdminSortOrder;
   /** Chỉ endpoint toàn cục trả về - bảng theo một cuộc thi không có thẻ thống kê. */
   stats?: AdminSubmissionStats;
+  /** Chỉ endpoint toàn cục: hợp đồng metric của từng cuộc thi có mặt trong trang. */
+  competitions?: CompetitionContract[];
 }
 
 export interface LeaderboardEntry {
@@ -134,7 +198,8 @@ export interface LeaderboardEntry {
 /** Admin và export luôn nhận toàn bộ danh sách, không phân trang. */
 export interface LeaderboardResponse {
   competition_id: string;
-  primary_metric: "f1" | "precision" | "recall";
+  /** Khóa metric chính theo hợp đồng kết quả; `null` khi cuộc thi chưa khai báo metric nào. */
+  primary_metric: string | null;
   entries: LeaderboardEntry[];
   total: number;
 }
@@ -179,6 +244,10 @@ export function fetchLeaderboard(
   return api.get(`/competitions/${competitionId}/leaderboard?limit=${limit}&offset=${offset}`);
 }
 
-export function formatScore(value: number | null | undefined): string {
-  return value == null ? "-" : value.toFixed(6);
+/**
+ * Số ghi theo đúng số thập phân admin khai báo cho metric đó. Record cũ có thể thiếu metric
+ * (bài chấm bằng bộ chấm khác): hiện dấu gạch, không tự coi là 0.
+ */
+export function formatMetric(value: number | null | undefined, decimals: number): string {
+  return value == null ? "-" : value.toFixed(decimals);
 }

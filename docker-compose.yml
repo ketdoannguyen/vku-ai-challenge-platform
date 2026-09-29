@@ -8,7 +8,9 @@ services:
     restart: unless-stopped
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      target: api
     environment:
       APP_ENV: ${APP_ENV:-development}
       APP_NAME: ${APP_NAME:-AI Challenge Platform}
@@ -35,6 +37,10 @@ services:
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
+      # Bộ chấm Python của admin (ADR-048). API chỉ gửi lượt chấm sang runner nội bộ và không có
+      # docker; đổi EVALUATOR_RUNTIME_IMAGE là đổi môi trường chấm, phải chạy thử lại trước khi publish.
+      EVALUATOR_RUNNER_URL: http://evaluator-runner:8100
+      EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
     expose:
       - "8000" # internal only - truy cập qua Nginx same-origin
     depends_on:
@@ -49,7 +55,9 @@ services:
   ai-review-worker:
     # Cùng image backend với `api` (cùng build context): worker là TIẾN TRÌNH RIÊNG - một lượt gọi
     # provider mất hàng chục giây và không được nằm trong vòng đời của API process.
-    build: ./backend
+    build:
+      context: ./backend
+      target: api
     command: ["python", "-m", "app.ai_review.worker"]
     environment:
       APP_ENV: ${APP_ENV:-development}
@@ -103,6 +111,44 @@ services:
     restart: unless-stopped
     volumes:
       - data:/data
+
+  evaluator-runner:
+    # Chạy bộ chấm của admin (ADR-048). Cùng image backend, tiến trình riêng, và là tiến trình DUY
+    # NHẤT được mount docker socket. Code chấm chạy trong container con (`--network none --read-only`):
+    # nó không thấy mạng, không thấy file máy chủ, và không bao giờ chạm tới socket này.
+    build:
+      context: ./backend
+      target: runner
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      EVALUATOR_RUNNER_PORT: 8100
+      EVALUATOR_RUNTIME_IMAGE: ${EVALUATOR_RUNTIME_IMAGE:-vku-evaluator-runtime:1}
+      EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
+      # Trần lượt chấm chạy song song. Runner là MỘT process nên đây là giới hạn chung cho mọi API
+      # worker; nâng lên thì phải chắc VPS còn CPU/RAM cho từng slot.
+      EVALUATOR_MAX_CONCURRENCY: ${EVALUATOR_MAX_CONCURRENCY:-2}
+    expose:
+      - "8100" # internal only - chỉ API gọi, không route Nginx
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Một lượt chấm có thể chạy tới EVALUATOR_TIMEOUT_SECONDS; ân hạn dừng dài hơn để job đang chạy
+    # không bị cắt giữa đường (container con vẫn do daemon quản lý nên không mồ côi khi runner thoát).
+    stop_grace_period: 60s
+    healthcheck:
+      # HTTP còn sống là điều kiện của healthcheck; "docker có mặt hay không" nằm ở trường `docker`
+      # của /health - thiếu docker thì service đã vô dụng, không cần đẩy container vào restart vòng lặp.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8100/health').read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
 
   minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z

@@ -1,4 +1,4 @@
-"""Pure CSV validation and synchronous classification scoring."""
+"""Pure CSV validation and synchronous classification scoring (cấu hình v1)."""
 
 import csv
 import io
@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict
 from sklearn.metrics import f1_score, precision_score, recall_score
+
+from app.scoring.errors import ScoringValidationError
 
 AVERAGES = ("binary", "macro", "weighted")
 PRIMARY_METRICS = ("f1", "precision", "recall")
@@ -39,13 +41,6 @@ class GroundTruth:
 class ScoreResult:
     metrics: dict[str, float]
     primary_score: float
-
-
-class ScoringValidationError(ValueError):
-    def __init__(self, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
 
 
 def validate_config(config: ScoringConfig) -> None:

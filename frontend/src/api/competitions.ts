@@ -1,20 +1,40 @@
 /** Types + helpers dùng chung cho competition API (Sprint 03). */
 
+import type { ResultContract } from "./results";
+
 export interface Membership {
   active: boolean;
   joined_at: string | null;
 }
 
+/** Một cột trong schema CSV của cuộc thi v2 do admin khai báo. */
+export interface SubmissionColumn {
+  name: string;
+  type: "string" | "integer" | "number";
+  nullable: boolean;
+  /** Tập giá trị hợp lệ; `null` nghĩa là không giới hạn theo enum. */
+  allowed_values: Array<string | number> | null;
+}
+
 export interface SubmissionConfig {
   ready: boolean;
-  id_column: string | null;
-  prediction_column: string | null;
-  average: "binary" | "macro" | "weighted" | null;
-  /** Chỉ có với admin và thành viên đang hoạt động - nhãn dương là thông tin của ground truth. */
-  pos_label?: string | null;
   max_upload_mb: number;
   /** Trần notebook Jupyter - mỗi lượt nộp bắt buộc kèm một tệp .ipynb. */
   max_notebook_mb: number;
+  /** 1 = bộ chấm sklearn cố định, 2 = bộ chấm Python của admin; vắng mặt là response cũ. */
+  version?: 1 | 2;
+  /** Metric chính theo hợp đồng kết quả; `null` khi bản nháp chưa khai báo metric nào. */
+  primary_metric?: string | null;
+  higher_is_better?: boolean | null;
+  result_contract?: ResultContract;
+  id_column: string | null;
+  /** Cuộc thi v1: cột nhãn–dự đoán cố định và cách tính điểm. */
+  prediction_column?: string | null;
+  average?: "binary" | "macro" | "weighted" | null;
+  /** Chỉ có với admin và thành viên đang hoạt động - nhãn dương là thông tin của ground truth. */
+  pos_label?: string | null;
+  /** Cuộc thi v2: các cột submission, dùng để sinh hướng dẫn và CSV mẫu. */
+  columns?: SubmissionColumn[];
 }
 
 /** Link tài nguyên BTC khai báo - nền tảng chỉ lưu URL, không host dataset. */
@@ -140,11 +160,25 @@ export const JOIN_MODE_LABEL: Record<Competition["join_mode"], string> = {
   invite_only: "Chỉ theo lời mời",
 };
 
-export const METRIC_LABEL: Record<Competition["primary_metric"], string> = {
+/** Nhãn của ba metric v1, dùng khi hợp đồng kết quả không mô tả metric chính (response cũ). */
+const LEGACY_METRIC_LABEL: Record<string, string> = {
   f1: "F1",
   precision: "Precision",
   recall: "Recall",
 };
+
+/**
+ * Nhãn metric chính của cuộc thi để hiển thị. Ưu tiên hợp đồng kết quả; response cũ chưa có hợp đồng
+ * thì rơi về tên metric v1. Bản nháp v2 chưa khai báo metric hiện "Chưa cấu hình" - `primary_metric`
+ * của document là field v1 còn sót lại, không phải metric đang được chấm.
+ */
+export function primaryMetricLabel(competition: Competition): string {
+  const config = competition.submission_config;
+  const contract = config?.result_contract;
+  const key = contract ? config?.primary_metric : competition.primary_metric;
+  if (!key) return "Chưa cấu hình";
+  return contract?.metrics.find((metric) => metric.key === key)?.label ?? LEGACY_METRIC_LABEL[key] ?? key;
+}
 
 /** "2026-10-01T00:00:00Z" → "01/10/2026 07:00" theo local timezone (DATA_MODEL quy ước). */
 export function formatLocal(iso: string): string {

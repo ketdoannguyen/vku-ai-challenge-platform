@@ -1490,3 +1490,119 @@ lượt ADR-044 chứ không phải lượt này). `e2e_harness` khoá phần **
 (đọc archive, oracle, dựng báo cáo, khớp bài nộp theo SHA) - không case nào trong đó gọi mạng,
 Mongo thật hay provider; phần chạy thật chỉ chứng minh được bằng một campaign thật, xem
 `docs/AI_REVIEW_HYBRID_BD_E2E_2026-09-22.md`.
+
+## 18. Bộ chấm Python do admin cấp (ADR-048) - passing
+
+Bốn tệp mới `backend/tests/test_scoring_v2.py` (29), `test_scoring_v2_api.py` (19),
+`test_scoring_v2_results.py` (3), `test_evaluator_sandbox.py` (7) khoá phần v2; các case v1 cũ trong
+`test_scoring.py` (23) và `test_scoring_admin.py` (12) **không đổi một dòng nào** - đó là bằng chứng
+hai đời cấu hình cùng sống.
+
+### Backend - hợp đồng dữ liệu và dấu vân tay
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Schema CSV: cột `id` phải nằm trong danh sách cột, không được kiểu số thực, không được nullable, hai file phải cùng kiểu id; `allowed_values` rỗng/trùng là cấu hình sai; giá trị phải đúng kiểu cột, và **cột `number` chỉ nhận `allowed_values` dạng số** (chuỗi `"0"` không so sánh được với ô đã parse thành số) | passing | `test_scoring_v2.py::test_schema_hop_le_khi_cot_id_duoc_khai_bao` → `test_allowed_values_cua_cot_so_khong_duoc_la_chuoi` (7 case) |
+| Hợp đồng metric: khoá đúng regex `[A-Za-z][A-Za-z0-9_]{0,63}`, ≤ 20 metric, `decimals` 0-8, `primary_metric` phải nằm trong danh sách | passing | `test_output_contract_hop_le` → `test_output_contract_tu_choi_metric_chinh_khong_nam_trong_danh_sach` (4 case) |
+| Source bộ chấm chỉ được nhận đúng hai tham số `(ground_truth_path, submission_path)` và có `evaluate` | passing | `test_evaluator_chi_nhan_diem_vao_evaluate` |
+| Ground truth đọc được, giữ thứ tự id, thiếu cột thì lỗi **có mã** (không phải chuỗi tự do) | passing | `test_ground_truth_doc_duoc_va_giu_thu_tu_id`, `test_ground_truth_bao_loi_co_ma_khi_thieu_cot` |
+| Bài nộp được **căn theo thứ tự ground truth** (không theo thứ tự file nộp) và giữ cột phụ | passing | `test_submission_duoc_can_theo_thu_tu_ground_truth_va_giu_cot_phu` |
+| Bài nộp thừa cột bị từ chối khi schema không cho phép; tập id phải khớp ground truth; id trùng lặp và giá trị ngoài `allowed_values` bị chặn; ô trống chỉ được phép khi `nullable`; số nguyên từ chối dạng không chuẩn; id dính khoảng trắng bị từ chối | passing | `test_submission_thua_cot_bi_tu_choi_khi_schema_khong_cho_phep` → `test_id_dinh_khoang_trang_bi_tu_choi` (6 case) |
+| CSV có BOM và CRLF vẫn đọc đúng | passing | `test_csv_bom_va_crlf_doc_duoc` |
+| Kết quả `evaluate` chỉ nhận số hữu hạn phẳng: giá trị lồng nhau/`NaN`/`Inf` bị từ chối; thiếu khoá và thừa khoá so với hợp đồng đều báo lỗi | passing | `test_validate_metrics_chi_nhan_so_huu_han_phang`, `test_validate_metrics_tu_choi_gia_tri_long_nhau`, `test_check_contract_bao_thieu_va_thua` |
+| `primary_score` lấy đúng `metrics[primary_metric]` và đòi đã chọn metric chính | passing | `test_primary_score_lay_dung_metric_chinh_va_doi_hoi_da_chon` |
+| **Đổi bất kỳ đầu vào nào cũng đổi dấu vân tay**: source, ground truth, schema, `preprocessing_version`, runtime, metric chính, chiều xếp hạng | passing | `test_doi_bat_ky_dau_vao_nao_cung_doi_dau_van_tay`, `test_verification_het_hieu_luc_khi_doi_metric_chinh_hoac_chieu_xep_hang` |
+| Lượt chạy thử cũ chết khi source hoặc ground truth đổi; chưa chạy hoặc chạy với cấu hình khác thì không tính là đã xác minh | passing | `test_v2_verification_dies_with_source_or_ground_truth`, `test_verification_chua_chay_hoac_da_chay_voi_cau_hinh_khac` |
+
+### Backend - API admin và khoá ghi
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Lưu bản nháp ghi source và **chặn publish khi chưa có hợp đồng** | passing | `test_v2_draft_saves_source_and_blocks_publish_without_contract` |
+| Hợp đồng **chưa chọn metric chính** vẫn là bản nháp: publish bị chặn (nếu không, mọi bài nộp sau hỏng ở bước lấy điểm chính) | passing | `test_v2_contract_without_primary_metric_is_a_draft_that_cannot_publish` |
+| Body v1 trên cuộc thi đã có cấu hình v2 hợp lệ → **422** `SCORING_CONFIG_INVALID` (không âm thầm đổi cách chấm của mọi bài sau); bản v2 **hỏng** thì vẫn rơi về v1 được để còn cứu cuộc thi | passing | `test_v2_config_cannot_be_downgraded_by_a_v1_body`, `test_broken_v2_config_can_still_fall_back_to_a_v1_body` |
+| `allowed_values` dạng chuỗi trên cột `number` bị từ chối ở lúc lưu, không để nổ giữa lúc chấm | passing | `test_v2_save_rejects_text_allowed_values_on_a_number_column` |
+| Lưu từ chối source thiếu/hỏng cú pháp | passing | `test_v2_save_rejects_missing_or_broken_source` |
+| Lưu với `expected_revision` cũ → **409** `SCORING_REVISION_CONFLICT`, không ghi đè | passing | `test_v2_save_rejects_stale_revision` |
+| Ground truth upload bị đối chiếu với schema admin khai | passing | `test_v2_ground_truth_is_checked_against_schema` |
+| Chạy thử: lượt đầu **phát hiện khoá metric**, lượt sau xác minh hợp đồng | passing | `test_v2_test_run_discovers_keys_then_verifies_contract` |
+| Chạy thử từ chối output nằm ngoài hợp đồng đã khai | passing | `test_v2_test_run_rejects_output_outside_contract` |
+| Lỗi bộ chấm khi chạy thử được ánh xạ thành **mã lỗi** (timeout, source hỏng, output sai) chứ không phải 500 trần | passing | `test_v2_test_run_maps_evaluator_failures` |
+| Publish từ chối khi guard không còn khớp cấu hình đang lưu | passing | `test_v2_publish_rejects_a_guard_that_no_longer_matches` |
+| Cấu hình bị khoá sau bài nộp đầu tiên | passing | `test_v2_config_is_locked_after_the_first_submission` |
+| Clone copy bộ chấm **nhưng không** copy bằng chứng đã chạy thử | passing | `test_v2_clone_copies_evaluator_but_not_ground_truth` |
+
+### Backend - chấm bài, xếp hạng và export
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Bài nộp được chấm bằng bộ chấm và ghi `scoring_ref` ghim đúng thứ đã sinh ra điểm | passing | `test_v2_submission_is_scored_by_evaluator_and_records_scoring_ref` |
+| CSV sai **không** chạy bộ chấm (lỗi học viên không tốn lượt) | passing | `test_v2_submission_rejects_bad_csv_without_running_evaluator` |
+| Bộ chấm hỏng là lỗi **hệ thống** phía học viên (`EVALUATOR_UNAVAILABLE`/`SCORING_FAILED`), không phải lỗi bài làm | passing | `test_v2_evaluator_failure_is_a_system_error_for_the_student` |
+| Học viên thấy schema và hợp đồng metric của cuộc thi | passing | `test_v2_participant_sees_schema_and_contract` |
+| `higher_is_better: false` xếp hạng **và** export theo chiều tăng dần | passing | `test_lower_is_better_ranks_and_exports_ascending` |
+| Export: sheet Results dựng cột theo hợp đồng, sheet Info theo cùng hợp đồng | passing | `test_export_columns_and_info_sheet_follow_the_contract` |
+| Bảng bài nộp toàn cục trả kèm metadata metric của từng cuộc thi | passing | `test_global_admin_list_carries_each_competitions_metric_metadata` |
+
+### Runner - hộp cát (`app/evaluator_runner/sandbox.py`)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Lệnh `docker run` giữ đủ cờ cách ly (`--network none`, `--read-only`, tmpfs `noexec`, trần RAM/CPU/PID, user 65534, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--stop-timeout 0`) và image lấy từ cấu hình runner | passing | `test_evaluator_sandbox.py::test_docker_command_keeps_the_isolation_flags` |
+| Kết quả lấy theo dấu mốc **cuối** trên stdout, nên dấu mốc giả do code chấm in ra không thắng được kết quả thật | passing | `test_parse_reads_the_last_marker_only` |
+| Mã lỗi entrypoint được ánh xạ, mã lạ quy về `EVALUATOR_FAILED`; kết quả thiếu/hỏng/quá 64 KiB bị từ chối | passing | `test_parse_maps_entrypoint_failures_and_rejects_unknown_codes`, `test_parse_rejects_missing_broken_or_oversized_results`, `test_parse_keeps_the_metric_error_code` |
+| Đọc stdout/stderr có trần bộ nhớ nhưng **vẫn đọc tới EOF** - ngừng đọc thì container bị chặn ở lần ghi sau và không bao giờ thoát | passing | `test_read_bounded_caps_memory_but_drains_to_eof` |
+| Hết slot chấm là **từ chối**, không xếp hàng | passing | `test_slots_reject_instead_of_queueing` |
+
+### Frontend
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Tab Chấm điểm: khai báo cột hai file, dòng cấu hình sklearn chỉ còn ở cuộc thi v1, upload ground truth và chạy thử đều chờ schema | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx::Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lưu` |
+| Chạy thử gửi `expected_revision`, mở bảng metric từ **khoá thật** trả về, khoá mới vào bảng với tên hiển thị mặc định là chính khoá | passing | `AdminCompetitionDetailPage.test.tsx::chạy thử gửi expected_revision và mở bảng metric từ khóa thật` |
+| Metric động hiển thị ở bảng xếp hạng, bài của tôi, danh sách bài nộp và form cấu hình; không còn chuỗi `F1/Precision/Recall` cứng | passing | `LeaderboardPage.test.tsx`, `MySubmissionsPage.test.tsx`, `AdminSubmissionsPage.test.tsx`, `AdminCompetitionDetailPage.test.tsx` |
+| Cuộc thi v1 vẫn hiển thị đúng như trước (không đổi hành vi cũ) | passing | các suite trên, fixture `V1_SCORING` |
+| "Bài tốt nhất" ở trang bài của tôi lấy **chiều từ hợp đồng** (metric nhỏ hơn là tốt hơn với `higher_is_better: false`), không mặc định điểm cao là nhất | passing | `MySubmissionsPage.test.tsx::điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn là tốt hơn` |
+| Thứ tự mặc định khi sắp theo cột điểm ở bảng bài nộp toàn cục cũng lấy chiều từ hợp đồng | passing | `AdminSubmissionsPage.test.tsx` (case `LOCKED_CONTRACT`) |
+
+### Bằng chứng tự động (2026-09-29)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **776 passed, 1 deselected** (171 s; +58 case v2 so với 718 của lượt trước) |
+| `cd frontend && npm test` | **506 passed (34 files)** (nhánh này gồm cả ADR-047 đã commit trước đó; riêng lượt v2 thêm case ở `AdminCompetitionDetailPage` - chạy thử và bảng metric động - cùng `submissionRequirements`, `LeaderboardPage`, `MySubmissionsPage`, `AdminSubmissionsPage`, `CompetitionGuidePage`) |
+| `cd frontend && npm run build` | `tsc -b` sạch + `vite build` OK |
+| `cd frontend && npm run lint` | 0 error, warning có sẵn (không phát sinh ở tệp đã sửa) |
+| `docker compose config --quiet` | OK |
+
+1 case bị loại khỏi mọi lượt chạy là hỏng có sẵn từ trước, không liên quan:
+`tests/test_ai_review_service.py::test_moc_hoan_tat_cua_luot_thanh_cong_la_luc_goi_provider_xong`
+(ngày ghim nằm ngoài cửa sổ claim; hôm nay 2026-09-29).
+
+### Bằng chứng đo tay: diễn tập Docker thật (2026-09-29)
+
+Kịch bản nằm ở `/tmp/evaluator-drill/` (`drill.py`, `service_drill.py`, `probe_types.py`) - **không**
+vào repo, nên đây là bằng chứng **một lần**, không phải cổng lặp lại được: muốn thành cổng thì phải
+viết lại script. Kỳ vọng của lượt chấm sklearn được tính **tại chỗ** bằng chính scikit-learn, không
+gõ tay.
+
+| Check | Kết quả | Chi tiết |
+|---|---|---|
+| Image `vku-evaluator-runtime:1` build từ chính `evaluator-runtime/` | đạt | `docker build -t vku-evaluator-runtime:1 evaluator-runtime`; `entrypoint.py` trong image trùng byte với bản trên đĩa (sha256 `e0daefe0…`) |
+| Bộ chấm pandas + scikit-learn thật chạy trong container, metric khớp oracle | đạt | 18/18 case của `drill.py`; fixture chọn sao cho macro ≠ binary, 2456 ms |
+| `--network none` chặn mạng thật; `--read-only` chặn ghi ra đĩa thật | đạt | socket tới `1.1.1.1` hỏng; ghi vào `/opt/evaluator/entrypoint.py` hỏng |
+| Kênh kết quả là fd 3 (`os.dup(1)`): log của admin đi sang stderr, dấu mốc giả ghi thẳng vào fd 3 **thua** kết quả thật | đạt | `print` + `sys.__stdout__` không thành kết quả; kết quả thật ghi sau nên thắng |
+| Dội 5 MiB vào kênh kết quả ra `EVALUATOR_OUTPUT_MISMATCH`; 100 KiB nhiễu vẫn qua | đạt | trần 4 MiB giữ đúng, và `print` 5 MiB chỉ tốn trần stderr 64 KiB nên lượt chấm vẫn xong |
+| `np.int64`/`np.float32`/`ndarray`/NaN/Inf/`bool` bị từ chối; `np.float64` qua | đạt | `probe_types.py`: NumPy 2 làm `np.float64` thành lớp con của `float` |
+| Bộ chấm ném lỗi và hàm sai chữ ký → `EVALUATOR_FAILED` kèm traceback; vòng lặp vô hạn → `EVALUATOR_TIMEOUT` sau 30,2 s | đạt | |
+| Runner thật (`app/evaluator_runner/server.py`): 200 kèm `metrics` + `duration_ms`; 422 cho bộ chấm hỏng và cho field lạ; 503 `EVALUATOR_UNAVAILABLE` trong 0,00 s khi hết slot; 413 cho `Content-Length` 40 MB | đạt | 6/6 case HTTP của `service_drill.py`; log runner không WARNING/ERROR/traceback, 0 container sót lại |
+
+### Chưa kiểm
+
+| Check | Status | Ghi chú |
+|---|---|---|
+| **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng ngay trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
+| Image runtime được build tự động | **chưa có** | `EVALUATOR_RUNTIME_IMAGE` (mặc định `vku-evaluator-runtime:1`) được `docker-compose.yml` tham chiếu nhưng **không service/script nào build nó** - image trên máy dev là do build tay cho lượt diễn tập. Triển khai mới phải build tay, nếu không mọi lượt chấm hỏng. Ghi ở mục 1 của ADR-048 và `docs/DEPLOYMENT.md` §3.3 |
+| Chạy được trên production | **chưa có, cố ý** | `docker-compose.prod.yml` **không** khai service `evaluator-runner` lẫn nhóm `EVALUATOR_*`, và `deploy/vps/auto-deploy.sh` chỉ quản `api`/`ai-review-worker`/`web`. Hệ quả: trên production mọi lượt chấm v2 trả `503 EVALUATOR_UNAVAILABLE`; cuộc thi v1 **không** bị ảnh hưởng. Bốn việc cần làm để bật: `docs/DEPLOYMENT.md` §3.3 |
+| Trần thời gian/RAM thật của container dưới tải (nhiều lượt song song) | **chưa đo** | `EVALUATOR_MAX_CONCURRENCY=2` và timeout 30 s là con số chọn theo kế hoạch §10.4, chưa có số đo trên máy thật |
+| Chất lượng bộ chấm do admin viết | **ngoài phạm vi** | Nền tảng chỉ bảo đảm nó chạy trong hộp cát và trả đúng hợp đồng; không kiểm tra nó có công bằng không. Xem ADR-048 mục "hệ quả" |

@@ -64,10 +64,14 @@ def error_response(
     message: str,
     headers: dict[str, str] | None = None,
     details: list[dict] | None = None,
+    detail: str | None = None,
 ) -> JSONResponse:
     error: dict = {"code": code, "message": message}
     if details:
         error["details"] = details
+    if detail:
+        # Chỉ có ở lỗi của endpoint admin (ADR-048); luồng thí sinh không bao giờ đặt trường này.
+        error["detail"] = detail
     return JSONResponse(
         status_code=status_code,
         content={"error": error},
@@ -83,6 +87,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
             exc.detail["code"],
             exc.detail.get("message", ""),
             exc.headers,
+            detail=exc.detail.get("detail"),
         )
     if exc.status_code == 404:
         return error_response(404, "NOT_FOUND", "Không tìm thấy tài nguyên.")

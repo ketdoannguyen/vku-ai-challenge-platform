@@ -218,7 +218,8 @@ test("submit hiển thị loading rồi metrics và quota còn lại", async () 
     ),
   );
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
-  expect(screen.getAllByText("0.500000")).toHaveLength(3);
+  // Số thập phân lấy theo hợp đồng kết quả (v1: 4 chữ số), không còn cứng 6 chữ số.
+  expect(screen.getAllByText("0.5000")).toHaveLength(3);
 
   const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
   const precisionCard = document.querySelector<HTMLElement>('[data-metric="precision"]');
@@ -367,7 +368,8 @@ test("lượt AI còn chạy chỉ là dòng nhắc: điểm đã có ngay và t
   submitOnce();
 
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
-  expect(screen.getAllByText("0.500000")).toHaveLength(3);
+  // Số thập phân lấy theo hợp đồng kết quả (v1: 4 chữ số), không còn cứng 6 chữ số.
+  expect(screen.getAllByText("0.5000")).toHaveLength(3);
   expect(
     screen.getByText("AI đang kiểm tra notebook (kết quả sơ bộ, không ảnh hưởng điểm số)."),
   ).toBeTruthy();

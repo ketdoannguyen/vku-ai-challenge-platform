@@ -12,6 +12,10 @@
  * còn icon - hình dạng và màu nói kết luận, chữ nằm trong tooltip và `aria-label` - vì badge
  * chữ chiếm chỗ mà thông tin thì đã có nhãn `dt` ngay cạnh.
  *
+ * Nhãn và số thập phân của cụm Kết quả không còn cố định như bộ chấm sklearn: mỗi cuộc thi khai
+ * một hợp đồng kết quả riêng, nên bảng toàn cục phải tra hợp đồng theo từng dòng còn bảng khóa
+ * cuộc thi nhận hợp đồng qua prop (endpoint theo cuộc thi không trả hợp đồng).
+ *
  * Lọc, sắp xếp và phân trang đều chạy phía server để tổng số luôn khớp bộ lọc.
  */
 
@@ -37,7 +41,9 @@ import {
 import { api } from "../api/client";
 import { formatLocal } from "../api/competitions";
 import {
-  formatScore,
+  ADMIN_SORT_FIELDS,
+  formatMetric,
+  resultContract as resolveResultContract,
   REVIEW_STATUS_LABEL,
   setSubmissionReview,
   SUBMISSION_STATUS_LABEL,
@@ -45,7 +51,8 @@ import {
   type AdminSortOrder,
   type AdminSubmissionItem,
   type AdminSubmissionsResponse,
-  type Metrics,
+  type MetricDefinition,
+  type ResultContract,
   type ReviewPayload,
 } from "../api/results";
 import { usePendingPolling } from "../hooks/usePendingPolling";
@@ -75,37 +82,24 @@ const REVIEW_OPTIONS = [
   { value: "rejected", label: "Không chấp nhận" },
 ];
 
-/** Thứ tự mặc định khi chuyển sang một cột: điểm/thời gian mới nhất trước, tên A→Z. */
-const DEFAULT_ORDER: Record<AdminSortField, AdminSortOrder> = {
-  created_at: "desc",
-  competition: "asc",
-  team: "asc",
-  primary_score: "desc",
-  f1: "desc",
-  precision: "desc",
-  recall: "desc",
-};
+/**
+ * Thứ tự mặc định khi chuyển sang một cột: thời gian thì mới nhất trước, tên A→Z. Cột điểm không
+ * có chiều cố định - chiều có lợi nằm trong hợp đồng của cuộc thi (có metric càng nhỏ càng tốt, ví
+ * dụ RMSE), bảng toàn cục không có hợp đồng nên tạm lấy giảm dần.
+ */
+function defaultOrder(field: AdminSortField, contract?: ResultContract): AdminSortOrder {
+  if (field === "competition" || field === "team") return "asc";
+  if (field === "created_at") return "desc";
+  return contract?.higher_is_better === false ? "asc" : "desc";
+}
 
 /**
- * Trường sắp xếp của thanh "Sắp xếp theo". Bảng khóa cuộc thi đã biết sẵn cuộc thi của mọi
- * dòng nên bỏ hẳn lựa chọn này thay vì để nó sắp xếp một trường hằng số.
+ * Metric phụ của một hợp đồng. Metric chính đã có hộp "Điểm chính" riêng nên không được hiện
+ * lại lần nữa, dù là trong cụm Kết quả hay trong danh sách sắp xếp.
  */
-const SORT_OPTIONS: Array<{ value: AdminSortField; label: string; globalOnly?: boolean }> = [
-  { value: "created_at", label: "Thời gian" },
-  { value: "competition", label: "Cuộc thi", globalOnly: true },
-  { value: "team", label: "Đội" },
-  { value: "primary_score", label: "Điểm chính" },
-  { value: "f1", label: "F1" },
-  { value: "precision", label: "Precision" },
-  { value: "recall", label: "Recall" },
-];
-
-/** Ba metric phụ; Điểm chính đứng riêng vì là metric chính của cuộc thi. */
-const METRIC_FIELDS: Array<{ key: keyof Metrics; label: string }> = [
-  { key: "f1", label: "F1" },
-  { key: "precision", label: "Precision" },
-  { key: "recall", label: "Recall" },
-];
+function secondaryMetrics(contract: ResultContract): MetricDefinition[] {
+  return contract.metrics.filter((metric) => metric.key !== contract.primary_metric);
+}
 
 interface Filters {
   competition_id: string;
@@ -148,11 +142,17 @@ interface CompetitionOption {
 
 export function AdminSubmissionsPanel({
   competitionId,
+  resultContract,
   title,
   listLabel,
 }: {
   /** Có cuộc thi thì danh sách khóa vào cuộc thi đó: ẩn bộ lọc, trường cuộc thi và thẻ thống kê. */
   competitionId?: string;
+  /**
+   * Hợp đồng metric của cuộc thi đang khóa. Endpoint theo cuộc thi không trả hợp đồng nên trang
+   * gọi phải truyền vào; bảng toàn cục không truyền vì mỗi dòng thuộc một cuộc thi khác nhau.
+   */
+  resultContract?: ResultContract;
   title: string;
   listLabel: string;
 }) {
@@ -300,7 +300,7 @@ export function AdminSubmissionsPanel({
     setQuery((current) =>
       current.sort === field
         ? current
-        : { ...current, sort: field, order: DEFAULT_ORDER[field], offset: 0 },
+        : { ...current, sort: field, order: defaultOrder(field, resultContract), offset: 0 },
     );
   }
 
@@ -350,6 +350,33 @@ export function AdminSubmissionsPanel({
   const shownFrom = data ? data.offset + 1 : 0;
   const shownTo = data ? Math.min(data.offset + PAGE_SIZE, data.total) : 0;
   const hasNext = data ? shownTo < data.total : false;
+
+  /**
+   * Trường của thanh "Sắp xếp theo". Bảng khóa cuộc thi đã biết sẵn cuộc thi của mọi dòng nên bỏ
+   * lựa chọn "Cuộc thi"; bù lại nó mới sắp xếp được theo metric, vì backend chỉ nhận khóa metric
+   * khi bảng đã khóa vào một cuộc thi - bảng toàn cục trộn nhiều thang điểm nên bị từ chối.
+   */
+  const sortFields = [
+    ...ADMIN_SORT_FIELDS.filter((option) => !option.globalOnly || !competitionId),
+    ...(competitionId && resultContract
+      ? secondaryMetrics(resultContract).map((metric) => ({
+          value: metric.key,
+          label: metric.label,
+        }))
+      : []),
+  ];
+
+  /**
+   * Hợp đồng metric của một dòng. Bảng khóa cuộc thi nhận hợp đồng qua prop nên mọi dòng dùng
+   * chung; bảng toàn cục tra theo cuộc thi của dòng, không thấy thì mô tả lại thành ba metric v1
+   * để bài nộp cũ vẫn hiện đúng cột.
+   */
+  function contractOf(submission: AdminSubmissionItem): ResultContract {
+    if (resultContract) return resultContract;
+    return resolveResultContract(
+      data?.competitions?.find((item) => item.id === submission.competition_id),
+    );
+  }
 
   /**
    * Trạng thái chấm điểm. Chữ nằm trong tooltip; thông báo lỗi của lượt chấm cũng theo vào đó
@@ -662,13 +689,11 @@ export function AdminSubmissionsPanel({
                 value={query.sort}
                 onChange={(event) => selectSort(event.target.value as AdminSortField)}
               >
-                {SORT_OPTIONS.filter((option) => !option.globalOnly || !competitionId).map(
-                  (option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ),
-                )}
+                {sortFields.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <button
@@ -682,113 +707,126 @@ export function AdminSubmissionsPanel({
           </div>
 
           <ul className="subm-list">
-            {data.submissions.map((submission) => (
-              <li key={submission.id} className={`subm-card subm-card-${cardTone(submission)}`}>
-                <article className="subm-card-body">
-                  <dl className="subm-card-tier">
-                    <div className="subm-field">
-                      <dt>Thời gian</dt>
-                      <dd>
-                        <BlockIcon tone="blue">{CALENDAR_PATHS}</BlockIcon>
-                        <span>{formatLocal(submission.created_at)}</span>
-                      </dd>
-                    </div>
-                    {!competitionId && (
-                      <div className="subm-field subm-field-grow">
-                        <dt>Cuộc thi</dt>
+            {data.submissions.map((submission) => {
+              const contract = contractOf(submission);
+              const secondary = secondaryMetrics(contract);
+              // Bản nháp chưa chọn metric chính thì Điểm chính lùi về 4 số thập phân như bộ chấm v1.
+              const primaryDecimals =
+                contract.metrics.find((metric) => metric.key === contract.primary_metric)
+                  ?.decimals ?? 4;
+              return (
+                <li key={submission.id} className={`subm-card subm-card-${cardTone(submission)}`}>
+                  <article className="subm-card-body">
+                    <dl className="subm-card-tier">
+                      <div className="subm-field">
+                        <dt>Thời gian</dt>
                         <dd>
-                          <BlockIcon tone="blue">{TROPHY_PATHS}</BlockIcon>
-                          {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở; slug chỉ dùng
-                              làm phép thử đó, không hiện ra nữa. */}
-                          {submission.competition?.slug ? (
-                            <Link
-                              to={`/admin/competitions/${submission.competition.id}`}
-                              title={submission.competition.name}
-                              className="subm-truncate"
-                            >
-                              {submission.competition.name}
-                            </Link>
+                          <BlockIcon tone="blue">{CALENDAR_PATHS}</BlockIcon>
+                          <span>{formatLocal(submission.created_at)}</span>
+                        </dd>
+                      </div>
+                      {!competitionId && (
+                        <div className="subm-field subm-field-grow">
+                          <dt>Cuộc thi</dt>
+                          <dd>
+                            <BlockIcon tone="blue">{TROPHY_PATHS}</BlockIcon>
+                            {/* Cuộc thi đã xóa trả slug rỗng và không còn trang để mở; slug chỉ dùng
+                                làm phép thử đó, không hiện ra nữa. */}
+                            {submission.competition?.slug ? (
+                              <Link
+                                to={`/admin/competitions/${submission.competition.id}`}
+                                title={submission.competition.name}
+                                className="subm-truncate"
+                              >
+                                {submission.competition.name}
+                              </Link>
+                            ) : (
+                              <span>{submission.competition?.name}</span>
+                            )}
+                          </dd>
+                        </div>
+                      )}
+                      <div className="subm-field subm-field-grow">
+                        <dt>Đội</dt>
+                        <dd>
+                          <BlockIcon tone="gold">{TEAM_PATHS}</BlockIcon>
+                          <strong className="subm-truncate">{submission.account.name}</strong>
+                          <span className="subm-muted subm-truncate">{submission.account.email}</span>
+                        </dd>
+                      </div>
+                      {/* Điểm chính đứng riêng khỏi cụm chỉ số: đây là con số duy nhất dùng để xếp
+                          hạng, để lẫn với các metric phụ thì nó không còn nổi nữa. */}
+                      <div className="subm-field">
+                        <dt>Điểm chính</dt>
+                        <dd>
+                          <span className="subm-score">
+                            <BlockIcon tone="gold">{STAR_PATHS}</BlockIcon>
+                            <span className="subm-result-primary-score">
+                              {formatMetric(submission.primary_score, primaryDecimals)}
+                            </span>
+                          </span>
+                        </dd>
+                      </div>
+                      <div className="subm-field subm-field-result">
+                        <dt>Kết quả</dt>
+                        <dd>
+                          <BlockIcon tone="blue">{CHART_PATHS}</BlockIcon>
+                          {secondary.length > 0 ? (
+                            <span className="subm-result-metrics">
+                              {secondary.map((metric) => (
+                                <span key={metric.key} className="subm-metric">
+                                  <span className="subm-metric-label">{metric.label}</span>
+                                  <span className="subm-metric-value">
+                                    {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                                  </span>
+                                </span>
+                              ))}
+                            </span>
                           ) : (
-                            <span>{submission.competition?.name}</span>
+                            // Hợp đồng chưa khai metric phụ nào: gạch mờ, không để lại cụm rỗng.
+                            <span className="subm-muted">—</span>
                           )}
                         </dd>
                       </div>
-                    )}
-                    <div className="subm-field subm-field-grow">
-                      <dt>Đội</dt>
-                      <dd>
-                        <BlockIcon tone="gold">{TEAM_PATHS}</BlockIcon>
-                        <strong className="subm-truncate">{submission.account.name}</strong>
-                        <span className="subm-muted subm-truncate">{submission.account.email}</span>
-                      </dd>
-                    </div>
-                    {/* Điểm chính đứng riêng khỏi cụm chỉ số: đây là con số duy nhất dùng để xếp
-                        hạng, để lẫn với F1/Precision/Recall thì nó không còn nổi nữa. */}
-                    <div className="subm-field">
-                      <dt>Điểm chính</dt>
-                      <dd>
-                        <span className="subm-score">
-                          <BlockIcon tone="gold">{STAR_PATHS}</BlockIcon>
-                          <span className="subm-result-primary-score">
-                            {formatScore(submission.primary_score)}
-                          </span>
-                        </span>
-                      </dd>
-                    </div>
-                    <div className="subm-field subm-field-result">
-                      <dt>Kết quả</dt>
-                      <dd>
-                        <BlockIcon tone="blue">{CHART_PATHS}</BlockIcon>
-                        <span className="subm-result-metrics">
-                          {METRIC_FIELDS.map((metric) => (
-                            <span key={metric.key} className="subm-metric">
-                              <span className="subm-metric-label">{metric.label}</span>
-                              <span className="subm-metric-value">
-                                {formatScore(submission.metrics?.[metric.key])}
-                              </span>
-                            </span>
-                          ))}
-                        </span>
-                      </dd>
-                    </div>
-                  </dl>
+                    </dl>
 
-                  {/* Ba trục phán quyết đứng liền nhau và theo đúng thứ tự đọc: chấm xong chưa
-                      (Trạng thái) → máy nói gì (AI sơ bộ) → người chốt gì (Xét duyệt). Mỗi trục là
-                      một badge tự tô theo kết luận của chính nó; vạch nhấn lề trái thẻ vẫn giữ
-                      mức nặng nhất trong ba, nên thẻ có tín hiệu tổng và từng trục có tín hiệu
-                      riêng, không chỗ nào phải suy ra từ chỗ khác. */}
-                  <dl className="subm-card-tier subm-card-tier-detail">
-                    <div className="subm-field">
-                      <dt>Tệp đã nộp</dt>
-                      <dd>
-                        <ArtifactLinks
-                          basePath="/admin/submissions"
-                          submissionId={submission.id}
-                          artifacts={submission.artifacts}
-                        />
-                      </dd>
-                    </div>
-                    <div className="subm-field">
-                      <dt>Trạng thái</dt>
-                      <dd>{statusCell(submission)}</dd>
-                    </div>
-                    <div className="subm-field">
-                      <dt>AI sơ bộ</dt>
-                      <dd>{aiCell(submission)}</dd>
-                    </div>
-                    <div className="subm-field">
-                      <dt>Xét duyệt</dt>
-                      <dd>{reviewCell(submission)}</dd>
-                    </div>
-                    <div className="subm-field">
-                      <dt>Thao tác</dt>
-                      <dd>{actionCell(submission)}</dd>
-                    </div>
-                  </dl>
-                </article>
-              </li>
-            ))}
+                    {/* Ba trục phán quyết đứng liền nhau và theo đúng thứ tự đọc: chấm xong chưa
+                        (Trạng thái) → máy nói gì (AI sơ bộ) → người chốt gì (Xét duyệt). Mỗi trục là
+                        một badge tự tô theo kết luận của chính nó; vạch nhấn lề trái thẻ vẫn giữ
+                        mức nặng nhất trong ba, nên thẻ có tín hiệu tổng và từng trục có tín hiệu
+                        riêng, không chỗ nào phải suy ra từ chỗ khác. */}
+                    <dl className="subm-card-tier subm-card-tier-detail">
+                      <div className="subm-field">
+                        <dt>Tệp đã nộp</dt>
+                        <dd>
+                          <ArtifactLinks
+                            basePath="/admin/submissions"
+                            submissionId={submission.id}
+                            artifacts={submission.artifacts}
+                          />
+                        </dd>
+                      </div>
+                      <div className="subm-field">
+                        <dt>Trạng thái</dt>
+                        <dd>{statusCell(submission)}</dd>
+                      </div>
+                      <div className="subm-field">
+                        <dt>AI sơ bộ</dt>
+                        <dd>{aiCell(submission)}</dd>
+                      </div>
+                      <div className="subm-field">
+                        <dt>Xét duyệt</dt>
+                        <dd>{reviewCell(submission)}</dd>
+                      </div>
+                      <div className="subm-field">
+                        <dt>Thao tác</dt>
+                        <dd>{actionCell(submission)}</dd>
+                      </div>
+                    </dl>
+                  </article>
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : (
