@@ -92,7 +92,7 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
   await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 });
   const blocks = [
     "Hai tệp bắt buộc trong mỗi lượt nộp",
-    "Định dạng tệp prediction.csv",
+    "Định dạng tệp CSV dự đoán",
     "Notebook tái lập (.ipynb)",
     "Notebook khởi đầu",
   ];
@@ -112,7 +112,7 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
   expect(within(required).getByText("1")).toBeTruthy();
 
   // Ví dụ CSV dùng đúng hai cột của cuộc thi và có nhiều dòng mẫu.
-  const sample = screen.getByLabelText("Ví dụ nội dung prediction.csv");
+  const sample = screen.getByLabelText("Ví dụ nội dung tệp CSV dự đoán");
   expect(sample.textContent?.split("\n")).toEqual([
     "record_id,label",
     "sample_0001,1",
@@ -120,6 +120,40 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
     "sample_0003,0",
     "sample_0004,1",
   ]);
+});
+
+test("cuộc thi v2 đọc cột và chỉ số chính theo cấu hình của bộ chấm", async () => {
+  mockApi({
+    ...BASE,
+    submission_config: {
+      ready: true,
+      version: 2,
+      id_column: "sample_id",
+      columns: [
+        { name: "sample_id", type: "integer", nullable: false, allowed_values: null },
+        { name: "predict_label", type: "integer", nullable: false, allowed_values: [0, 1] },
+      ],
+      primary_metric: "accuracy",
+      higher_is_better: true,
+      result_contract: {
+        metrics: [{ key: "accuracy", label: "Độ chính xác", decimals: 4 }],
+        primary_metric: "accuracy",
+        higher_is_better: true,
+      },
+      max_upload_mb: 50,
+      max_notebook_mb: 20,
+    },
+  });
+  renderGuide();
+
+  await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 });
+  // Dòng mẫu sinh theo kiểu dữ liệu đã khai báo: ID đếm tăng, cột nhãn lặp theo enum.
+  expect(
+    screen.getByLabelText("Ví dụ nội dung tệp CSV dự đoán").textContent?.split("\n"),
+  ).toEqual(["sample_id,predict_label", "1,0", "2,1", "3,0", "4,1"]);
+  expect(screen.getByText("Độ chính xác (chỉ số chính)")).toBeTruthy();
+  // Bộ chấm v2 không dùng average của sklearn nên hướng dẫn không được nhắc tới nó.
+  expect(screen.queryByText("Binary")).toBeNull();
 });
 
 test("cuộc thi chưa cấu hình chấm điểm vẫn đọc được hướng dẫn, không lộ null/undefined", async () => {
@@ -140,7 +174,9 @@ test("cuộc thi chưa cấu hình chấm điểm vẫn đọc được hướng
   await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 });
   expect(screen.getByText(/chưa cấu hình/)).toBeTruthy();
   // Ví dụ CSV rơi về tên cột mặc định của nền tảng thay vì hở giá trị rỗng.
-  expect(screen.getByLabelText("Ví dụ nội dung prediction.csv").textContent).toContain("id,prediction");
+  expect(screen.getByLabelText("Ví dụ nội dung tệp CSV dự đoán").textContent).toContain(
+    "id,prediction",
+  );
   expect(document.body.textContent).not.toContain("null");
   expect(document.body.textContent).not.toContain("undefined");
 });

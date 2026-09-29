@@ -47,10 +47,78 @@ const MEMBERS = {
   active_total: 1,
 };
 
+const CONTRACT_METRICS = [
+  { key: "f1", label: "F1", decimals: 4 },
+  { key: "precision", label: "Precision", decimals: 4 },
+  { key: "recall", label: "Recall", decimals: 4 },
+];
+
+/** Cấu hình v2 đã lưu đủ: schema, source, ground truth, hợp đồng metric và bằng chứng chạy thử. */
 const SCORING = {
   ready: true,
   not_ready_reason: null,
   locked: false,
+  version: 2,
+  config: null,
+  scoring: {
+    revision: 3,
+    input_schema: {
+      ground_truth: {
+        id_column: "id",
+        allow_extra_columns: true,
+        columns: [
+          { name: "id", type: "integer", nullable: false, allowed_values: null },
+          { name: "label", type: "integer", nullable: false, allowed_values: [0, 1] },
+        ],
+      },
+      submission: {
+        id_column: "id",
+        allow_extra_columns: false,
+        columns: [
+          { name: "id", type: "integer", nullable: false, allowed_values: null },
+          { name: "predict_label", type: "integer", nullable: false, allowed_values: [0, 1] },
+        ],
+      },
+    },
+    evaluator: {
+      name: "Bộ chấm nhị phân",
+      source_sha256: "a".repeat(64),
+      runtime_id: "python-3.12",
+      source_code: "def evaluate(ground_truth_path, submission_path):\n    return {'f1': 1.0}\n",
+    },
+    output_contract: {
+      metrics: CONTRACT_METRICS,
+      primary_metric: "f1",
+      higher_is_better: true,
+    },
+    verified: true,
+    verification: {
+      tested_at: "2026-09-15T00:00:00Z",
+      tested_by: "admin@vku.vn",
+      observed_keys: ["f1", "precision", "recall"],
+    },
+  },
+  ground_truth: {
+    row_count: 4,
+    columns: ["id", "label"],
+    uploaded_at: "2026-09-15T00:00:00Z",
+  },
+  primary_metric: "f1",
+  higher_is_better: true,
+  result_contract: {
+    metrics: CONTRACT_METRICS,
+    primary_metric: "f1",
+    higher_is_better: true,
+  },
+  quota_per_day: 5,
+  max_upload_mb: 10,
+  source_limit_kb: 256,
+};
+
+/** Cuộc thi còn chấm bằng bộ chấm sklearn: chỉ có cấu hình v1, chưa có bộ chấm Python. */
+const V1_SCORING = {
+  ...SCORING,
+  version: 1,
   config: {
     id_column: "id",
     prediction_column: "prediction",
@@ -59,14 +127,7 @@ const SCORING = {
     pos_label: "1",
     higher_is_better: true,
   },
-  ground_truth: {
-    row_count: 4,
-    columns: ["id", "label"],
-    uploaded_at: "2026-09-15T00:00:00Z",
-  },
-  primary_metric: "f1",
-  quota_per_day: 5,
-  max_upload_mb: 10,
+  scoring: null,
 };
 
 const AI_REVIEW_SETTINGS = {
@@ -613,29 +674,56 @@ test("tab Chấm điểm hiển thị readiness và metadata ground truth an to�
   expect(screen.queryByText("ground truth labels")).toBeNull();
 });
 
-test("lưu scoring config chỉ gửi schema metric, không gửi quota/primary/upload limit", async () => {
+test("lưu cấu hình chấm điểm gửi đủ schema, source và hợp đồng metric", async () => {
   mockApi((url, init) => {
-    if (url.endsWith("/scoring") && init?.method === "PUT") {
-      return { body: SCORING, status: 200 };
-    }
-    if (url.endsWith("/scoring")) return { body: { ...SCORING, ready: false, ground_truth: null }, status: 200 };
+    if (url.endsWith("/scoring") && init?.method === "PUT") return { body: SCORING, status: 200 };
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
-  fireEvent.change(await screen.findByLabelText("Cột prediction"), { target: { value: "answer" } });
-  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình" }).closest("form")!);
+
+  // Sửa một cột của submission: lượt lưu phải mang theo cả schema hai phía, source và metric.
+  fireEvent.change(await screen.findByLabelText("Submission: cột 2: tên"), {
+    target: { value: "answer" },
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" }).closest("form")!);
+
   await waitFor(() => {
     const put = calls.find((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT");
     expect(put).toBeTruthy();
     expect(JSON.parse(put!.init!.body as string)).toEqual({
-      id_column: "id",
-      prediction_column: "answer",
-      label_column: "label",
-      average: "binary",
-      pos_label: "1",
-      higher_is_better: true,
+      version: 2,
+      // Revision đang lưu là 3, gửi lại đúng số đó để backend phát hiện lượt sửa từ nơi khác.
+      expected_revision: 3,
+      input_schema: {
+        ground_truth: {
+          id_column: "id",
+          allow_extra_columns: true,
+          columns: [
+            { name: "id", type: "integer", nullable: false, allowed_values: null },
+            { name: "label", type: "integer", nullable: false, allowed_values: [0, 1] },
+          ],
+        },
+        submission: {
+          id_column: "id",
+          allow_extra_columns: false,
+          columns: [
+            { name: "id", type: "integer", nullable: false, allowed_values: null },
+            { name: "answer", type: "integer", nullable: false, allowed_values: [0, 1] },
+          ],
+        },
+      },
+      evaluator: {
+        name: "Bộ chấm nhị phân",
+        source_code: SCORING.scoring.evaluator.source_code,
+      },
+      output_contract: {
+        metrics: CONTRACT_METRICS,
+        primary_metric: "f1",
+        higher_is_better: true,
+      },
     });
   });
 });
@@ -759,8 +847,10 @@ test("scoring controls bị khóa khi backend báo locked", async () => {
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
   expect(await screen.findByText(/đã bị khóa/i)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Lưu cấu hình" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeDisabled();
   expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
+  expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
+  expect(screen.getByLabelText("Submission: cột 2: tên")).toBeDisabled();
 });
 
 test("tab Kết quả hiển thị ranking, filter submission và link export", async () => {
@@ -896,12 +986,13 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
   // Không có thẻ thống kê toàn cục và không còn nút Lọc; Điểm chính vẫn được nhấn.
   expect(screen.queryByRole("region", { name: "Tổng quan bài nộp" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Lọc" })).toBeNull();
-  expect(region.querySelector(".subm-result-primary-score")).toHaveTextContent("0.900000");
+  expect(region.querySelector(".subm-result-primary-score")).toHaveTextContent("0.9000");
 
-  // Cuộc thi đã khóa thì sắp xếp theo cuộc thi là trường hằng số: lựa chọn đó bị bỏ hẳn.
+  // Cuộc thi đã khóa thì sắp xếp theo cuộc thi là trường hằng số: lựa chọn đó bị bỏ hẳn. F1 là
+  // chỉ số chính nên nằm ở "Điểm chính", không lặp lại thành một lựa chọn metric phụ.
   const sortField = screen.getByLabelText("Sắp xếp theo");
   expect(Array.from(sortField.querySelectorAll("option")).map((option) => option.textContent)).toEqual(
-    ["Thời gian", "Đội", "Điểm chính", "F1", "Precision", "Recall"],
+    ["Thời gian", "Đội", "Điểm chính", "Precision", "Recall"],
   );
 
   // Sắp xếp vẫn chạy phía server, qua chính endpoint của cuộc thi.
@@ -913,7 +1004,7 @@ test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async
     expect(sorted?.url).toContain(`/admin/competitions/${COMPETITION.id}/submissions?`);
   });
 
-  for (const field of ["f1", "precision", "recall"]) {
+  for (const field of ["precision", "recall"]) {
     fireEvent.change(sortField, { target: { value: field } });
     await waitFor(() => {
       const sorted = calls.find(
@@ -1136,7 +1227,7 @@ test("draft chưa sẵn sàng chấm điểm: banner lý do, disable Publish, nh
   // Cùng một nguồn readiness: tab Chấm điểm nhắc lại đúng lý do đang chặn publish.
   expect(await screen.findByText(blocked.message)).toBeTruthy();
   expect(screen.getByRole("tab", { name: "Chấm điểm" })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByText("Cấu hình CSV")).toBeTruthy();
+  expect(screen.getByText("Định dạng dữ liệu")).toBeTruthy();
 });
 
 test("publish trả 422 vẫn hiển thị lỗi trong modal xác nhận", async () => {
@@ -1820,7 +1911,7 @@ test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không s
   for (const [name, tones] of [
     ["Hình ảnh", ["blue", "yellow", "red"]],
     ["Tài nguyên", ["yellow"]],
-    ["Chấm điểm", ["blue", "red", "yellow"]],
+    ["Chấm điểm", ["blue", "red", "yellow", "blue", "red"]],
     ["Kết quả", ["yellow", "blue"]],
     ["Thành viên & mã tham gia", ["red", "blue"]],
     ["Cài đặt", ["blue", "yellow"]],
@@ -1925,7 +2016,7 @@ test("năm bảng vẫn là vùng focus được và giữ nguyên accessible na
   fireEvent.click(railTab("Hình ảnh"));
   await expectRegion("Bảng tài nguyên cuộc thi");
 
-  // Chấm điểm: không có bảng; form cấu hình vẫn nằm trong tabpanel.
+  // Chấm điểm: bảng khai báo cột và metric không phải vùng focus (chỉ form cấu hình).
   fireEvent.click(railTab("Chấm điểm"));
   const scoringPanel = await screen.findByRole("tabpanel", { name: "Chấm điểm" });
   expect(within(scoringPanel).queryByRole("region")).toBeNull();
@@ -1943,7 +2034,7 @@ test("năm bảng vẫn là vùng focus được và giữ nguyên accessible na
   await expectRegion("Bảng thành viên cuộc thi");
 });
 
-test("Hướng dẫn định dạng chỉ phản ánh cấu hình backend đang lưu", async () => {
+test("Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lưu", async () => {
   mockApi((url) => {
     if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -1951,45 +2042,100 @@ test("Hướng dẫn định dạng chỉ phản ánh cấu hình backend đang 
   });
   const first = renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  await screen.findByLabelText("Ground truth: cột 1: tên");
 
-  const binaryGuide = (await screen.findByRole("heading", { name: "Hướng dẫn định dạng" })).closest(
-    "section",
-  ) as HTMLElement;
-  expect(within(binaryGuide).getByText("prediction")).toBeTruthy();
-  expect(within(binaryGuide).getByText("binary")).toBeTruthy();
-  expect(within(binaryGuide).getByText("Positive label")).toBeTruthy();
+  // Đã có bộ chấm Python: không còn cảnh báo sklearn, cột khai báo được điền từ backend.
+  expect(screen.queryByText(/bộ chấm sklearn cố định/)).toBeNull();
+  expect(screen.getByLabelText("Ground truth: cột 2: tên")).toHaveProperty("value", "label");
+  expect(screen.getByLabelText("Submission: cột 2: tên")).toHaveProperty("value", "predict_label");
   first.unmount();
 
-  // average khác binary: không còn dòng positive label.
+  // Cuộc thi còn chấm bằng sklearn: cảnh báo và dòng cấu hình cũ nằm trong chính card đó.
   mockApi((url) => {
-    if (url.endsWith("/scoring")) {
-      return {
-        body: { ...SCORING, config: { ...SCORING.config, average: "macro", pos_label: null } },
-        status: 200,
-      };
-    }
+    if (url.endsWith("/scoring")) return { body: V1_SCORING, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   const second = renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
-  const macroGuide = (await screen.findByRole("heading", { name: "Hướng dẫn định dạng" })).closest(
+  const v1Card = (await screen.findByText(/bộ chấm sklearn cố định/)).closest(
     "section",
   ) as HTMLElement;
-  expect(within(macroGuide).getByText("macro")).toBeTruthy();
-  expect(within(macroGuide).queryByText("Positive label")).toBeNull();
+  expect(within(v1Card).getByText("Cấu hình sklearn đang áp dụng")).toBeTruthy();
+  expect(within(v1Card).getByText("prediction")).toBeTruthy();
+  expect(within(v1Card).getByText("binary")).toBeTruthy();
   second.unmount();
 
-  // Chưa lưu cấu hình: form đang giữ giá trị mặc định nên không được coi là cấu hình đang áp dụng.
+  // Chưa lưu định dạng: upload ground truth và chạy thử đều phải chờ schema.
   mockApi((url) => {
     if (url.endsWith("/scoring")) {
-      return { body: { ...SCORING, ready: false, config: null, ground_truth: null }, status: 200 };
+      return { body: { ...SCORING, ready: false, scoring: null, config: null, ground_truth: null }, status: 200 };
     }
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
-  expect(await screen.findByText("Lưu cấu hình CSV trước khi upload.")).toBeTruthy();
-  expect(screen.queryByRole("heading", { name: "Hướng dẫn định dạng" })).toBeNull();
+  expect(await screen.findByText("Lưu định dạng dữ liệu trước khi upload.")).toBeTruthy();
+  expect(screen.getByText("Lưu cấu hình trước khi chạy thử.")).toBeTruthy();
+  expect(screen.getByText("Chạy thử bộ chấm để nhận diện các khóa metric.")).toBeTruthy();
+  expect((screen.getByLabelText("Upload ground truth CSV") as HTMLInputElement).disabled).toBe(true);
+});
+
+test("chạy thử gửi expected_revision và mở bảng metric từ khóa thật", async () => {
+  const TESTED = {
+    ...SCORING,
+    scoring: {
+      ...SCORING.scoring,
+      // Chưa khai báo metric: bảng metric phải do kết quả chạy thử sinh ra.
+      output_contract: null,
+      verified: false,
+      verification: null,
+    },
+    primary_metric: null,
+  };
+  mockApi((url) => {
+    if (url.endsWith("/scoring/test")) {
+      return {
+        body: {
+          ...TESTED,
+          // Lượt chạy thử vừa rồi là bằng chứng đang hiệu lực: chưa có hợp đồng metric nên không
+          // có gì để lệch fingerprint.
+          scoring: {
+            ...TESTED.scoring,
+            verified: true,
+            verification: {
+              tested_at: "2026-09-15T00:00:00Z",
+              tested_by: "admin@vku.vn",
+              observed_keys: ["f1", "precision"],
+            },
+          },
+          test: { observed_keys: ["f1", "precision"], metrics: { f1: 0.5, precision: 0.25 }, duration_ms: 120 },
+        },
+        status: 200,
+      };
+    }
+    if (url.endsWith("/scoring")) return { body: TESTED, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  const input = await screen.findByLabelText("Chọn CSV mẫu để chạy thử");
+  fireEvent.change(input, { target: { files: [new File(["id,f1"], "sample.csv", { type: "text/csv" })] } });
+
+  expect(await screen.findByText("Khóa metric đã chạy")).toBeTruthy();
+  expect(screen.getByText("f1, precision")).toBeTruthy();
+  // Giá trị hiển thị theo số thập phân mặc định vì chưa có hợp đồng metric.
+  expect(screen.getByText("f1 = 0.5000 · precision = 0.2500")).toBeTruthy();
+  expect(screen.getByText("120 ms")).toBeTruthy();
+  // Khóa mới vào bảng với tên hiển thị mặc định là chính khóa, admin tự đổi.
+  expect(screen.getByLabelText("Tên hiển thị của precision")).toHaveProperty("value", "precision");
+
+  const call = calls.find((item) => item.url.endsWith("/scoring/test"));
+  expect(call?.init?.method).toBe("POST");
+  const body = call?.init?.body as FormData;
+  expect(body.get("expected_revision")).toBe("3");
+  expect((body.get("file") as File).name).toBe("sample.csv");
 });

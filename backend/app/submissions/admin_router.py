@@ -10,6 +10,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Query, Request, Response
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
 from app.accounts.service import ACCOUNTS_COLLECTION
@@ -22,6 +23,8 @@ from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
+from app.scoring import contracts, models
+from app.scoring.models import OutputContract
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 from app.submissions import artifacts as artifacts_reader
 from app.submissions import service
@@ -58,13 +61,28 @@ async def list_submissions(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    _validate_query_params(status, review, ai_review, sort, order, service.SCOPED_SORT_FIELDS)
+    # Trong một cuộc thi, sort được theo đúng các khóa metric trong hợp đồng kết quả của nó.
+    metric_fields = service.metric_sort_fields(competition)
+    _validate_query_params(
+        status,
+        review,
+        ai_review,
+        sort,
+        order,
+        (*service.SCOPED_SORT_FIELDS, *metric_fields),
+    )
 
     query: dict = {"competition_id": competition["_id"]}
     await _apply_filters(db, query, q, status, review, ai_review)
     total = await db[service.SUBMISSIONS_COLLECTION].count_documents(query)
     submissions = await service.list_admin_submissions(
-        db, query, sort=sort, order=order, limit=limit, offset=offset
+        db,
+        query,
+        sort=sort,
+        order=order,
+        limit=limit,
+        offset=offset,
+        metric_fields=metric_fields,
     )
     accounts = await _accounts_by_id(db, [item["account_id"] for item in submissions])
     reviewers = await _accounts_by_id(db, _reviewer_ids(submissions))
@@ -134,6 +152,9 @@ async def list_all_submissions(
         "sort": sort,
         "order": order,
         "stats": stats,
+        # Bảng toàn cục trộn nhiều cuộc thi với bộ metric khác nhau: trả metadata một lần theo từng
+        # cuộc thi có mặt trong trang, để UI gắn nhãn metric đúng cho từng hàng.
+        "competitions": _competition_contracts(competitions),
     }
 
 
@@ -359,7 +380,7 @@ async def admin_leaderboard(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    entries = await leaderboard_service.ranked_entries(db, competition["_id"])
+    entries = await leaderboard_service.ranked_entries(db, competition)
     return leaderboard_service.admin_leaderboard_response(competition, entries)
 
 
@@ -369,8 +390,8 @@ async def export_results(
 ) -> Response:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    entries = await leaderboard_service.ranked_entries(db, competition["_id"])
-    content = _build_workbook(entries)
+    entries = await leaderboard_service.ranked_entries(db, competition)
+    content = _build_workbook(competition, entries)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"{competition['slug']}-results-{timestamp}.xlsx"
     logger.info(
@@ -465,33 +486,41 @@ def _competition_ref(competition: dict | None, competition_id) -> dict:
     }
 
 
-def _build_workbook(entries: list[dict]) -> bytes:
+def _competition_contracts(competitions: dict) -> list[dict]:
+    """Metadata metric của từng cuộc thi trong trang, kèm id để UI tra theo hàng."""
+    return [
+        {**_competition_ref(competition, competition["_id"]), "result_contract": contracts.contract_payload(competition)}
+        for competition in competitions.values()
+    ]
+
+
+def _build_workbook(competition: dict, entries: list[dict]) -> bytes:
+    """Một cột cho mỗi metric trong hợp đồng kết quả, cùng thứ hạng và số liệu như UI."""
+    contract = contracts.result_contract(competition)
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Results"
-    headers = (
-        "Rank",
-        "Account ID",
-        "Team name",
-        "Best score",
-        "F1",
-        "Precision",
-        "Recall",
-        "Best submission time",
-        "Total submissions",
+    sheet.append(
+        (
+            "Rank",
+            "Account ID",
+            "Team name",
+            "Best score",
+            *(metric.label for metric in contract.metrics),
+            "Best submission time",
+            "Total submissions",
+        )
     )
-    sheet.append(headers)
     for entry in entries:
-        metrics = entry["metrics"]
+        # Bản ghi cũ có thể thiếu metric: để ô trống thay vì ghi 0.
+        metrics = entry["metrics"] or {}
         sheet.append(
             (
                 entry["rank"],
                 entry["account_id"],
                 _formula_safe(entry["display_name"]),
                 entry["primary_score"],
-                metrics["f1"],
-                metrics["precision"],
-                metrics["recall"],
+                *(metrics.get(metric.key) for metric in contract.metrics),
                 entry["best_submission_at"],
                 entry["total_submissions"],
             )
@@ -503,13 +532,57 @@ def _build_workbook(entries: list[dict]) -> bytes:
         cell.fill = header_fill
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = (8, 26, 28, 14, 12, 12, 12, 24, 18)
+    widths = (8, 26, 28, 14, *(12 for _ in contract.metrics), 24, 18)
     for index, width in enumerate(widths, start=1):
-        sheet.column_dimensions[chr(64 + index)].width = width
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    _apply_number_formats(sheet, contract)
+    _append_info_sheet(workbook, competition, contract)
 
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+# Bốn cột đầu của sheet Results trước khi tới các cột metric.
+_FIRST_METRIC_COLUMN = 5
+
+
+def _apply_number_formats(sheet, contract: OutputContract) -> None:
+    """Ghi số gốc kèm định dạng hiển thị theo `decimals` - giá trị lưu không bị làm tròn."""
+    primary = _metric_by_key(contract, contract.primary_metric)
+    formats = {4: primary.decimals if primary else 4}
+    for offset, metric in enumerate(contract.metrics):
+        formats[_FIRST_METRIC_COLUMN + offset] = metric.decimals
+    for row in sheet.iter_rows(min_row=2):
+        for column, decimals in formats.items():
+            row[column - 1].number_format = _decimals_format(decimals)
+
+
+def _decimals_format(decimals: int) -> str:
+    return "0" if decimals <= 0 else f"0.{'0' * decimals}"
+
+
+def _metric_by_key(contract: OutputContract, key: str | None):
+    return next((metric for metric in contract.metrics if metric.key == key), None)
+
+
+def _append_info_sheet(workbook: Workbook, competition: dict, contract: OutputContract) -> None:
+    """Sheet thông tin: bảng này đọc theo bộ chấm nào. Không chứa source, ground truth hay đường dẫn."""
+    config = models.stored_config_or_none(competition)
+    primary = _metric_by_key(contract, contract.primary_metric)
+    info = workbook.create_sheet("Info")
+    info.append(("Competition", competition["name"]))
+    info.append(("Evaluator", config.evaluator.name if config else "Bộ chấm cố định v1"))
+    info.append(("Config revision", config.revision if config else "—"))
+    info.append(("Primary metric", f"{primary.label} ({primary.key})" if primary else "—"))
+    info.append(
+        ("Ranking", "Higher is better" if contract.higher_is_better else "Lower is better")
+    )
+    info.append(("Exported at", iso_z(datetime.now(timezone.utc))))
+    info.append(("",))
+    info.append(("Metric key", "Label", "Decimals"))
+    for metric in contract.metrics:
+        info.append((metric.key, metric.label, metric.decimals))
 
 
 def _formula_safe(value: str) -> str:

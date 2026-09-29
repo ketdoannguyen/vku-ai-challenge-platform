@@ -1,6 +1,6 @@
 /**
  * Dialog Tạo/Sửa cuộc thi: cấu trúc 5 section, shell header/body/footer và các
- * invariant nghiệp vụ (payload, khoá slug/metric khi published, lỗi API).
+ * invariant nghiệp vụ (payload, khoá slug khi published, lỗi API).
  */
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -148,7 +148,9 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
   expect(titleOf(screen.getByRole("group", { name: "Cách tham gia" }))).toBe(
     "Cách tham gia",
   );
-  expect(titleOf(screen.getByLabelText("Chỉ số chính"))).toBe("Chấm điểm & giới hạn");
+  // Metric không còn do form này quyết định: bộ chấm Python + result_contract ở tab
+  // "Chấm điểm" mới là nơi khai báo cách chấm, nên form không được hỏi lại.
+  expect(screen.queryByLabelText("Chỉ số chính")).toBeNull();
   expect(titleOf(screen.getByLabelText(/Giới hạn nộp bài/))).toBe(
     "Chấm điểm & giới hạn",
   );
@@ -169,7 +171,6 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
     "comp-desc",
     "comp-start",
     "comp-end",
-    "comp-metric",
     "comp-quota",
     "comp-leaderboard",
   ]);
@@ -209,7 +210,6 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
   fireEvent.change(screen.getByLabelText("Bắt đầu"), { target: { value: "2026-11-01T08:00" } });
   fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
   fireEvent.click(screen.getByRole("radio", { name: /Cần mã tham gia/ }));
-  fireEvent.change(screen.getByLabelText("Chỉ số chính"), { target: { value: "recall" } });
   fireEvent.change(screen.getByLabelText(/Giới hạn nộp bài/), { target: { value: "12" } });
   fireEvent.click(screen.getByLabelText(/Leaderboard hiển thị với thí sinh/));
 
@@ -229,11 +229,13 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
     start_at: new Date("2026-11-01T08:00").toISOString(),
     end_at: new Date("2026-11-02T08:00").toISOString(),
     join_mode: "code",
-    primary_metric: "recall",
     quota_per_day: 12,
     leaderboard_visible: false,
     resources: [{ label: "Dataset", url: "https://drive.google.com/drive/folders/abc" }],
   });
+  // Không gửi primary_metric: field này chỉ là dấu vết dữ liệu v1, gửi lên là vô tình
+  // ghi đè cấu hình chấm mà bộ chấm Python ở tab "Chấm điểm" đang sở hữu.
+  expect(postedBodies("POST")[0]).not.toHaveProperty("primary_metric");
 });
 
 test("slug tự điền theo tên cuộc thi; gõ tay thì giá trị tay thắng", () => {
@@ -306,7 +308,7 @@ test("lỗi API giữ dialog mở, hiện đúng một alert và cho phép submi
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
-test("sửa cuộc thi published: slug và metric bị khoá, tài nguyên chuyển sang tab riêng", async () => {
+test("sửa cuộc thi published: slug bị khoá, tài nguyên chuyển sang tab riêng", async () => {
   mockApi((init) =>
     init.method === "PATCH"
       ? { body: { ...BASE, status: "published" }, status: 200 }
@@ -321,7 +323,7 @@ test("sửa cuộc thi published: slug và metric bị khoá, tài nguyên chuy�
 
   expect(screen.getByRole("dialog", { name: /Sửa cuộc thi/ })).toBeTruthy();
   expect(screen.getByLabelText(/Slug/)).toBeDisabled();
-  expect(screen.getByLabelText("Chỉ số chính")).toBeDisabled();
+  expect(screen.queryByLabelText("Chỉ số chính")).toBeNull();
   expect(screen.queryByRole("group", { name: "Tài nguyên tải về" })).toBeNull();
   expect(sections()).toHaveLength(4);
 
@@ -338,6 +340,7 @@ test("sửa cuộc thi published: slug và metric bị khoá, tài nguyên chuy�
     quota_per_day: 9,
   });
   expect(postedBodies("PATCH")[0]).not.toHaveProperty("resources");
+  expect(postedBodies("PATCH")[0]).not.toHaveProperty("primary_metric");
   await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
 });
 

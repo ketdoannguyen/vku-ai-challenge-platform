@@ -16,10 +16,10 @@ import { api } from "../api/client";
 import type { Competition, CompetitionsResponse, Membership } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
-  METRIC_LABEL,
   STATUS_LABEL,
   displayStatus,
   formatLocal,
+  primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
 import { Loading } from "../components/ui";
@@ -777,7 +777,7 @@ function CompetitionCard({
         <div className="comp-telemetry">
           <div className="comp-telemetry-item">
             <span className="comp-telemetry-label">Chỉ số đánh giá</span>
-            <span className="comp-telemetry-value">{METRIC_LABEL[c.primary_metric]}</span>
+            <span className="comp-telemetry-value">{primaryMetricLabel(c)}</span>
           </div>
           <div className="comp-telemetry-item">
             <span className="comp-telemetry-label">Hạn mức nộp</span>

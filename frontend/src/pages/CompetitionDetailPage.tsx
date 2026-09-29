@@ -6,10 +6,10 @@ import { ApiClientError, api } from "../api/client";
 import type { Competition, Membership } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
-  METRIC_LABEL,
   STATUS_LABEL,
   displayStatus,
   formatLocal,
+  primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
 import { fetchContents, type ContentSummary } from "../api/contents";
@@ -365,7 +365,7 @@ export function CompetitionDetailPage() {
               </Icon>
               Chỉ số chính
             </dt>
-            <dd className="comp-fact-value">{METRIC_LABEL[c.primary_metric]}</dd>
+            <dd className="comp-fact-value">{primaryMetricLabel(c)}</dd>
           </div>
           <div className="comp-fact">
             <dt>

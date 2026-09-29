@@ -96,15 +96,22 @@ export const api = {
       body: json === undefined ? undefined : JSON.stringify(json),
     }),
   download,
-  upload: <T>(path: string, file: File) => {
+  upload: <T>(path: string, file: File, fields?: Record<string, string>) => {
     const form = new FormData();
     form.append("file", file);
+    appendFields(form, fields);
     return request<T>(path, { method: "PUT", body: form });
   },
   /** Nhiều part một request (mỗi lượt nộp gửi kèm cả CSV lẫn notebook). */
-  postFile: <T>(path: string, files: Record<string, File>) => {
+  postFile: <T>(path: string, files: Record<string, File>, fields?: Record<string, string>) => {
     const form = new FormData();
     for (const [field, file] of Object.entries(files)) form.append(field, file);
+    appendFields(form, fields);
     return request<T>(path, { method: "POST", body: form });
   },
 };
+
+/** Field văn bản đi kèm part file, ví dụ `expected_revision` của API chấm điểm. */
+function appendFields(form: FormData, fields?: Record<string, string>): void {
+  for (const [name, value] of Object.entries(fields ?? {})) form.append(name, value);
+}

@@ -7,10 +7,10 @@ import { api } from "../api/client";
 import type { AdminCompetition, AdminCompetitionsResponse, Competition } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
-  METRIC_LABEL,
   STATUS_LABEL,
   displayStatus,
   formatLocal,
+  primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
 import {
@@ -623,7 +623,7 @@ function CompetitionRow({
       </td>
       <td>
         <div className="ac-metric-cell">
-          <strong>{METRIC_LABEL[c.primary_metric]}</strong>
+          <strong>{primaryMetricLabel(c)}</strong>
           <span>{c.quota_per_day} lượt/ngày</span>
         </div>
       </td>

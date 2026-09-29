@@ -22,13 +22,18 @@ import {
   formatLocal,
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
-  METRIC_LABEL,
+  primaryMetricLabel,
   STATUS_LABEL,
   displayStatus,
   statusClass,
 } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
-import { formatScore, type LeaderboardResponse } from "../api/results";
+import {
+  formatMetric,
+  resultContract,
+  type LeaderboardResponse,
+  type ResultContract,
+} from "../api/results";
 import {
   CompetitionActionConfirmModal,
   CompetitionDeleteModal,
@@ -91,7 +96,8 @@ const SUMMARY_FACTS: ReadonlyArray<{
   {
     label: "Chỉ số chính",
     Icon: IconTarget,
-    read: (c) => METRIC_LABEL[c.primary_metric] ?? c.primary_metric.toUpperCase(),
+    // Cuộc thi v2 đặt chỉ số chính theo hợp đồng kết quả, không còn là f1/precision/recall.
+    read: (c) => primaryMetricLabel(c),
   },
   { label: "Quota", Icon: IconClock, read: (c) => `${c.quota_per_day} lượt/ngày` },
 ];
@@ -116,28 +122,85 @@ interface MemberItem {
   joined_at: string;
 }
 
-interface ScoringConfig {
+type ColumnType = "string" | "integer" | "number";
+
+interface ScoringColumn {
+  name: string;
+  type: ColumnType;
+  nullable: boolean;
+  allowed_values: Array<string | number> | null;
+}
+
+interface ScoringFileSchema {
+  id_column: string;
+  allow_extra_columns: boolean;
+  columns: ScoringColumn[];
+}
+
+/** Bộ chấm sklearn cố định của cuộc thi chưa chuyển sang v2 - chỉ để hiển thị. */
+interface ScoringV1 {
   id_column: string;
   prediction_column: string;
   label_column: string;
   average: "binary" | "macro" | "weighted";
   pos_label: string | null;
-  higher_is_better: true;
+  higher_is_better: boolean;
+}
+
+/** Cấu hình v2 đã lưu ở backend; `source_code` là bản đọc lại từ file riêng tư. */
+interface ScoringV2 {
+  revision: number;
+  input_schema: {
+    ground_truth: ScoringFileSchema;
+    submission: ScoringFileSchema;
+  };
+  evaluator: {
+    name: string;
+    source_sha256: string | null;
+    runtime_id: string | null;
+    source_code: string;
+  };
+  output_contract: {
+    metrics: Array<{ key: string; label: string; decimals: number }>;
+    primary_metric: string | null;
+    higher_is_better: boolean;
+  } | null;
+  /** Lượt chạy thử đã lưu còn đúng với cấu hình hiện tại hay không. */
+  verified: boolean;
+  verification: {
+    tested_at: string | null;
+    tested_by: string | null;
+    observed_keys: string[];
+  } | null;
 }
 
 interface ScoringStatus {
   ready: boolean;
   not_ready_reason: { code: string; message: string } | null;
   locked: boolean;
-  config: ScoringConfig | null;
+  version: 1 | 2;
+  config: ScoringV1 | null;
+  scoring: ScoringV2 | null;
   ground_truth: {
     row_count: number;
     columns: string[];
     uploaded_at: string;
   } | null;
-  primary_metric: "f1" | "precision" | "recall";
+  primary_metric: string | null;
+  higher_is_better: boolean | null;
+  result_contract: ResultContract;
   quota_per_day: number;
   max_upload_mb: number;
+  source_limit_kb: number;
+}
+
+/** Trạng thái mới kèm kết quả thật của lượt chạy thử vừa rồi. */
+interface ScoringTestResult extends ScoringStatus {
+  test: {
+    observed_keys: string[];
+    metrics: Record<string, number>;
+    duration_ms: number;
+  };
 }
 
 function Icon({
@@ -820,6 +883,7 @@ export function AdminCompetitionDetailPage() {
 /** ---------- Kết quả & submissions ---------- */
 
 function ResultsPanel({ competition }: { competition: Competition }) {
+  const contract = resultContract(competition.submission_config);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState<unknown>(null);
@@ -901,16 +965,18 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             aria-label="Bảng xếp hạng của cuộc thi"
           >
             <table className="table results-table">
-              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th><th scope="col" className="score-cell">Điểm chính</th><th scope="col" className="score-cell">F1</th><th scope="col" className="score-cell">Precision</th><th scope="col" className="score-cell">Recall</th><th scope="col" className="results-count-cell">Số bài</th></tr></thead>
+              {/* Cột metric theo hợp đồng kết quả; điểm chính là một trong số đó nên không in lặp. */}
+              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
                     <td><span className="rank-cell" data-rank={entry.rank}>{entry.rank}</span></td>
                     <td>{entry.display_name}</td>
-                    <td className="score-cell primary-score">{formatScore(entry.primary_score)}</td>
-                    <td className="score-cell">{formatScore(entry.metrics.f1)}</td>
-                    <td className="score-cell">{formatScore(entry.metrics.precision)}</td>
-                    <td className="score-cell">{formatScore(entry.metrics.recall)}</td>
+                    {contract.metrics.map((metric) => (
+                      <td key={metric.key} className={`score-cell${metric.key === contract.primary_metric ? " primary-score" : ""}`}>
+                        {formatMetric(entry.metrics[metric.key], metric.decimals)}
+                      </td>
+                    ))}
                     <td className="results-count-cell">{entry.total_submissions}</td>
                   </tr>
                 ))}
@@ -922,6 +988,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
 
       <AdminSubmissionsPanel
         competitionId={competition.id}
+        resultContract={contract}
         title="Danh sách submissions"
         listLabel="Danh sách bài nộp của cuộc thi"
       />
@@ -930,6 +997,339 @@ function ResultsPanel({ competition }: { competition: Competition }) {
 }
 
 /** ---------- Chấm điểm ---------- */
+
+/** Một dòng cột đang sửa; `allowed` giữ nguyên chuỗi admin gõ, chỉ tách thành mảng lúc gửi lên. */
+interface ColumnRow {
+  name: string;
+  type: ColumnType;
+  nullable: boolean;
+  allowed: string;
+}
+
+interface FileSchemaRow {
+  idColumn: string;
+  allowExtra: boolean;
+  columns: ColumnRow[];
+}
+
+interface MetricRow {
+  key: string;
+  label: string;
+  decimals: string;
+}
+
+/** Toàn bộ nội dung form Chấm điểm: một lượt Lưu gửi đủ schema, bộ chấm và bảng metric. */
+interface ScoringForm {
+  groundTruth: FileSchemaRow;
+  submission: FileSchemaRow;
+  evaluatorName: string;
+  sourceCode: string;
+  metrics: MetricRow[];
+  primaryMetric: string;
+  higherIsBetter: boolean;
+}
+
+const DEFAULT_DECIMALS = 4;
+/** Chưa từng lưu cấu hình v2; backend cũng đếm revision từ đây. */
+const INITIAL_REVISION = 0;
+
+/** Bảng cột khởi đầu: một cột ID là đủ để lưu nháp, admin thêm cột theo dữ liệu thật. */
+function newFileSchema(idColumn: string, allowExtra: boolean): FileSchemaRow {
+  return {
+    idColumn,
+    allowExtra,
+    columns: [{ name: idColumn, type: "integer", nullable: false, allowed: "" }],
+  };
+}
+
+/** Ground truth cho phép cột phụ, submission thì không - mặc định của hợp đồng CSV. */
+const EMPTY_FORM: ScoringForm = {
+  groundTruth: newFileSchema("id", true),
+  submission: newFileSchema("id", false),
+  evaluatorName: "",
+  sourceCode: "",
+  metrics: [],
+  primaryMetric: "",
+  higherIsBetter: true,
+};
+
+/** Số thập phân đang gõ dở có thể rỗng; rơi về mặc định khi chưa đọc được số. */
+function decimalsValue(text: string): number {
+  const parsed = Number.parseInt(text, 10);
+  return Number.isNaN(parsed) ? DEFAULT_DECIMALS : parsed;
+}
+
+/** Số thập phân của một khóa vừa chạy thử, theo bảng metric admin đang sửa. */
+function metricDecimals(rows: MetricRow[], key: string): number {
+  const row = rows.find((metric) => metric.key === key);
+  return row ? decimalsValue(row.decimals) : DEFAULT_DECIMALS;
+}
+
+/** `"0, 1"` → `[0, 1]`; chuỗi rỗng là "không giới hạn", không phải danh sách rỗng. */
+function parseAllowed(text: string, type: ColumnType): Array<string | number> | null {
+  const values = text
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (values.length === 0) return null;
+  if (type === "string") return values;
+  // Số không đọc được giữ nguyên dạng chuỗi để backend báo lỗi thay vì lặng lẽ thành null.
+  return values.map((value) => (Number.isNaN(Number(value)) ? value : Number(value)));
+}
+
+function columnPayload(row: ColumnRow): ScoringColumn {
+  return {
+    name: row.name.trim(),
+    type: row.type,
+    nullable: row.nullable,
+    allowed_values: parseAllowed(row.allowed, row.type),
+  };
+}
+
+function fileSchemaPayload(row: FileSchemaRow): ScoringFileSchema {
+  return {
+    id_column: row.idColumn,
+    allow_extra_columns: row.allowExtra,
+    columns: row.columns.map(columnPayload),
+  };
+}
+
+/** Hợp đồng kết quả để gửi lên; chưa khai báo metric nào là bản nháp, không phải hợp đồng rỗng. */
+function contractPayload(form: ScoringForm) {
+  if (form.metrics.length === 0) return null;
+  return {
+    metrics: form.metrics.map((row) => ({
+      key: row.key,
+      label: row.label.trim(),
+      decimals: decimalsValue(row.decimals),
+    })),
+    primary_metric: form.primaryMetric || null,
+    higher_is_better: form.higherIsBetter,
+  };
+}
+
+function fileSchemaRow(schema: ScoringFileSchema): FileSchemaRow {
+  return {
+    idColumn: schema.id_column,
+    allowExtra: schema.allow_extra_columns,
+    columns: schema.columns.map((column) => ({
+      name: column.name,
+      type: column.type,
+      nullable: column.nullable,
+      allowed: (column.allowed_values ?? []).map(String).join(", "),
+    })),
+  };
+}
+
+function formFromView(view: ScoringStatus): ScoringForm {
+  const scoring = view.scoring;
+  if (!scoring) return EMPTY_FORM;
+  const contract = scoring.output_contract;
+  return {
+    groundTruth: fileSchemaRow(scoring.input_schema.ground_truth),
+    submission: fileSchemaRow(scoring.input_schema.submission),
+    evaluatorName: scoring.evaluator.name,
+    sourceCode: scoring.evaluator.source_code,
+    metrics: (contract?.metrics ?? []).map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      decimals: String(metric.decimals),
+    })),
+    primaryMetric: contract?.primary_metric ?? "",
+    higherIsBetter: contract?.higher_is_better ?? true,
+  };
+}
+
+/**
+ * Ghép khóa metric của lượt chạy thật vào bảng: giữ tên hiển thị admin đã đặt, thêm khóa mới và bỏ
+ * khóa đã biến mất. Hợp đồng phải khớp đúng thứ code chấm trả về nên bảng không giữ lại khóa cũ.
+ */
+function metricsFromKeys(
+  keys: string[],
+  form: ScoringForm,
+): Pick<ScoringForm, "metrics" | "primaryMetric"> {
+  const metrics = keys.map(
+    (key) =>
+      form.metrics.find((row) => row.key === key) ?? {
+        key,
+        label: key,
+        decimals: String(DEFAULT_DECIMALS),
+      },
+  );
+  return {
+    metrics,
+    primaryMetric: metrics.some((row) => row.key === form.primaryMetric) ? form.primaryMetric : "",
+  };
+}
+
+/** Hiệu lực của lượt chạy thử gần nhất; bằng chứng cũ tự hết giá trị khi cấu hình đổi. */
+function verificationText(scoring: ScoringV2): string {
+  const verification = scoring.verification;
+  if (!verification) return "Chưa chạy thử lần nào.";
+  if (!scoring.verified) {
+    return "Lượt chạy thử đã cũ vì cấu hình đã đổi; chạy thử lại trước khi publish.";
+  }
+  return verification.tested_at
+    ? `Bằng chứng còn hiệu lực cho cấu hình hiện tại (chạy lúc ${formatLocal(verification.tested_at)}).`
+    : "Bằng chứng còn hiệu lực cho cấu hình hiện tại.";
+}
+
+/**
+ * Bảng cột của một tệp. Cột ID chọn bằng radio nên `id_column` luôn nằm trong danh sách cột; đổi
+ * tên cột cũng kéo con trỏ ID theo.
+ */
+function ColumnEditor({
+  title,
+  idPrefix,
+  hint,
+  schema,
+  disabled,
+  onChange,
+}: {
+  title: string;
+  idPrefix: string;
+  hint: string;
+  schema: FileSchemaRow;
+  disabled: boolean;
+  onChange: (schema: FileSchemaRow) => void;
+}) {
+  function patchColumn(index: number, patch: Partial<ColumnRow>) {
+    onChange({
+      ...schema,
+      columns: schema.columns.map((column, i) => (i === index ? { ...column, ...patch } : column)),
+    });
+  }
+
+  function renameColumn(index: number, name: string) {
+    const previous = schema.columns[index].name;
+    onChange({
+      ...schema,
+      idColumn: schema.idColumn === previous ? name : schema.idColumn,
+      columns: schema.columns.map((column, i) => (i === index ? { ...column, name } : column)),
+    });
+  }
+
+  /** Số thứ tự trong nhãn thay cho tên cột, vì tên cột có thể đang trống lúc admin gõ. */
+  const position = (index: number) => `${title}: cột ${index + 1}`;
+
+  return (
+    <div className="form-field">
+      <span className="field-label">{title}</span>
+      <p className="text-muted">{hint}</p>
+      <div className="table-wrap">
+        <table className="table">
+          <thead>
+            <tr>
+              <th scope="col">Cột</th>
+              <th scope="col">Kiểu</th>
+              <th scope="col">Cho phép rỗng</th>
+              <th scope="col">Giá trị hợp lệ</th>
+              <th scope="col">Cột ID</th>
+              <th scope="col">
+                <span className="sr-only">Xoá cột</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {schema.columns.map((column, index) => (
+              <tr key={index}>
+                <td>
+                  <input
+                    className="input"
+                    aria-label={`${position(index)}: tên`}
+                    value={column.name}
+                    disabled={disabled}
+                    onChange={(event) => renameColumn(index, event.target.value)}
+                  />
+                </td>
+                <td>
+                  <select
+                    className="input"
+                    aria-label={`${position(index)}: kiểu`}
+                    value={column.type}
+                    disabled={disabled}
+                    onChange={(event) =>
+                      patchColumn(index, { type: event.target.value as ColumnType })
+                    }
+                  >
+                    <option value="string">Chuỗi</option>
+                    <option value="integer">Số nguyên</option>
+                    <option value="number">Số thực</option>
+                  </select>
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`${position(index)}: cho phép rỗng`}
+                    checked={column.nullable}
+                    disabled={disabled}
+                    onChange={(event) => patchColumn(index, { nullable: event.target.checked })}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="input"
+                    placeholder="bỏ trống = không giới hạn"
+                    aria-label={`${position(index)}: giá trị hợp lệ`}
+                    value={column.allowed}
+                    disabled={disabled}
+                    onChange={(event) => patchColumn(index, { allowed: event.target.value })}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="radio"
+                    name={`scoring-id-${idPrefix}`}
+                    aria-label={`${position(index)}: lấy làm cột ID`}
+                    checked={column.name === schema.idColumn}
+                    disabled={disabled}
+                    onChange={() => onChange({ ...schema, idColumn: column.name })}
+                  />
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    aria-label={`${position(index)}: xoá`}
+                    disabled={disabled || schema.columns.length <= 1}
+                    onClick={() =>
+                      onChange({ ...schema, columns: schema.columns.filter((_, i) => i !== index) })
+                    }
+                  >
+                    Xoá
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="checkbox-field">
+        <input
+          id={`scoring-extra-${idPrefix}`}
+          type="checkbox"
+          checked={schema.allowExtra}
+          disabled={disabled}
+          onChange={(event) => onChange({ ...schema, allowExtra: event.target.checked })}
+        />
+        <label htmlFor={`scoring-extra-${idPrefix}`}>Cho phép cột phụ ngoài danh sách</label>
+      </div>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        disabled={disabled}
+        onClick={() =>
+          onChange({
+            ...schema,
+            columns: [...schema.columns, { name: "", type: "string", nullable: false, allowed: "" }],
+          })
+        }
+      >
+        Thêm cột
+      </button>
+    </div>
+  );
+}
 
 function ScoringPanel({
   competition,
@@ -945,11 +1345,8 @@ function ScoringPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
-  const [idColumn, setIdColumn] = useState("id");
-  const [predictionColumn, setPredictionColumn] = useState("prediction");
-  const [labelColumn, setLabelColumn] = useState("label");
-  const [average, setAverage] = useState<ScoringConfig["average"]>("binary");
-  const [posLabel, setPosLabel] = useState("1");
+  const [form, setForm] = useState<ScoringForm>(EMPTY_FORM);
+  const [testResult, setTestResult] = useState<ScoringTestResult["test"] | null>(null);
   const [pendingGroundTruth, setPendingGroundTruth] = useState<File | null>(null);
 
   const load = useCallback(async () => {
@@ -959,13 +1356,7 @@ function ScoringPanel({
         `/admin/competitions/${competition.id}/scoring`,
       );
       setStatus(data);
-      if (data.config) {
-        setIdColumn(data.config.id_column);
-        setPredictionColumn(data.config.prediction_column);
-        setLabelColumn(data.config.label_column);
-        setAverage(data.config.average);
-        setPosLabel(data.config.pos_label ?? "");
-      }
+      setForm(formFromView(data));
     } catch (err) {
       setError(err);
     } finally {
@@ -977,25 +1368,15 @@ function ScoringPanel({
     void load();
   }, [load]);
 
-  async function saveConfig(event: FormEvent) {
-    event.preventDefault();
+  /** Đường đi chung của mọi lượt ghi: bật busy, xoá thông báo cũ, báo lại cho trang cha. */
+  async function submit(action: () => Promise<void>, done: string) {
+    if (busy) return;
     setBusy(true);
     setError(null);
     setMessage("");
     try {
-      const data = await api.put<ScoringStatus>(
-        `/admin/competitions/${competition.id}/scoring`,
-        {
-          id_column: idColumn,
-          prediction_column: predictionColumn,
-          label_column: labelColumn,
-          average,
-          pos_label: average === "binary" ? posLabel : null,
-          higher_is_better: true,
-        },
-      );
-      setStatus(data);
-      setMessage("Đã lưu cấu hình chấm điểm.");
+      await action();
+      setMessage(done);
       await onCompetitionChanged();
     } catch (err) {
       setError(err);
@@ -1004,156 +1385,179 @@ function ScoringPanel({
     }
   }
 
-  async function uploadGroundTruth(file: File) {
-    setBusy(true);
-    setError(null);
-    setMessage("");
-    try {
+  function saveConfig(event: FormEvent) {
+    event.preventDefault();
+    void submit(async () => {
+      const data = await api.put<ScoringStatus>(`/admin/competitions/${competition.id}/scoring`, {
+        version: 2,
+        expected_revision: status?.scoring?.revision ?? INITIAL_REVISION,
+        input_schema: {
+          ground_truth: fileSchemaPayload(form.groundTruth),
+          submission: fileSchemaPayload(form.submission),
+        },
+        evaluator: { name: form.evaluatorName.trim(), source_code: form.sourceCode },
+        output_contract: contractPayload(form),
+      });
+      setStatus(data);
+      // Giá trị backend chuẩn hoá là bản đang áp dụng, nên form đọc lại từ response.
+      setForm(formFromView(data));
+    }, "Đã lưu cấu hình chấm điểm.");
+  }
+
+  function uploadGroundTruth(file: File) {
+    void submit(async () => {
       const data = await api.upload<ScoringStatus>(
         `/admin/competitions/${competition.id}/ground-truth`,
         file,
+        status?.scoring ? { expected_revision: String(status.scoring.revision) } : undefined,
+      );
+      // File được kiểm tra theo schema đã lưu, nên lượt upload này không ghi đè form đang sửa.
+      setStatus(data);
+    }, "Đã tải lên và kiểm tra ground truth.");
+  }
+
+  function runTest(file: File, revision: number) {
+    void submit(async () => {
+      const data = await api.postFile<ScoringTestResult>(
+        `/admin/competitions/${competition.id}/scoring/test`,
+        { file },
+        { expected_revision: String(revision) },
       );
       setStatus(data);
-      setMessage("Đã upload và kiểm tra ground truth.");
-      await onCompetitionChanged();
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
+      setTestResult(data.test);
+      setForm((current) => ({ ...current, ...metricsFromKeys(data.test.observed_keys, current) }));
+    }, "Đã chạy thử bộ chấm.");
+  }
+
+  /** Tệp .py chỉ là cách nhập nhanh: nội dung đọc vào editor và được lưu từ chính editor đó. */
+  async function readSourceFile(file: File) {
+    setError(null);
+    try {
+      const source = await file.text();
+      setForm((current) => ({ ...current, sourceCode: source }));
+    } catch {
+      setError(new Error("Không đọc được tệp Python vừa chọn."));
     }
+  }
+
+  function patchMetric(index: number, patch: Partial<MetricRow>) {
+    setForm({
+      ...form,
+      metrics: form.metrics.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    });
   }
 
   if (loading) return <Loading />;
 
+  const scoring = status?.scoring ?? null;
+  const locked = Boolean(status?.locked);
+  const disabled = busy || locked;
+  const verification = scoring?.verification ?? null;
+  /** Sáu điều kiện publish của kế hoạch; `status.ready` là phán quyết của backend cho cả nhóm. */
+  const checklist = [
+    { label: "Định dạng dữ liệu đã lưu", done: scoring !== null },
+    { label: "Ground truth hợp lệ", done: status?.ground_truth != null },
+    { label: "Đã lưu source bộ chấm", done: Boolean(scoring?.evaluator.source_sha256) },
+    { label: "Đã khai báo metric", done: scoring?.output_contract != null },
+    { label: "Đã chạy thử và khớp cấu hình hiện tại", done: Boolean(scoring?.verified) },
+    { label: "Đã chọn chỉ số chính", done: status?.primary_metric != null },
+  ];
+  const testMetrics = testResult
+    ? Object.entries(testResult.metrics)
+        .map(([key, value]) => `${key} = ${formatMetric(value, metricDecimals(form.metrics, key))}`)
+        .join(" · ")
+    : "";
+
   return (
-    <div className="admin-detail-grid">
-      <section className="admin-detail-card" data-tone="blue">
-        <div className="admin-detail-card-head">
-          <div className="admin-detail-section-heading">
-            <span className="admin-detail-card-icon" aria-hidden="true">
-              <IconGauge className="admin-detail-card-icon-glyph" />
-            </span>
-              <div>
-                <h2 className="admin-detail-card-title">Cấu hình CSV</h2>
-                <p className="admin-detail-card-desc">
-                  Metric chính: {competition.primary_metric.toUpperCase()} · Quota:{" "}
-                  {competition.quota_per_day} lượt/ngày
-                </p>
-              </div>
-            </div>
-            {status && (
-              <span className={`status-badge ${status.ready ? "success" : "warning"}`}>
-                {status.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
-              </span>
-            )}
+    <form className="admin-detail-column" onSubmit={saveConfig}>
+      {locked && (
+        <div className="status-banner warning">
+          Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
         </div>
-
-        {status?.locked && (
-          <div className="status-banner warning">
-            Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
-          </div>
-        )}
-        {status && !status.ready && status.not_ready_reason && (
-          <div className="status-banner warning">{status.not_ready_reason.message}</div>
-        )}
-        {message && (
-          <div className="status-banner success" role="status">
-            <span>{message}</span>
-            <button
-              type="button"
-              className="banner-dismiss"
-              aria-label="Đóng thông báo"
-              onClick={() => setMessage("")}
-            >
-              ×
-            </button>
-          </div>
-        )}
-        {error ? (
-          <div className="admin-section-error">
-            <ErrorBox error={error} />
-            {!status && (
-              <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
-                Thử lại
-              </button>
-            )}
-          </div>
-        ) : null}
-
-        <form onSubmit={saveConfig}>
-          <div className="form-grid">
-            <div className="form-field">
-              <label className="field-label" htmlFor="scoring-id-column">Cột ID</label>
-              <input
-                id="scoring-id-column"
-                className="input"
-                value={idColumn}
-                disabled={busy || status?.locked}
-                onChange={(event) => setIdColumn(event.target.value)}
-                required
-              />
-            </div>
-            <div className="form-field">
-              <label className="field-label" htmlFor="scoring-prediction-column">Cột prediction</label>
-              <input
-                id="scoring-prediction-column"
-                className="input"
-                value={predictionColumn}
-                disabled={busy || status?.locked}
-                onChange={(event) => setPredictionColumn(event.target.value)}
-                required
-              />
-            </div>
-            <div className="form-field">
-              <label className="field-label" htmlFor="scoring-label-column">Cột label trong ground truth</label>
-              <input
-                id="scoring-label-column"
-                className="input"
-                value={labelColumn}
-                disabled={busy || status?.locked}
-                onChange={(event) => setLabelColumn(event.target.value)}
-                required
-              />
-            </div>
-            <div className="form-field">
-              <label className="field-label" htmlFor="scoring-average">Average</label>
-              <select
-                id="scoring-average"
-                className="input"
-                value={average}
-                disabled={busy || status?.locked}
-                onChange={(event) => setAverage(event.target.value as ScoringConfig["average"])}
-              >
-                <option value="binary">Binary</option>
-                <option value="macro">Macro</option>
-                <option value="weighted">Weighted</option>
-              </select>
-            </div>
-            {average === "binary" && (
-              <div className="form-field">
-                <label className="field-label" htmlFor="scoring-pos-label">Positive label</label>
-                <input
-                  id="scoring-pos-label"
-                  className="input"
-                  value={posLabel}
-                  disabled={busy || status?.locked}
-                  onChange={(event) => setPosLabel(event.target.value)}
-                  required
-                />
-              </div>
-            )}
-          </div>
+      )}
+      {message && (
+        <div className="status-banner success" role="status">
+          <span>{message}</span>
           <button
-            className="btn admin-detail-primary-action"
-            type="submit"
-            disabled={busy || status?.locked}
+            type="button"
+            className="banner-dismiss"
+            aria-label="Đóng thông báo"
+            onClick={() => setMessage("")}
           >
-            {busy ? "Đang lưu..." : "Lưu cấu hình"}
+            ×
           </button>
-        </form>
+        </div>
+      )}
+      {error !== null && (
+        <div className="admin-section-error">
+          <ErrorBox error={error} />
+          {status === null && (
+            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
+              Thử lại
+            </button>
+          )}
+        </div>
+      )}
+
+      <section className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconGauge className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Định dạng dữ liệu</h2>
+            <p className="admin-detail-card-desc">
+              Khai báo cột của đáp án và của bài nộp; tên cột phải khớp chính xác tệp CSV.
+            </p>
+          </div>
+        </div>
+        {status?.config && (
+          <>
+            <div className="status-banner warning">
+              Cuộc thi đang chấm bằng bộ chấm sklearn cố định. Khai báo lại cột rồi lưu bộ chấm
+              Python bên dưới để chuyển sang bộ chấm riêng.
+            </div>
+            <dl className="scoring-metadata">
+              <div className="scoring-meta-item">
+                <dt>Cấu hình sklearn đang áp dụng</dt>
+                <dd>
+                  ID <code>{status.config.id_column}</code> · prediction{" "}
+                  <code>{status.config.prediction_column}</code> · label{" "}
+                  <code>{status.config.label_column}</code> · average{" "}
+                  <code>{status.config.average}</code>
+                </dd>
+              </div>
+            </dl>
+          </>
+        )}
+        <ColumnEditor
+          title="Ground truth"
+          idPrefix="gt"
+          hint="Đáp án do admin giữ, thí sinh không thấy tệp này."
+          schema={form.groundTruth}
+          disabled={disabled}
+          onChange={(groundTruth) => setForm({ ...form, groundTruth })}
+        />
+        <ColumnEditor
+          title="Submission"
+          idPrefix="sub"
+          hint="Bài nộp của thí sinh. Cột nào dùng để tính điểm do source Python quyết định."
+          schema={form.submission}
+          disabled={disabled}
+          onChange={(submission) => setForm({ ...form, submission })}
+        />
+        <dl className="scoring-metadata">
+          <div className="scoring-meta-item">
+            <dt>Khớp bài nộp với đáp án</dt>
+            <dd>
+              Theo cột ID: <code>{form.groundTruth.idColumn || "chưa chọn"}</code> ↔{" "}
+              <code>{form.submission.idColumn || "chưa chọn"}</code>. Hai bên phải cùng kiểu và có
+              đủ ID như nhau.
+            </dd>
+          </div>
+        </dl>
       </section>
 
-      <div className="admin-detail-column">
       <section className="admin-detail-card" data-tone="red">
         <div className="admin-detail-section-heading">
           <span className="admin-detail-card-icon" aria-hidden="true">
@@ -1162,8 +1566,8 @@ function ScoringPanel({
           <div>
             <h2 className="admin-detail-card-title">Ground truth private</h2>
             <p className="admin-detail-card-desc">
-              CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có public
-              download URL.
+              CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có
+              public download URL.
             </p>
           </div>
         </div>
@@ -1189,63 +1593,247 @@ function ScoringPanel({
           className="btn btn-secondary admin-detail-outline-action"
           inputLabel="Upload ground truth CSV"
           accept=".csv,text/csv"
-          disabled={busy || status?.locked || !status?.config}
+          disabled={disabled || scoring === null}
           onFile={(file) => {
             if (status?.ground_truth) setPendingGroundTruth(file);
-            else void uploadGroundTruth(file);
+            else uploadGroundTruth(file);
           }}
         >
           {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
         </FileButton>
-        {!status?.config && <p className="text-muted">Lưu cấu hình CSV trước khi upload.</p>}
+        {scoring === null && <p className="text-muted">Lưu định dạng dữ liệu trước khi upload.</p>}
       </section>
 
-      {/* Chỉ hiện khi đã có cấu hình lưu ở backend; nếu chưa, form đang giữ giá
-          trị mặc định và không phải cấu hình đang áp dụng. */}
-      {status?.config && (
-        <section className="admin-detail-card" data-tone="yellow">
+      <section className="admin-detail-card" data-tone="yellow">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconFileText className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Bộ chấm Python</h2>
+            <p className="admin-detail-card-desc">
+              Module Python có hàm <code>evaluate(ground_truth_path, submission_path)</code> trả về
+              dictionary số. Tối đa {status?.source_limit_kb ?? 256} KiB.
+            </p>
+          </div>
+        </div>
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="field-label" htmlFor="scoring-evaluator-name">
+              Tên bộ chấm
+            </label>
+            <input
+              id="scoring-evaluator-name"
+              className="input"
+              value={form.evaluatorName}
+              disabled={disabled}
+              onChange={(event) => setForm({ ...form, evaluatorName: event.target.value })}
+            />
+          </div>
+          <div className="form-field">
+            <span className="field-label">Nhập nhanh từ tệp</span>
+            <FileButton
+              className="btn btn-secondary"
+              inputLabel="Tải tệp Python"
+              accept=".py,text/x-python"
+              disabled={disabled}
+              onFile={(file) => void readSourceFile(file)}
+            >
+              Đọc nội dung tệp .py
+            </FileButton>
+          </div>
+        </div>
+        <div className="form-field">
+          <label className="field-label" htmlFor="scoring-source">
+            Source code
+          </label>
+          <textarea
+            id="scoring-source"
+            className="input"
+            rows={14}
+            spellCheck={false}
+            value={form.sourceCode}
+            disabled={disabled}
+            onChange={(event) => setForm({ ...form, sourceCode: event.target.value })}
+          />
+        </div>
+        <div className="form-field">
+          <span className="field-label">Chạy thử</span>
+          {scoring ? (
+            <>
+              <p className="text-muted">
+                Chạy source đã lưu với ground truth thật và một CSV mẫu có đủ ID. Khóa metric được
+                nhận diện từ kết quả chạy thật, không suy đoán từ source.
+              </p>
+              <FileButton
+                className="btn btn-secondary admin-detail-outline-action"
+                inputLabel="Chọn CSV mẫu để chạy thử"
+                accept=".csv,text/csv"
+                disabled={disabled}
+                onFile={(file) => runTest(file, scoring.revision)}
+              >
+                Chọn CSV mẫu để chạy thử
+              </FileButton>
+              <dl className="scoring-metadata">
+                <div className="scoring-meta-item">
+                  <dt>Khóa metric đã chạy</dt>
+                  <dd>{verification?.observed_keys.join(", ") || "chưa có"}</dd>
+                </div>
+                {testResult && (
+                  <>
+                    <div className="scoring-meta-item">
+                      <dt>Giá trị lượt chạy vừa rồi</dt>
+                      <dd>{testMetrics}</dd>
+                    </div>
+                    <div className="scoring-meta-item">
+                      <dt>Thời gian chạy</dt>
+                      <dd>{testResult.duration_ms} ms</dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+              <p className="text-muted">{verificationText(scoring)}</p>
+            </>
+          ) : (
+            <p className="text-muted">Lưu cấu hình trước khi chạy thử.</p>
+          )}
+        </div>
+      </section>
+
+      <section className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon" aria-hidden="true">
+            <IconTarget className="admin-detail-card-icon-glyph" />
+          </span>
+          <div>
+            <h2 className="admin-detail-card-title">Kết quả và metric</h2>
+            <p className="admin-detail-card-desc">
+              Bảng metric phải khớp đúng các khóa bộ chấm trả về. Khóa do code quyết định, tên hiển
+              thị do admin đặt.
+            </p>
+          </div>
+        </div>
+        {form.metrics.length === 0 ? (
+          <p className="text-muted">Chạy thử bộ chấm để nhận diện các khóa metric.</p>
+        ) : (
+          <>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Khóa</th>
+                    <th scope="col">Tên hiển thị</th>
+                    <th scope="col">Thập phân</th>
+                    <th scope="col">Chỉ số chính</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.metrics.map((row, index) => (
+                    <tr key={row.key}>
+                      <td>
+                        <code>{row.key}</code>
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          aria-label={`Tên hiển thị của ${row.key}`}
+                          value={row.label}
+                          disabled={disabled}
+                          onChange={(event) => patchMetric(index, { label: event.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input"
+                          type="number"
+                          min={0}
+                          max={8}
+                          aria-label={`Số thập phân của ${row.key}`}
+                          value={row.decimals}
+                          disabled={disabled}
+                          onChange={(event) => patchMetric(index, { decimals: event.target.value })}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="radio"
+                          name="scoring-primary-metric"
+                          aria-label={`Chọn ${row.key} làm chỉ số chính`}
+                          checked={form.primaryMetric === row.key}
+                          disabled={disabled}
+                          onChange={() => setForm({ ...form, primaryMetric: row.key })}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="form-field">
+              <label className="field-label" htmlFor="scoring-direction">
+                Chiều xếp hạng
+              </label>
+              <select
+                id="scoring-direction"
+                className="input"
+                value={form.higherIsBetter ? "higher" : "lower"}
+                disabled={disabled}
+                onChange={(event) =>
+                  setForm({ ...form, higherIsBetter: event.target.value === "higher" })
+                }
+              >
+                <option value="higher">Điểm cao xếp trên</option>
+                <option value="lower">Điểm thấp xếp trên</option>
+              </select>
+            </div>
+          </>
+        )}
+        <button className="btn admin-detail-primary-action" type="submit" disabled={disabled}>
+          {busy ? "Đang lưu..." : "Lưu cấu hình chấm điểm"}
+        </button>
+        <p className="text-muted">
+          Lưu áp dụng cho cả định dạng dữ liệu, source bộ chấm và bảng metric ở trên.
+        </p>
+      </section>
+
+      <section className="admin-detail-card" data-tone="red">
+        <div className="admin-detail-card-head">
           <div className="admin-detail-section-heading">
             <span className="admin-detail-card-icon" aria-hidden="true">
-              <IconInfo className="admin-detail-card-icon-glyph" />
+              <IconCheck className="admin-detail-card-icon-glyph" />
             </span>
             <div>
-              <h2 className="admin-detail-card-title">Hướng dẫn định dạng</h2>
+              <h2 className="admin-detail-card-title">Trạng thái sẵn sàng publish</h2>
               <p className="admin-detail-card-desc">
-                Cấu hình đang áp dụng khi đọc file CSV lúc chấm điểm.
+                Publish chỉ mở khi mọi điều kiện đã đạt; backend vẫn kiểm tra lại khi nhận request.
               </p>
             </div>
           </div>
-          <dl className="scoring-metadata">
-            <div className="scoring-meta-item">
-              <dt>Cột ID</dt>
-              <dd><code>{idColumn}</code></dd>
+          <span className={`status-badge ${status?.ready ? "success" : "warning"}`}>
+            {status?.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
+          </span>
+        </div>
+        <dl className="scoring-metadata">
+          {checklist.map((item) => (
+            <div className="scoring-meta-item" key={item.label}>
+              <dt>{item.label}</dt>
+              <dd>
+                <span className={`status-badge ${item.done ? "success" : "warning"}`}>
+                  {item.done ? "Đã đạt" : "Chưa đạt"}
+                </span>
+              </dd>
             </div>
-            <div className="scoring-meta-item">
-              <dt>Cột prediction</dt>
-              <dd><code>{predictionColumn}</code></dd>
-            </div>
-            <div className="scoring-meta-item">
-              <dt>Cột label</dt>
-              <dd><code>{labelColumn}</code></dd>
-            </div>
-            <div className="scoring-meta-item">
-              <dt>Average</dt>
-              <dd><code>{average}</code></dd>
-            </div>
-            {average === "binary" && (
-              <div className="scoring-meta-item">
-                <dt>Positive label</dt>
-                <dd><code>{posLabel}</code></dd>
-              </div>
-            )}
-          </dl>
-        </section>
-      )}
-      </div>
+          ))}
+        </dl>
+        {status?.not_ready_reason && (
+          <div className="status-banner warning">{status.not_ready_reason.message}</div>
+        )}
+      </section>
+
       {pendingGroundTruth && (
         <ConfirmModal
           title="Thay ground truth"
-          body="File ground truth hiện tại sẽ bị thay thế. Hãy chắc chắn file mới đã được kiểm tra đúng schema."
+          body="File ground truth hiện tại sẽ bị thay thế và lượt chạy thử cũ mất hiệu lực. Hãy chắc chắn file mới đúng schema đã khai báo."
           confirmLabel="Thay ground truth"
           danger
           onConfirm={async () => {
@@ -1255,10 +1843,9 @@ function ScoringPanel({
           onClose={() => setPendingGroundTruth(null)}
         />
       )}
-    </div>
+    </form>
   );
 }
-
 /** ---------- Nội dung ---------- */
 
 /**

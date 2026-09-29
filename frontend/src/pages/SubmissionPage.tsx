@@ -2,32 +2,24 @@ import { useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type { ParticipantAiReview } from "../api/aiReview";
 import { api } from "../api/client";
-import { METRIC_LABEL, formatLocal } from "../api/competitions";
+import { formatLocal } from "../api/competitions";
+import { formatMetric, resultContract, type Metrics } from "../api/results";
 import { ErrorBox, FileButton } from "../components/ui";
-import {
-  SAMPLE_ROWS,
-  SUBMISSION_PITFALLS,
-  submissionColumns,
-} from "../lib/submissionRequirements";
+import { SUBMISSION_PITFALLS, submissionSchema } from "../lib/submissionRequirements";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 interface SubmissionResult {
   id: string;
   competition_id: string;
   status: "completed";
-  metrics: {
-    f1: number;
-    precision: number;
-    recall: number;
-  };
+  /** Bộ khóa do bộ chấm của cuộc thi quyết định; hiển thị theo hợp đồng kết quả. */
+  metrics: Metrics;
   primary_score: number;
   created_at: string;
   quota_remaining: number;
   /** Vắng mặt khi cuộc thi chưa bật AI hoặc không công khai kết luận cho thí sinh. */
   ai_review?: ParticipantAiReview;
 }
-
-const METRICS = ["f1", "precision", "recall"] as const;
 
 /** Hai part bắt buộc của một lượt nộp - thiếu một trong hai thì backend từ chối. */
 type SlotKind = "csv" | "notebook";
@@ -75,8 +67,12 @@ export function SubmissionPage() {
 
   const unavailableMessage = submissionUnavailableMessage(competition);
   const config = competition.submission_config;
-  // Tên cột hiển thị trong phần hướng dẫn nhanh; dùng chung với trang Hướng dẫn.
-  const columns = submissionColumns(config);
+  // Cấu trúc CSV và hợp đồng metric hiển thị trong phần hướng dẫn nhanh; dùng chung với trang Hướng dẫn.
+  const schema = submissionSchema(config);
+  const contract = resultContract(config);
+  const valueColumns = schema.columns
+    .filter((column) => column.name !== schema.idColumn)
+    .map((column) => column.name);
   // Chỉ có khi backend trả quota (thành viên đang hoạt động, cuộc thi đang mở).
   const quota = competition.quota;
   const quotaLabel = quota
@@ -194,10 +190,11 @@ export function SubmissionPage() {
             </span>
             <span className="sub-spec-label">Cột Output</span>
             <span className="sub-spec-val">
-              <code>{config.prediction_column ?? "chưa cấu hình"}</code>
+              {/* v2 không có một cột nhãn cố định: cột dự đoán là các cột khác cột ID trong schema. */}
+              <code>{valueColumns.length > 0 ? valueColumns.join(", ") : "chưa cấu hình"}</code>
             </span>
             <span className="sr-only">
-              Prediction: {config.prediction_column ?? "chưa cấu hình"}
+              Prediction: {valueColumns.length > 0 ? valueColumns.join(", ") : "chưa cấu hình"}
             </span>
           </div>
           <div className="sub-spec-item">
@@ -209,8 +206,9 @@ export function SubmissionPage() {
             </span>
             <span className="sub-spec-label">Định dạng</span>
             <span className="sub-spec-val">
-              {averageLabel(config.average)}
-              {config.average === "binary" && config.pos_label != null && (
+              {/* v2 chấm bằng bộ chấm Python của cuộc thi; average/pos_label là cấu hình của bộ chấm sklearn. */}
+              {config.version === 2 ? "Bộ chấm Python" : averageLabel(config.average)}
+              {config.version !== 2 && config.average === "binary" && config.pos_label != null && (
                 <span className="sub-spec-sub">positive label: {config.pos_label}</span>
               )}
             </span>
@@ -287,18 +285,16 @@ export function SubmissionPage() {
             </div>
 
             <div className="metric-grid sub-result-cards">
-              {METRICS.map((metric) => {
-                const isPrimary = competition.primary_metric === metric;
+              {contract.metrics.map((metric) => {
+                const isPrimary = metric.key === contract.primary_metric;
                 return (
                   <div
                     className={`metric-card sub-result-card${isPrimary ? " primary" : ""}`}
-                    data-metric={metric}
-                    key={metric}
+                    data-metric={metric.key}
+                    key={metric.key}
                   >
                     <div className="sub-result-card-top">
-                      <span className="sub-result-metric-label">
-                        {METRIC_LABEL[metric]}
-                      </span>
+                      <span className="sub-result-metric-label">{metric.label}</span>
                       {isPrimary && (
                         <span className="sub-result-metric-badge">
                           <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor">
@@ -309,7 +305,7 @@ export function SubmissionPage() {
                       )}
                     </div>
                     <div className="sub-result-score">
-                      <strong>{result.metrics[metric].toFixed(6)}</strong>
+                      <strong>{formatMetric(result.metrics[metric.key], metric.decimals)}</strong>
                     </div>
                   </div>
                 );
@@ -514,7 +510,8 @@ export function SubmissionPage() {
             <span className="sub-guide-tag">Header chuẩn</span>
           </div>
           <p className="sub-guide-desc">
-            File nộp phải chứa đúng 2 cột, phân cách bằng dấu phẩy (<code>,</code>), không có dấu cách thừa.
+            File nộp phải chứa đúng {schema.columns.length} cột, phân cách bằng dấu phẩy (<code>,</code>),
+            không có dấu cách thừa.
           </p>
           <p className="sub-guide-desc">
             Tệp thứ hai là notebook Jupyter (<code>.ipynb</code>) sinh ra kết quả dự đoán. Hệ thống
@@ -522,13 +519,15 @@ export function SubmissionPage() {
           </p>
           <div className="sub-code-preview">
             <div className="sub-code-head">
-              <span>{columns.id},{columns.prediction}</span>
+              <span>{schema.columns.map((column) => column.name).join(",")}</span>
               <span>Mẫu dữ liệu</span>
             </div>
             <div className="sub-code-sample">
-              <div><strong>{columns.id}</strong>,<strong>{columns.prediction}</strong></div>
-              {SAMPLE_ROWS.map(([id, prediction]) => (
-                <div key={id}>{id},{prediction}</div>
+              <div>
+                <strong>{schema.columns.map((column) => column.name).join(",")}</strong>
+              </div>
+              {schema.rows.map((row) => (
+                <div key={row[0]}>{row.join(",")}</div>
               ))}
             </div>
           </div>
@@ -558,7 +557,7 @@ export function SubmissionPage() {
                   </span>
                   <span className="sub-pitfall-label">{pitfall.label}</span>
                 </div>
-                <p className="sub-pitfall-desc">{pitfall.description(columns)}</p>
+                <p className="sub-pitfall-desc">{pitfall.description(schema)}</p>
               </div>
             ))}
           </div>

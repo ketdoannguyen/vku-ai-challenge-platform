@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
-import { formatLocal, METRIC_LABEL } from "../api/competitions";
+import { formatLocal } from "../api/competitions";
 import {
   fetchLeaderboard,
-  formatScore,
+  formatMetric,
+  metricLabel,
+  resultContract,
   type ParticipantLeaderboardResponse,
 } from "../api/results";
 import { ErrorBox, Loading } from "../components/ui";
@@ -12,8 +14,23 @@ import type { CompetitionContext } from "./CompetitionDetailPage";
 /** Số dòng mỗi trang; backend chặn 1–200 nên đây chỉ là lựa chọn hiển thị. */
 const PAGE_SIZE = 25;
 
+/**
+ * Câu mô tả quy tắc xếp hạng. Cuộc thi chưa khai báo metric chính (bản nháp v2) thì không nêu tên
+ * metric: `metricLabel` trả null cho key rỗng, không phải chuỗi "null" để lọt ra màn hình.
+ */
+function rankingNote(label: string | null): string {
+  return label
+    ? `Xếp theo ${label} tốt nhất; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.`
+    : "Xếp theo điểm chấm của cuộc thi; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.";
+}
+
 export function LeaderboardPage() {
   const { competition } = useOutletContext<CompetitionContext>();
+  // Cột metric và số thập phân đọc từ hợp đồng của cuộc thi, không cố định f1/precision/recall.
+  const contract = resultContract(competition.submission_config);
+  /** Số thập phân của metric chính; hợp đồng rỗng (bản nháp v2) rơi về mức 4 như bộ chấm v1. */
+  const primaryDecimals =
+    contract.metrics.find((metric) => metric.key === contract.primary_metric)?.decimals ?? 4;
   const [data, setData] = useState<ParticipantLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(competition.leaderboard_visible);
   const [refreshing, setRefreshing] = useState(false);
@@ -177,7 +194,7 @@ export function LeaderboardPage() {
           <div className="lb-head-copy">
             <h2 className="lb-title">Bảng xếp hạng</h2>
             <p className="lb-lead text-muted">
-              Xếp theo {METRIC_LABEL[competition.primary_metric]} tốt nhất; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.
+              {rankingNote(metricLabel(contract, contract.primary_metric))}
             </p>
           </div>
         </div>
@@ -214,7 +231,7 @@ export function LeaderboardPage() {
           </div>
           <h2 className="lb-title">Bảng xếp hạng</h2>
           <p className="lb-lead text-muted">
-            Xếp theo {METRIC_LABEL[data.primary_metric]} tốt nhất; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.
+            {rankingNote(metricLabel(contract, data.primary_metric))}
           </p>
         </div>
 
@@ -270,7 +287,7 @@ export function LeaderboardPage() {
           <dl className="lb-me-facts">
             <div>
               <dt>Điểm chính</dt>
-              <dd>{formatScore(data.me.primary_score)}</dd>
+              <dd>{formatMetric(data.me.primary_score, primaryDecimals)}</dd>
             </div>
             <div>
               <dt>Số bài đã nộp</dt>
@@ -304,7 +321,8 @@ export function LeaderboardPage() {
         </div>
       ) : (
       <>
-      {/* Bảng xếp hạng 7 cột */}
+      {/* Cột metric theo đúng thứ tự hợp đồng. Không dựng thêm cột "Điểm chính" vì
+          `primary_score` chính là giá trị của metric chính - vẽ cả hai là lặp số. */}
       <div
         className="lb-table-wrap table-wrap"
         aria-busy={busy}
@@ -317,10 +335,11 @@ export function LeaderboardPage() {
             <tr>
               <th scope="col" className="lb-col-rank">Hạng</th>
               <th scope="col">Đội / tài khoản</th>
-              <th scope="col" className="lb-col-num">Điểm chính</th>
-              <th scope="col" className="lb-col-num">F1</th>
-              <th scope="col" className="lb-col-num">Precision</th>
-              <th scope="col" className="lb-col-num">Recall</th>
+              {contract.metrics.map((metric) => (
+                <th scope="col" className="lb-col-num" key={metric.key}>
+                  {metric.label}
+                </th>
+              ))}
               <th scope="col" className="lb-col-time">Đạt lúc</th>
             </tr>
           </thead>
@@ -353,18 +372,16 @@ export function LeaderboardPage() {
                     <span className="lb-user-badge">Bạn</span>
                   )}
                 </td>
-                <td className="score-cell primary-score">
-                  {formatScore(entry.primary_score)}
-                </td>
-                <td className="score-cell">
-                  {formatScore(entry.metrics.f1)}
-                </td>
-                <td className="score-cell">
-                  {formatScore(entry.metrics.precision)}
-                </td>
-                <td className="score-cell">
-                  {formatScore(entry.metrics.recall)}
-                </td>
+                {contract.metrics.map((metric) => (
+                  <td
+                    key={metric.key}
+                    className={`score-cell${
+                      metric.key === contract.primary_metric ? " primary-score" : ""
+                    }`}
+                  >
+                    {formatMetric(entry.metrics[metric.key], metric.decimals)}
+                  </td>
+                ))}
                 <td className="lb-time-cell">
                   {formatLocal(entry.best_submission_at)}
                 </td>

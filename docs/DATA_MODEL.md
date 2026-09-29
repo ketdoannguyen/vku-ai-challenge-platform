@@ -50,11 +50,11 @@ Fields:
 - `start_at`, `end_at` (UTC, timezone-aware; API nhận ISO, trả ISO `...Z`)
 - `join_mode`: `open` | `code` | `invite_only`
 - `join_code_hash` (luôn None ở Sprint 03 - join là Sprint 04; không bao giờ trả về API)
-- `primary_metric`: `f1` | `precision` | `recall`
+- `primary_metric`: `f1` | `precision` | `recall` - **chỉ cuộc thi v1 đọc field này**; từ ADR-048 chỉ số chính của cuộc thi v2 nằm trong `scoring_config.output_contract.primary_metric`, và mọi đường đọc dùng `contracts.result_contract()` để hai đời ra cùng một hình dạng
 - `quota_per_day` (0-1000)
 - `leaderboard_visible` (bool)
 - `resources` (list, default `[]` | absent ở document cũ) - link Google Drive cho participant tải, xem §9
-- `scoring_config` (object | absent) - Sprint 05; chỉ chứa CSV/metric behavior, xem §7
+- `scoring_config` (object | absent) - Sprint 05, hai đời phân biệt bằng field `version` (ADR-048); chỉ chứa CSV/metric behavior, xem §7
 - `ground_truth` (object | absent) - Sprint 05; metadata/path private, xem §8
 - `created_by` (email của admin tạo) - chỉ trả trong represent admin, không bao giờ lộ cho guest/participant (ADR-016)
 - `created_at`, `updated_at` (UTC, timezone-aware)
@@ -119,8 +119,9 @@ Fields:
 - `file_path` (chỉ record cũ) - CSV trên persistent disk theo layout ADR-003; vẫn đọc được khi tải, không có migration bắt buộc
 - `original_filename` (chỉ record cũ, đi cùng `file_path`)
 - `status`: `completed` (chỉ persist bài validation/scoring thành công)
-- `metrics`: `{f1, precision, recall}` raw float
-- `primary_score`
+- `metrics`: raw float, **tập khoá do hợp đồng kết quả của cuộc thi quyết định** - `{f1, precision, recall}` ở cuộc thi v1, đúng tập khoá bộ chấm Python trả về ở cuộc thi v2 (ADR-048). Đây vốn đã là `dict[str, float]` nên không có migration; UI, sort, leaderboard và Excel đọc cột từ `contracts.result_contract(competition)` chứ không đọc theo tên khoá
+- `primary_score` - luôn là `metrics[primary_metric]` của hợp đồng, không tính lại và không đổi thang
+- `scoring_ref` (object | absent) - **chỉ có ở bài chấm bằng bộ chấm v2** (ADR-048), ghim lại đúng thứ đã sinh ra điểm để hậu kiểm: `{version: 2, revision, config_fingerprint, source_sha256, ground_truth_sha256, submission_sha256, runtime_id}`. Bài v1 và bài legacy không có field này; không chứa source, ground truth hay đường dẫn
 - `created_at`
 - `review` (object | absent ở record cũ) - quyết định xét duyệt **hậu kiểm** của admin, là trục **độc lập** với `status` (ADR-035):
   - `status`: `rejected` | `accepted`
@@ -162,20 +163,41 @@ Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin vie
 
 ## 7. Scoring config (embedded trong competitions)
 
-`competitions.scoring_config`:
+`competitions.scoring_config` có **hai đời**, phân biệt bằng field `version` (ADR-048). Document v1 không có `version` và được đọc nguyên trạng - **không migrate**.
+
+**v1** (Sprint 05, bộ chấm sklearn cố định):
 - `id_column`, `prediction_column`, `label_column`
 - `average`: `binary` | `macro` | `weighted`
 - `pos_label` (nếu binary)
 - `higher_is_better`: `true` (MVP)
 
-Không lưu `scoring_config.json`. `primary_metric` và `quota_per_day` dùng top-level competition fields hiện có. `MAX_UPLOAD_MB` chỉ đến từ environment, không lưu Mongo (ADR-011).
+**v2** (ADR-048, bộ chấm Python do admin cấp):
+- `version`: `2`
+- `revision` (int, bắt đầu `1` ở lần lưu đầu; `0` = chưa từng lưu) - điều kiện ghi lạc hậu, xem dưới
+- `input_schema`: `{ground_truth, submission, id_matching: "exact", row_alignment: "ground_truth_order", preprocessing_version: 1}`, mỗi file là `{id_column, allow_extra_columns, columns: [{name, type: "string"|"integer"|"number", nullable, allowed_values: [...]|null}]}`
+- `evaluator`: `{name, entrypoint: "evaluate", source_path, source_sha256, runtime_id}` - **metadata**; source nằm ở file riêng tư (§7b), không nằm trong document
+- `output_contract`: `{metrics: [{key, label, decimals}], primary_metric, higher_is_better}` hoặc `null` khi còn là bản nháp
+- `verification`: bằng chứng lượt chạy thử - `{state: "passed", execution_fingerprint, config_fingerprint, observed_keys, tested_submission_sha256, tested_at, tested_by}` hoặc `null`
+
+Không lưu `scoring_config.json`. `quota_per_day` dùng top-level competition field. `MAX_UPLOAD_MB` chỉ đến từ environment, không lưu Mongo (ADR-011).
+
+Hai bất biến của v2: (a) **ghi là `$set` nguyên khối kèm điều kiện `scoring_config.revision`** - Mongo standalone không có transaction nên revision là toàn bộ cơ chế chống ghi đè, và upload ground truth cũng tăng revision vì ground truth nằm trong dấu vân tay; (b) **`verification` không bao giờ được tin theo tuổi** - nó chỉ còn hiệu lực khi `execution_fingerprint` (protocol + `preprocessing_version` + schema + sha256 source + sha256 ground truth + runtime) **và** `config_fingerprint` (execution + hợp đồng) cùng khớp cấu hình đang lưu. Đổi source, đổi đáp án, đổi schema, đổi hợp đồng (metric chính hay chiều xếp hạng), hay chạy thử lại trên một runtime khác đều làm lượt chạy thử cũ hết giá trị mà không phải xoá field nào.
+
+## 7b. File riêng tư của bộ chấm (filesystem, không có collection)
+
+Dưới `<DATA_DIR>/competitions/<competition_id>/private/`:
+- `ground-truth-<sha256[:16]>.csv` (v2) hoặc `ground_truth.csv` (v1, layout cũ giữ nguyên)
+- `evaluator/<sha256>.py` - source bộ chấm v2
+
+Tên gắn hash nội dung và ghi theo kiểu "ghi nếu chưa có", nên một lượt chấm đang chạy vẫn đọc đúng bản đã được xác minh kể cả khi admin vừa lưu bản mới. Không có route public nào phục vụ hai loại file này; `evaluator.source_path` và `ground_truth.path` là đường dẫn **tương đối** trong `DATA_DIR` và không bao giờ đi ra API (ADR-048).
 
 ## 8. Ground truth metadata (embedded trong competitions)
 
 `competitions.ground_truth`:
-- `path`: relative `competitions/<competition_id>/private/ground_truth.csv`
+- `path`: relative trong `DATA_DIR` - `competitions/<competition_id>/private/ground_truth-<sha256[:16]>.csv` (v2) hoặc `.../ground_truth.csv` (v1)
 - `row_count`
-- `columns`: danh sách header, không chứa row/label values
+- `columns`: danh sách header, không chứa row/label values. Ở v2 lấy từ **schema admin khai** (không phải header đọc được của file), nên nó luôn khớp cấu hình đang áp dụng
+- `sha256` (v2; v1 ghim thêm ở lượt chạy thử đầu tiên) - đầu vào của dấu vân tay thực thi; readiness còn đối chiếu hash này với bytes trên đĩa nên sửa file ngoài luồng làm cuộc thi hết sẵn sàng
 - `uploaded_at` (UTC)
 
 File thật private trên persistent disk. Scoring ready khi có `scoring_config`, metadata path hợp lệ và file thường tồn tại (không chấp nhận symlink). Config/ground truth khóa khi competition closed hoặc có submission completed.
