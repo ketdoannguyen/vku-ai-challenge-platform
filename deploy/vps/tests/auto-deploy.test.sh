@@ -255,6 +255,19 @@ FAKE
   chmod +x "$ROOT/bin/docker"
 }
 
+# Compose của bản CHƯA khai `evaluator-runner` (hình dạng production trước release B), dựng từ compose
+# thật bằng cách bỏ đúng khối service đó. Không dùng compose thật nguyên bản vì từ B nó đã khai runner:
+# commit nền sẽ vô tình khai runner và mọi case "bản cũ chưa có runner" (rollback, `rm -sf`, thứ tự
+# service) sẽ đo sai thứ cần đo. Bản đầy đủ vẫn được kiểm ở `commit_compose_with_runner`.
+compose_before_runner() {
+  awk '
+    /^  evaluator-runner:[[:space:]]*$/ { skip = 1; next }
+    skip && /^  [^[:space:]#]/ { skip = 0 }
+    skip && /^[^[:space:]]/ { skip = 0 }
+    !skip
+  ' "$REPO_ROOT/docker-compose.prod.yml"
+}
+
 begin() {
   section "$1"
   ROOT="$(mktemp -d)"
@@ -271,7 +284,7 @@ begin() {
   # Compose nằm TRONG repo, đúng như production: deployer phải đọc được bản compose của một SHA cũ
   # bằng `git show` để biết bản đó có khai `ai-review-worker` hay không (`release_defines_service`).
   # `setup_base` commit nó ở commit nền nên mọi kịch bản đều có sẵn.
-  cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
+  compose_before_runner >"$REPO_DIR/docker-compose.prod.yml"
   git -C "$REPO_DIR" config user.name harness
   git -C "$REPO_DIR" config user.email harness@test
   git -C "$REPO_DIR" remote add origin "$ROOT/origin.git"
@@ -307,7 +320,7 @@ commit() {
 
 detach_to() { git -C "$REPO_DIR" checkout -q --detach "$1" >&2; }
 
-# Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production cộng thêm service
+# Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production - tức bản khai
 # `evaluator-runner` (release B). Các case về runner phải commit nội dung thật chứ không phải marker
 # như `commit()`: `release_defines_service` đọc chính file này bằng `git show` để biết bản đó có khai
 # service hay không, nên một marker sẽ làm mọi case về runner đo sai thứ cần đo.
@@ -318,14 +331,6 @@ commit_compose_with_runner() {
   tip="$(git -C "$ROOT/origin.git" rev-parse --verify --quiet refs/heads/release || true)"
   if [ -n "$tip" ]; then detach_to "$tip"; fi
   cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
-  cat >>"$REPO_DIR/docker-compose.prod.yml" <<'YAML'
-
-  evaluator-runner:
-    build:
-      context: ./backend
-      target: runner
-    image: vku-challenge-runner:prod
-YAML
   git -C "$REPO_DIR" add -A >&2
   git -C "$REPO_DIR" -c user.name=harness -c user.email=harness@test commit -q -m "$msg" >&2
   git -C "$REPO_DIR" push -q origin HEAD:refs/heads/release >&2

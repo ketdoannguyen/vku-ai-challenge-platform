@@ -178,11 +178,19 @@ hơn không khai, vì nó làm người vận hành tin rằng tính năng đã 
 2. **Khai service `evaluator-runner`** trong `docker-compose.prod.yml` (mẫu ở `docker-compose.yml`:
    cùng image backend, `target: runner`, mount `/var/run/docker.sock`, `expose 8100`, không publish
    port, không route Nginx) cùng nhóm biến `EVALUATOR_*` cho service `api`.
-3. **Dạy deployer biết service thứ tư**: `deploy/vps/auto-deploy.sh` hiện chỉ quản `api`,
-   `ai-review-worker`, `web` (map thay đổi → service, thứ tự `up`, nhánh rollback `rm -sf` cho service
-   chưa tồn tại ở bản cũ). Không sửa thì container runner không bao giờ được tạo lại theo SHA, và một
-   rollback sẽ để nó chạy mã của bản vừa hỏng. Sửa deployer trong repo **không** tự áp dụng lên VM -
-   phải chạy lại `install-auto-deploy.sh` từ commit đã duyệt.
+3. **Dạy deployer biết service thứ tư** - bản deployer trong repo đã làm (ADR-048): nó quản `api`,
+   `ai-review-worker`, `evaluator-runner`, `web`; `backend/*`, `docker-compose.prod.yml` và
+   `evaluator-runtime/*` đều map vào runner; runner có image riêng theo SHA (`vku-challenge-runner`,
+   `target: runner`) và đứng **trước** `api` trong lượt `up`; rollback về bản chưa khai runner thì
+   `rm -sf evaluator-runner` thay vì chạy lại nó; trước khi thay container, deployer kiểm image runtime
+   **tồn tại** (thiếu thì dừng, in lệnh build tay, và **không** ghi `last-failed` - đây là thao tác tay
+   còn thiếu, không phải commit hỏng). Hai việc nó cố ý **không** làm: build/xoá image runtime, và dọn
+   container của một service bị **bỏ** khỏi compose (nó chỉ quản service **có khai**) - bỏ runner khỏi
+   compose là việc của người vận hành.
+   Sửa deployer trong repo **không** tự áp dụng lên VM: phải chạy lại
+   `deploy/vps/install-auto-deploy.sh` từ commit đã duyệt, và việc đó phải xong **trước** khi push
+   release khai `evaluator-runner` - bản deployer cũ không bao giờ `up` service này, và một rollback
+   sẽ để nó chạy mã của bản vừa hỏng.
 4. **Cấp quyền cho runner**: nó là tiến trình **duy nhất** được mount docker socket. Trên VM một
    người dùng, điều đó nghĩa là runner có quyền tương đương root trên host - chấp nhận được **chỉ vì**
    code chấm của admin chạy trong container con với `--network none --read-only --cap-drop ALL

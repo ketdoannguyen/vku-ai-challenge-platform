@@ -127,6 +127,13 @@ services:
       AI_REVIEW_ALLOWED_PRIVATE_HOSTS: ${AI_REVIEW_ALLOWED_PRIVATE_HOSTS:-}
       AI_REVIEW_ALLOWED_HTTP_HOSTS: ${AI_REVIEW_ALLOWED_HTTP_HOSTS:-}
       AI_REVIEW_ALLOWED_PORTS: ${AI_REVIEW_ALLOWED_PORTS:-443}
+      # Bộ chấm Python của admin (ADR-048): `api` chỉ gửi lượt chấm sang runner nội bộ và KHÔNG có
+      # docker. Cùng lý do với nhóm AI ở trên, thiếu runner chỉ làm tính năng chấm v2 trả 503 chứ
+      # không được chặn deploy. Tên service là hằng số của file này nên không mở thành biến .env.
+      EVALUATOR_RUNNER_URL: http://evaluator-runner:8100
+      # Phải khớp giá trị của chính service `evaluator-runner` bên dưới - hai bên đọc cùng một biến
+      # trong .env, và API cộng thêm 15 s để lỗi timeout đến từ phía biết lý do.
+      EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
     expose:
       - "8000" # internal only - đi qua Nginx same-origin (ADR-002)
     volumes:
@@ -219,6 +226,64 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+    logging: *logging
+
+  evaluator-runner:
+    # Bộ chấm Python do admin cấp (ADR-048): chạy `evaluate(ground_truth, submission)` của BTC trong
+    # container dùng một lần. Đây là service **duy nhất** của stack được mount docker socket - `api`
+    # không bao giờ chạm tới nó, chỉ gọi service này qua Docker network.
+    build:
+      context: ./backend
+      # Stage riêng của `backend/Dockerfile` (nó có thêm docker CLI, thứ không container nào khác
+      # được phép có) và image riêng theo SHA: dùng chung tag với `api` là để hai stage tranh nhau
+      # một cái tên.
+      target: runner
+    image: vku-challenge-runner:prod
+    environment:
+      APP_ENV: production
+      EVALUATOR_RUNNER_PORT: 8100
+      # Image của **container chấm** (khác image của chính service này), do người vận hành build tay
+      # trên VM: `sudo docker build -t vku-evaluator-runtime:1 evaluator-runtime`. Deployer kiểm nó
+      # tồn tại trước khi thay container nhưng **không** build và **không** xoá nó (DEPLOYMENT.md §3.3).
+      EVALUATOR_RUNTIME_IMAGE: ${EVALUATOR_RUNTIME_IMAGE:-vku-evaluator-runtime:1}
+      # Trần một lượt chấm. `api` đọc CÙNG biến này để đặt timeout của nó (+15 s), nên đổi một nơi là
+      # đổi cả hai đầu.
+      EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
+      # Số lượt chấm chạy song song trong MỘT process runner. Mỗi slot là một container 1 CPU / 1 GiB,
+      # và VM production chỉ có 2 lõi - nâng lên là các lượt tự giành CPU của nhau. Hết slot thì runner
+      # TỪ CHỐI ngay bằng 503 chứ không xếp hàng: API đang giữ request của thí sinh.
+      EVALUATOR_MAX_CONCURRENCY: ${EVALUATOR_MAX_CONCURRENCY:-2}
+    # KHÔNG publish port (master context §13): chỉ `api` gọi được, qua Docker network.
+    expose:
+      - "8100"
+    volumes:
+      # Đường duy nhất tới Docker daemon, và là toàn bộ lý do service này là một tiến trình riêng.
+      # Trên VM một người dùng, quyền này tương đương root trên host - chấp nhận được **chỉ vì** code
+      # chấm bị nhốt trong container con (`--network none --read-only --cap-drop ALL --user 65534`,
+      # các cờ nằm ở `app/evaluator_runner/sandbox.py`). Nới bất kỳ cờ nào ở đó là đổi biên an toàn
+      # của cả hệ thống, không phải một chỉnh sửa cục bộ.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Một lượt chấm có thể chạy tới EVALUATOR_TIMEOUT_SECONDS; ân hạn dừng dài hơn để không cắt ngang
+    # lượt đang chạy. Container con vẫn do daemon quản lý và tự kết thúc theo deadline của nó, nên
+    # runner thoát không để lại container chạy mã admin.
+    stop_grace_period: 60s
+    healthcheck:
+      # Cố ý chỉ kiểm **tiến trình còn sống**, không kiểm "chấm được hay chưa": `degraded` (không ghim
+      # được image runtime) mà làm `up --wait` thất bại thì một lượt rollback - đường phục hồi - sẽ
+      # hỏng chỉ vì tính năng chấm, trong khi `api`/`web` vẫn phục vụ bình thường. Trạng thái thật nằm
+      # ở `runtime_id` của `/health`, và deployer đã chặn từ trước bằng preflight image runtime.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8100/health').read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
     logging: *logging
 
