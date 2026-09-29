@@ -7,6 +7,10 @@ học đã cài. Hợp đồng với runner nằm ở hai đầu của stdio:
 - stdout chỉ chứa đúng một dòng kết quả giữa `<<<VKU_RESULT>>>` và `<<<VKU_END>>>`
   (`app/evaluator_runner/sandbox.py` giữ bản sao của hai dấu mốc này: đổi một nơi phải đổi cả hai).
 - Mọi thứ code chấm in ra bị đẩy sang stderr, nên `print()` của admin không phá kênh kết quả.
+- `VKU_DEADLINE_SECONDS` (env, do runner đặt) là hạn chạy của tiến trình này, dài hơn timeout của
+  runner một khoảng ân hạn. Bình thường runner là bên cắt lượt chấm và báo lỗi; đồng hồ ở đây tồn tại
+  cho trường hợp runner chết giữa lượt - khi đó container phải tự kết thúc, vì không còn ai
+  `docker kill` nó nữa.
 
 Code chấm do admin cung cấp chạy trong tiến trình này; biên an toàn là container, không phải file này.
 """
@@ -14,6 +18,7 @@ Code chấm do admin cung cấp chạy trong tiến trình này; biên an toàn 
 import inspect
 import json
 import os
+import signal
 import sys
 import traceback
 import types
@@ -25,6 +30,7 @@ MAX_DETAIL_CHARS = 4_000
 ENTRYPOINT = "evaluate"
 GROUND_TRUTH_PATH = "/tmp/ground_truth.csv"
 SUBMISSION_PATH = "/tmp/submission.csv"
+DEADLINE_ENV = "VKU_DEADLINE_SECONDS"
 
 
 def _emit(channel: int, payload: dict) -> None:
@@ -49,6 +55,32 @@ def _failure(code: str, message: str, detail: str | None = None) -> dict:
     if detail:
         payload["detail"] = detail[-MAX_DETAIL_CHARS:]
     return payload
+
+
+def _deadline_seconds(raw: str | None) -> float | None:
+    """Đọc hạn chạy từ biến môi trường; thiếu hoặc vô lý thì không đặt đồng hồ nào."""
+    try:
+        seconds = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds > 0 else None
+
+
+def _arm_deadline(channel: int, seconds: float) -> None:
+    """Đặt đồng hồ tự kết thúc cho cả tiến trình.
+
+    `os._exit` trong handler, không phải raise: code chấm hoàn toàn có thể bắt `BaseException` rồi
+    chạy tiếp, và một vòng lặp nằm trong C thì mãi không quay lại bytecode để ném. Ghi kết quả trước
+    rồi thoát thẳng là cách duy nhất không phụ thuộc vào thiện chí của code chấm - tiến trình này
+    sống đúng một lượt chấm nên không có gì phía sau cần được dọn.
+    """
+
+    def expire(signum, frame):  # noqa: ANN001, ARG001 - chữ ký của signal handler
+        _emit(channel, _failure("EVALUATOR_TIMEOUT", f"Bộ chấm chạy quá {seconds:g} giây."))
+        os._exit(0)
+
+    signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
 
 
 def _load_entrypoint(source_code: str):
@@ -80,6 +112,10 @@ def main() -> int:
     # Giữ kênh kết quả riêng TRƯỚC khi code chấm có cơ hội ghi vào stdout, rồi trỏ fd 1 sang stderr.
     channel = os.dup(1)
     os.dup2(2, 1)
+    deadline = _deadline_seconds(os.environ.get(DEADLINE_ENV))
+    if deadline is not None:
+        # Đặt trước khi đọc stdin: chờ dữ liệu cũng là thời gian của lượt chấm.
+        _arm_deadline(channel, deadline)
     try:
         payload = json.load(sys.stdin)
         with open(GROUND_TRUTH_PATH, "w", encoding="utf-8", newline="") as handle:

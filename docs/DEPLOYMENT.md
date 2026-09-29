@@ -172,8 +172,9 @@ hơn không khai, vì nó làm người vận hành tin rằng tính năng đã 
 
 1. **Build image runtime** trên VM (không service/script nào làm hộ):
    `sudo docker build -t vku-evaluator-runtime:1 evaluator-runtime` - chạy từ repo trên VM. Thiếu bước
-   này thì runner vẫn lên nhưng **mọi** lượt chấm hỏng (`/health` trả `"docker": true` vì nó chỉ kiểm
-   docker CLI, không kiểm image tồn tại - lỗi hiện ra ở lượt chấm đầu tiên).
+   này thì runner vẫn lên nhưng **mọi** lượt chấm hỏng: runner phân giải image thành ID nội dung ngay
+   lúc khởi động, không phân giải được thì `/health` trả `"status": "degraded"` kèm `runtime_id: null`
+   và mọi lượt chấm là `503 EVALUATOR_UNAVAILABLE`.
 2. **Khai service `evaluator-runner`** trong `docker-compose.prod.yml` (mẫu ở `docker-compose.yml`:
    cùng image backend, `target: runner`, mount `/var/run/docker.sock`, `expose 8100`, không publish
    port, không route Nginx) cùng nhóm biến `EVALUATOR_*` cho service `api`.
@@ -192,8 +193,8 @@ Môi trường **dev** thì đã sẵn: `docker-compose.yml` có service, chỉ 
 
 | Biến (dev) | Ý nghĩa |
 |---|---|
-| `EVALUATOR_RUNTIME_IMAGE` | Image của container chấm, mặc định `vku-evaluator-runtime:1`. **Chỉ runner đọc**, và **phải build tay**. Đổi giá trị này **không** tự làm bằng chứng chạy thử hết hiệu lực: vân tay tính theo runtime đã **ghim** trong cấu hình lúc chạy thử, không theo biến này - cố ý, vì `scoring/test` bị khoá sau bài nộp đầu tiên nên đóng cửa theo biến sẽ chặn vĩnh viễn đường chấm của cuộc thi đang sống. Bù lại, điểm sau đó do image **mới** sinh ra: muốn có bằng chứng cho image mới thì phải chạy thử lại lúc cuộc thi còn sửa được |
-| `EVALUATOR_TIMEOUT_SECONDS` | Trần một lượt chấm, mặc định `30`. API dùng timeout `+15 s` để runner kịp trả mã lỗi trước khi API bỏ cuộc |
+| `EVALUATOR_RUNTIME_IMAGE` | Image của container chấm, mặc định `vku-evaluator-runtime:1`. **Chỉ runner đọc**, và **phải build tay**. Runner phân giải tag thành **ID nội dung** (`docker image inspect`) ngay lúc khởi động, ghim nó cho cả vòng đời process và từ chối chấm khi không phân giải được - nên `runtime_id` trong bằng chứng xác minh và trong `scoring_ref` là **nội dung** đã chạy, không phải một cái tên có thể bị build đè. Đổi giá trị này **không** tự làm bằng chứng chạy thử hết hiệu lực: vân tay tính theo runtime đã **ghim** trong cấu hình lúc chạy thử, không theo biến này - cố ý, vì `scoring/test` bị khoá sau bài nộp đầu tiên nên đóng cửa theo biến sẽ chặn vĩnh viễn đường chấm của cuộc thi đang sống. Bù lại, điểm sau đó do image **mới** sinh ra: muốn có bằng chứng cho image mới thì phải chạy thử lại lúc cuộc thi còn sửa được |
+| `EVALUATOR_TIMEOUT_SECONDS` | Trần một lượt chấm, mặc định `30`. API dùng timeout `+15 s` để runner kịp trả mã lỗi trước khi API bỏ cuộc. Container con tự kết thúc ở mốc `+5 s` nữa (`VKU_DEADLINE_SECONDS`, kèm `--ulimit cpu` làm đường chết cho vòng lặp nằm trong C): runner còn sống thì chính nó cắt lượt chấm, còn runner chết giữa lượt thì container không chạy mãi trên VPS |
 | `EVALUATOR_MAX_CONCURRENCY` | Số lượt chấm song song trong **một** process runner, mặc định `2`. Hết slot thì **từ chối** (`EVALUATOR_UNAVAILABLE`) chứ không xếp hàng. VPS chỉ có 2 lõi (ADR-046) - nâng phải chắc còn CPU/RAM cho từng slot |
 | `EVALUATOR_RUNNER_URL` | `http://evaluator-runner:8100`, **chỉ `api` đọc**. Sai giá trị = mọi lượt chấm v2 trả 503 |
 

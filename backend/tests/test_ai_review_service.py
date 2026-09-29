@@ -93,8 +93,10 @@ async def test_moc_hoan_tat_cua_luot_thanh_cong_la_luc_goi_provider_xong(mock_db
     đo rút hàng đợi dựng trên `completed_at` đều hụt đi một lượt. Transport giả ở đây ngủ 30 ms nên
     `duration_ms` là một số thật, không phải 0 may rủi.
     """
-    await seed(mock_db)
     now = datetime(2026, 9, 23, 10, 0, 0, tzinfo=timezone.utc)
+    # `run_after` của job phải nằm trên cùng đồng hồ với `now` lúc claim: để fixture tự lấy giờ thực
+    # thì job rơi vào tương lai so với mốc 2026-09-23 và `claim_next` không nhặt được nó.
+    await seed(mock_db, run_after=now)
 
     def slow(request: httpx.Request) -> dict:
         time.sleep(0.03)

@@ -42,15 +42,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         timeout_seconds=settings.evaluator_timeout_seconds,
     )
     app.state.slots = Slots(settings.evaluator_max_concurrency)
-    if not app.state.sandbox.available:
+    # Phân giải image runtime thành ID nội dung ngay lúc khởi động: image thiếu thì phải ồn ào ở đây
+    # chứ không phải ở lượt chấm đầu tiên của thí sinh.
+    resolved = await app.state.sandbox.load()
+    if not resolved:
         logger.error(
-            "Không thấy docker trong image runner: mọi lượt chấm sẽ trả %s cho tới khi sửa xong.",
+            "Runner không sẵn sàng (docker=%s, image=%s): mọi lượt chấm sẽ trả %s cho tới khi sửa xong.",
+            app.state.sandbox.available,
+            app.state.sandbox.image,
             UNAVAILABLE_CODE,
         )
     logger.info(
-        "Runner sẵn sàng: image=%s, timeout=%ss, đồng thời=%s",
+        "Runner sẵn sàng: image=%s, runtime_id=%s, timeout=%ss (+%ss ân hạn), đồng thời=%s",
         app.state.sandbox.image,
+        app.state.sandbox.runtime_id,
         settings.evaluator_timeout_seconds,
+        app.state.sandbox.deadline_seconds - settings.evaluator_timeout_seconds,
         settings.evaluator_max_concurrency,
     )
     yield
@@ -81,9 +88,13 @@ async def limit_body_size(request: Request, call_next):
 async def health(request: Request) -> dict:
     sandbox: Sandbox = request.app.state.sandbox
     return {
-        "status": "ok" if sandbox.available else "degraded",
+        "status": "ok" if sandbox.ready else "degraded",
         "docker": sandbox.available,
-        "runtime_id": sandbox.image,
+        # `image` là tag đang cấu hình (để đối chiếu với `.env`), `runtime_id` là ID nội dung đã ghim -
+        # thứ đi vào bằng chứng xác minh và `scoring_ref`. Hai giá trị chỉ khác nhau khi có người build
+        # đè chính tag đó.
+        "image": sandbox.image,
+        "runtime_id": sandbox.runtime_id,
     }
 
 
@@ -111,7 +122,7 @@ async def evaluate(payload: EvaluateRequest, request: Request) -> JSONResponse:
         status_code=200,
         content={
             "status": "passed",
-            "runtime_id": sandbox.image,
+            "runtime_id": sandbox.runtime_id,
             "metrics": metrics,
             "duration_ms": duration_ms,
         },

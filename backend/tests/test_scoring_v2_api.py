@@ -384,6 +384,32 @@ def test_v2_submission_is_scored_by_evaluator_and_records_scoring_ref(client, fa
     assert membership_document(client, cid)["quota_used"] == 1
 
 
+def test_v2_moi_truong_cham_duoc_ghim_bang_id_noi_dung(client, fake_runner):
+    """`runtime_id` là ID nội dung của image: build đè cùng tag là một môi trường khác, và bằng chứng
+    của lượt chạy thử trước đó không còn là bằng chứng cho môi trường đang chạy."""
+    first = "sha256:" + "1" * 64
+    second = "sha256:" + "2" * 64
+    fake_runner.runtime_id = first
+    competition = publish_v2_competition(client)
+    cid = competition["id"]
+    login(client)
+
+    verified = client.get(f"/api/admin/competitions/{cid}/scoring").json()["scoring"]
+    assert verified["evaluator"]["runtime_id"] == first
+    assert verified["verified"] is True
+    first_fingerprint = verified["verification"]["execution_fingerprint"]
+
+    # Image được build lại (cùng tag, nội dung khác) rồi admin chạy thử lại: cấu hình ghim ID mới và
+    # vân tay đổi theo, nên lượt chấm sau ghi vào `scoring_ref` đúng môi trường đã sinh ra điểm.
+    fake_runner.runtime_id = second
+    retested = run_scoring_test_v2(client, cid, expected_revision=_revision(client, cid))
+    assert retested.status_code == 200, retested.text
+    scoring = retested.json()["scoring"]
+    assert scoring["evaluator"]["runtime_id"] == second
+    assert scoring["verified"] is True
+    assert scoring["verification"]["execution_fingerprint"] != first_fingerprint
+
+
 def test_v2_submission_rejects_bad_csv_without_running_evaluator(client, fake_runner):
     competition = publish_v2_competition(client)
     cid = competition["id"]

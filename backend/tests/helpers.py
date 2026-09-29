@@ -292,8 +292,10 @@ class FakeRunner:
     `app.scoring.execution` vẫn chạy thật - chỉ có tiến trình chấm là giả.
     """
 
-    def __init__(self, metrics: dict | None = None):
+    def __init__(self, metrics: dict | None = None, runtime_id: str = V2_RUNTIME_ID):
         self.metrics = dict(metrics or {"accuracy": 0.75, "n_items": 4.0})
+        # Sửa được giữa chừng: dựng lại image runtime là một môi trường chấm khác (ID nội dung khác).
+        self.runtime_id = runtime_id
         self.error: Exception | None = None
         self.calls: list[dict] = []
 
@@ -313,5 +315,5 @@ class FakeRunner:
         if self.error is not None:
             raise self.error
         return EvaluatorResult(
-            metrics=dict(self.metrics), runtime_id=V2_RUNTIME_ID, duration_ms=7
+            metrics=dict(self.metrics), runtime_id=self.runtime_id, duration_ms=7
         )
