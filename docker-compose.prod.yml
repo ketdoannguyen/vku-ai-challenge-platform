@@ -92,6 +92,7 @@ services:
   api:
     build:
       context: ./backend
+      target: api
     image: vku-challenge-api:prod
     environment:
       APP_ENV: production
@@ -157,6 +158,7 @@ services:
     # chục giây, và API phải trả lời được kể cả khi LLM hỏng hoàn toàn.
     build:
       context: ./backend
+      target: api
     image: vku-challenge-api:prod
     command: ["python", "-m", "app.ai_review.worker"]
     environment:

@@ -8,7 +8,9 @@ services:
     restart: unless-stopped
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      target: api
     environment:
       APP_ENV: ${APP_ENV:-development}
       APP_NAME: ${APP_NAME:-AI Challenge Platform}
@@ -53,7 +55,9 @@ services:
   ai-review-worker:
     # Cùng image backend với `api` (cùng build context): worker là TIẾN TRÌNH RIÊNG - một lượt gọi
     # provider mất hàng chục giây và không được nằm trong vòng đời của API process.
-    build: ./backend
+    build:
+      context: ./backend
+      target: api
     command: ["python", "-m", "app.ai_review.worker"]
     environment:
       APP_ENV: ${APP_ENV:-development}
