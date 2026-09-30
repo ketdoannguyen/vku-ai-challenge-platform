@@ -22,14 +22,17 @@ from tests.helpers import (
     V2_SCHEMA,
     V2_SOURCE,
     V2_SUBMISSION,
+    attempt_documents,
+    attempt_status,
     login,
     login_participant,
     membership_document,
     publish_v2_competition,
     put_scoring_v2,
+    run_scoring_test_v2,
+    run_worker,
     submission_documents,
     submit,
-    run_scoring_test_v2,
     upload_v2_ground_truth,
 )
 
@@ -350,24 +353,42 @@ def test_v2_verification_dies_with_source_or_ground_truth(client, fake_runner):
     assert retested.json()["ready"] is True
 
 
-def test_v2_submission_is_scored_by_evaluator_and_records_scoring_ref(client, fake_runner):
+def test_v2_submission_is_scored_by_evaluator_and_records_scoring_ref(
+    client, fake_runner, fake_artifact_storage
+):
     competition = publish_v2_competition(client)
     cid = competition["id"]
     login(client)
     revision = _revision(client, cid)
     login_participant(client)
 
-    response = submit(client, cid, V2_SUBMISSION)
-    assert response.status_code == 201, response.text
-    body = response.json()
-    assert body["metrics"] == {"accuracy": 0.75, "n_items": 4.0}
-    assert body["primary_score"] == 0.75
-    assert body["quota_remaining"] == 4
+    # Lượt chạy thử lúc publish đã gọi runner; chỉ đếm thêm từ mốc này.
+    calls_after_publish = len(fake_runner.calls)
+    accepted = submit(client, cid, V2_SUBMISSION)
+    assert accepted.status_code == 202, accepted.text
+    queued = accepted.json()
+    assert queued["status"] == "QUEUED"
+    assert queued["queue_position"] == 1
+    assert queued["submission"] is None
+    # Vào hàng đợi là chưa chấm gì và chưa có bài nộp nào.
+    assert len(fake_runner.calls) == calls_after_publish
+    assert submission_documents(client) == []
+
+    assert run_worker(client) == 1
+
+    body = attempt_status(client, cid, queued["attempt_id"])
+    assert body["status"] == "COMPLETED"
+    assert body["submission"]["metrics"] == {"accuracy": 0.75, "n_items": 4.0}
+    assert body["submission"]["primary_score"] == 0.75
+    assert body["submission"]["quota_remaining"] == 4
     assert fake_runner.calls[-1]["submission_csv"] == V2_PREPARED_SUBMISSION
 
     stored = submission_documents(client)[0]
+    assert str(stored["_id"]) == queued["attempt_id"]
     assert stored["metrics"] == {"accuracy": 0.75, "n_items": 4.0}
     assert stored["primary_score"] == 0.75
+    # `created_at` là lúc thí sinh nhấn Nút: suất quota giữ lúc nhận bài phải cùng ngày với bài nộp.
+    assert stored["created_at"] == attempt_documents(client)[0]["created_at"]
     # Dấu vết của lượt chấm: đối chiếu lại được với đúng bộ chấm, đúng ground truth, đúng file đã nộp.
     scoring_ref = stored["scoring_ref"]
     assert {
@@ -382,6 +403,8 @@ def test_v2_submission_is_scored_by_evaluator_and_records_scoring_ref(client, fa
     }
     assert len(scoring_ref["config_fingerprint"]) == 64
     assert membership_document(client, cid)["quota_used"] == 1
+    # File tạm dọn sau khi ghi bài: kho không giữ lại bản sao thứ hai của cùng bài nộp.
+    assert not [key for key in fake_artifact_storage.objects if "staging/" in key]
 
 
 def test_v2_moi_truong_cham_duoc_ghim_bang_id_noi_dung(client, fake_runner):
@@ -440,17 +463,25 @@ def test_v2_evaluator_failure_is_a_system_error_for_the_student(client, fake_run
     fake_runner.error = EvaluatorError(
         "EVALUATOR_FAILED", "Bộ chấm lỗi khi chạy.", detail="Traceback (most recent call last): ..."
     )
-    failed = submit(client, cid, V2_SUBMISSION)
-    assert failed.status_code == 500
-    assert failed.json()["error"] == {
-        "code": "SCORING_FAILED",
-        "message": "Không thể chấm điểm bài nộp.",
+    broken = submit(client, cid, V2_SUBMISSION)
+    assert broken.status_code == 202
+    assert run_worker(client) == 1
+
+    # Chi tiết lỗi nội bộ không ra tới thí sinh: chỉ còn một câu chung, mã lỗi giữ để tra log.
+    failed = attempt_status(client, cid, broken.json()["attempt_id"])
+    assert failed["status"] == "FAILED"
+    assert failed["error"] == {
+        "code": "EVALUATOR_FAILED",
+        "message": "Không thể chấm điểm bài nộp này.",
     }
 
     fake_runner.error = EvaluatorError("EVALUATOR_UNAVAILABLE", "Máy chấm đang không sẵn sàng.")
     busy = submit(client, cid, V2_SUBMISSION)
-    assert busy.status_code == 503
-    assert busy.json()["error"]["code"] == "EVALUATOR_UNAVAILABLE"
+    assert busy.status_code == 202
+    assert run_worker(client) == 1
+    assert attempt_status(client, cid, busy.json()["attempt_id"])["error"]["code"] == (
+        "EVALUATOR_UNAVAILABLE"
+    )
 
     # Lỗi hệ thống không tiêu lượt và không để lại bài nộp giả.
     assert submission_documents(client) == []
@@ -458,15 +489,31 @@ def test_v2_evaluator_failure_is_a_system_error_for_the_student(client, fake_run
 
 
 def test_v2_config_is_locked_after_the_first_submission(client, fake_runner):
+    """Khóa cấu hình tính theo bài đã có điểm: lượt còn nằm chờ chưa khóa, chấm xong mới khóa."""
     competition = publish_v2_competition(client)
     cid = competition["id"]
-    assert submit(client, cid, V2_SUBMISSION).status_code == 201
+    queued = submit(client, cid, V2_SUBMISSION)
+    assert queued.status_code == 202
+
+    login(client)
+    # Chưa có điểm nào nên cấu hình còn sửa được, dù đã có một lượt nằm chờ.
+    editable = put_scoring_v2(
+        client, cid, expected_revision=_revision(client, cid), output_contract=V2_CONTRACT
+    )
+    assert editable.status_code == 200, editable.text
+
+    login_participant(client)
+    assert run_worker(client) == 1
+    assert attempt_status(client, cid, queued.json()["attempt_id"])["status"] == "COMPLETED"
 
     login(client)
     locked = put_scoring_v2(client, cid, expected_revision=_revision(client, cid))
     assert locked.status_code == 422
     assert locked.json()["error"]["code"] == "SCORING_LOCKED"
-    assert upload_v2_ground_truth(client, cid, expected_revision=3).status_code == 422
+    ground_truth = upload_v2_ground_truth(
+        client, cid, expected_revision=_revision(client, cid)
+    )
+    assert ground_truth.status_code == 422
 
 
 def test_v2_participant_sees_schema_and_contract(client, fake_runner):

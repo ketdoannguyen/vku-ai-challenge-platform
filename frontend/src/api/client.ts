@@ -103,11 +103,16 @@ export const api = {
     return request<T>(path, { method: "PUT", body: form });
   },
   /** Nhiều part một request (mỗi lượt nộp gửi kèm cả CSV lẫn notebook). */
-  postFile: <T>(path: string, files: Record<string, File>, fields?: Record<string, string>) => {
+  postFile: <T>(
+    path: string,
+    files: Record<string, File>,
+    fields?: Record<string, string>,
+    headers?: Record<string, string>,
+  ) => {
     const form = new FormData();
     for (const [field, file] of Object.entries(files)) form.append(field, file);
     appendFields(form, fields);
-    return request<T>(path, { method: "POST", body: form });
+    return request<T>(path, { method: "POST", body: form, headers });
   },
 };
 

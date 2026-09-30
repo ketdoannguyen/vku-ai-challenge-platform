@@ -27,6 +27,9 @@ SUBMISSIONS_COLLECTION = "submissions"
 # lượt đã dùng trong ngày đó.
 QUOTA_DAY_FIELD = "quota_day"
 QUOTA_USED_FIELD = "quota_used"
+# Dấu "lượt nộp nào đang giữ suất này" -> khoá ngày đã giữ. Chỉ đường nộp v2 dùng: v1 hoàn lượt ngay
+# trong request nên không cần nhớ gì.
+QUOTA_CLAIMS_FIELD = "quota_claims"
 _PUBLIC_ERROR_MESSAGES = {
     "SCORING_FAILED": "Không thể chấm điểm bài nộp.",
     "SUBMISSION_REJECTED": "Bài nộp không hợp lệ.",
@@ -242,7 +245,7 @@ async def quota_status(
 
 
 async def reserve_quota_slot(
-    db, membership: dict, quota_per_day: int, now: datetime
+    db, membership: dict, quota_per_day: int, now: datetime, *, attempt_id: str | None = None
 ) -> int | None:
     """Giữ chỗ một lượt nộp trong ngày UTC, nguyên tử; trả số lượt đã dùng sau khi giữ.
 
@@ -251,34 +254,48 @@ async def reserve_quota_slot(
     cuộc thi/account - và `$inc` kèm điều kiện `quota_used < quota_per_day` là một thao tác
     nguyên tử trên một document, nên số lượt dùng không thể vượt `quota_per_day`.
 
+    `attempt_id` đóng dấu lượt nào đang giữ suất này: đường nộp v2 giữ suất lâu hơn một request
+    (chờ chấm, ghi bài, đối soát), nên phải biết hoàn cho đúng lượt và không hoàn hai lần.
+
     Trả `None` khi đã hết lượt. Lượt đã giữ phải trả lại bằng `release_quota_slot` nếu upload
     hoặc ghi DB thất bại.
     """
     collection = db[MEMBERSHIPS_COLLECTION]
     day_key = utc_day_key(now)
     await _seed_quota_day(db, membership, day_key, now)
+    update: dict = {"$inc": {QUOTA_USED_FIELD: 1}}
+    if attempt_id is not None:
+        update["$set"] = {f"{QUOTA_CLAIMS_FIELD}.{attempt_id}": day_key}
     updated = await collection.find_one_and_update(
         {
             "_id": membership["_id"],
             QUOTA_DAY_FIELD: day_key,
             QUOTA_USED_FIELD: {"$lt": quota_per_day},
         },
-        {"$inc": {QUOTA_USED_FIELD: 1}},
+        update,
         return_document=ReturnDocument.AFTER,
     )
     return updated[QUOTA_USED_FIELD] if updated else None
 
 
-async def release_quota_slot(db, membership: dict, now: datetime) -> None:
-    """Trả lại lượt đã giữ khi bài nộp không được ghi; không bao giờ để bộ đếm âm."""
-    await db[MEMBERSHIPS_COLLECTION].update_one(
-        {
-            "_id": membership["_id"],
-            QUOTA_DAY_FIELD: utc_day_key(now),
-            QUOTA_USED_FIELD: {"$gt": 0},
-        },
-        {"$inc": {QUOTA_USED_FIELD: -1}},
-    )
+async def release_quota_slot(
+    db, membership: dict, now: datetime, *, attempt_id: str | None = None
+) -> None:
+    """Trả lại lượt đã giữ khi bài nộp không được ghi; không bao giờ để bộ đếm âm.
+
+    Có `attempt_id` thì chỉ trả lại khi dấu của chính lượt đó còn nguyên, và dấu bị xoá luôn trong
+    chính lượt ghi này - nên gọi lặp (worker chết rồi chạy lại, reconciler quét lại) không thể trừ
+    hai lần. Dấu mang khoá ngày nên một lượt của ngày cũ cũng không hoàn được vào ngày mới.
+    """
+    day_key = utc_day_key(now)
+    query = {"_id": membership["_id"], QUOTA_USED_FIELD: {"$gt": 0}}
+    update: dict = {"$inc": {QUOTA_USED_FIELD: -1}}
+    if attempt_id is None:
+        query[QUOTA_DAY_FIELD] = day_key
+    else:
+        query[f"{QUOTA_CLAIMS_FIELD}.{attempt_id}"] = day_key
+        update["$unset"] = {f"{QUOTA_CLAIMS_FIELD}.{attempt_id}": ""}
+    await db[MEMBERSHIPS_COLLECTION].update_one(query, update)
 
 
 async def _seed_quota_day(db, membership: dict, day_key: str, now: datetime) -> None:
@@ -295,7 +312,14 @@ async def _seed_quota_day(db, membership: dict, day_key: str, now: datetime) -> 
     )
     await db[MEMBERSHIPS_COLLECTION].update_one(
         {"_id": membership["_id"], QUOTA_DAY_FIELD: {"$ne": day_key}},
-        {"$set": {QUOTA_DAY_FIELD: day_key, QUOTA_USED_FIELD: used}},
+        {
+            "$set": {
+                QUOTA_DAY_FIELD: day_key,
+                QUOTA_USED_FIELD: used,
+                # Dấu của ngày cũ hết giá trị khi ngày đổi: giữ lại chỉ làm map phình ra.
+                QUOTA_CLAIMS_FIELD: {},
+            }
+        },
     )
 
 

@@ -352,6 +352,7 @@ async def delete_competition_cascade(db, competition: dict) -> None:
     from app.ai_review.content_snapshot import delete_revisions
     from app.content.service import CONTENTS_COLLECTION
     from app.memberships.service import MEMBERSHIPS_COLLECTION
+    from app.scoring_attempts.store import ATTEMPTS_COLLECTION
     from app.submissions.service import SUBMISSIONS_COLLECTION
 
     competition_id = competition["_id"]
@@ -360,6 +361,8 @@ async def delete_competition_cascade(db, competition: dict) -> None:
     await db[ai_queue.JOBS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[ai_service.REVIEWS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[SUBMISSIONS_COLLECTION].delete_many({"competition_id": competition_id})
+    # Lượt còn chờ chấm cũng thuộc cuộc thi: bỏ luôn để worker không còn gì để claim.
+    await db[ATTEMPTS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[MEMBERSHIPS_COLLECTION].delete_many({"competition_id": competition_id})
     await db[CONTENTS_COLLECTION].delete_many({"competition_id": competition_id})
     # Revision đứng sau submission/review vì chúng tham chiếu tới nó.

@@ -132,6 +132,57 @@ def initial_projection(*, captured: bool, now: datetime) -> dict:
     }
 
 
+async def plan_submission_state(
+    db, competition: dict, *, settings, now: datetime
+) -> tuple[dict | None, dict | None]:
+    """Chốt ảnh chụp policy và desired state AI cho một bài nộp; không bao giờ chặn việc nộp bài.
+
+    Không chụp được nội dung chỉ làm lượt AI kết thúc ở ERROR: bài vẫn được chấm, vẫn xếp hạng và
+    vẫn qua được vòng duyệt của BTC y như khi tính năng AI không tồn tại. Trả `(None, None)` khi
+    cuộc thi không bật AI - hai field này không được xuất hiện trên document.
+    """
+    stored = config.stored_config(competition)
+    if not stored["enabled"]:
+        return None, None
+    try:
+        revision = await content_snapshot.capture_revision(
+            db, competition["_id"], settings=settings
+        )
+    except content_snapshot.SnapshotError as exc:
+        logger.warning(
+            "AI content snapshot failed competition=%s code=%s", competition["_id"], exc.code
+        )
+        snapshot = failed_snapshot(exc.code, now=now)
+    else:
+        snapshot = captured_snapshot(revision, now=now)
+    if not stored["auto_review"]:
+        return snapshot, None
+    return snapshot, initial_projection(
+        captured=snapshot["state"] == constants.SNAPSHOT_CAPTURED, now=now
+    )
+
+
+async def wake_worker(db, submission: dict, *, settings, now: datetime) -> None:
+    """Đánh thức worker cho desired state hiện tại; không có gì phải chạy thì không làm gì.
+
+    Hỏng ở đây không được làm hỏng một bài đã ghi thành công: reconciler coi "submission đang chờ mà
+    không có job" là lỗ hổng phải vá, nên job rơi ở đây vẫn được tạo ở vòng quét sau.
+    """
+    projection = submission.get("ai_review") or {}
+    if projection.get("state") != constants.AI_STATE_QUEUED:
+        return
+    try:
+        await ensure_job(
+            db,
+            submission,
+            source=constants.JOB_SOURCE_AUTO,
+            now=now,
+            max_attempts=settings.ai_review_max_attempts,
+        )
+    except Exception:
+        logger.exception("AI review enqueue failed submission=%s", submission["_id"])
+
+
 def cache_key(*, competition_id, content_hash: str, notebook_sha256: str, provider: str,
               host: str, model: str, max_notebook_chars: int) -> str:
     """Băm mọi thứ ảnh hưởng tới nội dung gửi model; đổi bất kỳ thành phần nào là đổi khoá.

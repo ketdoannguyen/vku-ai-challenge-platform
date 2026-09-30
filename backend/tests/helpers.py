@@ -1,6 +1,7 @@
 """Helper dùng chung cho test: đưa một cuộc thi draft tới trạng thái publish được."""
 
 import asyncio
+import itertools
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -8,6 +9,7 @@ from bson import ObjectId
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.scoring_attempts.store import ATTEMPTS_COLLECTION
 from app.submissions.service import SUBMISSIONS_COLLECTION
 
 ADMIN_CREDENTIALS = ("admin@vku.vn", "adminmatkhau1")
@@ -105,6 +107,9 @@ def ready_competition(
     return competition
 
 
+_submit_keys = itertools.count(1)
+
+
 def submit(
     client,
     competition_id: str,
@@ -112,12 +117,52 @@ def submit(
     filename: str = "answers.csv",
     notebook: bytes | None = VALID_NOTEBOOK,
     notebook_filename: str = "solution.ipynb",
+    key: str | None = None,
 ):
-    """Nộp bài kèm notebook; `notebook=None` để bỏ hẳn part notebook (test thiếu file)."""
+    """Nộp bài kèm notebook; `notebook=None` để bỏ hẳn part notebook (test thiếu file).
+
+    Mỗi lần gọi là một lần nhấn Nút mới nên mặc định có `Idempotency-Key` riêng; test nào muốn thử
+    gửi lại cùng một lần nhấn thì truyền `key` cố định.
+    """
     files = {"file": (filename, data, "text/csv")}
     if notebook is not None:
         files["notebook"] = (notebook_filename, notebook, "application/x-ipynb+json")
-    return client.post(f"/api/competitions/{competition_id}/submissions", files=files)
+    headers = {"Idempotency-Key": key or f"test-key-{next(_submit_keys)}"}
+    return client.post(
+        f"/api/competitions/{competition_id}/submissions", files=files, headers=headers
+    )
+
+
+def run_worker(client, *, max_attempts: int | None = None) -> int:
+    """Chạy worker hàng đợi thật trên Mongo mock cho tới khi hàng đợi rỗng."""
+    from app.core.config import get_settings
+    from app.scoring_attempts import worker
+
+    return asyncio.run(
+        worker.serve(
+            db=client.app.state.mongo.db,
+            settings=get_settings(),
+            stop=worker.Stop(),
+            max_attempts=max_attempts,
+            once=True,
+        )
+    )
+
+
+def attempt_documents(client, query: dict | None = None) -> list[dict]:
+    async def load():
+        cursor = client.app.state.mongo.db[ATTEMPTS_COLLECTION].find(query or {})
+        return [document async for document in cursor]
+
+    return asyncio.run(load())
+
+
+def attempt_status(client, competition_id: str, attempt_id: str) -> dict:
+    response = client.get(
+        f"/api/competitions/{competition_id}/submissions/attempts/{attempt_id}"
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
 
 
 def submission_documents(client, query: dict | None = None) -> list[dict]:
@@ -298,8 +343,11 @@ class FakeRunner:
         self.runtime_id = runtime_id
         self.error: Exception | None = None
         self.calls: list[dict] = []
+        self.timeouts: list[float | None] = []
 
-    def __call__(self, settings) -> "FakeRunner":
+    def __call__(self, settings, *, timeout: float | None = None) -> "FakeRunner":
+        # Trần gọi runner của riêng lượt này (worker cắt theo hạn 60 giây của bài) - giữ để test kiểm.
+        self.timeouts.append(timeout)
         return self
 
     async def evaluate(self, *, source_code: str, ground_truth_csv: str, submission_csv: str):
