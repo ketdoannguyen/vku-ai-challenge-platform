@@ -1701,12 +1701,35 @@ công. Chi tiết đầy đủ: `docs/SCORING_V2_E2E_PROD_2026-09-30.md`.
 | Mọi bài lưu trong DB ghim đúng runtime đã sinh ra điểm | đạt | Mongo chỉ-đọc: **7/7** bài (`1+2+2+2`), đều `version=2` và **cùng** `runtime_id` nội dung `sha256:ebac286c…`; 0 bài thiếu `scoring_ref` |
 | Dọn sạch, dữ liệu thật không đổi | đạt | 0 cuộc thi / 0 bài nộp / 0 membership / 0 account diễn tập còn hoạt động / 0 artifact; dữ liệu thật **1 account, 1 cuộc thi, 3 bài** đúng bằng trước đợt |
 
+### Production, hàng đợi chấm: 24/25 đồng thời, hạn 60 giây, 4 slot (2026-09-30)
+
+Release B `6ce4ce82a7fa` trên VPS thật, đo qua đường công khai Cloudflare → nginx → API → hàng đợi →
+worker → runner → container dùng một lần, **mười** cuộc thi biệt lập `[LOAD TEST]`, một thí sinh một
+tài khoản, bắn đúng N request qua một rào khởi chạy, không retry, poll theo nhịp thật 1,5 s của
+`SubmissionPage.tsx`. `EVALUATOR_MAX_CONCURRENCY=4` + `SCORING_WORKER_CONCURRENCY=4` (nâng từ 2 giữa
+đợt; trần chờ 20 và hạn 60 s giữ mặc định), chỉ `evaluator-runner` + `scoring-worker` được tạo lại.
+Chi tiết đầy đủ: `docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md`.
+
+| Check | Kết quả | Chi tiết |
+|---|---|---|
+| 20 người bấm nộp cùng lúc | đạt | **20/20 nhận `202`, 20/20 `COMPLETED`**, lượt cuối xong sau **33,5 s** - trước hàng đợi cùng cảnh huống cho 2 nhận + 18 `503`; 1/10/15 người cũng 100% nhận và 100% xong |
+| Vượt trần 20 chỗ chờ + 4 chạy | đạt | 24 người → **20 nhận + 4 `503 SCORING_QUEUE_FULL`**; 25 → **21 nhận + 4 `503`**; lượt bị từ chối **không** tạo document, **không** tiêu quota (đối chiếu Mongo sau stage) |
+| Chờ đúng thứ tự FIFO | đạt | `queue_position` trả lúc POST đơn điệu (`1,2,3,3,4,4,…`); số nhảy cách đúng bằng số lượt đã được nhấc lên chạy - chỗ chờ là tài nguyên nhả khi vào chạy |
+| Quá hạn 60 s → hoàn quota | đạt | 12 lượt × 25 s chấm: **4 `COMPLETED`** (còn 30,5-32,7 s trước hạn) + **8 `EXPIRED`** kèm `SUBMISSION_EXPIRED` (đóng ở 49,4-51,0 s), `quota_charged=false`, **0 bài** được ghi |
+| Trần slot không bị vượt | đạt | đếm container `vku-evaluator-*` theo **từng giây** từ cgroup: **đỉnh 2** ở giai đoạn 2 slot, **đỉnh 4** ở giai đoạn 4 slot, không giây nào vượt |
+| Bất biến quota và đối soát | đạt | **0 vi phạm** trên mọi stage; ba nguồn khớp nhau: log `api` **168** `202` = 159 lượt thật + 9 replay idempotent, Mongo **159** lượt = 141 `COMPLETED` + 16 `EXPIRED` + 2 `FAILED`, log worker **74** lượt đúng bốn stage pha 2 |
+| Không lượt kẹt | đạt | **0** `RESOLVING`, **0** chỗ chờ bị giữ, **0** dấu `quota_claims` sót lại sau đợt |
+| Tài nguyên VPS dưới tải | ghi nhận | RAM khả dụng đáy **5446 MiB** (cổng >2 GiB), **0 restart**, **0 OOM**, container chấm đỉnh **6,9 MiB** RSS; load1 đỉnh **5,26** **vượt** cổng <4, nhưng trong đúng cửa sổ đỉnh **toàn bộ** container cộng lại chỉ ~0,6/2 lõi và container chấm ~0 CPU → quy cho chính máy phát tải (24-25 luồng driver + hàng chục lượt tạo/huỷ container + sampler 1 Hz), không phải đường chấm |
+| Hai lượt `FAILED` (hạn chế đã biết) | ghi nhận | qp-dl `08:14:29`: hai `POST /evaluate → 503` rồi `attempt=…de27`/`…de28 outcome=FAILED`; container chấm của lượt bị bỏ dở giữ slot runner tới hạn riêng của nó. Cả hai **hoàn quota**, **không** ghi bài |
+| Dọn sạch, dữ liệu thật không đổi | đạt | 10 cuộc thi `[LOAD TEST]` xoá kèm cascade; 188 tài khoản diễn tập **vô hiệu hoá, không xoá**; 0 container sót; script + credential của diễn tập xoá khỏi VPS; dữ liệu thật **1 cuộc thi / 1 tài khoản / 3 bài nộp** |
+| Verdict | **GO** | 12/12 cổng đạt trừ cổng `load1`, và cổng đó quy được cho dụng cụ đo |
+
 ### Chưa kiểm
 
 | Check | Status | Ghi chú |
 |---|---|---|
-| **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng ngay trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
+| **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng diễn tập phía trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
 | Image runtime được build tự động | **chưa có** | `EVALUATOR_RUNTIME_IMAGE` (mặc định `vku-evaluator-runtime:1`) được `docker-compose.yml` tham chiếu nhưng **không service/script nào build nó** - image trên máy dev là do build tay cho lượt diễn tập. Triển khai mới phải build tay, nếu không mọi lượt chấm hỏng. Ghi ở mục 1 của ADR-048 và `docs/DEPLOYMENT.md` §3.3 |
-| **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (bảng ngay trên), nhưng tính năng mới chỉ được dùng bởi bốn cuộc thi diễn tập `[LOAD TEST]` đã xoá. Chưa lượt chấm thật nào của thí sinh thật |
-| Trần thời gian/RAM thật của container dưới tải **với bộ chấm thật** | **chưa đo** | Số đo production ở trên dùng bộ chấm thử `sleep(3.0)` + đọc hai CSV 120 dòng, nên nó đo **đường ống** chứ không đo chi phí chấm thật: ~4,3 s/bài là **sàn**, không phải dự báo. `EVALUATOR_MAX_CONCURRENCY=2` và timeout 30 s chọn theo kế hoạch §10.4; muốn tin con số độ trễ thì phải đo lại bằng một bộ chấm `pandas`/`scikit-learn` thật |
+| **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (hai bảng production phía trên), nhưng tính năng mới chỉ được dùng bởi các cuộc thi diễn tập `[LOAD TEST]` đã xoá. Cuộc thi thật duy nhất trên production, `tabular-lightweight`, chấm bằng **v1 trong tiến trình** (không sinh container chấm), nên đường v2 và hàng đợi chưa có phơi nhiễm thật |
+| Trần thời gian/RAM thật của container **trên VPS 2 lõi** với bộ chấm thật | **chưa đo** | Cổng tài nguyên 4 slot đã **đạt trên máy dev** với bộ chấm `pandas`/`scikit-learn` thật (4 lượt đồng thời trên 2 lõi: 7,2-7,5 s và 145-192 MiB mỗi container - bảng diễn tập phía trên), nhưng **mọi** số đo production đều dùng bộ chấm thử `sleep`, nên chúng đo **đường ống**: 33,5 s cho 20 lượt là **sàn**, không phải dự báo. Production đang chạy `EVALUATOR_MAX_CONCURRENCY=4` (quyết định có chủ ý, điều kiện đo lại ghi ở `docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md` §8a/§10): cuộc thi v2 đầu tiên có bộ chấm nặng phải được đo lại CPU/RAM với chính bộ chấm đó trước khi tin cấu hình 4 slot |
 | Chất lượng bộ chấm do admin viết | **ngoài phạm vi** | Nền tảng chỉ bảo đảm nó chạy trong hộp cát và trả đúng hợp đồng; không kiểm tra nó có công bằng không. Xem ADR-048 mục "hệ quả" |
