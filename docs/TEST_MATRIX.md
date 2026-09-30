@@ -1579,6 +1579,22 @@ hai đời cấu hình cùng sống.
 `tests/test_ai_review_service.py::test_moc_hoan_tat_cua_luot_thanh_cong_la_luc_goi_provider_xong`
 (ngày ghim nằm ngoài cửa sổ claim; hôm nay 2026-09-29).
 
+### Bằng chứng tự động (2026-09-30)
+
+Lượt đo lại **sau** khi nhánh gộp `main` (gồm `fb2212a` sửa case trên) và trước khi phát hành B -
+con số 776/1 deselected ở bảng trên là của lượt gate sớm hơn, **không** phải trạng thái phát hành:
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **790 passed, 0 failed** (178 s) - case AI review đã xanh thật, không còn `deselect` nào |
+| `bash deploy/vps/tests/auto-deploy.test.sh` | **209 ok, 0 fail** |
+| `cd frontend && npm test` | **506 passed (34 files)** |
+| `cd frontend && npm run build` / `npm run lint` | `tsc -b` + `vite build` sạch; lint 0 error |
+| `docker compose config --quiet` (env giả) | OK |
+
+Con số 776 → 790 chênh 14 case là hai tệp mới của lượt gia cố runner
+(`test_evaluator_runtime_entrypoint.py`, `test_evaluator_runner_server.py`) cộng case của `fb2212a`.
+
 ### Bằng chứng đo tay: diễn tập Docker thật (2026-09-29)
 
 Kịch bản nằm ở `/tmp/evaluator-drill/` (`drill.py`, `service_drill.py`, `probe_types.py`) - **không**
@@ -1597,12 +1613,30 @@ gõ tay.
 | Bộ chấm ném lỗi và hàm sai chữ ký → `EVALUATOR_FAILED` kèm traceback; vòng lặp vô hạn → `EVALUATOR_TIMEOUT` sau 30,2 s | đạt | |
 | Runner thật (`app/evaluator_runner/server.py`): 200 kèm `metrics` + `duration_ms`; 422 cho bộ chấm hỏng và cho field lạ; 503 `EVALUATOR_UNAVAILABLE` trong 0,00 s khi hết slot; 413 cho `Content-Length` 40 MB | đạt | 6/6 case HTTP của `service_drill.py`; log runner không WARNING/ERROR/traceback, 0 container sót lại |
 
+### Production, 1/10/15/20 bài nộp đồng thời (2026-09-30)
+
+Release B `23676bf8bbed` trên VPS thật, đo qua đường công khai, bốn cuộc thi biệt lập, một thí sinh
+một tài khoản, bắn đúng N request qua một rào khởi chạy, không retry. `EVALUATOR_MAX_CONCURRENCY=2`
+**không đổi suốt đợt** - mục tiêu là đo hành vi từ chối có kiểm soát, không phải ép 20 lượt thành
+công. Chi tiết đầy đủ: `docs/SCORING_V2_E2E_PROD_2026-09-30.md`.
+
+| Check | Kết quả | Chi tiết |
+|---|---|---|
+| Số lượt `201`/`503` ở 1/10/15/20 người nộp cùng lúc | đạt | **1→1 `201`; 10→2 `201`+8 `503`; 15→2 `201`+13 `503`; 20→2 `201`+18 `503`** - đúng `N−2` như dự báo, vì 2 slot bị chiếm ngay từ đầu |
+| Mọi lượt bị từ chối là `EVALUATOR_UNAVAILABLE`, không lẫn mã khác | đạt | 39/39 lượt; log `api` đếm 8/13/18 khớp **từng stage** với driver, và đó là mã lỗi **duy nhất** trong cửa sổ đo |
+| Runner **từ chối ngay**, không xếp hàng | đạt | `503` về trong **0,7-1,5 s**, trong khi slot đầu mãi ~4,5 s mới nhả - có xếp hàng thì không thể nhanh hơn 4,5 s |
+| Lượt bị từ chối **không** tiêu lượt nộp | đạt | 46 thí sinh, **0 vi phạm**: từng người `used_delta == stored_delta == (1 nếu 201, 0 nếu 503)` |
+| Số container con đồng thời không vượt trần | đạt | đỉnh **2** ở cả ba stage tải, đúng bằng `EVALUATOR_MAX_CONCURRENCY`; 0 container sót sau mỗi stage |
+| Tài nguyên VPS dưới tải | đạt | load1 đỉnh **2,48**/2 lõi (cổng <4), RAM khả dụng đáy **5,88 GiB** (cổng >2 GiB), **0 restart** `api`/`runner`, `/api/health` `200` suốt |
+| Mọi bài lưu trong DB ghim đúng runtime đã sinh ra điểm | đạt | Mongo chỉ-đọc: **7/7** bài (`1+2+2+2`), đều `version=2` và **cùng** `runtime_id` nội dung `sha256:ebac286c…`; 0 bài thiếu `scoring_ref` |
+| Dọn sạch, dữ liệu thật không đổi | đạt | 0 cuộc thi / 0 bài nộp / 0 membership / 0 account diễn tập còn hoạt động / 0 artifact; dữ liệu thật **1 account, 1 cuộc thi, 3 bài** đúng bằng trước đợt |
+
 ### Chưa kiểm
 
 | Check | Status | Ghi chú |
 |---|---|---|
 | **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng ngay trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
 | Image runtime được build tự động | **chưa có** | `EVALUATOR_RUNTIME_IMAGE` (mặc định `vku-evaluator-runtime:1`) được `docker-compose.yml` tham chiếu nhưng **không service/script nào build nó** - image trên máy dev là do build tay cho lượt diễn tập. Triển khai mới phải build tay, nếu không mọi lượt chấm hỏng. Ghi ở mục 1 của ADR-048 và `docs/DEPLOYMENT.md` §3.3 |
-| Chạy được trên production | **chưa có, cố ý** | `docker-compose.prod.yml` **không** khai service `evaluator-runner` lẫn nhóm `EVALUATOR_*`, và `deploy/vps/auto-deploy.sh` chỉ quản `api`/`ai-review-worker`/`web`. Hệ quả: trên production mọi lượt chấm v2 trả `503 EVALUATOR_UNAVAILABLE`; cuộc thi v1 **không** bị ảnh hưởng. Bốn việc cần làm để bật: `docs/DEPLOYMENT.md` §3.3 |
-| Trần thời gian/RAM thật của container dưới tải (nhiều lượt song song) | **chưa đo** | `EVALUATOR_MAX_CONCURRENCY=2` và timeout 30 s là con số chọn theo kế hoạch §10.4, chưa có số đo trên máy thật |
+| **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (bảng ngay trên), nhưng tính năng mới chỉ được dùng bởi bốn cuộc thi diễn tập `[LOAD TEST]` đã xoá. Chưa lượt chấm thật nào của thí sinh thật |
+| Trần thời gian/RAM thật của container dưới tải **với bộ chấm thật** | **chưa đo** | Số đo production ở trên dùng bộ chấm thử `sleep(3.0)` + đọc hai CSV 120 dòng, nên nó đo **đường ống** chứ không đo chi phí chấm thật: ~4,3 s/bài là **sàn**, không phải dự báo. `EVALUATOR_MAX_CONCURRENCY=2` và timeout 30 s chọn theo kế hoạch §10.4; muốn tin con số độ trễ thì phải đo lại bằng một bộ chấm `pandas`/`scikit-learn` thật |
 | Chất lượng bộ chấm do admin viết | **ngoài phạm vi** | Nền tảng chỉ bảo đảm nó chạy trong hộp cát và trả đúng hợp đồng; không kiểm tra nó có công bằng không. Xem ADR-048 mục "hệ quả" |
