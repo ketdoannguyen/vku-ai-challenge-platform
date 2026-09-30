@@ -77,10 +77,41 @@ class Settings(BaseSettings):
     evaluator_timeout_seconds: int = 30
     evaluator_max_concurrency: int = 2
 
+    # Hàng đợi chấm v2 (ADR-048). Hạn tính từ lúc API nhận request, gồm cả upload, chờ, chấm và ghi
+    # bài; `scoring_commit_reserve_seconds` là phần để dành cho bước ghi cuối. Trần hàng đợi là số
+    # lượt CHỜ được nhận, không tính các lượt đang chấm.
+    scoring_deadline_seconds: int = 60
+    scoring_commit_reserve_seconds: int = 10
+    scoring_queue_capacity: int = 20
+    scoring_worker_concurrency: int = 2
+    scoring_poll_interval_seconds: float = 1
+    scoring_reconcile_interval_seconds: int = 30
+    scoring_reconcile_batch: int = 100
+    # File worker ghi mỗi vòng lặp để healthcheck của container biết nó còn sống.
+    scoring_heartbeat_file: str = "/tmp/scoring-worker.heartbeat"
+
     @property
     def evaluator_client_timeout_seconds(self) -> float:
         """Chờ lâu hơn trần của runner một nhịp để lỗi timeout đến từ phía biết lý do."""
         return self.evaluator_timeout_seconds + 15
+
+    @property
+    def scoring_lease_seconds(self) -> int:
+        """Lease phải dài hơn trọn một lượt chấm kể cả bước ghi, nếu không worker tự giành lại lượt."""
+        return self.scoring_deadline_seconds + 60
+
+    @property
+    def scoring_worker_config_valid(self) -> bool:
+        """Worker không được có nhiều slot hơn số chỗ runner nhận, nếu không các lượt thừa bị từ chối.
+
+        Trần thật nằm ở runner - nơi biết tài nguyên của máy - nên cấu hình lệch phải thoát ngay,
+        không tự hạ xuống.
+        """
+        return (
+            1 <= self.scoring_worker_concurrency <= self.evaluator_max_concurrency
+            and self.scoring_queue_capacity >= 1
+            and 0 < self.scoring_commit_reserve_seconds < self.scoring_deadline_seconds
+        )
 
     @property
     def ai_review_worker_config_valid(self) -> bool:

@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
@@ -23,6 +24,7 @@ from app.memberships import service as memberships_service
 from app.memberships.admin_router import router as admin_memberships_router
 from app.memberships.router import router as memberships_router
 from app.scoring.admin_router import router as admin_scoring_router
+from app.scoring_attempts import store as scoring_attempts_store
 from app.submissions.admin_router import global_router as admin_submissions_global_router
 from app.submissions.admin_router import router as admin_submissions_router
 from app.submissions import service as submissions_service
@@ -51,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await memberships_service.ensure_indexes(ctx.db)
         await content_service.ensure_indexes(ctx.db)
         await submissions_service.ensure_indexes(ctx.db)
+        await scoring_attempts_store.ensure_indexes(ctx.db)
         await ai_review_service.ensure_indexes(ctx.db)
         yield
 
@@ -136,6 +139,17 @@ async def resolve_account_middleware(request: Request, call_next):
     token = request.cookies.get(get_settings().session_cookie_name, "")
     if token and request.url.path.startswith("/api"):
         request.state.account = await resolve_session(request.app.state.mongo.db, token)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def received_at_middleware(request: Request, call_next):
+    """Mốc nhận request, sớm hơn cả bước parse multipart.
+
+    Hạn 60 giây của một lượt chấm tính từ đây (ADR-048), nên nó phải đặt trước mọi thứ khác; đăng ký
+    sau `resolve_account_middleware` là đủ vì middleware thêm sau nằm ngoài cùng.
+    """
+    request.state.received_at = datetime.now(timezone.utc)
     return await call_next(request)
 
 

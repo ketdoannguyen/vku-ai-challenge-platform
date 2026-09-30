@@ -159,52 +159,60 @@ notebook của thí sinh sẽ đi tới đâu trước khi bật AI.
 Hai host ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS`/`_HTTP_HOSTS` chỉ nên có mặt trên môi trường phát triển;
 đây là danh sách **mở khoá**, nên một entry ở đây nới rộng biên chứ không thu hẹp nó.
 
-### 3.3 Bộ chấm Python (ADR-048) - **chưa nối vào production**
+### 3.3 Bộ chấm Python và hàng đợi chấm (ADR-048) - **bộ chấm đã lên production, hàng đợi thì chưa**
 
-Trạng thái thật, đọc trước khi định bật: **`docker-compose.prod.yml` chưa có service `evaluator-runner`
-và chưa có nhóm biến `EVALUATOR_*`**. Hệ quả trên production hiện tại: mọi lượt chấm của một cuộc thi
-v2 trả `503 EVALUATOR_UNAVAILABLE` (API không phân giải được `http://evaluator-runner:8100`) - cuộc
-thi v1 **không** bị ảnh hưởng, vì chúng không đi qua runner. Đây là **cố ý**: thêm một service mà
-deployer không quản thì nó không bao giờ được `up`, và một service "có khai nhưng không chạy" còn tệ
-hơn không khai, vì nó làm người vận hành tin rằng tính năng đã sẵn sàng.
+Trạng thái thật, đọc trước khi định nâng cấp: **bộ chấm đang chạy trên production** từ 2026-09-30 (mốc
+ở `docs/DECISIONS.md`, ADR-048): `evaluator-runner` là service thứ tư, image runtime
+`vku-evaluator-runtime:1` build **tay** một lần trên VM và `runtime_id` ghim theo nội dung. Cấu hình đo
+là `EVALUATOR_MAX_CONCURRENCY=2`; số đo 1/10/15/20 bài nộp đồng thời ở
+`docs/SCORING_V2_E2E_PROD_2026-09-30.md`.
 
-Để bật trên production cần **đủ bốn** việc, không việc nào tự động:
+**Chưa lên production: hàng đợi chấm** - nó thêm service thứ **năm**, `scoring-worker`: cùng image với
+`api` (`target: api`) nhưng chạy `python -m app.scoring_attempts.worker`, **không** có docker socket
+(đường duy nhất tới docker daemon vẫn là `evaluator-runner`), chỉ đọc/ghi Mongo rồi gọi runner qua HTTP.
+Từ release này thí sinh bấm Nút là **vào hàng đợi** thay vì nhận 503 khi runner bận, nên
+`EVALUATOR_MAX_CONCURRENCY` trở thành **trần phòng vệ** của runner chứ không còn là trần của cả hệ thống.
 
-1. **Build image runtime** trên VM (không service/script nào làm hộ):
-   `sudo docker build -t vku-evaluator-runtime:1 evaluator-runtime` - chạy từ repo trên VM. Thiếu bước
-   này thì runner vẫn lên nhưng **mọi** lượt chấm hỏng: runner phân giải image thành ID nội dung ngay
-   lúc khởi động, không phân giải được thì `/health` trả `"status": "degraded"` kèm `runtime_id: null`
-   và mọi lượt chấm là `503 EVALUATOR_UNAVAILABLE`.
-2. **Khai service `evaluator-runner`** trong `docker-compose.prod.yml` (mẫu ở `docker-compose.yml`:
-   cùng image backend, `target: runner`, mount `/var/run/docker.sock`, `expose 8100`, không publish
-   port, không route Nginx) cùng nhóm biến `EVALUATOR_*` cho service `api`.
-3. **Dạy deployer biết service thứ tư** - bản deployer trong repo đã làm (ADR-048): nó quản `api`,
-   `ai-review-worker`, `evaluator-runner`, `web`; `backend/*`, `docker-compose.prod.yml` và
-   `evaluator-runtime/*` đều map vào runner; runner có image riêng theo SHA (`vku-challenge-runner`,
-   `target: runner`) và đứng **trước** `api` trong lượt `up`; rollback về bản chưa khai runner thì
-   `rm -sf evaluator-runner` thay vì chạy lại nó; trước khi thay container, deployer kiểm image runtime
-   **tồn tại** (thiếu thì dừng, in lệnh build tay, và **không** ghi `last-failed` - đây là thao tác tay
-   còn thiếu, không phải commit hỏng). Hai việc nó cố ý **không** làm: build/xoá image runtime, và dọn
-   container của một service bị **bỏ** khỏi compose (nó chỉ quản service **có khai**) - bỏ runner khỏi
-   compose là việc của người vận hành.
-   Sửa deployer trong repo **không** tự áp dụng lên VM: phải chạy lại
-   `deploy/vps/install-auto-deploy.sh` từ commit đã duyệt, và việc đó phải xong **trước** khi push
-   release khai `evaluator-runner` - bản deployer cũ không bao giờ `up` service này, và một rollback
-   sẽ để nó chạy mã của bản vừa hỏng.
-4. **Cấp quyền cho runner**: nó là tiến trình **duy nhất** được mount docker socket. Trên VM một
-   người dùng, điều đó nghĩa là runner có quyền tương đương root trên host - chấp nhận được **chỉ vì**
-   code chấm của admin chạy trong container con với `--network none --read-only --cap-drop ALL
-   --user 65534:65534`, và tiến trình runner không bao giờ `exec` code đó. Đừng nới hai cờ đó.
+Hai việc phải làm, đúng thứ tự:
 
-Môi trường **dev** thì đã sẵn: `docker-compose.yml` có service, chỉ cần build image runtime một lần
-(`docker build -t vku-evaluator-runtime:1 evaluator-runtime`) rồi `docker compose up -d --build`.
+1. **Cài lại deployer từ commit đã duyệt TRƯỚC khi push release khai `scoring-worker`**
+   (`sudo deploy/vps/install-auto-deploy.sh`). Bản đóng băng trên VM không biết service này: nó build
+   và recreate những service nó biết rồi **bỏ quên** worker mà không báo gì - tính năng im lặng không
+   chạy dù release đã lên, và một rollback sẽ để container cũ chạy mã của bản vừa hỏng. Đã xảy ra một
+   lần với `ai-review-worker`, một lần với `evaluator-runner`.
+2. **Nâng số slot, hai biến phải đổi cùng nhau**: `EVALUATOR_MAX_CONCURRENCY` (trần của runner) và
+   `SCORING_WORKER_CONCURRENCY` (số lượt chấm song song của worker). Worker **từ chối khởi động** (exit
+   2 rồi restart vô hạn, trong khi mọi healthcheck của runner vẫn xanh) nếu số của nó lớn hơn trần
+   runner. Bẫy đi kèm, đã gặp thật trên máy dev: `scoring-worker` **phải** khai
+   `EVALUATOR_MAX_CONCURRENCY` y như `evaluator-runner`, vì nó so hai con số **trong tiến trình của
+   chính nó**; thiếu biến thì nó đọc mặc định `2` trong khi runner đã nâng lên `4`. Có test compose
+   (`backend/tests/test_compose_wiring.py`) chặn đúng lỗi này.
+
+Bốn slot là lựa chọn **đã đo**, không phải phỏng đoán: trên máy dev (2 lõi, 4 container 1 CPU / 1 GiB)
+bốn lượt đồng thời xong trong 7,2-7,5 s mỗi lượt, đỉnh RSS mỗi container 145-192 MiB (tổng lớn nhất
+~800 MiB trên ~5,9 GiB khả dụng), rất xa trần 30 s - số đo đầy đủ ở ADR-048. Đổi hai biến thì
+`recreate` cả `evaluator-runner` lẫn `scoring-worker` (`api` cũng đọc `SCORING_*`, cho vào cùng lượt).
+Rollback: chờ các lượt đang chấm kết thúc (hoặc để nguyên - lượt quá 60 s tự đóng và hoàn quota) rồi mới
+lùi; lùi về bản chưa khai `scoring-worker` thì deployer `rm -sf scoring-worker` thay vì chạy lại nó.
+
+Hai điều **không** đổi: image runtime vẫn build **tay** trên VM
+(`sudo docker build -t vku-evaluator-runtime:1 evaluator-runtime`) - không service/script nào làm hộ, và
+deployer chỉ kiểm nó **tồn tại** trước khi thay container (thiếu thì dừng, in lệnh build tay, và
+**không** ghi `last-failed`), không bao giờ build hay xoá nó; và `evaluator-runner` vẫn là tiến trình
+**duy nhất** mount docker socket, tức quyền tương đương root trên VM một người dùng - chấp nhận được
+**chỉ vì** code chấm của admin chạy trong container con với `--network none --read-only --cap-drop ALL
+--user 65534:65534`, và tiến trình runner không bao giờ `exec` code đó. Đừng nới hai cờ đó.
+
+Môi trường **dev** thì đã sẵn: `docker-compose.yml` có cả hai service, chỉ cần build image runtime một
+lần (`docker build -t vku-evaluator-runtime:1 evaluator-runtime`) rồi `docker compose up -d --build`.
 
 | Biến (dev) | Ý nghĩa |
 |---|---|
 | `EVALUATOR_RUNTIME_IMAGE` | Image của container chấm, mặc định `vku-evaluator-runtime:1`. **Chỉ runner đọc**, và **phải build tay**. Runner phân giải tag thành **ID nội dung** (`docker image inspect`) ngay lúc khởi động, ghim nó cho cả vòng đời process và từ chối chấm khi không phân giải được - nên `runtime_id` trong bằng chứng xác minh và trong `scoring_ref` là **nội dung** đã chạy, không phải một cái tên có thể bị build đè. Đổi giá trị này **không** tự làm bằng chứng chạy thử hết hiệu lực: vân tay tính theo runtime đã **ghim** trong cấu hình lúc chạy thử, không theo biến này - cố ý, vì `scoring/test` bị khoá sau bài nộp đầu tiên nên đóng cửa theo biến sẽ chặn vĩnh viễn đường chấm của cuộc thi đang sống. Bù lại, điểm sau đó do image **mới** sinh ra: muốn có bằng chứng cho image mới thì phải chạy thử lại lúc cuộc thi còn sửa được |
 | `EVALUATOR_TIMEOUT_SECONDS` | Trần một lượt chấm, mặc định `30`. API dùng timeout `+15 s` để runner kịp trả mã lỗi trước khi API bỏ cuộc. Container con tự kết thúc ở mốc `+5 s` nữa (`VKU_DEADLINE_SECONDS`, kèm `--ulimit cpu` làm đường chết cho vòng lặp nằm trong C): runner còn sống thì chính nó cắt lượt chấm, còn runner chết giữa lượt thì container không chạy mãi trên VPS |
-| `EVALUATOR_MAX_CONCURRENCY` | Số lượt chấm song song trong **một** process runner, mặc định `2`. Hết slot thì **từ chối** (`EVALUATOR_UNAVAILABLE`) chứ không xếp hàng. VPS chỉ có 2 lõi (ADR-046) - nâng phải chắc còn CPU/RAM cho từng slot |
-| `EVALUATOR_RUNNER_URL` | `http://evaluator-runner:8100`, **chỉ `api` đọc**. Sai giá trị = mọi lượt chấm v2 trả 503 |
+| `EVALUATOR_MAX_CONCURRENCY` | Số lượt chấm song song trong **một** process runner, mặc định `2`. Từ hàng đợi (ADR-048) đây là **trần phòng vệ**: `scoring-worker` phải khai cùng giá trị và `SCORING_WORKER_CONCURRENCY` phải ≤ nó - hết slot ở runner là lỗi cấu hình, không phải đường thí sinh gặp, vì hàng đợi nằm ở worker. VPS chỉ có 2 lõi (ADR-046) - nâng phải chắc còn CPU/RAM cho từng slot, số đo 4 slot ở ADR-048 |
+| `EVALUATOR_RUNNER_URL` | `http://evaluator-runner:8100`, **`api` và `scoring-worker` đọc**. Sai giá trị = mọi lượt chấm v2 trả 503 |
+| `SCORING_WORKER_CONCURRENCY` / `SCORING_QUEUE_CAPACITY` / `SCORING_DEADLINE_SECONDS` | Nhịp và trần của hàng đợi: số lượt chấm song song của worker (≤ `EVALUATOR_MAX_CONCURRENCY`), số lượt **chờ** được nhận, và hạn của trọn một lượt nộp (> `EVALUATOR_TIMEOUT_SECONDS`). Hai nhịp `SCORING_POLL_INTERVAL_SECONDS`/`SCORING_RECONCILE_INTERVAL_SECONDS` chỉ ảnh hưởng độ trễ phát hiện sự cố. Ý nghĩa đầy đủ: `deploy/production.env.example` |
 
 ### 3.1 MinIO: bootstrap bucket và credential (ADR-028)
 

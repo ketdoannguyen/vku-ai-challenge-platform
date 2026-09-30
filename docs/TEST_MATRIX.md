@@ -1544,6 +1544,42 @@ hai đời cấu hình cùng sống.
 | Export: sheet Results dựng cột theo hợp đồng, sheet Info theo cùng hợp đồng | passing | `test_export_columns_and_info_sheet_follow_the_contract` |
 | Bảng bài nộp toàn cục trả kèm metadata metric của từng cuộc thi | passing | `test_global_admin_list_carries_each_competitions_metric_metadata` |
 
+### Backend - hàng đợi chấm (bổ sung 2026-09-30, cùng ADR-048)
+
+`backend/tests/test_scoring_queue.py` (17 case) khoá phần hàng đợi; `test_scoring_v2_api.py` được
+sửa để đi qua đường 202 (không còn case nào giả định POST trả 201 ngay).
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Một lần nhấn Nút là **một lượt** trong hàng đợi: POST trả 202 kèm vị trí chờ | passing | `test_scoring_queue.py::test_mot_lan_nhan_nut_la_mot_luot_cho_duoc_cham` |
+| Gửi lại **cùng key** (mất mạng, bấm lần hai) nhận lại đúng lượt cũ, không tạo lượt thứ hai, không tiêu thêm quota | passing | `test_cung_mot_lan_nhan_nut_thi_khong_tao_luot_thu_hai` |
+| Thiếu `Idempotency-Key` → 400 và **không** vào hàng đợi; cùng key nhưng cặp file khác → 409 `IDEMPOTENCY_KEY_REUSED` | passing | `test_thieu_idempotency_key_thi_khong_vao_hang_doi`, case 409 cùng tệp |
+| Hàng đợi đầy → **503 ngay**, không giữ lượt, không upload, không tiêu quota | passing | `test_hang_doi_day_thi_tra_503_ngay_va_khong_giu_luot` |
+| Quá 60 giây → lượt `EXPIRED` kèm `SUBMISSION_EXPIRED`, **hoàn quota**, dọn file tạm | passing | `test_qua_60_giay_thi_luot_bi_dong_va_khong_ton_luot` |
+| Bài hỏng (CSV sai) hoàn lượt và không giữ file tạm | passing | `test_bai_hong_thi_hoan_luot_va_khong_giu_file_tam` |
+| Hoàn lượt hai lần không thành hai suất; quota cấp **đúng** số suất khi nhiều người nộp đồng thời | passing | `test_hoan_luot_hai_lan_khong_thanh_hai_suat`, `test_quota_chi_duoc_cap_dung_so_suat_khi_nop_dong_thoi` |
+| Cuộc thi đóng hoặc membership bị vô hiệu hoá giữa lúc chờ → lượt không thành công | passing | `test_dong_cuoc_thi_giua_luc_cho_thi_luot_khong_thanh_cong`, `test_vo_hieu_hoa_membership_thi_luot_khong_duoc_cham` |
+| Kho tạm hỏng lúc nhận bài → không giữ lượt | passing | `test_kho_tam_hong_khi_nhan_bai_thi_khong_giu_luot` |
+| Worker chết giữa lúc chấm → reconciler trả lượt về hàng đợi; chết quá hạn → đóng lượt và hoàn suất | passing | `test_worker_chet_giua_luc_cham_thi_doi_soat_tra_luot_ve_hang_doi`, `test_worker_chet_qua_han_thi_dong_luot_va_hoan_suat` |
+| Ghi kết quả **không rõ** → `RESOLVING` rồi đối soát: có điểm thì ghi nốt bài nộp, không có điểm thì đóng lượt - không bao giờ kết luận `FAILED` khi chưa chứng minh | passing | `test_ket_qua_cham_da_co_thi_doi_soat_ghi_not_bai_nop`, `test_ghi_bai_khong_ro_ket_qua_ma_khong_co_diem_thi_dong_luot` |
+| Xoá cuộc thi dọn luôn lượt đang chờ; lượt của người khác không đọc được | passing | `test_xoa_cuoc_thi_thi_luot_dang_cho_bi_xoa_luon`, `test_luot_cua_nguoi_khac_khong_doc_duoc` |
+| `scoring-worker` khai `EVALUATOR_MAX_CONCURRENCY` **đúng như** `evaluator-runner` ở cả hai file compose | passing | `test_compose_wiring.py::test_runner_and_worker_declare_the_same_concurrency_ceiling` |
+| Mọi service mount ổ dữ liệu chung đều khai `DATA_DIR=/data` | passing | `test_compose_wiring.py::test_services_mounting_shared_data_volume_declare_data_dir` |
+
+Hàng đợi nằm **trên** runner, không thay thế nó: runner vẫn từ chối ngay khi hết slot (dòng cuối bảng
+hộp cát bên dưới), còn API đã nhận lượt và trả 202 từ trước đó - hai cơ chế ở hai tầng khác nhau.
+
+### Frontend - hàng đợi trên trang nộp bài
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Vào hàng đợi rồi **tự poll** ra metrics và quota còn lại, thí sinh không phải bấm lại | passing | `SubmissionPage.test.tsx::submit hiển thị loading, vào hàng đợi rồi ra metrics và quota còn lại` |
+| Một lần nhấn Nút là một `Idempotency-Key`: gửi lại sau khi mất mạng vẫn cùng key | passing | `SubmissionPage.test.tsx::một lần nhấn Nút là một Idempotency-Key: gửi lại sau khi mất mạng vẫn cùng key` |
+| Mở lại trang thì nhận lại **lượt đang chờ** thay vì nộp mới | passing | `SubmissionPage.test.tsx::mở lại trang thì nhận lại lượt đang chờ thay vì nộp mới` |
+| Quá 60 giây thì báo **không tính lượt** và cho nộp lại bằng key mới | passing | `SubmissionPage.test.tsx::quá 60 giây thì báo không tính lượt và cho nộp lại bằng key mới` |
+| Lượt hỏng thì hiện lý do, không tính lượt và vẫn nộp lại được | passing | `SubmissionPage.test.tsx::lượt hỏng thì hiện lý do, không tính lượt và vẫn nộp lại được` |
+| Lượt `RESOLVING` thì **vẫn chờ** dù đã quá 60 giây - không hối thí sinh nộp lại trong lúc hệ thống còn đang đối soát | passing | `SubmissionPage.test.tsx::lượt đang đối soát thì vẫn chờ dù đã quá 60 giây` |
+
 ### Runner - hộp cát (`app/evaluator_runner/sandbox.py`)
 
 | Check | Status | Cách verify |
@@ -1595,6 +1631,16 @@ con số 776/1 deselected ở bảng trên là của lượt gate sớm hơn, **
 Con số 776 → 790 chênh 14 case là hai tệp mới của lượt gia cố runner
 (`test_evaluator_runtime_entrypoint.py`, `test_evaluator_runner_server.py`) cộng case của `fb2212a`.
 
+### Bằng chứng tự động (2026-09-30, hàng đợi)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **809 passed, 0 failed** (hơn lượt 790 ở trên 19 case: 17 case `test_scoring_queue.py` cộng 2 case compose) |
+| `cd frontend && npm test` | **511 passed (34 files)** (hơn 506 năm case hàng đợi ở `SubmissionPage.test.tsx`) |
+| `cd frontend && npm run build` / `npm run lint` | `tsc -b` + `vite build` sạch; lint 0 error, 25 warning - **bằng** mức nền của `main`, không phát sinh ở tệp đã sửa |
+| `bash deploy/vps/tests/auto-deploy.test.sh` | **214 ok, 0 fail** (hơn lượt trước 5 case của Release A) |
+| `docker compose config --quiet` (env giả, cả hai file) | OK |
+
 ### Bằng chứng đo tay: diễn tập Docker thật (2026-09-29)
 
 Kịch bản nằm ở `/tmp/evaluator-drill/` (`drill.py`, `service_drill.py`, `probe_types.py`) - **không**
@@ -1612,6 +1658,30 @@ gõ tay.
 | `np.int64`/`np.float32`/`ndarray`/NaN/Inf/`bool` bị từ chối; `np.float64` qua | đạt | `probe_types.py`: NumPy 2 làm `np.float64` thành lớp con của `float` |
 | Bộ chấm ném lỗi và hàm sai chữ ký → `EVALUATOR_FAILED` kèm traceback; vòng lặp vô hạn → `EVALUATOR_TIMEOUT` sau 30,2 s | đạt | |
 | Runner thật (`app/evaluator_runner/server.py`): 200 kèm `metrics` + `duration_ms`; 422 cho bộ chấm hỏng và cho field lạ; 503 `EVALUATOR_UNAVAILABLE` trong 0,00 s khi hết slot; 413 cho `Content-Length` 40 MB | đạt | 6/6 case HTTP của `service_drill.py`; log runner không WARNING/ERROR/traceback, 0 container sót lại |
+
+### Bằng chứng đo tay: hàng đợi và cổng tài nguyên trên máy dev (2026-09-30)
+
+Hai script ở `/tmp/vku-queue/` (`queue_e2e.py`, `measure.py`) - **không** vào repo, cùng quy ước với
+các đợt diễn tập trước: bằng chứng **một lần**, muốn thành cổng lặp lại được thì phải viết lại
+script. Bộ chấm dùng cho đợt này là bộ chấm **thật** (pandas `read_csv` + merge theo id +
+`LogisticRegression(max_iter=300)` + `accuracy_score`/`f1_score`) trên 60 000 dòng × 6 đặc trưng
+(3,2 MiB ground truth, 3,1 MiB bài nộp) - khác hẳn bộ chấm `sleep(3.0)` của đợt production hôm
+2026-09-30, và đây là lý do đợt này trả lời được câu hỏi "tốn bao nhiêu RAM/CPU".
+
+| Check | Kết quả | Chi tiết |
+|---|---|---|
+| Bộ chấm thật đi hết đường ống API → hàng đợi → worker → runner → container, 2 slot rồi 4 slot | đạt | mọi lượt `COMPLETED` với `primary_score 1.0`; 2 người: 146,5/146,4 MiB và 5,6/5,4 s mỗi lượt |
+| **Cổng tài nguyên cho 4 slot** | **đạt** | 4 lượt đồng thời trên 2 lõi: **7,15-7,46 s** mỗi lượt (+18% so với chạy một mình) và **145-192 MiB** mỗi container - cách xa trần 30 s và 1 GiB |
+| Sàn của hộp cát và chi phí import | đạt | python trần + entrypoint (giữ 2 s) **23,0 MiB**; thêm `import pandas` + `sklearn` **105,3 MiB**; bộ chấm đầy đủ **149,3 MiB** - 55% đỉnh RSS là import, nên **không tối ưu gì** (cắt được chỉ có thể là cắt thứ bộ chấm cần) |
+| Lượt chấm đầu tiên trên máy (page cache nguội) | ghi nhận | 247,8 MiB / 9,11 s - cao hơn hẳn các lượt sau; đây là hiệu ứng **page cache** của cgroup v2, không phải mức tiêu thụ thật của bộ chấm |
+| Chi phí upload nằm trong ngân sách 60 s | ghi nhận | nộp 3,1 MiB: **2,47 s** (2 người) và **4,88-5,00 s** (4 người), so với **83,7 ms** cho payload nhỏ của đợt diễn tập - dung lượng file ăn thẳng vào hạn 60 giây |
+| Worker chết ~3 phút với 4 lượt đang chờ (ngoài kế hoạch) | đạt | bật lại, reconciler ghi `{'expired': 4, 'requeued': 0, 'resolved': 0, 'refunded': 0}`; quota đọc lại qua API đúng bằng số bài đã chấm xong (u1=1, u2=1, u3=0, u4=0) - **không rò quota, không lượt kẹt** |
+| Dọn sạch sau diễn tập | đạt | 7 run-tag (`q-dev-s1`, `q-dev-s10`, `q-dev-s24`, `q-dev-s24b`, `q-dev-dead`, `q-dev-dead2`, `q-dev-measure`) đều xoá cuộc thi; account **vô hiệu hoá, không xoá**; 0 cuộc thi `loadtest-*` sót, 0 account `@loadtest.example.com` còn hoạt động |
+
+Một lỗi thật đã gặp và đã chặn bằng test: nâng runner lên 4 slot mà **không** khai
+`EVALUATOR_MAX_CONCURRENCY` cho `scoring-worker` làm worker đọc mặc định 2, từ chối khởi động và
+restart vô hạn - 4 lượt nằm `QUEUED` suốt 180 s với **0** container, trong khi healthcheck của runner
+vẫn xanh. Xem dòng compose ở bảng hàng đợi phía trên.
 
 ### Production, 1/10/15/20 bài nộp đồng thời (2026-09-30)
 

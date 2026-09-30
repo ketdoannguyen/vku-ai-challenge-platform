@@ -29,6 +29,7 @@ async def evaluate(
     source: str,
     ground_truth_data: bytes,
     submission_data: bytes,
+    client_timeout: float | None = None,
 ) -> Evaluation:
     """Chấm một bài nộp; lỗi cấu hình và lỗi bộ chấm được ném nguyên dạng cho người gọi.
 
@@ -41,7 +42,9 @@ async def evaluate(
     prepared = csv_validation.prepare_submission(
         submission_data, config.input_schema.submission, truth
     )
-    result = await evaluator_client.EvaluatorClient(get_settings()).evaluate(
+    result = await evaluator_client.EvaluatorClient(
+        get_settings(), timeout=client_timeout
+    ).evaluate(
         source_code=source,
         ground_truth_csv=ground_truth_data.decode("utf-8-sig"),
         submission_csv=prepared.decode("utf-8-sig"),

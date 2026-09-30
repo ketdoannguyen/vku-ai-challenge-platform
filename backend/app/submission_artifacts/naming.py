@@ -7,6 +7,7 @@ confusion và header injection).
 
 import re
 import unicodedata
+from pathlib import Path
 from urllib.parse import quote
 
 from app.core.slugs import SLUG_MAX, VIETNAMESE_ASCII_FALLBACK
@@ -48,6 +49,12 @@ def sanitize_segment(value: str, *, fallback: str, max_length: int) -> str:
     if len(text) > max_length:
         text = text[:max_length].strip("-")
     return text or fallback
+
+
+def safe_original_filename(filename: str | None, fallback: str) -> str:
+    """Tên file gốc để hiển thị: chỉ giữ phần tên cuối, không bao giờ là đường dẫn."""
+    safe_name = Path((filename or fallback).replace("\\", "/")).name
+    return safe_name[:255] or fallback
 
 
 def download_filename(
