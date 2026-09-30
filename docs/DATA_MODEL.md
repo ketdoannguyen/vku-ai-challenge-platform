@@ -76,6 +76,7 @@ Fields:
 - `updated_at` (UTC, timezone-aware)
 - `submission_seq` (int | absent ở membership cũ) - counter cấp `submission_no` cho cặp (cuộc thi, account) này, tăng nguyên tử bằng `$inc` **trước** khi upload (ADR-033). Membership chưa có thì lần cấp đầu tiên seed bằng `submission_no` lớn nhất đã cấp cho cặp đó; số nhảy cách nếu upload fail sau khi đã cấp.
 - `quota_day` (str `YYYY-MM-DD` UTC | absent ở membership cũ) + `quota_used` (int | absent) - bộ đếm lượt nộp theo ngày, nguồn sự thật của hạn mức thay cho phép đếm submission (ADR-034). `quota_used` chỉ được tăng/giảm qua `find_one_and_update` có điều kiện nên không bao giờ vượt `quota_per_day`; sang ngày mới (hoặc membership chưa có field) thì seed lại từ số bài `completed` thật trong ngày. Bài không ghi được (upload/insert lỗi) được trả lại lượt.
+- `quota_claims` (object | absent ở membership cũ) - dấu `attempt_id → ngày` của những suất đang bị **giữ** bởi một lượt nộp v2 chưa kết thúc (ADR-048): đường v2 giữ suất lâu hơn một request nên `$inc` không đủ để biết suất nào của lượt nào. Hoàn suất xoá **đúng dấu của lượt đó** và chỉ chạy khi cờ `quota_charged` của lượt còn bật, nên gọi lặp không trừ hai lần; lượt v1 và lượt cũ không có dấu nào.
 
 Indexes:
 - unique compound `(competition_id, account_id)` - enforce race-safe idempotent join
@@ -161,6 +162,46 @@ Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_s
 
 Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record **được tính kết quả**, nhất quán với ADR-011 và ADR-035.
 
+## 6b. scoring_attempts - implemented (ADR-048, hàng đợi chấm v2)
+
+Một document cho **mỗi lần thí sinh nhấn Nút** ở cuộc thi v2, sống từ lúc API nhận request tới khi có
+kết quả hoặc bị đóng. Bài chưa chấm **không** nằm ở §6 vì `submissions.status` chỉ có `completed` và
+mọi đường đọc (quota, leaderboard, AI review) đều dựa vào nó; khi chấm xong, `_id` của lượt **chính
+là** `_id` của submission được ghi, nên không có bản ghi thứ hai phải đồng bộ.
+
+Fields:
+- `_id` (= `attempt_id` trả cho client, và = `submissions._id` của lượt thành công)
+- `competition_id`, `account_id`, `membership_id`
+- `idempotency_key` (str, ≤128 ký tự) + `payload_sha256` - một key cho **một lần nhấn Nút**: cùng key
+  cùng bytes = trả lại lượt cũ (không tiêu thêm quota), cùng key khác bytes = 409
+- `status`: `STAGING` (đang nhận file) → `QUEUED` → `RUNNING` → `COMPLETED` | `FAILED` | `EXPIRED`, và
+  `RESOLVING` khi lần ghi kết quả dở dang và worker đang đối soát. `RESOLVING` **không** phải `FAILED`:
+  chỉ kết luận hỏng khi đã chứng minh không có submission
+- `queue_slot` (int, chỉ khi đang giữ chỗ) - chỗ trong dải `0..SCORING_QUEUE_CAPACITY-1`. Trần hàng đợi
+  là **ràng buộc của unique index trên field này**, không phải một phép đếm-rồi-insert, và index
+  **không** gắn với cuộc thi: trần là của cả hệ thống
+- `staging_prefix` - prefix MinIO tạm (`competitions/<slug>/staging/scoring/<attempt_id>/`), xoá khi
+  lượt đóng; kho tạm chỉ giữ bài đang chờ hoặc đang chấm
+- `deadline_at` - mốc 60 giây tính từ lúc API nhận request (trước khi parse multipart), gồm upload, chờ,
+  chấm và ghi kết quả; quá mốc này là `EXPIRED`
+- `claimed_by` / `lease_token` / `lease_expires_at` - worker nào đang chấm và tới khi nào; `lease_token`
+  có mặt trong mọi filter ghi nên worker mất lease không ghi đè được document của người khác
+- `quota_charged` (bool) - lượt này đã tiêu một suất quota chưa; hoàn suất chỉ chạy khi cờ còn bật nên
+  retry, restart và đối soát không hoàn hai lần
+- `submission_no` (int | null) - số thứ tự cấp trước khi ghi bài, dùng lại counter của membership (§4)
+- `result` (object | null) - kết quả bộ chấm (metrics + `scoring_ref`) ghi **trước** khi tạo submission,
+  để một lượt ghi dở vẫn đối soát được thay vì phải chấm lại
+- `artifacts` (object) - hai artifact đã nhận của lượt (cùng shape với §6)
+- `error` (`{code,message}` | null) - lý do lượt không thành công
+- `created_at` / `updated_at`
+
+Indexes:
+- unique `(competition_id, account_id, idempotency_key)` (`attempt_idempotency_unique`) - một lần nhấn Nút là một lượt
+- unique partial `queue_slot` (`attempt_queue_slot_unique`, chỉ document đang giữ chỗ) - trần hàng đợi
+- `(competition_id, account_id, created_at DESC, _id DESC)` - danh sách lượt chưa kết thúc của thí sinh
+- `(status, deadline_at)` - vòng đối soát tìm lượt quá hạn
+- `(status, lease_expires_at)` - vòng đối soát thu hồi lượt của worker đã chết
+
 ## 7. Scoring config (embedded trong competitions)
 
 `competitions.scoring_config` có **hai đời**, phân biệt bằng field `version` (ADR-048). Document v1 không có `version` và được đọc nguyên trạng - **không migrate**.
@@ -214,7 +255,8 @@ Document tạo trước thay đổi này không có field; serializer trả `[]`
 
 Không dùng Mongo transaction (standalone). Thứ tự xoá luôn là con trước – cha sau để lỗi giữa đường vẫn còn bản ghi gốc cho lần gọi lại:
 
-- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `ai_review_jobs` → `ai_reviews` → `submissions` → `competition_memberships` → `competition_contents` → `competition_content_revisions` → `competitions` (ADR-036 chèn ba collection AI vào đúng vị trí tham chiếu của chúng: job và audit row đứng trước `submissions` vì cùng trỏ vào nó, revision đứng sau vì bị `submissions`/`ai_reviews` tham chiếu), sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>` **và** dọn hai prefix MinIO `competitions/<slug>/` + `competitions/<id>/` (ADR-028, ADR-033). Một bước dọn lỗi ⇒ `files_removed:false`, DB đã xoá xong. `accounts` và `sessions` không bị đụng.
+- `DELETE /api/admin/competitions/{id}` (`draft` + `closed`; `published` → 409 `COMPETITION_NOT_DELETABLE`): `ai_review_jobs` → `ai_reviews` → `submissions` → `scoring_attempts` → `competition_memberships` → `competition_contents` → `competition_content_revisions` → `competitions` (ADR-036 chèn ba collection AI vào đúng vị trí tham chiếu của chúng: job và audit row đứng trước `submissions` vì cùng trỏ vào nó, revision đứng sau vì bị `submissions`/`ai_reviews` tham chiếu; `scoring_attempts` đứng ngay sau `submissions` để worker không còn gì để claim - ADR-048), sau đó best-effort `rmtree` hai root `<DATA_DIR>/competitions/<id>` và `<DATA_DIR>/submissions/<id>` **và** dọn hai prefix MinIO `competitions/<slug>/` + `competitions/<id>/` (ADR-028, ADR-033; kho tạm của lượt chờ chấm nằm dưới prefix `competitions/<slug>/staging/scoring/` nên cũng được dọn theo). Một bước dọn lỗi ⇒ `files_removed:false`, DB đã xoá xong. `accounts` và `sessions` không bị đụng.
+- Xoá member (dòng dưới) và xoá account (ADR-047) **không** xoá `scoring_attempts`: lượt đang chờ/chấm của account đó do worker đóng khi revalidate (membership biến mất hoặc không còn `active`), và suất quota của lượt đó không còn chỗ để hoàn vì bộ đếm nằm trên membership đã xoá - vô hại, không rò sang account khác.
 - `DELETE /api/admin/competitions/{id}/members/{account_id}`: xoá record submission chưa `completed` của account (kèm object MinIO/file legacy, best-effort) rồi xoá membership cuối cùng. Bài `completed` không bao giờ bị xoá - vướng thì trả 409 và dừng.
 - `DELETE /api/admin/accounts/{id}?confirm_email=<email>` (ADR-047): `ai_review_jobs` → `ai_reviews` → `submissions` **chỉ bài chưa `completed`** (kèm file legacy và object MinIO, best-effort) → `competition_memberships` → `sessions` → `accounts`. `sessions` **bắt buộc** nằm trong cascade: bỏ sót thì token phiên cũ vẫn đăng nhập được vào một tài khoản đã xoá. Bài `completed` không bao giờ bị xoá - vướng thì 409 `ACCOUNT_HAS_SUBMISSIONS`; tài khoản đang là vết hậu kiểm (`review.reviewed_by`, `ai_review_config.updated_by`) cũng bị 409 `ACCOUNT_REFERENCED`. `competitions`, `competition_contents` và `competition_content_revisions` **không** bị đụng - lịch sử thi của đội khác không thuộc về account này.
 - `POST /api/competitions/{slug}/leave`: chỉ `update` `active=false`, không xoá gì.
