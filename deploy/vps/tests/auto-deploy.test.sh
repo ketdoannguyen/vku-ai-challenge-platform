@@ -255,13 +255,14 @@ FAKE
   chmod +x "$ROOT/bin/docker"
 }
 
-# Compose của bản CHƯA khai `evaluator-runner` (hình dạng production trước release B), dựng từ compose
-# thật bằng cách bỏ đúng khối service đó. Không dùng compose thật nguyên bản vì từ B nó đã khai runner:
-# commit nền sẽ vô tình khai runner và mọi case "bản cũ chưa có runner" (rollback, `rm -sf`, thứ tự
-# service) sẽ đo sai thứ cần đo. Bản đầy đủ vẫn được kiểm ở `commit_compose_with_runner`.
-compose_before_runner() {
+# Compose của bản CHƯA khai `evaluator-runner` lẫn `scoring-worker` (hình dạng production trước ADR-048),
+# dựng từ compose thật bằng cách bỏ đúng hai khối service đó. Không dùng compose thật nguyên bản vì từ
+# ADR-048 nó đã khai cả hai: commit nền sẽ vô tình khai chúng và mọi case "bản cũ chưa có service mới"
+# (rollback, `rm -sf`, thứ tự service) sẽ đo sai thứ cần đo. Bản đầy đủ được kiểm ở
+# `commit_compose_with_evaluator`.
+compose_before_evaluator() {
   awk '
-    /^  evaluator-runner:[[:space:]]*$/ { skip = 1; next }
+    /^  (evaluator-runner|scoring-worker):[[:space:]]*$/ { skip = 1; next }
     skip && /^  [^[:space:]#]/ { skip = 0 }
     skip && /^[^[:space:]]/ { skip = 0 }
     !skip
@@ -284,7 +285,7 @@ begin() {
   # Compose nằm TRONG repo, đúng như production: deployer phải đọc được bản compose của một SHA cũ
   # bằng `git show` để biết bản đó có khai `ai-review-worker` hay không (`release_defines_service`).
   # `setup_base` commit nó ở commit nền nên mọi kịch bản đều có sẵn.
-  compose_before_runner >"$REPO_DIR/docker-compose.prod.yml"
+  compose_before_evaluator >"$REPO_DIR/docker-compose.prod.yml"
   git -C "$REPO_DIR" config user.name harness
   git -C "$REPO_DIR" config user.email harness@test
   git -C "$REPO_DIR" remote add origin "$ROOT/origin.git"
@@ -321,10 +322,10 @@ commit() {
 detach_to() { git -C "$REPO_DIR" checkout -q --detach "$1" >&2; }
 
 # Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production - tức bản khai
-# `evaluator-runner` (release B). Các case về runner phải commit nội dung thật chứ không phải marker
-# như `commit()`: `release_defines_service` đọc chính file này bằng `git show` để biết bản đó có khai
-# service hay không, nên một marker sẽ làm mọi case về runner đo sai thứ cần đo.
-commit_compose_with_runner() {
+# `evaluator-runner` và `scoring-worker` (release B). Các case về hai service này phải commit nội dung
+# thật chứ không phải marker như `commit()`: `release_defines_service` đọc chính file này bằng `git show`
+# để biết bản đó có khai service hay không, nên một marker sẽ làm mọi case về chúng đo sai thứ cần đo.
+commit_compose_with_evaluator() {
   local msg="$1" n tip
   n=$(( $(cat "$ROOT/counter" 2>/dev/null || echo 0) + 1 ))
   printf '%s' "$n" >"$ROOT/counter"
@@ -470,9 +471,9 @@ expect_in "build api web" "$(docker_log)" "build api web"
 expect_eq "revision worker khớp SHA mục tiêu" "$(running_revision ai-review-worker)" "$COMPOSE_SHA"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$COMPOSE_SHA"
 
-begin "release khai evaluator-runner: deploy runner trước api, image riêng"
+begin "release khai evaluator-runner và scoring-worker: runner trước api, image riêng"
 setup_deployed
-RB="$(commit_compose_with_runner "release B")"
+RB="$(commit_compose_with_evaluator "release B")"
 detach_to "$BASE"
 run_deploy
 expect_status "deploy release có runner thành công" 0
@@ -480,18 +481,23 @@ expect_status "deploy release có runner thành công" 0
 # `degraded` và mọi lượt chấm v2 trả 503 - hỏng im lặng đúng lúc cuộc thi đang chạy.
 expect_in "kiểm image runtime trước khi build" "$(docker_log)" "image inspect vku-evaluator-runtime:1"
 expect_in "build cả ba image, runner trước" "$(docker_log)" "build evaluator-runner api web"
-expect_in "up bốn service, runner trước api" "$(docker_log)" \
-  "up -d --no-deps --no-build --wait --wait-timeout 180 evaluator-runner api ai-review-worker web"
+expect_in "up đủ năm service, runner trước api" "$(docker_log)" \
+  "up -d --no-deps --no-build --wait --wait-timeout 180 evaluator-runner api ai-review-worker scoring-worker web"
 expect_eq "revision runner khớp SHA mục tiêu" "$(running_revision evaluator-runner)" "$RB"
 # Runner KHÔNG dùng chung tag với api: cùng build context nhưng khác stage, nên nó phải có image riêng
 # thì lượt `up` sau mới biết container nào đang chạy code gì.
 expect_eq "runner có image riêng theo SHA" "$(running_image evaluator-runner)" "vku-challenge-runner:${RB:0:12}"
 expect_eq "api vẫn dùng image backend" "$(running_image api)" "vku-challenge-api:${RB:0:12}"
+# Worker chấm là cùng một image backend, chỉ khác `command`: nhãn revision giống api là hệ quả của việc
+# dùng chung image, và nó phải được tạo lại ở MỌI lượt backend đổi - không thì nó chạy code cũ trong khi
+# `api` đã trả 202 cho hàng đợi mà không ai nhấc lượt.
+expect_eq "worker chấm dùng chung image với api" "$(running_image scoring-worker)" "$(running_image api)"
+expect_eq "revision worker chấm khớp SHA mục tiêu" "$(running_revision scoring-worker)" "$RB"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$RB"
 
 begin "thiếu image runtime: dừng trước khi thay container nào"
 setup_deployed
-RB="$(commit_compose_with_runner "release B")"
+RB="$(commit_compose_with_evaluator "release B")"
 detach_to "$BASE"
 FAKE_NO_RUNTIME_IMAGE=1
 run_deploy
@@ -509,7 +515,7 @@ expect_eq "worktree trả về bản đang chạy" "$(git -C "$REPO_DIR" rev-par
 
 begin "evaluator-runtime-only: chỉ tạo lại container runner"
 setup_deployed
-RB="$(commit_compose_with_runner "release B")"
+RB="$(commit_compose_with_evaluator "release B")"
 run_deploy
 expect_status "deploy release có runner thành công" 0
 : >"$ROOT/docker.log"
@@ -526,24 +532,29 @@ expect_eq "revision runner khớp SHA mới" "$(running_revision evaluator-runne
 expect_eq "api không bị tạo lại" "$(running_revision api)" "$RB"
 expect_eq "state tiến" "$(state_read last-success-sha)" "$ER"
 
-begin "rollback qua release giới thiệu runner: dọn container runner"
+begin "rollback qua release giới thiệu runner và scoring-worker: dọn cả hai container"
 setup_deployed
 state_write running.api.revision "$BASE"
 state_write running.web.revision "$BASE"
-RB="$(commit_compose_with_runner "release B")"
+RB="$(commit_compose_with_evaluator "release B")"
 detach_to "$BASE"
 FAKE_BAD_LABEL="$RB"
 run_deploy
 expect_status "deploy hỏng thì thất bại" 1
 expect_in "nói rõ vì sao bỏ runner" "$OUT" "chưa khai evaluator-runner"
+expect_in "nói rõ vì sao bỏ worker chấm" "$OUT" "chưa khai scoring-worker"
 expect_in "rollback chỉ còn api, worker, web" "$OUT" "đưa api ai-review-worker web về image của ${BASE:0:12}"
-# Điểm mấu chốt: KHÔNG được đưa runner vào override rollback - bản cũ không có module
-# `app.evaluator_runner.server`, nên `up` bằng image cũ là dựng container crash-loop và `--wait` cháy
-# hết thời gian chờ.
+# Điểm mấu chốt: KHÔNG được đưa hai service mới vào override rollback - bản cũ không có module
+# `app.evaluator_runner.server`/`app.scoring_attempts.worker`, nên `up` bằng image cũ là dựng container
+# crash-loop và `--wait` cháy hết thời gian chờ.
 expect_not_in "override rollback không khai runner" \
   "$(cat "$ROOT/state/rollback-override.yml")" "evaluator-runner"
+expect_not_in "override rollback không khai worker chấm" \
+  "$(cat "$ROOT/state/rollback-override.yml")" "scoring-worker"
 expect_eq "dọn container runner còn sót của release hỏng" \
   "$(grep -c 'rm -sf evaluator-runner' "$ROOT/docker.log")" "1"
+expect_eq "dọn container worker chấm còn sót của release hỏng" \
+  "$(grep -c 'rm -sf scoring-worker' "$ROOT/docker.log")" "1"
 expect_eq "api chạy lại bản cũ" "$(running_revision api)" "$BASE"
 expect_eq "state vẫn ở bản cũ" "$(state_read last-success-sha)" "$BASE"
 
