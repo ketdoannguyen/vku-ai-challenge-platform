@@ -256,10 +256,10 @@ FAKE
 }
 
 # Compose của bản CHƯA khai `evaluator-runner` lẫn `scoring-worker` (hình dạng production trước ADR-048),
-# dựng từ compose thật bằng cách bỏ đúng hai khối service đó. Không dùng compose thật nguyên bản vì từ
-# ADR-048 nó đã khai cả hai: commit nền sẽ vô tình khai chúng và mọi case "bản cũ chưa có service mới"
-# (rollback, `rm -sf`, thứ tự service) sẽ đo sai thứ cần đo. Bản đầy đủ được kiểm ở
-# `commit_compose_with_evaluator`.
+# dựng từ compose thật bằng cách bỏ đúng hai khối service đó. Không dùng compose thật nguyên bản vì nó đã
+# khai `evaluator-runner` (và từ release B là `scoring-worker`): commit nền sẽ vô tình khai chúng và mọi
+# case "bản cũ chưa có service mới" (rollback, `rm -sf`, thứ tự service) sẽ đo sai thứ cần đo. Bản đầy đủ
+# được kiểm ở `commit_compose_with_evaluator`.
 compose_before_evaluator() {
   awk '
     /^  (evaluator-runner|scoring-worker):[[:space:]]*$/ { skip = 1; next }
@@ -321,10 +321,15 @@ commit() {
 
 detach_to() { git -C "$REPO_DIR" checkout -q --detach "$1" >&2; }
 
-# Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production - tức bản khai
-# `evaluator-runner` và `scoring-worker` (release B). Các case về hai service này phải commit nội dung
+# Commit chỉ đổi `docker-compose.prod.yml`, với NỘI DUNG THẬT của bản production, cộng thêm khối
+# `scoring-worker` nếu compose thật chưa khai nó. Các case về runner/worker chấm phải commit nội dung
 # thật chứ không phải marker như `commit()`: `release_defines_service` đọc chính file này bằng `git show`
 # để biết bản đó có khai service hay không, nên một marker sẽ làm mọi case về chúng đo sai thứ cần đo.
+#
+# Nhánh nối thêm có lý do theo thời điểm: release A (deployer biết `scoring-worker`) lên main TRƯỚC
+# release B (compose khai service đó), nên ở lượt gate của A compose thật vẫn chưa có khối này - thiếu nó
+# thì deployer bỏ service ra khỏi lượt deploy và mọi case về worker chấm đo nhầm bản cũ. Từ B trở đi
+# `grep` thấy khối thật và không nối gì.
 commit_compose_with_evaluator() {
   local msg="$1" n tip
   n=$(( $(cat "$ROOT/counter" 2>/dev/null || echo 0) + 1 ))
@@ -332,6 +337,17 @@ commit_compose_with_evaluator() {
   tip="$(git -C "$ROOT/origin.git" rev-parse --verify --quiet refs/heads/release || true)"
   if [ -n "$tip" ]; then detach_to "$tip"; fi
   cp "$REPO_ROOT/docker-compose.prod.yml" "$REPO_DIR/docker-compose.prod.yml"
+  if ! grep -qE '^  scoring-worker:[[:space:]]*$' "$REPO_DIR/docker-compose.prod.yml"; then
+    cat >>"$REPO_DIR/docker-compose.prod.yml" <<'YAML'
+
+  scoring-worker:
+    build:
+      context: ./backend
+      target: api
+    image: vku-challenge-api:prod
+    command: ["python", "-m", "app.scoring_attempts.worker"]
+YAML
+  fi
   git -C "$REPO_DIR" add -A >&2
   git -C "$REPO_DIR" -c user.name=harness -c user.email=harness@test commit -q -m "$msg" >&2
   git -C "$REPO_DIR" push -q origin HEAD:refs/heads/release >&2
