@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,8 +10,7 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile
 
 from app.accounts import service as accounts_service
-from app.ai_review import constants as ai_constants
-from app.ai_review import content_snapshot, service as ai_service
+from app.ai_review import service as ai_service
 from app.ai_review import settings as ai_settings
 from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
@@ -20,53 +18,41 @@ from app.core.config import get_settings
 from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
-from app.scoring import csv_validation, evaluator_client, execution, models, revisions
-from app.scoring import output_validation
+from app.scoring import evaluator_client, models
 from app.scoring import service as scoring_service
-from app.scoring import storage as scoring_storage
 from app.scoring.errors import EvaluatorError, ScoringValidationError
+from app.scoring_attempts import service as attempts_service
+from app.scoring_attempts import store as attempts_store
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts import validation as artifact_validation
 from app.submission_artifacts.naming import (
     NOTEBOOK_ARTIFACT,
     PREDICTION_ARTIFACT,
     ARTIFACT_MEDIA_TYPES,
+    safe_original_filename,
 )
 from app.submissions import artifacts as artifacts_reader
+from app.submissions import scoring as scoring_flow
 from app.submissions import service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/competitions")
 
-SCORING_NOT_READY_MESSAGE = "Cuộc thi chưa sẵn sàng chấm điểm."
-# Lỗi thuộc về file thí sinh: trả mã riêng để em biết phải sửa gì. Mọi lỗi còn lại - ground truth
-# hỏng, hợp đồng metric lệch, bộ chấm lỗi, runner bận - là lỗi hệ thống mà thí sinh không sửa được.
-_STUDENT_ERROR_CODES = frozenset(
-    {
-        csv_validation.SCHEMA_INVALID,
-        csv_validation.VALUE_INVALID,
-        csv_validation.DUPLICATE_IDS,
-        csv_validation.ID_MISMATCH,
-    }
-)
-
-
-@dataclass(frozen=True)
-class _Scored:
-    metrics: dict[str, float]
-    primary_score: float
-    # Dấu vết của lượt chấm v2; v1 để None vì bộ chấm và công thức là cố định trong mã nguồn.
-    scoring_ref: dict | None = None
+# Một lần nhấn Nút của thí sinh là một `Idempotency-Key`; gửi lại cùng key nhận đúng lượt cũ.
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+MAX_IDEMPOTENCY_KEY = 128
 
 
 @router.post("/{competition_id}/submissions", status_code=201)
 async def submit_submission(
     competition_id: str,
     request: Request,
+    response: Response,
     account: CurrentAccount,
     file: UploadFile = File(...),
     notebook: UploadFile = File(...),
 ) -> dict:
+    """Nhận bài nộp: bộ chấm cố định (v1) chấm ngay trong request, bộ chấm Python (v2) vào hàng đợi."""
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
     if competition["status"] != "published":
@@ -129,6 +115,52 @@ async def submit_submission(
         )
         raise api_error(422, exc.code, exc.message)
 
+    if isinstance(config, models.ScoringConfigV2):
+        return await _submit_queued(
+            db,
+            request,
+            response,
+            competition=competition,
+            account=account,
+            membership=membership,
+            config=config,
+            data=data,
+            notebook_data=notebook_data,
+            csv_filename=file.filename,
+            notebook_filename=notebook.filename,
+            now=now,
+        )
+    return await _submit_scored(
+        db,
+        competition=competition,
+        account=account,
+        membership=membership,
+        config=config,
+        data=data,
+        notebook_data=notebook_data,
+        csv_filename=file.filename,
+        notebook_filename=notebook.filename,
+        quota=quota,
+        now=now,
+    )
+
+
+async def _submit_scored(
+    db,
+    *,
+    competition: dict,
+    account: dict,
+    membership: dict,
+    config,
+    data: bytes,
+    notebook_data: bytes,
+    csv_filename: str | None,
+    notebook_filename: str | None,
+    quota: int,
+    now: datetime,
+) -> dict:
+    """Đường v1: chấm ngay trong request rồi ghi bài nộp, trả về kết quả luôn."""
+    settings = get_settings()
     scored = await _score_or_fail(competition, config, data, account=account)
 
     # Giữ lượt nguyên tử TRƯỚC khi cấp số và upload: phép đếm ở trên không nguyên tử nên nhiều
@@ -161,13 +193,13 @@ async def submit_submission(
         "artifacts": {
             PREDICTION_ARTIFACT: {
                 "object_key": prediction_key,
-                "original_filename": _safe_original_filename(file.filename, "submission.csv"),
+                "original_filename": safe_original_filename(csv_filename, "submission.csv"),
                 "size_bytes": len(data),
             },
             NOTEBOOK_ARTIFACT: {
                 "object_key": notebook_key,
-                "original_filename": _safe_original_filename(
-                    notebook.filename, "notebook.ipynb"
+                "original_filename": safe_original_filename(
+                    notebook_filename, "notebook.ipynb"
                 ),
                 "size_bytes": len(notebook_data),
                 # Hash chốt ngay lúc nộp: worker đối chiếu lại bytes đã lưu với nó trước khi kiểm,
@@ -184,7 +216,9 @@ async def submit_submission(
         # Vân tay của lượt chấm v2: đối chiếu lại được bài nộp với đúng bộ chấm đã sinh ra điểm.
         document["scoring_ref"] = scored.scoring_ref
     try:
-        snapshot, projection = await _ai_state(db, competition, settings, now)
+        snapshot, projection = await ai_service.plan_submission_state(
+            db, competition, settings=settings, now=now
+        )
         if snapshot is not None:
             document["content_snapshot"] = snapshot
         if projection is not None:
@@ -218,8 +252,7 @@ async def submit_submission(
         # Bài không ghi được thì trả lại lượt đã giữ, quota không bị tiêu oan.
         await service.release_quota_slot(db, membership, now)
         raise
-    if projection is not None and snapshot["state"] == ai_constants.SNAPSHOT_CAPTURED:
-        await _wake_worker(db, document, settings, now)
+    await ai_service.wake_worker(db, document, settings=settings, now=now)
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
@@ -232,49 +265,68 @@ async def submit_submission(
     )
 
 
-async def _ai_state(db, competition: dict, settings, now: datetime) -> tuple[dict | None, dict | None]:
-    """Chốt ảnh chụp policy và desired state AI cho bài nộp; không bao giờ chặn việc nộp bài.
+async def _submit_queued(
+    db,
+    request: Request,
+    response: Response,
+    *,
+    competition: dict,
+    account: dict,
+    membership: dict,
+    config: models.ScoringConfigV2,
+    data: bytes,
+    notebook_data: bytes,
+    csv_filename: str | None,
+    notebook_filename: str | None,
+    now: datetime,
+) -> dict:
+    """Đường v2: đưa lượt vào hàng đợi rồi trả 202 ngay.
 
-    Không chụp được nội dung chỉ làm lượt AI kết thúc ở ERROR: bài vẫn được chấm, vẫn xếp hạng và
-    vẫn qua được vòng duyệt của BTC y như khi tính năng AI không tồn tại.
+    Client gửi `Idempotency-Key` cho mỗi lần nhấn Nút: gửi lại cùng key (mất mạng, bấm lần hai)
+    nhận đúng lượt cũ chứ không tạo lượt mới và không tiêu thêm quota. Kết quả đến sau, client theo
+    dõi bằng `attempt_id`.
     """
-    stored = ai_settings.stored_config(competition)
-    if not stored["enabled"]:
-        return None, None
-    try:
-        revision = await content_snapshot.capture_revision(
-            db, competition["_id"], settings=settings
+    if config.output_contract is None:
+        # Bản nháp chưa khai báo metric: không có gì để đối chiếu, vào hàng đợi cũng chỉ để hỏng.
+        raise scoring_flow.scoring_not_ready()
+    key = (request.headers.get(IDEMPOTENCY_HEADER) or "").strip()
+    if not key or len(key) > MAX_IDEMPOTENCY_KEY:
+        raise api_error(
+            400,
+            "IDEMPOTENCY_KEY_REQUIRED",
+            f"Thiếu header {IDEMPOTENCY_HEADER} cho lần nộp này.",
         )
-    except content_snapshot.SnapshotError as exc:
-        logger.warning(
-            "AI content snapshot failed competition=%s code=%s", competition["_id"], exc.code
-        )
-        snapshot = ai_service.failed_snapshot(exc.code, now=now)
-    else:
-        snapshot = ai_service.captured_snapshot(revision, now=now)
-    if not stored["auto_review"]:
-        return snapshot, None
-    return snapshot, ai_service.initial_projection(
-        captured=snapshot["state"] == ai_constants.SNAPSHOT_CAPTURED, now=now
-    )
-
-
-async def _wake_worker(db, document: dict, settings, now: datetime) -> None:
-    """Đánh thức worker; hỏng ở đây không được làm hỏng một bài đã ghi thành công.
-
-    Reconciler coi "submission đang chờ mà không có job" là lỗ hổng phải vá, nên job rơi ở đây
-    vẫn được tạo ở vòng quét sau.
-    """
     try:
-        await ai_service.ensure_job(
+        scoring_flow.validate_submission_csv(competition, config, data)
+    except ScoringValidationError as exc:
+        logger.info(
+            "Submission rejected competition=%s account=%s code=%s",
+            competition["_id"],
+            account["_id"],
+            exc.code,
+        )
+        raise api_error(422, exc.code, exc.message)
+    try:
+        attempt = await attempts_service.admit(
             db,
-            document,
-            source=ai_constants.JOB_SOURCE_AUTO,
+            competition=competition,
+            account=account,
+            membership=membership,
+            data=data,
+            notebook_data=notebook_data,
+            csv_filename=csv_filename,
+            notebook_filename=notebook_filename,
+            idempotency_key=key,
+            received_at=getattr(request.state, "received_at", now),
             now=now,
-            max_attempts=settings.ai_review_max_attempts,
         )
-    except Exception:
-        logger.exception("AI review enqueue failed submission=%s", document["_id"])
+    except artifact_storage.ArtifactStorageUnavailable:
+        # Lượt đã được đóng và hoàn quota bên trong; ở đây chỉ còn dịch thành lời cho thí sinh.
+        raise _storage_unavailable()
+    response.status_code = 202
+    return await attempts_service.attempt_payload(
+        db, attempt, competition=competition, account=account, now=now
+    )
 
 
 async def _upload(key: str, data: bytes, content_type: str, competition: dict, account: dict) -> None:
@@ -317,6 +369,57 @@ async def my_submissions(
         ai_visible=ai_settings.participant_visible(competition),
     )
     return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{competition_id}/submissions/attempts")
+async def my_active_attempts(
+    competition_id: str, request: Request, account: CurrentAccount
+) -> dict:
+    """Các lượt chưa kết thúc của chính mình.
+
+    Trang nộp bài gọi endpoint này lúc mở lại: đóng tab hay mất mạng giữa chừng thì lượt vẫn còn,
+    thí sinh thấy lại đúng lượt đang chờ thay vì phải nộp lần nữa.
+    """
+    db = request.app.state.mongo.db
+    competition = await _competition_or_404(db, competition_id)
+    now = datetime.now(timezone.utc)
+    attempts = await attempts_store.list_active(db, competition["_id"], account["_id"])
+    return {
+        "attempts": [
+            await attempts_service.attempt_payload(
+                db, attempt, competition=competition, account=account, now=now
+            )
+            for attempt in attempts
+        ]
+    }
+
+
+@router.get("/{competition_id}/submissions/attempts/{attempt_id}")
+async def my_attempt_status(
+    competition_id: str, attempt_id: str, request: Request, account: CurrentAccount
+) -> dict:
+    """Trạng thái một lượt chấm: hàng đợi, đang chạy, kết quả hoặc lý do không thành công."""
+    db = request.app.state.mongo.db
+    competition = await _competition_or_404(db, competition_id)
+    attempt = await _own_attempt_or_404(db, competition, account, attempt_id)
+    return await attempts_service.attempt_payload(
+        db, attempt, competition=competition, account=account, now=datetime.now(timezone.utc)
+    )
+
+
+async def _own_attempt_or_404(db, competition: dict, account: dict, attempt_id: str) -> dict:
+    try:
+        oid = ObjectId(attempt_id)
+    except InvalidId:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy lượt chấm.")
+    attempt = await attempts_store.get(db, oid)
+    if (
+        attempt is None
+        or attempt["competition_id"] != competition["_id"]
+        or attempt["account_id"] != account["_id"]
+    ):
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy lượt chấm.")
+    return attempt
 
 
 @router.get("/{competition_id}/submissions/{submission_id}/prediction")
@@ -383,7 +486,7 @@ def _scoring_config(
 ) -> scoring_service.ScoringConfig | models.ScoringConfigV2:
     """Cấu hình chấm đang dùng của cuộc thi: bộ chấm Python của v2, hoặc cấu hình cột cố định của v1."""
     if not competition.get("ground_truth"):
-        raise _scoring_not_ready()
+        raise scoring_flow.scoring_not_ready()
     try:
         config_v2 = models.stored_config(competition)
     except Exception:
@@ -395,13 +498,13 @@ def _scoring_config(
     except Exception:
         config = None
     if config is None:
-        raise _scoring_not_ready()
+        raise scoring_flow.scoring_not_ready()
     return config
 
 
 async def _score_or_fail(
     competition: dict, config, data: bytes, *, account: dict
-) -> _Scored:
+) -> scoring_flow.Scored:
     """Chấm bài nộp, dịch mọi lỗi sang HTTP.
 
     Lỗi thuộc về file của thí sinh giữ mã riêng để em biết đường sửa; lỗi của cấu hình chấm và của
@@ -409,17 +512,17 @@ async def _score_or_fail(
     """
     try:
         if isinstance(config, models.ScoringConfigV2):
-            return await _score_v2(competition, config, data)
-        return _score_v1(competition, config, data)
+            return await scoring_flow.score_v2(competition, config, data)
+        return scoring_flow.score_v1(competition, config, data)
     except ScoringValidationError as exc:
-        if exc.code not in _STUDENT_ERROR_CODES:
+        if exc.code not in scoring_flow.STUDENT_ERROR_CODES:
             logger.error(
                 "Scoring unusable competition=%s code=%s message=%s",
                 competition["_id"],
                 exc.code,
                 exc.message,
             )
-            raise _scoring_not_ready()
+            raise scoring_flow.scoring_not_ready()
         logger.info(
             "Submission rejected competition=%s account=%s code=%s",
             competition["_id"],
@@ -452,88 +555,9 @@ async def _score_or_fail(
         raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
 
 
-def _score_v1(
-    competition: dict, config: scoring_service.ScoringConfig, data: bytes
-) -> _Scored:
-    """Bộ chấm cố định của v1: backend tự tính f1/precision/recall từ cột prediction."""
-    ground_truth_data = _read_ground_truth(competition)
-    ground_truth = scoring_service.load_ground_truth(ground_truth_data, config)
-    result = scoring_service.score_submission(
-        data, ground_truth, config, competition["primary_metric"]
-    )
-    return _Scored(metrics=result.metrics, primary_score=result.primary_score)
-
-
-async def _score_v2(
-    competition: dict, config: models.ScoringConfigV2, data: bytes
-) -> _Scored:
-    """Bộ chấm Python của admin: backend kiểm dữ liệu, gọi runner rồi đối chiếu hợp đồng metric."""
-    source = _read_evaluator_source(competition, config)
-    ground_truth_data = _read_ground_truth(competition)
-    evaluation = await execution.evaluate(
-        config,
-        source=source,
-        ground_truth_data=ground_truth_data,
-        submission_data=data,
-    )
-    if config.output_contract is None:
-        raise ScoringValidationError("SCORING_TEST_REQUIRED", "Cuộc thi chưa khai báo metric.")
-    return _Scored(
-        metrics=evaluation.metrics,
-        primary_score=output_validation.primary_score(
-            evaluation.metrics, config.output_contract
-        ),
-        scoring_ref={
-            "version": 2,
-            "revision": config.revision,
-            "config_fingerprint": evaluation.config_fingerprint,
-            "source_sha256": config.evaluator.source_sha256,
-            "ground_truth_sha256": revisions.sha256_bytes(ground_truth_data),
-            "submission_sha256": revisions.sha256_bytes(data),
-            "runtime_id": evaluation.runtime_id,
-        },
-    )
-
-
-def _read_evaluator_source(competition: dict, config: models.ScoringConfigV2) -> str:
-    """Source đã xác minh lúc publish phải đúng là source đang chạy."""
-    try:
-        raw = scoring_storage.read_evaluator_source(config.evaluator)
-        source = raw.decode("utf-8")
-    except (KeyError, OSError, ValueError, UnicodeDecodeError):
-        logger.error("Evaluator source unreadable competition=%s", competition["_id"])
-        raise _scoring_not_ready()
-    if revisions.sha256_bytes(raw) != config.evaluator.source_sha256:
-        logger.error("Evaluator source changed competition=%s", competition["_id"])
-        raise _scoring_not_ready()
-    return source
-
-
-def _read_ground_truth(competition: dict) -> bytes:
-    """Ground truth đang dùng; khác bản đã xác minh lúc publish cũng là cuộc thi không còn sẵn sàng."""
-    try:
-        data = scoring_storage.read_ground_truth(competition)
-    except (KeyError, OSError, ValueError):
-        raise _scoring_not_ready()
-    stored_sha = (competition.get("ground_truth") or {}).get("sha256")
-    if stored_sha and stored_sha != revisions.sha256_bytes(data):
-        logger.error("Ground truth changed competition=%s", competition["_id"])
-        raise _scoring_not_ready()
-    return data
-
-
-def _scoring_not_ready():
-    return api_error(422, "SCORING_NOT_READY", SCORING_NOT_READY_MESSAGE)
-
-
 async def _read_limited(file: UploadFile, limit_mb: int) -> bytes:
     limit = limit_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
         raise api_error(413, "FILE_TOO_LARGE", f"File vượt quá giới hạn {limit_mb} MiB.")
     return data
-
-
-def _safe_original_filename(filename: str | None, fallback: str) -> str:
-    safe_name = Path((filename or fallback).replace("\\", "/")).name
-    return safe_name[:255] or fallback

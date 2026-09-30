@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
+import { flushTimers } from "../test/timers";
 import { SubmissionPage } from "./SubmissionPage";
 
 const COMPETITION: Competition = {
@@ -59,7 +60,16 @@ function selectCsv(name = "result.csv", body = "id,prediction\n1,1\n") {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
+
+/** Nhịp trang hỏi trạng thái lượt chấm; `flushTimers` chia thời gian thành từng nhịp poll. */
+const POLL_MS = 1_500;
+
+/** Cuộc thi v2: có hàng đợi chấm nên trang tự tìm lại lượt còn dở khi mở lại. */
+function v2Competition(): Competition {
+  return { ...COMPETITION, submission_config: { ...COMPETITION.submission_config, version: 2 } };
+}
 
 /** Payload chấm điểm đã xong, chưa ghép projection AI. */
 const SCORED = {
@@ -72,20 +82,64 @@ const SCORED = {
   quota_remaining: 4,
 };
 
-/** Trả lời lượt nộp bằng payload đã cho và ghi lại số request để chứng minh trang không poll. */
-function mockSubmit(payload: unknown) {
-  const urls: string[] = [];
+/** Lượt vừa được nhận vào hàng đợi: backend trả payload này kèm 202. */
+function queued(overrides: Record<string, unknown> = {}) {
+  return {
+    attempt_id: "attempt-1",
+    status: "QUEUED",
+    created_at: new Date().toISOString(),
+    deadline_at: new Date(Date.now() + 60_000).toISOString(),
+    queue_position: 1,
+    error: null,
+    submission: null,
+    ...overrides,
+  };
+}
+
+/** Lượt đã chấm xong: kết quả nằm trong `submission`. */
+function completed(overrides: Record<string, unknown> = {}) {
+  return queued({ status: "COMPLETED", queue_position: null, submission: SCORED, ...overrides });
+}
+
+function json(payload: unknown, status: number) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+interface SentRequest {
+  url: string;
+  method: string;
+  key: string | null;
+}
+
+/**
+ * Giả lập backend chấm: POST nhận bài trả 202, mỗi lần hỏi trạng thái lấy lần lượt `reads` (hết thì
+ * lặp lại lần cuối). Ghi lại từng request để test đối chiếu URL, method và `Idempotency-Key`.
+ */
+function mockScoring(queuedPayload: unknown, ...reads: unknown[]) {
+  const sent: SentRequest[] = [];
+  let readCount = 0;
   vi.stubGlobal(
     "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      urls.push(String(input));
-      return new Response(JSON.stringify(payload), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      sent.push({
+        url,
+        method,
+        key: new Headers(init?.headers as HeadersInit).get("Idempotency-Key"),
       });
+      if (method === "POST") return json(queuedPayload, 202);
+      // Danh sách lượt chưa xong lúc mở trang: mặc định không có lượt nào.
+      if (url.endsWith("/submissions/attempts")) return json({ attempts: [] }, 200);
+      const payload = reads[Math.min(readCount, reads.length - 1)];
+      readCount += 1;
+      return json(payload, 200);
     }),
   );
-  return urls;
+  return sent;
 }
 
 function submitOnce() {
@@ -186,38 +240,34 @@ test("nút chọn file CSV là <button> thật nên Tab/Enter mở được pick
   openPicker.mockRestore();
 });
 
-test("submit hiển thị loading rồi metrics và quota còn lại", async () => {
-  let resolveRequest: ((response: Response) => void) | undefined;
+test("submit hiển thị loading, vào hàng đợi rồi ra metrics và quota còn lại", async () => {
+  vi.useFakeTimers();
+  let resolvePost: ((response: Response) => void) | undefined;
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveRequest = resolve;
-        }),
-    ),
+    vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Promise<Response>((resolve) => {
+          resolvePost = resolve;
+        });
+      }
+      return Promise.resolve(json(completed(), 200));
+    }),
   );
   renderPage();
   selectCsv();
   selectNotebook();
   fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
-  expect(await screen.findByRole("button", { name: "Đang chấm điểm..." })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Đang gửi bài..." })).toBeDisabled();
 
-  resolveRequest?.(
-    new Response(
-      JSON.stringify({
-        id: "submission-1",
-        competition_id: COMPETITION.id,
-        status: "completed",
-        metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
-        primary_score: 0.5,
-        created_at: "2026-09-15T00:00:00Z",
-        quota_remaining: 4,
-      }),
-      { status: 201, headers: { "Content-Type": "application/json" } },
-    ),
-  );
-  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  await act(async () => resolvePost?.(json(queued({ queue_position: 3 }), 202)));
+  // Lượt đã vào hàng đợi: nút nộp biến mất nên không có cách nào nộp trùng.
+  expect(screen.getByText("Bài đang chờ chấm")).toBeTruthy();
+  expect(screen.getByText("Bạn đang ở vị trí thứ 3 trong hàng chờ.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Nộp và chấm điểm" })).toBeNull();
+
+  await flushTimers(POLL_MS * 2);
+  expect(screen.getByText("Kết quả chấm điểm")).toBeTruthy();
   // Số thập phân lấy theo hợp đồng kết quả (v1: 4 chữ số), không còn cứng 6 chữ số.
   expect(screen.getAllByText("0.5000")).toHaveLength(3);
 
@@ -241,19 +291,11 @@ test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method !== "POST") {
+        return json(completed({ submission: { ...SCORED, quota_remaining: 2 } }), 200);
+      }
       bodies.push(init?.body);
-      return new Response(
-        JSON.stringify({
-          id: "submission-1",
-          competition_id: COMPETITION.id,
-          status: "completed",
-          metrics: { f1: 0.5, precision: 0.5, recall: 0.5 },
-          primary_score: 0.5,
-          created_at: "2026-09-15T00:00:00Z",
-          quota_remaining: 2,
-        }),
-        { status: 201, headers: { "Content-Type": "application/json" } },
-      );
+      return json(queued(), 202);
     }),
   );
   const { refreshCompetition } = renderPage({
@@ -354,16 +396,21 @@ test("khóa form khi chưa là member hoặc scoring chưa ready", async () => {
   expect(await waitFor(() => screen.getByText("Cuộc thi chưa sẵn sàng chấm điểm."))).toBeTruthy();
 });
 
-test("lượt AI còn chạy chỉ là dòng nhắc: điểm đã có ngay và trang không chờ, không poll", async () => {
-  const urls = mockSubmit({
-    ...SCORED,
-    ai_review: {
-      state: "QUEUED",
-      verdict: null,
-      summary: "AI đang kiểm tra notebook.",
-      updated_at: null,
-    },
-  });
+test("lượt AI còn chạy chỉ là dòng nhắc: điểm đã có và trang không hỏi gì thêm về AI", async () => {
+  const sent = mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        ai_review: {
+          state: "QUEUED",
+          verdict: null,
+          summary: "AI đang kiểm tra notebook.",
+          updated_at: null,
+        },
+      },
+    }),
+  );
   renderPage();
   submitOnce();
 
@@ -374,20 +421,25 @@ test("lượt AI còn chạy chỉ là dòng nhắc: điểm đã có ngay và t
     screen.getByText("AI đang kiểm tra notebook (kết quả sơ bộ, không ảnh hưởng điểm số)."),
   ).toBeTruthy();
 
-  // Chấm điểm xong là xong: đúng một request, không có vòng poll nào cho AI.
-  expect(urls).toHaveLength(1);
+  // Trang chỉ hỏi trạng thái lượt chấm; trạng thái AI xem ở lịch sử bài nộp nên không có request nào.
+  expect(sent.every((call) => !call.url.includes("ai-review"))).toBe(true);
 });
 
 test("lượt AI đã xong hoặc chưa từng chạy thì không hiện dòng nhắc", async () => {
-  mockSubmit({
-    ...SCORED,
-    ai_review: {
-      state: "COMPLETED",
-      verdict: "CLEAR",
-      summary: "AI không phát hiện dấu hiệu vi phạm thể lệ trong notebook.",
-      updated_at: "2026-09-15T00:01:00Z",
-    },
-  });
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        ai_review: {
+          state: "COMPLETED",
+          verdict: "CLEAR",
+          summary: "AI không phát hiện dấu hiệu vi phạm thể lệ trong notebook.",
+          updated_at: "2026-09-15T00:01:00Z",
+        },
+      },
+    }),
+  );
   renderPage();
   submitOnce();
 
@@ -396,15 +448,20 @@ test("lượt AI đã xong hoặc chưa từng chạy thì không hiện dòng n
 });
 
 test("lượt AI hỏng không bị nói thành đang kiểm tra", async () => {
-  mockSubmit({
-    ...SCORED,
-    ai_review: {
-      state: "ERROR",
-      verdict: "ERROR",
-      summary: "AI chưa thể hoàn tất kiểm tra.",
-      updated_at: "2026-09-15T00:01:00Z",
-    },
-  });
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        ai_review: {
+          state: "ERROR",
+          verdict: "ERROR",
+          summary: "AI chưa thể hoàn tất kiểm tra.",
+          updated_at: "2026-09-15T00:01:00Z",
+        },
+      },
+    }),
+  );
   renderPage();
   submitOnce();
 
@@ -413,4 +470,120 @@ test("lượt AI hỏng không bị nói thành đang kiểm tra", async () => {
   expect(screen.queryByText(/AI đang kiểm tra notebook \(/)).toBeNull();
   // Trang kết quả chỉ nói về điểm; trạng thái AI nằm ở lịch sử bài nộp.
   expect(screen.queryByText("AI chưa thể hoàn tất kiểm tra.")).toBeNull();
+});
+
+test("một lần nhấn Nút là một Idempotency-Key: gửi lại sau khi mất mạng vẫn cùng key", async () => {
+  const keys: (string | null)[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      keys.push(new Headers(init?.headers as HeadersInit).get("Idempotency-Key"));
+      throw new TypeError("Failed to fetch");
+    }),
+  );
+  renderPage();
+  submitOnce();
+  await waitFor(() => expect(keys).toHaveLength(1));
+  expect(keys[0]).toBeTruthy();
+
+  // Mất mạng rồi bấm lại: cùng key nên backend trả đúng lượt cũ, không tiêu thêm quota.
+  fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
+  await waitFor(() => expect(keys).toHaveLength(2));
+  expect(keys[1]).toBe(keys[0]);
+
+  // Đổi tệp nghĩa là lượt nộp khác: key mới, không dính vào lượt cũ.
+  fireEvent.click(screen.getByRole("button", { name: "Bỏ chọn Tệp dự đoán (.csv)" }));
+  selectCsv("other.csv");
+  fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
+  await waitFor(() => expect(keys).toHaveLength(3));
+  expect(keys[2]).not.toBe(keys[0]);
+});
+
+test("mở lại trang thì nhận lại lượt đang chờ thay vì nộp mới", async () => {
+  vi.useFakeTimers();
+  const sent: SentRequest[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      sent.push({ url, method: init?.method ?? "GET", key: null });
+      if (url.endsWith("/submissions/attempts")) {
+        return json({ attempts: [queued({ queue_position: 2 })] }, 200);
+      }
+      return json(queued({ queue_position: 2 }), 200);
+    }),
+  );
+  renderPage(v2Competition());
+  await flushTimers(0);
+
+  expect(screen.getByText("Bạn đang ở vị trí thứ 2 trong hàng chờ.")).toBeTruthy();
+  expect(sent.every((call) => call.method === "GET")).toBe(true);
+});
+
+test("quá 60 giây thì báo không tính lượt và cho nộp lại bằng key mới", async () => {
+  vi.useFakeTimers();
+  const sent = mockScoring(queued(), queued());
+  renderPage();
+  submitOnce();
+  await flushTimers(0);
+  await flushTimers(POLL_MS * 2);
+  expect(screen.getByText(/Lượt này còn tối đa \d+ giây\./)).toBeTruthy();
+
+  await flushTimers(60_000);
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("Bài nộp quá hạn chờ chấm nên không bị tính lượt.");
+  expect(alert).toHaveTextContent("Lượt này không bị tính vào hạn mức nộp.");
+  // Form trở lại cùng hai tệp đã chọn: một lần bấm là nộp lại được.
+  expect(screen.getByText("result.csv")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
+  await flushTimers(0);
+  const posts = sent.filter((call) => call.method === "POST");
+  expect(posts).toHaveLength(2);
+  // Lượt cũ đã chết: nộp lại phải là lượt mới, không phải trả về lượt quá hạn.
+  expect(posts[1].key).not.toBe(posts[0].key);
+});
+
+test("lượt hỏng thì hiện lý do, không tính lượt và vẫn nộp lại được", async () => {
+  vi.useFakeTimers();
+  mockScoring(
+    queued(),
+    queued({
+      status: "FAILED",
+      queue_position: null,
+      error: { code: "SUBMISSION_CLOSED", message: "Cuộc thi hiện không nhận bài nộp." },
+    }),
+  );
+  renderPage();
+  submitOnce();
+  await flushTimers(0);
+  await flushTimers(POLL_MS * 2);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("Cuộc thi hiện không nhận bài nộp.");
+  expect(alert).toHaveTextContent("Lượt này không bị tính vào hạn mức nộp.");
+  expect(screen.getByText("result.csv")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
+});
+
+test("lượt đang đối soát thì vẫn chờ dù đã quá 60 giây", async () => {
+  vi.useFakeTimers();
+  mockScoring(
+    queued(),
+    queued({
+      status: "RESOLVING",
+      queue_position: null,
+      deadline_at: new Date(Date.now() - 5_000).toISOString(),
+      error: { code: "SUBMISSION_RESOLVING", message: "Không thể chấm điểm bài nộp này." },
+    }),
+  );
+  renderPage();
+  submitOnce();
+  await flushTimers(0);
+  await flushTimers(POLL_MS * 2);
+
+  // Hệ thống còn nợ kết luận: chưa được nói là hỏng, cũng chưa được nói là hết hạn.
+  expect(screen.getByText("Đang đối soát kết quả")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
 });

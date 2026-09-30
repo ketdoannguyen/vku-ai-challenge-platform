@@ -41,6 +41,9 @@ services:
       # docker; đổi EVALUATOR_RUNTIME_IMAGE là đổi môi trường chấm, phải chạy thử lại trước khi publish.
       EVALUATOR_RUNNER_URL: http://evaluator-runner:8100
       EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
+      # Hàng đợi chấm (ADR-048). API chỉ giữ chỗ và trả 202; hạn 60 giây tính từ lúc nhận request.
+      SCORING_DEADLINE_SECONDS: ${SCORING_DEADLINE_SECONDS:-60}
+      SCORING_QUEUE_CAPACITY: ${SCORING_QUEUE_CAPACITY:-20}
     expose:
       - "8000" # internal only - truy cập qua Nginx same-origin
     depends_on:
@@ -148,6 +151,68 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+
+  scoring-worker:
+    # Nhấc lượt khỏi hàng đợi và gọi runner (ADR-048). Cùng image với `api`, tiến trình riêng, và
+    # KHÔNG có docker socket: chỉ runner mới được chạm vào docker.
+    build:
+      context: ./backend
+      target: api
+    command: ["python", "-m", "app.scoring_attempts.worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_DATABASE: ${MONGO_DATABASE:-ai_challenge}
+      MONGO_USER: ${MONGO_USER:-changeme}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:-changeme}
+      # Nguồn bộ chấm và ground truth nằm trong `data_dir` chứ không ở MinIO: thiếu biến này thì
+      # worker đọc đường dẫn rỗng trong container và mọi lượt chấm hỏng với `SCORING_NOT_READY`.
+      DATA_DIR: /data
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-app}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-appsecret}
+      MINIO_BUCKET: ${MINIO_BUCKET:-submission-artifacts}
+      EVALUATOR_RUNNER_URL: http://evaluator-runner:8100
+      EVALUATOR_TIMEOUT_SECONDS: ${EVALUATOR_TIMEOUT_SECONDS:-30}
+      # Số lượt chấm song song. Worker từ chối khởi động nếu lớn hơn EVALUATOR_MAX_CONCURRENCY,
+      # vì vượt trần runner thì các lượt thừa bị từ chối ngay.
+      SCORING_WORKER_CONCURRENCY: ${SCORING_WORKER_CONCURRENCY:-2}
+      # Trần của runner, KHAI Ở CẢ HAI service: worker so số này với số trên để tự chặn lúc khởi
+      # động, nên thiếu nó ở đây thì worker đọc mặc định 2 và restart vô hạn ngay khi ai đó nâng
+      # runner lên 4 - đúng lỗi đã gặp khi đo tài nguyên (ADR-048).
+      EVALUATOR_MAX_CONCURRENCY: ${EVALUATOR_MAX_CONCURRENCY:-2}
+      SCORING_QUEUE_CAPACITY: ${SCORING_QUEUE_CAPACITY:-20}
+      SCORING_DEADLINE_SECONDS: ${SCORING_DEADLINE_SECONDS:-60}
+      SCORING_POLL_INTERVAL_SECONDS: ${SCORING_POLL_INTERVAL_SECONDS:-1}
+      SCORING_RECONCILE_INTERVAL_SECONDS: ${SCORING_RECONCILE_INTERVAL_SECONDS:-30}
+    # Không expose/publish port nào: worker chỉ nói chuyện với Mongo, MinIO và runner nội bộ.
+    volumes:
+      # Cần `/data` như `ai-review-worker`: lúc ghi bài, worker chụp lại nội dung thể lệ (Markdown
+      # nằm trong data_dir) để lượt AI review sau đó đọc đúng bản đã áp dụng.
+      - data:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    # SIGTERM dừng sau khi các lượt đang chấm viết xong kết quả; lượt bỏ dở được đối soát thu hồi.
+    stop_grace_period: 60s
+    healthcheck:
+      # Cùng mẫu với ai-review-worker: file này được ghi mỗi vòng lặp, kể cả khi hàng đợi rỗng.
+      # Một lượt chấm tối đa EVALUATOR_TIMEOUT_SECONDS nên 60s là mốc "vòng lặp đã chết".
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,sys,time; p='/tmp/scoring-worker.heartbeat'; m=os.stat(p).st_mtime if os.path.exists(p) else 0; sys.exit(0 if time.time()-m < 60 else 1)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   minio:

@@ -184,8 +184,9 @@ Ghi lại đầy đủ để người đọc sau không phải suy diễn:
    api → runner → sandbox → lưu kết quả → quota), **không đo chi phí chấm thật**. Con số ~4,3 s cho
    một bài là **sàn**, không phải dự báo.
 2. **Driver đọc sai đường dẫn mã lỗi.** `_error_code` đọc `body["code"]`, trong khi phong bì của API
-   là `{"detail": {"code": …, "message": …}}` (`backend/app/core/errors.py`). Hệ quả: NDJSON ghi
-   `HTTP_503` thay vì `EVALUATOR_UNAVAILABLE`. Đã sửa trong script **sau** khi đo; số liệu thô giữ
+   là `{"error": {"code": …, "message": …}}` (`backend/app/main.py::error_response`; `errors.py` chỉ
+   dựng `HTTPException.detail`, còn handler mới là chỗ định hình body trên đường dây). Hệ quả: NDJSON
+   ghi `HTTP_503` thay vì `EVALUATOR_UNAVAILABLE`. Đã sửa trong script **sau** khi đo; số liệu thô giữ
    nguyên và mã thật được đối chiếu từ log `api` (§3) — khớp từng stage.
 3. **Stage 1 phải chạy lại một lần vì lỗi của chính harness.** Lượt đầu chết ở
    `AttributeError: 'Admin' object has no attribute 'run_tag'` (hàm `configure_v2` dùng nhầm thuộc

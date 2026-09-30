@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type { ParticipantAiReview } from "../api/aiReview";
-import { api } from "../api/client";
+import { ApiClientError, api } from "../api/client";
 import { formatLocal } from "../api/competitions";
 import { formatMetric, resultContract, type Metrics } from "../api/results";
 import { ErrorBox, FileButton } from "../components/ui";
+import { useDeadlineClock } from "../hooks/useCountdown";
 import { SUBMISSION_PITFALLS, submissionSchema } from "../lib/submissionRequirements";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
@@ -54,13 +55,52 @@ const SLOTS: {
   },
 ];
 
+/**
+ * Một lượt chấm trong hàng đợi (ADR-048): POST trả 202 kèm lượt này, kết quả đến sau ở
+ * `submission`. Backend chỉ ghi bài nộp khi lượt còn kịp hạn 60 giây, nên hết hạn là hết cơ hội.
+ */
+interface Attempt {
+  attempt_id: string;
+  status: "STAGING" | "QUEUED" | "RUNNING" | "RESOLVING" | "COMPLETED" | "FAILED" | "EXPIRED";
+  /** Mốc hạn của cả lượt, tính từ lúc API nhận request. */
+  deadline_at: string;
+  /** Số thứ tự trong hàng chờ, 1 là lượt kế tiếp; null khi lượt đã rời hàng. */
+  queue_position: number | null;
+  /** Lý do không thành công, backend luôn kèm khi lượt bị đóng. */
+  error: { code: string; message: string } | null;
+  submission: SubmissionResult | null;
+}
+
+/** Lượt còn đang chờ chấm - còn phải hỏi trạng thái. */
+const WAITING_ATTEMPT_STATUSES = new Set<Attempt["status"]>([
+  "STAGING",
+  "QUEUED",
+  "RUNNING",
+  "RESOLVING",
+]);
+
+/** Lượt đã có kết luận: hết chờ thì thôi hỏi. */
+const FINAL_ATTEMPT_STATUSES = new Set<Attempt["status"]>(["COMPLETED", "FAILED", "EXPIRED"]);
+
+/** Nhịp hỏi trạng thái lượt: đủ nhanh để kết quả vừa xong hiện ra, đủ thưa để không dồn request. */
+const ATTEMPT_POLL_MS = 1_500;
+
+/** Chốt hạn phía trình duyệt: sau mốc 60 giây backend không ghi bài nộp nào nữa. */
+const OUT_OF_TIME = {
+  code: "SUBMISSION_EXPIRED",
+  message: "Bài nộp quá hạn chờ chấm nên không bị tính lượt. Bạn hãy nộp lại.",
+};
+
 export function SubmissionPage() {
   const { competition, refreshCompetition } = useOutletContext<CompetitionContext>();
   const [files, setFiles] = useState<Record<SlotKind, File | null>>({
     csv: null,
     notebook: null,
   });
-  const [result, setResult] = useState<SubmissionResult | null>(null);
+  /** Lượt đang theo dõi: vừa gửi xong, hoặc lượt còn dở nhận lại khi mở trang. */
+  const [attempt, setAttempt] = useState<Attempt | null>(null);
+  /** `Idempotency-Key` của lần nhấn Nút hiện tại; đổi tệp hoặc đã nhận lượt thì bỏ. */
+  const [submitKey, setSubmitKey] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
   const [dragOver, setDragOver] = useState<SlotKind | null>(null);
@@ -90,6 +130,88 @@ export function SubmissionPage() {
         ? "ok"
         : "low";
 
+  // Đồng hồ của lượt đang chờ: hạn 60 giây là mốc thật của backend, không phải nhịp của trang.
+  const clock = useDeadlineClock(attempt ? [attempt.deadline_at] : []);
+  const secondsLeft =
+    attempt && clock !== null
+      ? Math.ceil((new Date(attempt.deadline_at).getTime() - clock) / 1000)
+      : null;
+  // Quá mốc 60 giây thì backend không ghi bài nộp nào nữa, nên lượt chắc chắn không thành công và
+  // sẽ được hoàn hạn mức. RESOLVING là ngoại lệ: hệ thống còn nợ kết luận nên vẫn chờ tiếp.
+  const timedOut =
+    attempt !== null &&
+    attempt.status !== "RESOLVING" &&
+    clock !== null &&
+    clock >= new Date(attempt.deadline_at).getTime();
+
+  const result = attempt?.submission ?? null;
+  const waiting = attempt !== null && WAITING_ATTEMPT_STATUSES.has(attempt.status) && !timedOut;
+  const failure =
+    timedOut && !result
+      ? OUT_OF_TIME
+      : attempt !== null && FINAL_ATTEMPT_STATUSES.has(attempt.status) && !result
+        ? attempt.error
+        : null;
+
+  // Mở lại trang giữa chừng (đóng tab, mất mạng): nhận lại đúng lượt đang chờ thay vì nộp lần nữa.
+  useEffect(() => {
+    if (config.version !== 2) return;
+    let cancelled = false;
+    void api
+      .get<{ attempts: Attempt[] }>(`/competitions/${competition.id}/submissions/attempts`)
+      .then((data) => {
+        if (!cancelled && data.attempts.length > 0) setAttempt(data.attempts[0]);
+      })
+      .catch(() => {
+        // Không đọc được thì thôi: lần nộp sau vẫn tạo lượt mới bình thường.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [competition.id, config.version]);
+
+  // Theo dõi lượt tới khi có kết luận. Vòng sau hẹn sau khi vòng trước xong nên request không dồn.
+  useEffect(() => {
+    if (attempt === null || timedOut || !WAITING_ATTEMPT_STATUSES.has(attempt.status)) return;
+    const attemptId = attempt.attempt_id;
+    let timer: number | null = null;
+    let stopped = false;
+
+    async function poll() {
+      try {
+        const next = await api.get<Attempt>(
+          `/competitions/${competition.id}/submissions/attempts/${attemptId}`,
+        );
+        if (stopped) return;
+        setAttempt(next);
+        if (!WAITING_ATTEMPT_STATUSES.has(next.status)) {
+          if (next.submission !== null) {
+            // Chấm xong: form trở về trạng thái trống và hạn mức ở header được tính lại.
+            setFiles({ csv: null, notebook: null });
+            void refreshCompetition();
+          }
+          return;
+        }
+      } catch (err) {
+        if (stopped) return;
+        if (err instanceof ApiClientError && err.status === 404) {
+          // Lượt không còn (cuộc thi bị xoá giữa chừng): trả trang về chỗ nộp bài.
+          setAttempt(null);
+          setError(err);
+          return;
+        }
+        // Lỗi khác chỉ là một vòng hỏng: vòng sau thử lại.
+      }
+      timer = window.setTimeout(poll, ATTEMPT_POLL_MS);
+    }
+
+    timer = window.setTimeout(poll, ATTEMPT_POLL_MS);
+    return () => {
+      stopped = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [attempt, timedOut, competition.id, refreshCompetition]);
+
   /** Trần và định dạng khác nhau theo từng slot nên luật kiểm tra nằm cùng một chỗ. */
   function rejectReason(kind: SlotKind, selectedFile: File): string | null {
     const limitMb = kind === "csv" ? config.max_upload_mb : config.max_notebook_mb;
@@ -110,6 +232,8 @@ export function SubmissionPage() {
   }
 
   function selectFile(kind: SlotKind, selectedFile: File | null) {
+    // Bộ tệp khác đi nghĩa là lượt nộp khác: key cũ không còn dùng lại được.
+    setSubmitKey(null);
     if (!selectedFile) {
       setFiles((current) => ({ ...current, [kind]: null }));
       return;
@@ -122,7 +246,7 @@ export function SubmissionPage() {
     }
     setFiles((current) => ({ ...current, [kind]: selectedFile }));
     setError(null);
-    setResult(null);
+    setAttempt(null);
   }
 
   const ready = SLOTS.every((slot) => files[slot.kind] !== null);
@@ -132,16 +256,20 @@ export function SubmissionPage() {
     if (!ready || unavailableMessage) return;
     setSubmitting(true);
     setError(null);
-    setResult(null);
+    // Cùng một lần nhấn Nút giữ nguyên key: gửi lại sau khi mất mạng nhận đúng lượt cũ, không
+    // tạo lượt thứ hai và không tiêu thêm quota.
+    const key = submitKey ?? crypto.randomUUID();
+    setSubmitKey(key);
     try {
-      const response = await api.postFile<SubmissionResult>(
+      const response = await api.postFile<Attempt>(
         `/competitions/${competition.id}/submissions`,
         Object.fromEntries(SLOTS.map((slot) => [slot.part, files[slot.kind]!])),
+        undefined,
+        { "Idempotency-Key": key },
       );
-      setResult(response);
-      setFiles({ csv: null, notebook: null });
-      // POST đã trả quota_remaining tức thời; refetch để header và chỗ nộp bài khớp lại.
-      void refreshCompetition();
+      // Server đã nhận lượt: từ đây theo dõi bằng `attempt_id`, key không còn cần nữa.
+      setSubmitKey(null);
+      setAttempt(response);
     } catch (err) {
       setError(err);
     } finally {
@@ -149,7 +277,7 @@ export function SubmissionPage() {
     }
   }
 
-  // Trang này cố ý không poll: điểm số đã xong, còn lượt AI thì xem ở lịch sử bài nộp.
+  // Lượt AI còn chạy chỉ là dòng nhắc: điểm số đã xong, còn lượt AI thì xem ở lịch sử bài nộp.
   const aiPending =
     result?.ai_review?.state === "QUEUED" || result?.ai_review?.state === "RUNNING";
 
@@ -160,8 +288,8 @@ export function SubmissionPage() {
         <div className="sub-header submission-head">
           <h2 className="sub-title">Nộp bài dự đoán</h2>
           <p className="sub-lead text-muted">
-            Mỗi lượt nộp gồm file CSV dự đoán và notebook tái lập. File được kiểm tra và chấm
-            điểm ngay sau khi upload.
+            Mỗi lượt nộp gồm file CSV dự đoán và notebook tái lập. File được kiểm tra ngay khi
+            upload rồi vào hàng đợi chấm.
           </p>
         </div>
 
@@ -268,7 +396,14 @@ export function SubmissionPage() {
 
         <ErrorBox error={error} />
 
-        {/* Khi có kết quả (S06c): hiển thị kết quả chấm điểm; khi chưa: hiển thị form nộp bài */}
+        {/* Lượt vừa rồi hỏng hay quá hạn: nói rõ lý do và nhắc lại là không bị tính lượt. */}
+        {failure && (
+          <div className="error-box" role="alert">
+            {failure.message} Lượt này không bị tính vào hạn mức nộp.
+          </div>
+        )}
+
+        {/* Ba trạng thái của trang: có kết quả (S06c), đang chờ chấm (S06d), hoặc form nộp bài */}
         {result ? (
           <section className="score-result sub-result-view" aria-live="polite">
             <div className="sub-result-header">
@@ -337,17 +472,31 @@ export function SubmissionPage() {
                 <Link to="../leaderboard" className="btn btn-secondary">
                   Xem bảng xếp hạng
                 </Link>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    setResult(null);
-                    setFiles({ csv: null, notebook: null });
-                  }}
-                >
+                <button type="button" className="btn" onClick={() => setAttempt(null)}>
                   Nộp bài khác
                 </button>
               </div>
+            </div>
+          </section>
+        ) : waiting ? (
+          /* S06d Lượt đã vào hàng đợi: thí sinh chỉ cần đợi, không phải bấm nộp lại. */
+          <section className="score-result sub-result-view" aria-live="polite">
+            <div className="sub-result-header">
+              <h3 className="sub-result-title">{waitingTitle(attempt.status)}</h3>
+              <p className="sub-result-lead">
+                Bài của bạn đã được nhận và đang chờ chấm. Bạn không cần bấm nộp lại — kết quả sẽ
+                tự hiện ở đây.
+              </p>
+              {attempt.queue_position !== null && (
+                <p className="sub-result-ai-note text-muted" role="status">
+                  Bạn đang ở vị trí thứ {attempt.queue_position} trong hàng chờ.
+                </p>
+              )}
+              {secondsLeft !== null && secondsLeft > 0 && (
+                <p className="sub-result-ai-note text-muted" role="status">
+                  Lượt này còn tối đa {secondsLeft} giây.
+                </p>
+              )}
             </div>
           </section>
         ) : (
@@ -482,13 +631,14 @@ export function SubmissionPage() {
                     type="submit"
                     disabled={!ready || submitting || Boolean(unavailableMessage)}
                   >
-                    {submitting ? "Đang chấm điểm..." : "Nộp và chấm điểm"}
+                    {submitting ? "Đang gửi bài..." : "Nộp và chấm điểm"}
                   </button>
                 </div>
               </div>
 
               <p className="sub-notice-footnote">
-                Lưu ý: Thao tác nộp bài sẽ trừ 1 lượt nộp hôm nay và chạy kiểm tra ground truth tự động. Điểm số sẽ hiển thị ngay sau khi chấm.
+                Lưu ý: Mỗi lượt nộp chạy kiểm tra ground truth tự động và chỉ tính vào hạn mức khi
+                chấm xong. Lượt quá 60 giây không bị tính — bạn hãy nộp lại.
               </p>
             </div>
           </form>
@@ -590,6 +740,13 @@ function submissionUnavailableMessage(
     )}.`;
   }
   return null;
+}
+
+/** Tiêu đề của lượt đang chờ: nói đúng việc hệ thống đang làm với bài của thí sinh. */
+function waitingTitle(status: Attempt["status"]): string {
+  if (status === "RUNNING") return "Đang chấm bài";
+  if (status === "RESOLVING") return "Đang đối soát kết quả";
+  return "Bài đang chờ chấm";
 }
 
 function averageLabel(

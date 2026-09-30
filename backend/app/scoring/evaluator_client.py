@@ -42,9 +42,12 @@ class EvaluatorClient:
         settings: Settings,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        timeout: float | None = None,
     ) -> None:
         self._base_url = settings.evaluator_runner_url.rstrip("/")
-        self._timeout = settings.evaluator_client_timeout_seconds
+        # `timeout` là trần riêng của lượt gọi này (worker hàng đợi cắt theo hạn 60 giây của bài);
+        # không truyền thì dùng trần chung của hệ thống.
+        self._timeout = timeout if timeout is not None else settings.evaluator_client_timeout_seconds
         self._transport = transport
 
     async def evaluate(
