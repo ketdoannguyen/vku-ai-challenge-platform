@@ -17,6 +17,8 @@ from app.content import storage
 from app.core.config import get_settings
 from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.scoring import contracts
+from app.scoring.models import OutputContract
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
@@ -381,8 +383,13 @@ def artifact_metadata(submission: dict) -> dict:
 
 
 def public_submission(
-    submission: dict, quota_remaining: int, *, ai_visible: bool = False
+    submission: dict,
+    quota_remaining: int,
+    *,
+    ai_visible: bool = False,
+    contract: OutputContract | None = None,
 ) -> dict:
+    """`contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric."""
     result = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -394,14 +401,21 @@ def public_submission(
         "artifacts": artifact_metadata(submission),
         "quota_remaining": quota_remaining,
     }
+    if contract is not None:
+        contracts.apply_metric_visibility(result, contract)
     projection = ai_serializers.participant_projection(submission, ai_visible)
     if projection is not None:
         result["ai_review"] = projection
     return result
 
 
-def submission_history_item(submission: dict, *, ai_visible: bool = False) -> dict:
-    """Return participant-safe history data without account or storage details."""
+def submission_history_item(
+    submission: dict, *, ai_visible: bool = False, contract: OutputContract | None = None
+) -> dict:
+    """Return participant-safe history data without account or storage details.
+
+    `contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric.
+    """
     item = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -430,6 +444,8 @@ def submission_history_item(submission: dict, *, ai_visible: bool = False) -> di
             "status": REVIEW_STATUS_REJECTED,
             "note": review.get("note"),
         }
+    if contract is not None:
+        contracts.apply_metric_visibility(item, contract)
     projection = ai_serializers.participant_projection(submission, ai_visible)
     if projection is not None:
         item["ai_review"] = projection
@@ -437,13 +453,23 @@ def submission_history_item(submission: dict, *, ai_visible: bool = False) -> di
 
 
 async def list_account_submissions(
-    db, competition_id, account_id, *, limit: int, offset: int, ai_visible: bool = False
+    db,
+    competition_id,
+    account_id,
+    *,
+    limit: int,
+    offset: int,
+    ai_visible: bool = False,
+    contract: OutputContract | None = None,
 ) -> tuple[list[dict], int]:
     query = {"competition_id": competition_id, "account_id": account_id}
     collection = db[SUBMISSIONS_COLLECTION]
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
-    return [submission_history_item(item, ai_visible=ai_visible) async for item in cursor], total
+    return [
+        submission_history_item(item, ai_visible=ai_visible, contract=contract)
+        async for item in cursor
+    ], total
 
 
 async def matching_account_ids(db, query: str) -> list[ObjectId] | None:

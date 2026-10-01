@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.scoring import csv_validation, revisions
+from app.scoring import contracts, csv_validation, revisions
 from app.scoring.errors import ScoringValidationError
 from app.scoring.models import (
     ColumnSpec,
@@ -181,6 +181,65 @@ def test_output_contract_tu_choi_metric_chinh_khong_nam_trong_danh_sach():
         validate_output_contract(_contract(primary_metric="khong_co"))
 
 
+def test_output_contract_nhan_whitelist_metric_cho_thi_sinh():
+    validate_output_contract(_contract(visible_metrics=["accuracy"]))
+    # Mảng rỗng là "ẩn hết", vẫn là cấu hình hợp lệ; khác `None` là "không giới hạn".
+    validate_output_contract(_contract(visible_metrics=[]))
+
+
+def test_output_contract_tu_choi_whitelist_khoa_la_hoac_trung():
+    with pytest.raises(ScoringValidationError, match="thí sinh thấy"):
+        validate_output_contract(_contract(visible_metrics=["khong_co"]))
+    with pytest.raises(ScoringValidationError, match="trùng"):
+        validate_output_contract(_contract(visible_metrics=["accuracy", "accuracy"]))
+
+
+def _v2_competition(**contract_overrides) -> dict:
+    contract = _contract().model_dump()
+    contract.update(contract_overrides)
+    return {
+        "scoring_config": {
+            "version": 2,
+            "input_schema": _schema().model_dump(),
+            "evaluator": {"name": "Bộ chấm"},
+            "output_contract": contract,
+        }
+    }
+
+
+def test_participant_contract_giu_nguyen_khi_admin_chua_gioi_han():
+    contract = contracts.participant_contract(_v2_competition())
+    assert [metric.key for metric in contract.metrics] == ["accuracy", "macro_f1"]
+    assert contract.primary_metric == "macro_f1"
+
+
+def test_participant_contract_bo_metric_ngoai_whitelist_va_chi_so_chinh_bi_an():
+    contract = contracts.participant_contract(_v2_competition(visible_metrics=["accuracy"]))
+    assert [metric.key for metric in contract.metrics] == ["accuracy"]
+    # macro_f1 là chỉ số chính nhưng bị ẩn: bảng xếp hạng vẫn xếp theo nó, chỉ không trả giá trị.
+    assert contract.primary_metric is None
+
+
+def test_apply_metric_visibility_loc_metrics_va_primary_score():
+    contract = OutputContract(
+        metrics=[MetricDefinition(key="accuracy", label="Accuracy")],
+        primary_metric=None,
+        visible_metrics=["accuracy"],
+    )
+    payload = {"metrics": {"accuracy": 1.0, "macro_f1": 0.5}, "primary_score": 0.5}
+    contracts.apply_metric_visibility(payload, contract)
+    assert payload == {"metrics": {"accuracy": 1.0}, "primary_score": None}
+
+
+def test_apply_metric_visibility_khong_doi_payload_khi_chua_co_whitelist():
+    contract = OutputContract(
+        metrics=[MetricDefinition(key="accuracy", label="Accuracy")], primary_metric="accuracy"
+    )
+    payload = {"metrics": {"accuracy": 1.0, "extra": 2.0}, "primary_score": 1.0}
+    contracts.apply_metric_visibility(payload, contract)
+    assert payload == {"metrics": {"accuracy": 1.0, "extra": 2.0}, "primary_score": 1.0}
+
+
 def test_evaluator_chi_nhan_diem_vao_evaluate():
     validate_evaluator_config(EvaluatorConfig(name="Bộ chấm"))
     with pytest.raises(ScoringValidationError, match="Điểm vào"):
@@ -302,6 +361,16 @@ def test_validate_metrics_chi_nhan_so_huu_han_phang():
         assert error.value.code == "EVALUATOR_OUTPUT_MISMATCH"
 
 
+def test_validate_metrics_noi_dung_bo_cham_da_tra_ve_gi():
+    """Ba dạng sai phải ra ba câu khác nhau: admin nhìn thông báo là biết sửa gì trong evaluate."""
+    with pytest.raises(ScoringValidationError, match="không trả về giá trị nào"):
+        validate_metrics(None)
+    with pytest.raises(ScoringValidationError, match="dictionary rỗng"):
+        validate_metrics({})
+    with pytest.raises(ScoringValidationError, match="trả về list"):
+        validate_metrics([1.0])
+
+
 def test_validate_metrics_tu_choi_gia_tri_long_nhau():
     with pytest.raises(ScoringValidationError):
         validate_metrics({"f1": {"a": 1}})
@@ -357,20 +426,40 @@ def test_doi_bat_ky_dau_vao_nao_cung_doi_dau_van_tay():
         assert _fingerprint(**{field: value}) != base, field
 
 
-def test_verification_het_hieu_luc_khi_doi_metric_chinh_hoac_chieu_xep_hang():
+def test_doi_trinh_bay_khong_mat_hieu_luc_doi_tap_khoa_thi_mat():
     execution = _fingerprint()
     contract = _contract()
     verification = Verification(
         state="passed",
         execution_fingerprint=execution,
-        config_fingerprint=revisions.config_fingerprint(execution, contract),
+        observed_keys=["accuracy", "macro_f1"],
     )
     assert revisions.verification_matches(verification, execution=execution, contract=contract)
+    # Bản nháp dò khóa chưa khai hợp đồng: bằng chứng chỉ cần đúng phần đã chạy.
+    assert revisions.verification_matches(verification, execution=execution, contract=None)
 
+    # Trình bày kết quả không nằm trong bằng chứng: lượt chạy thử không quan sát được chúng, nên bắt
+    # chạy lại vì chúng chỉ tạo thêm lượt chứ không thêm bằng chứng.
     for changed in (
         _contract(primary_metric="accuracy"),
         _contract(higher_is_better=False),
-        _contract(metrics=[MetricDefinition(key="accuracy", label="Accuracy", decimals=2)]),
+        _contract(
+            metrics=[
+                MetricDefinition(key="accuracy", label="Độ chính xác", decimals=2),
+                MetricDefinition(key="macro_f1", label="Macro F1", decimals=4),
+            ]
+        ),
+        _contract(visible_metrics=["accuracy"]),
+    ):
+        assert revisions.verification_matches(verification, execution=execution, contract=changed)
+
+    # Tập khóa là thứ bộ chấm phải trả về: khai thừa hay khai thiếu đều làm bằng chứng cũ hết hiệu lực.
+    for changed in (
+        _contract(
+            metrics=[MetricDefinition(key="accuracy", label="Accuracy", decimals=4)],
+            primary_metric=None,
+        ),
+        _contract(metrics=[*_contract().metrics, MetricDefinition(key="f1_macro", label="Macro F1")]),
     ):
         assert not revisions.verification_matches(verification, execution=execution, contract=changed)
 

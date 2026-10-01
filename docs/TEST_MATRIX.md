@@ -182,7 +182,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 |---|---|---|
 | Normalize/validate link Drive: tối đa 10 mục, label ≤120, url ≤2048, bắt buộc https, chặn host lạ/credentials | passing | `backend/tests/test_competitions_admin.py` |
 | Create/edit/clear (`resources: []`)/clone resources; document legacy thiếu field trả `[]`, không cần migration | passing | `backend/tests/test_competitions_{admin,public}.py` |
-| Admin detail có 6 tab theo thứ tự Nội dung → Hình ảnh → Tài nguyên → Chấm điểm → Kết quả → Thành viên; tab Tài nguyên dùng PATCH hiện tại, validate Drive/Docs, clear `[]`, giới hạn 10, giữ draft khi lỗi và khóa khi competition `closed`; dialog chỉ nhập tài nguyên khi tạo mới | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx`, `frontend/src/components/AdminCompetitionManagement.test.tsx`, `frontend/src/lib/competitionResources.test.ts` |
+| Admin detail có 7 tab theo thứ tự Nội dung → Hình ảnh → Tài nguyên → Chấm điểm → Kết quả → Thành viên → Cài đặt; tab Tài nguyên dùng PATCH hiện tại, validate Drive/Docs, clear `[]`, giới hạn 10, giữ draft khi lỗi và khóa khi competition `closed`; dialog chỉ nhập tài nguyên khi tạo mới | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx`, `frontend/src/components/AdminCompetitionManagement.test.tsx`, `frontend/src/lib/competitionResources.test.ts` |
 | Block "Tài nguyên tải về" nằm SAU "Mục lục nội dung" theo DOM; dùng cùng card shell VKU, badge số lượng và format đánh số; ẩn khi rỗng; link ngoài có `rel="noopener noreferrer nofollow"`; URL không hợp lệ bị FE lọc bỏ | passing | `frontend/src/pages/CompetitionDetailPage.test.tsx` |
 | Payload public không có `created_by`; `pos_label` chỉ với thành viên active (guest/non-member/inactive không có key); admin vẫn nhận `created_by` | passing | `backend/tests/test_competitions_public.py` |
 | Datetime naive/aware cùng instant normalize giống nhau; PATCH chỉ `start_at` hoặc chỉ `end_at` lệch thứ tự → 422 chứ không 500 | passing | `backend/tests/test_datetimes.py`, `backend/tests/test_competitions_admin.py` |
@@ -190,7 +190,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Publish thất bại giữ nguyên `draft`; join-code thiếu thắng readiness khi cả hai cùng thiếu; publish xong thì submission fixture chấm được | passing | `backend/tests/test_competitions_admin.py`, `backend/tests/test_submissions.py` |
 | Admin detail trả `publish_ready`/`publish_blocked_reason`; banner + disable Publish; 422 vẫn hiện trong modal | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Cổng publish không lệch nhau: detail trả `JOIN_CODE_REQUIRED` khi `join_mode=code` chưa có mã, đặt mã xong rơi xuống `SCORING_CONFIG_REQUIRED` | passing | `backend/tests/test_competitions_admin.py` |
-| Upload ground truth xong banner publish biến mất + nút Publish mở khóa; banner chặn vì mã tham gia mở tab Thành viên | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
+| Upload ground truth xong banner publish biến mất + nút Publish mở khóa; banner chặn vì mã tham gia mở tab Cài đặt | passing | `frontend/src/pages/AdminCompetitionDetailPage.test.tsx` |
 | Join: trước `start_at` thành công; non-member sau `end_at` → `JOIN_DEADLINE_PASSED` và không tạo membership; active member sau deadline/closed vẫn idempotent; inactive vẫn 403; closed thắng deadline | passing | `backend/tests/test_memberships.py`, `frontend/src/components/JoinControl.test.tsx` |
 | Quota: đúng trước/sau khi nộp, `resets_at` ISO `Z`, loại bài của ngày hôm trước, quota 0; không có key quota trên guest/non-member/inactive/list | passing | `backend/tests/test_competitions_public.py`, `backend/tests/test_submissions.py` |
 | UI quota: hiện "Còn X/Y lượt", khoá form khi remaining=0, nộp xong refetch detail | passing | `frontend/src/pages/{CompetitionDetailPage,SubmissionPage}.test.tsx` |
@@ -1493,10 +1493,10 @@ Mongo thật hay provider; phần chạy thật chỉ chứng minh được bằ
 
 ## 18. Bộ chấm Python do admin cấp (ADR-048) - passing
 
-Bốn tệp mới `backend/tests/test_scoring_v2.py` (29), `test_scoring_v2_api.py` (19),
-`test_scoring_v2_results.py` (3), `test_evaluator_sandbox.py` (7) khoá phần v2; các case v1 cũ trong
-`test_scoring.py` (23) và `test_scoring_admin.py` (12) **không đổi một dòng nào** - đó là bằng chứng
-hai đời cấu hình cùng sống.
+Bốn tệp mới `backend/tests/test_scoring_v2.py` (36), `test_scoring_v2_api.py` (21),
+`test_scoring_v2_results.py` (5), `test_evaluator_sandbox.py` (11) khoá phần v2; các case v1 cũ trong
+`test_scoring.py` (23) và `test_scoring_admin.py` (12) **vẫn xanh, hành vi không đổi** - đó là bằng
+chứng hai đời cấu hình cùng sống.
 
 ### Backend - hợp đồng dữ liệu và dấu vân tay
 
@@ -1511,7 +1511,8 @@ hai đời cấu hình cùng sống.
 | CSV có BOM và CRLF vẫn đọc đúng | passing | `test_csv_bom_va_crlf_doc_duoc` |
 | Kết quả `evaluate` chỉ nhận số hữu hạn phẳng: giá trị lồng nhau/`NaN`/`Inf` bị từ chối; thiếu khoá và thừa khoá so với hợp đồng đều báo lỗi | passing | `test_validate_metrics_chi_nhan_so_huu_han_phang`, `test_validate_metrics_tu_choi_gia_tri_long_nhau`, `test_check_contract_bao_thieu_va_thua` |
 | `primary_score` lấy đúng `metrics[primary_metric]` và đòi đã chọn metric chính | passing | `test_primary_score_lay_dung_metric_chinh_va_doi_hoi_da_chon` |
-| **Đổi bất kỳ đầu vào nào cũng đổi dấu vân tay**: source, ground truth, schema, `preprocessing_version`, runtime, metric chính, chiều xếp hạng | passing | `test_doi_bat_ky_dau_vao_nao_cung_doi_dau_van_tay`, `test_verification_het_hieu_luc_khi_doi_metric_chinh_hoac_chieu_xep_hang` |
+| **Đổi bất kỳ đầu vào thực thi nào cũng đổi dấu vân tay**: source, ground truth, schema, `preprocessing_version`, runtime | passing | `test_doi_bat_ky_dau_vao_nao_cung_doi_dau_van_tay` |
+| **Hiệu lực xác minh theo tập khoá metric, không theo trình bày** (2026-10-01): đổi label/số thập phân/ẩn-hiện/metric chính/chiều xếp hạng **không** làm mất hiệu lực; khai **lệch** tập khoá (thừa hay thiếu) thì mất; khai đúng tập khoá vừa dò là publish được ngay sau **một** lượt chạy thử | passing | `test_doi_trinh_bay_khong_mat_hieu_luc_doi_tap_khoa_thi_mat`, `test_v2_test_run_discovers_keys_then_verifies_contract`, `test_v2_khai_lech_tap_khoa_lam_bang_chung_het_hieu_luc` |
 | Lượt chạy thử cũ chết khi source hoặc ground truth đổi; chưa chạy hoặc chạy với cấu hình khác thì không tính là đã xác minh | passing | `test_v2_verification_dies_with_source_or_ground_truth`, `test_verification_chua_chay_hoac_da_chay_voi_cau_hinh_khac` |
 
 ### Backend - API admin và khoá ghi
@@ -1525,7 +1526,7 @@ hai đời cấu hình cùng sống.
 | Lưu từ chối source thiếu/hỏng cú pháp | passing | `test_v2_save_rejects_missing_or_broken_source` |
 | Lưu với `expected_revision` cũ → **409** `SCORING_REVISION_CONFLICT`, không ghi đè | passing | `test_v2_save_rejects_stale_revision` |
 | Ground truth upload bị đối chiếu với schema admin khai | passing | `test_v2_ground_truth_is_checked_against_schema` |
-| Chạy thử: lượt đầu **phát hiện khoá metric**, lượt sau xác minh hợp đồng | passing | `test_v2_test_run_discovers_keys_then_verifies_contract` |
+| Chạy thử: lượt đầu **phát hiện khoá metric** (chưa khai hợp đồng vẫn còn hiệu lực), khai đúng tập khoá vừa dò là `verified` ngay | passing | `test_v2_test_run_discovers_keys_then_verifies_contract` |
 | Chạy thử từ chối output nằm ngoài hợp đồng đã khai | passing | `test_v2_test_run_rejects_output_outside_contract` |
 | Lỗi bộ chấm khi chạy thử được ánh xạ thành **mã lỗi** (timeout, source hỏng, output sai) chứ không phải 500 trần | passing | `test_v2_test_run_maps_evaluator_failures` |
 | Publish từ chối khi guard không còn khớp cấu hình đang lưu | passing | `test_v2_publish_rejects_a_guard_that_no_longer_matches` |
@@ -1701,12 +1702,52 @@ công. Chi tiết đầy đủ: `docs/SCORING_V2_E2E_PROD_2026-09-30.md`.
 | Mọi bài lưu trong DB ghim đúng runtime đã sinh ra điểm | đạt | Mongo chỉ-đọc: **7/7** bài (`1+2+2+2`), đều `version=2` và **cùng** `runtime_id` nội dung `sha256:ebac286c…`; 0 bài thiếu `scoring_ref` |
 | Dọn sạch, dữ liệu thật không đổi | đạt | 0 cuộc thi / 0 bài nộp / 0 membership / 0 account diễn tập còn hoạt động / 0 artifact; dữ liệu thật **1 account, 1 cuộc thi, 3 bài** đúng bằng trước đợt |
 
+### Production, hàng đợi chấm: 24/25 đồng thời, hạn 60 giây, 4 slot (2026-09-30)
+
+Release B `6ce4ce82a7fa` trên VPS thật, đo qua đường công khai Cloudflare → nginx → API → hàng đợi →
+worker → runner → container dùng một lần, **mười** cuộc thi biệt lập `[LOAD TEST]`, một thí sinh một
+tài khoản, bắn đúng N request qua một rào khởi chạy, không retry, poll theo nhịp thật 1,5 s của
+`SubmissionPage.tsx`. `EVALUATOR_MAX_CONCURRENCY=4` + `SCORING_WORKER_CONCURRENCY=4` (nâng từ 2 giữa
+đợt; trần chờ 20 và hạn 60 s giữ mặc định), chỉ `evaluator-runner` + `scoring-worker` được tạo lại.
+Chi tiết đầy đủ: `docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md`.
+
+| Check | Kết quả | Chi tiết |
+|---|---|---|
+| 20 người bấm nộp cùng lúc | đạt | **20/20 nhận `202`, 20/20 `COMPLETED`**, lượt cuối xong sau **33,5 s** - trước hàng đợi cùng cảnh huống cho 2 nhận + 18 `503`; 1/10/15 người cũng 100% nhận và 100% xong |
+| Vượt trần 20 chỗ chờ + 4 chạy | đạt | 24 người → **20 nhận + 4 `503 SCORING_QUEUE_FULL`**; 25 → **21 nhận + 4 `503`**; lượt bị từ chối **không** tạo document, **không** tiêu quota (đối chiếu Mongo sau stage) |
+| Chờ đúng thứ tự FIFO | đạt | `queue_position` trả lúc POST đơn điệu (`1,2,3,3,4,4,…`); số nhảy cách đúng bằng số lượt đã được nhấc lên chạy - chỗ chờ là tài nguyên nhả khi vào chạy |
+| Quá hạn 60 s → hoàn quota | đạt | 12 lượt × 25 s chấm: **4 `COMPLETED`** (còn 30,5-32,7 s trước hạn) + **8 `EXPIRED`** kèm `SUBMISSION_EXPIRED` (đóng ở 49,4-51,0 s), `quota_charged=false`, **0 bài** được ghi |
+| Trần slot không bị vượt | đạt | đếm container `vku-evaluator-*` theo **từng giây** từ cgroup: **đỉnh 2** ở giai đoạn 2 slot, **đỉnh 4** ở giai đoạn 4 slot, không giây nào vượt |
+| Bất biến quota và đối soát | đạt | **0 vi phạm** trên mọi stage; ba nguồn khớp nhau: log `api` **168** `202` = 159 lượt thật + 9 replay idempotent, Mongo **159** lượt = 141 `COMPLETED` + 16 `EXPIRED` + 2 `FAILED`, log worker **74** lượt đúng bốn stage pha 2 |
+| Không lượt kẹt | đạt | **0** `RESOLVING`, **0** chỗ chờ bị giữ, **0** dấu `quota_claims` sót lại sau đợt |
+| Tài nguyên VPS dưới tải | ghi nhận | RAM khả dụng đáy **5446 MiB** (cổng >2 GiB), **0 restart**, **0 OOM**, container chấm đỉnh **6,9 MiB** RSS; load1 đỉnh **5,26** **vượt** cổng <4, nhưng trong đúng cửa sổ đỉnh **toàn bộ** container cộng lại chỉ ~0,6/2 lõi và container chấm ~0 CPU → quy cho chính máy phát tải (24-25 luồng driver + hàng chục lượt tạo/huỷ container + sampler 1 Hz), không phải đường chấm |
+| Hai lượt `FAILED` (hạn chế đã biết) | ghi nhận | qp-dl `08:14:29`: hai `POST /evaluate → 503` rồi `attempt=…de27`/`…de28 outcome=FAILED`; container chấm của lượt bị bỏ dở giữ slot runner tới hạn riêng của nó. Cả hai **hoàn quota**, **không** ghi bài |
+| Dọn sạch, dữ liệu thật không đổi | đạt | 10 cuộc thi `[LOAD TEST]` xoá kèm cascade; 188 tài khoản diễn tập **vô hiệu hoá, không xoá**; 0 container sót; script + credential của diễn tập xoá khỏi VPS; dữ liệu thật **1 cuộc thi / 1 tài khoản / 3 bài nộp** |
+| Verdict | **GO** | 12/12 cổng đạt trừ cổng `load1`, và cổng đó quy được cho dụng cụ đo |
+
+### Bằng chứng đo tay: DATATEST E2E trên Docker local (2026-10-01)
+
+Chạy `datatest.zip` (fixture tổng hợp) qua nginx `localhost:8080/api` trên stack Compose **đã rebuild từ working tree chưa commit**; `revisions.py` trong container khớp bản trên đĩa, web bundle mới, health báo Mongo reachable. Script diễn tập và báo cáo chi tiết ở `/tmp/datatest-run/` (`run_e2e.py`, `audit_refs.py`, `report.json`, `report.md`) — **không** nằm trong repo, không phải cổng CI hay số đo production. Năm cuộc thi `datatest-*` và năm tài khoản TEST-A..E vẫn ở **Mongo local** để đối chiếu, không xoá dữ liệu sau lượt chạy; 5 bài có sẵn ngoài bộ thử đã được loại khỏi thống kê.
+
+| Check | Kết quả | Phạm vi đã xác minh |
+|---|---|---|
+| Tạo/publish 5 cuộc thi với bộ chấm v2 thật | đạt | 5/5; schema + source + ground truth riêng, 1 lượt test-run/cuộc thi trước publish; 3 bộ chấm lỗi của bộ hồi quy bị từ chối đúng mã. Bộ NLP PDF dò khoá → khai **sai** tập khoá thì 422 `SCORING_TEST_REQUIRED` → khai **đúng** tập khoá thì `verified`/`ready` và publish ngay, **không chạy thử lần hai**. Thiếu cấu hình/ground truth/lượt thử cũng chặn publish đúng mã |
+| Bài hợp lệ và hậu kiểm điểm | đạt | **40/40** lượt nhận 202 rồi `COMPLETED`: bốn tài khoản × năm cuộc thi, thêm TEST-E nộp đủ bốn case mỗi cuộc thi. Metric thô đối chiếu `expected_results.json` với sai số tuyệt đối ≤1e-10; quota +1/lượt, lịch sử đúng; `scoring_ref` đọc trong Mongo **40/40** khớp SHA-256 bài/source/ground truth, revision và runtime. Mỗi cuộc thi đúng **8 submission + 8 scoring_attempt** |
+| Bài lỗi và retry | đạt | **20/20** CSV sai trả 422 đúng mã, không tăng submission/quota/active attempt; notebook thiếu hoặc đuôi `.txt` bị từ chối; replay cùng `Idempotency-Key` trở lại cùng attempt, đổi byte → 409, thiếu key → 400 |
+| Ranking, review, privacy và Excel | đạt | Bốn đội xếp đúng thứ tự ở cả năm bộ (kể cả điểm hoà và RMSE/CER thấp tốt hơn); TEST-E có best của bốn bài, từ chối bài 04 rơi về best tiếp theo, khôi phục trả hạng, quota không hoàn. 5/5 `.xlsx` hai sheet đọc được, 5 hạng/file và **90/90 ô metric** khớp leaderboard; năm hợp đồng metric tách biệt trong bảng admin toàn cục. Participant không lấy được artifact của đội khác hoặc cấu hình admin |
+| Đề bài và dữ liệu công khai | đạt | 5/5 Markdown có fixture chỉ công khai, khách đọc được; 8/8 ảnh OCR được upload và GET lại đúng byte. Ground truth và source evaluator không đưa vào nội dung công khai |
+| Khóa cấu hình | đạt | `published` **chưa khóa** nếu chưa có điểm; sau bài `COMPLETED`, PUT scoring/ground truth và POST test đều bị 422 `SCORING_LOCKED`, revision/ground truth không đổi |
+
+Hai assertion **trung gian của script** sai vì kỳ vọng rank 4 ở một nhánh hoà điểm thực tế rank 3 và vì chưa xử lý resume sau khi đã ghi quyết định từ chối; đã sửa và kiểm lại toàn bộ năm nhánh best/reject/restore, **không xác nhận lỗi ứng dụng**. Lượt tạo tài khoản đầu tiên dùng `@local.test` cũng bị validator từ chối 422 (TLD dành riêng); đã đổi sang `@example.com` rồi chạy thành công. Báo cáo lưu cả những lần lỗi này, không xoá dấu vết.
+
+**Chưa kiểm trong lượt DATATEST này:** thao tác/hiển thị trực quan bằng browser (upload `.py`, refresh, màn chờ), queue-full/kill-worker/timeout, AI review, biến thể NLP loại dòng type=0, production và tải đồng thời. Các bảng production phía trên là **đợt khác**, không suy từ fixture nhỏ này sang hiệu năng production.
+
 ### Chưa kiểm
 
 | Check | Status | Ghi chú |
 |---|---|---|
-| **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng ngay trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
+| **Test tự động chạy Docker** (một case trong suite thật sự gọi `docker run`) | **chưa có** | Lượt chấm thật đã chạy **đo tay** (bảng diễn tập phía trên), nhưng mọi case backend vẫn dùng runner giả (`tests/helpers.py::FakeRunner`) và các case hộp cát chỉ kiểm **lệnh** `docker run` cùng cách đọc kết quả - không case nào chạy Docker. `app/evaluator_runner/server.py` và `evaluator-runtime/entrypoint.py` (đọc stdin/ghi stdout) **không có test nào**, và kịch bản diễn tập không nằm trong repo, nên cổng này phải viết lại trước khi bật cho cuộc thi chính thức |
 | Image runtime được build tự động | **chưa có** | `EVALUATOR_RUNTIME_IMAGE` (mặc định `vku-evaluator-runtime:1`) được `docker-compose.yml` tham chiếu nhưng **không service/script nào build nó** - image trên máy dev là do build tay cho lượt diễn tập. Triển khai mới phải build tay, nếu không mọi lượt chấm hỏng. Ghi ở mục 1 của ADR-048 và `docs/DEPLOYMENT.md` §3.3 |
-| **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (bảng ngay trên), nhưng tính năng mới chỉ được dùng bởi bốn cuộc thi diễn tập `[LOAD TEST]` đã xoá. Chưa lượt chấm thật nào của thí sinh thật |
-| Trần thời gian/RAM thật của container dưới tải **với bộ chấm thật** | **chưa đo** | Số đo production ở trên dùng bộ chấm thử `sleep(3.0)` + đọc hai CSV 120 dòng, nên nó đo **đường ống** chứ không đo chi phí chấm thật: ~4,3 s/bài là **sàn**, không phải dự báo. `EVALUATOR_MAX_CONCURRENCY=2` và timeout 30 s chọn theo kế hoạch §10.4; muốn tin con số độ trễ thì phải đo lại bằng một bộ chấm `pandas`/`scikit-learn` thật |
+| **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (hai bảng production phía trên), nhưng tính năng mới chỉ được dùng bởi các cuộc thi diễn tập `[LOAD TEST]` đã xoá. Cuộc thi thật duy nhất trên production, `tabular-lightweight`, chấm bằng **v1 trong tiến trình** (không sinh container chấm), nên đường v2 và hàng đợi chưa có phơi nhiễm thật |
+| Trần thời gian/RAM thật của container **trên VPS 2 lõi** với bộ chấm thật | **chưa đo** | Cổng tài nguyên 4 slot đã **đạt trên máy dev** với bộ chấm `pandas`/`scikit-learn` thật (4 lượt đồng thời trên 2 lõi: 7,2-7,5 s và 145-192 MiB mỗi container - bảng diễn tập phía trên), nhưng **mọi** số đo production đều dùng bộ chấm thử `sleep`, nên chúng đo **đường ống**: 33,5 s cho 20 lượt là **sàn**, không phải dự báo. Production đang chạy `EVALUATOR_MAX_CONCURRENCY=4` (quyết định có chủ ý, điều kiện đo lại ghi ở `docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md` §8a/§10): cuộc thi v2 đầu tiên có bộ chấm nặng phải được đo lại CPU/RAM với chính bộ chấm đó trước khi tin cấu hình 4 slot |
 | Chất lượng bộ chấm do admin viết | **ngoài phạm vi** | Nền tảng chỉ bảo đảm nó chạy trong hộp cát và trả đúng hợp đồng; không kiểm tra nó có công bằng không. Xem ADR-048 mục "hệ quả" |

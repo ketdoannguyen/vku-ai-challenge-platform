@@ -15,7 +15,8 @@ interface SubmissionResult {
   status: "completed";
   /** Bộ khóa do bộ chấm của cuộc thi quyết định; hiển thị theo hợp đồng kết quả. */
   metrics: Metrics;
-  primary_score: number;
+  /** `null` khi chỉ số chính bị admin ẩn khỏi thí sinh. */
+  primary_score: number | null;
   created_at: string;
   quota_remaining: number;
   /** Vắng mặt khi cuộc thi chưa bật AI hoặc không công khai kết luận cho thí sinh. */

@@ -64,7 +64,7 @@ const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }
   { key: "resources", label: "Tài nguyên", Icon: IconFolder },
   { key: "scoring", label: "Chấm điểm", Icon: IconGauge },
   { key: "results", label: "Kết quả", Icon: IconTrophy },
-  { key: "members", label: "Thành viên & mã tham gia", Icon: IconUsers },
+  { key: "members", label: "Thành viên", Icon: IconUsers },
   // Cấu hình AI là chuyện của từng cuộc thi, không phải thiết lập toàn hệ thống, nên nằm cùng
   // trang thay vì tách sang trang riêng. Để cuối rail vì là việc dọn dẹp sau cùng.
   { key: "settings", label: "Cài đặt", Icon: IconSparkle },
@@ -164,6 +164,8 @@ interface ScoringV2 {
     metrics: Array<{ key: string; label: string; decimals: number }>;
     primary_metric: string | null;
     higher_is_better: boolean;
+    /** `null` = thí sinh thấy mọi metric; danh sách = chỉ những khóa này. */
+    visible_metrics: string[] | null;
   } | null;
   /** Lượt chạy thử đã lưu còn đúng với cấu hình hiện tại hay không. */
   verified: boolean;
@@ -288,6 +290,16 @@ function IconUpload({ className }: { className?: string }) {
       <path d="M12 16V4" />
       <path d="m7 9 5-5 5 5" />
       <path d="M5 14v5h14v-5" />
+    </Icon>
+  );
+}
+
+function IconDownload({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M12 4v12" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
     </Icon>
   );
 }
@@ -601,11 +613,11 @@ export function AdminCompetitionDetailPage() {
   const uploadLimits = competition.upload_limits ?? DEFAULT_UPLOAD_LIMITS;
   // Backend vẫn là authority: nếu payload không kèm readiness (list) thì không tự chặn.
   const publishBlocked = competition.publish_blocked_reason ?? null;
-  // CTA phải mở đúng tab chứa thứ đang thiếu: mã tham gia nằm ở tab Thành viên, mọi lý do
+  // CTA phải mở đúng tab chứa thứ đang thiếu: mã tham gia nằm ở Cài đặt, mọi lý do
   // chặn còn lại (cấu hình chấm điểm, ground truth) đều thuộc tab Chấm điểm.
   const publishBlockCta =
     publishBlocked?.code === "JOIN_CODE_REQUIRED"
-      ? { tab: "members" as Tab, label: "Mở tab Thành viên" }
+      ? { tab: "settings" as Tab, label: "Mở tab Cài đặt" }
       : { tab: "scoring" as Tab, label: "Mở tab Chấm điểm" };
 
   return (
@@ -828,11 +840,14 @@ export function AdminCompetitionDetailPage() {
           {tab === "scoring" && (
             <ScoringPanel competition={competition} onCompetitionChanged={load} />
           )}
-          {tab === "settings" && <AiReviewSettingsPanel competitionId={competition.id} />}
-          {tab === "results" && <ResultsPanel competition={competition} />}
-          {tab === "members" && (
-            <MembersPanel competition={competition} onCompetitionChanged={load} />
+          {tab === "settings" && (
+            <div className="admin-detail-column">
+              <JoinCodePanel competition={competition} onCompetitionChanged={load} />
+              <AiReviewSettingsPanel competitionId={competition.id} />
+            </div>
           )}
+          {tab === "results" && <ResultsPanel competition={competition} />}
+          {tab === "members" && <MembersPanel competition={competition} />}
         </div>
       </div>
 
@@ -1016,6 +1031,8 @@ interface MetricRow {
   key: string;
   label: string;
   decimals: string;
+  /** Thí sinh có được thấy metric này không; admin luôn thấy đủ mọi khóa. */
+  visible: boolean;
 }
 
 /** Toàn bộ nội dung form Chấm điểm: một lượt Lưu gửi đủ schema, bộ chấm và bảng metric. */
@@ -1097,6 +1114,7 @@ function fileSchemaPayload(row: FileSchemaRow): ScoringFileSchema {
 /** Hợp đồng kết quả để gửi lên; chưa khai báo metric nào là bản nháp, không phải hợp đồng rỗng. */
 function contractPayload(form: ScoringForm) {
   if (form.metrics.length === 0) return null;
+  const visible = form.metrics.filter((row) => row.visible).map((row) => row.key);
   return {
     metrics: form.metrics.map((row) => ({
       key: row.key,
@@ -1105,6 +1123,8 @@ function contractPayload(form: ScoringForm) {
     })),
     primary_metric: form.primaryMetric || null,
     higher_is_better: form.higherIsBetter,
+    // Thấy hết là mặc định cũ, gửi `null` để giữ nguyên hành vi; chỉ gửi danh sách khi có ẩn.
+    visible_metrics: visible.length === form.metrics.length ? null : visible,
   };
 }
 
@@ -1134,6 +1154,7 @@ function formFromView(view: ScoringStatus): ScoringForm {
       key: metric.key,
       label: metric.label,
       decimals: String(metric.decimals),
+      visible: contract?.visible_metrics == null || contract.visible_metrics.includes(metric.key),
     })),
     primaryMetric: contract?.primary_metric ?? "",
     higherIsBetter: contract?.higher_is_better ?? true,
@@ -1154,6 +1175,7 @@ function metricsFromKeys(
         key,
         label: key,
         decimals: String(DEFAULT_DECIMALS),
+        visible: true,
       },
   );
   return {
@@ -1167,11 +1189,11 @@ function verificationText(scoring: ScoringV2): string {
   const verification = scoring.verification;
   if (!verification) return "Chưa chạy thử lần nào.";
   if (!scoring.verified) {
-    return "Lượt chạy thử đã cũ vì cấu hình đã đổi; chạy thử lại trước khi publish.";
+    return "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi publish.";
   }
   return verification.tested_at
-    ? `Bằng chứng còn hiệu lực cho cấu hình hiện tại (chạy lúc ${formatLocal(verification.tested_at)}).`
-    : "Bằng chứng còn hiệu lực cho cấu hình hiện tại.";
+    ? `Lượt chạy thử khớp cấu hình hiện tại (lúc ${formatLocal(verification.tested_at)}).`
+    : "Lượt chạy thử khớp cấu hình hiện tại.";
 }
 
 /**
@@ -1181,6 +1203,8 @@ function verificationText(scoring: ScoringV2): string {
 function ColumnEditor({
   title,
   idPrefix,
+  icon,
+  tone,
   hint,
   schema,
   disabled,
@@ -1188,6 +1212,9 @@ function ColumnEditor({
 }: {
   title: string;
   idPrefix: string;
+  icon: ReactNode;
+  /** Màu badge icon: vàng cho đáp án admin giữ, xanh cho bài nộp - hai bảng tách hẳn nhau. */
+  tone: "yellow" | "blue";
   hint: string;
   schema: FileSchemaRow;
   disabled: boolean;
@@ -1213,11 +1240,20 @@ function ColumnEditor({
   const position = (index: number) => `${title}: cột ${index + 1}`;
 
   return (
-    <div className="form-field">
-      <span className="field-label">{title}</span>
-      <p className="text-muted">{hint}</p>
+    <div className="form-field scoring-columns">
+      <div className="scoring-file-heading">
+        <div className="scoring-file-ident">
+          <span className={`scoring-file-icon scoring-file-icon-${tone}`} aria-hidden="true">
+            {icon}
+          </span>
+          <h3 className="scoring-file-title" id={`scoring-title-${idPrefix}`}>
+            {title}
+          </h3>
+        </div>
+        <p className="scoring-file-hint">{hint}</p>
+      </div>
       <div className="table-wrap">
-        <table className="table">
+        <table className="table" aria-labelledby={`scoring-title-${idPrefix}`}>
           <thead>
             <tr>
               <th scope="col">Cột</th>
@@ -1269,8 +1305,9 @@ function ColumnEditor({
                 <td>
                   <input
                     className="input"
-                    placeholder="bỏ trống = không giới hạn"
+                    placeholder="ví dụ: 0, 1"
                     aria-label={`${position(index)}: giá trị hợp lệ`}
+                    aria-describedby={`scoring-allowed-${idPrefix}`}
                     value={column.allowed}
                     disabled={disabled}
                     onChange={(event) => patchColumn(index, { allowed: event.target.value })}
@@ -1302,8 +1339,36 @@ function ColumnEditor({
               </tr>
             ))}
           </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={6}>
+                <button
+                  type="button"
+                  className="btn admin-detail-outline-action btn-sm"
+                  aria-label={`${title}: thêm cột`}
+                  disabled={disabled}
+                  onClick={() =>
+                    onChange({
+                      ...schema,
+                      columns: [
+                        ...schema.columns,
+                        { name: "", type: "string", nullable: false, allowed: "" },
+                      ],
+                    })
+                  }
+                >
+                  <IconPlus className="admin-detail-primary-icon" />
+                  <span>Thêm cột</span>
+                </button>
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
+      <p className="text-muted scoring-allowed-hint" id={`scoring-allowed-${idPrefix}`}>
+        Danh sách giá trị được chấp nhận, cách nhau bằng dấu phẩy (ví dụ: 0, 1). Để trống: không
+        giới hạn giá trị; kiểu dữ liệu và quy định cho phép rỗng vẫn áp dụng.
+      </p>
       <div className="checkbox-field">
         <input
           id={`scoring-extra-${idPrefix}`}
@@ -1314,22 +1379,18 @@ function ColumnEditor({
         />
         <label htmlFor={`scoring-extra-${idPrefix}`}>Cho phép cột phụ ngoài danh sách</label>
       </div>
-      <button
-        type="button"
-        className="btn btn-secondary btn-sm"
-        disabled={disabled}
-        onClick={() =>
-          onChange({
-            ...schema,
-            columns: [...schema.columns, { name: "", type: "string", nullable: false, allowed: "" }],
-          })
-        }
-      >
-        Thêm cột
-      </button>
     </div>
   );
 }
+
+/** Việc đang chạy của tab Chấm điểm; nhãn hiện trong dải ghim để lượt dài không im lặng. */
+type ScoringAction = "save" | "groundTruth" | "test";
+
+const SCORING_ACTION_LABEL: Record<ScoringAction, string> = {
+  save: "Đang lưu cấu hình chấm điểm…",
+  groundTruth: "Đang tải lên và kiểm tra ground truth…",
+  test: "Đang chạy thử bộ chấm…",
+};
 
 function ScoringPanel({
   competition,
@@ -1342,7 +1403,7 @@ function ScoringPanel({
 }) {
   const [status, setStatus] = useState<ScoringStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<ScoringAction | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [form, setForm] = useState<ScoringForm>(EMPTY_FORM);
@@ -1368,25 +1429,31 @@ function ScoringPanel({
     void load();
   }, [load]);
 
-  /** Đường đi chung của mọi lượt ghi: bật busy, xoá thông báo cũ, báo lại cho trang cha. */
-  async function submit(action: () => Promise<void>, done: string) {
-    if (busy) return;
-    setBusy(true);
+  /** Đường đi chung của mọi lượt ghi: bật busy kèm nhãn việc, xoá thông báo cũ, báo lại trang cha. */
+  async function submit(action: () => Promise<string>, kind: ScoringAction) {
+    if (busy !== null) return;
+    setBusy(kind);
     setError(null);
     setMessage("");
     try {
-      await action();
-      setMessage(done);
+      // Hành động tự trả câu thông báo: lượt lưu phải nói thêm khi nó vừa làm lượt chạy thử cũ
+      // hết hiệu lực, còn câu cố định thì không biết được điều đó.
+      setMessage(await action());
       await onCompetitionChanged();
     } catch (err) {
       setError(err);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   function saveConfig(event: FormEvent) {
     event.preventDefault();
+    // Ground truth chọn trước khi lưu nằm chờ ở đây: phải có schema đã lưu mới kiểm tra được.
+    const queued = pendingGroundTruth;
+    // Cấu hình đang có bằng chứng chạy thử hay không, đọc trước khi ghi: lượt lưu này làm bằng
+    // chứng đó hết hiệu lực thì phải nói ngay, vì đó là lúc mục "Đã chạy thử..." rơi về Chưa đạt.
+    const wasVerified = Boolean(status?.scoring?.verified);
     void submit(async () => {
       const data = await api.put<ScoringStatus>(`/admin/competitions/${competition.id}/scoring`, {
         version: 2,
@@ -1395,16 +1462,39 @@ function ScoringPanel({
           ground_truth: fileSchemaPayload(form.groundTruth),
           submission: fileSchemaPayload(form.submission),
         },
-        evaluator: { name: form.evaluatorName.trim(), source_code: form.sourceCode },
+        // Ô source trống = chưa viết bộ chấm (bản nháp): gửi null để backend giữ nguyên
+        // source cũ nếu có, thay vì báo lỗi cú pháp trên chuỗi rỗng.
+        evaluator: {
+          name: form.evaluatorName.trim(),
+          source_code: form.sourceCode.trim() ? form.sourceCode : null,
+        },
         output_contract: contractPayload(form),
       });
       setStatus(data);
       // Giá trị backend chuẩn hoá là bản đang áp dụng, nên form đọc lại từ response.
       setForm(formFromView(data));
-    }, "Đã lưu cấu hình chấm điểm.");
+      let saved = data;
+      if (queued) {
+        // Tải lên theo revision vừa lưu; lỗi ở bước này giữ tệp trong hàng chờ để lượt lưu sau thử lại.
+        saved = await api.upload<ScoringStatus>(
+          `/admin/competitions/${competition.id}/ground-truth`,
+          queued,
+          data.scoring ? { expected_revision: String(data.scoring.revision) } : undefined,
+        );
+        setStatus(saved);
+        setPendingGroundTruth(null);
+      }
+      const done = queued ? "Đã lưu cấu hình và tải lên ground truth." : "Đã lưu cấu hình chấm điểm.";
+      return wasVerified && !saved.scoring?.verified
+        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi publish.`
+        : done;
+    }, "save");
   }
 
   function uploadGroundTruth(file: File) {
+    // Ground truth là một phần của dấu vân tay: tệp mới làm lượt chạy thử cũ hết hiệu lực,
+    // nên câu thông báo phải nói luôn thay vì để checklist tự rơi về Chưa đạt.
+    const wasVerified = Boolean(status?.scoring?.verified);
     void submit(async () => {
       const data = await api.upload<ScoringStatus>(
         `/admin/competitions/${competition.id}/ground-truth`,
@@ -1413,7 +1503,11 @@ function ScoringPanel({
       );
       // File được kiểm tra theo schema đã lưu, nên lượt upload này không ghi đè form đang sửa.
       setStatus(data);
-    }, "Đã tải lên và kiểm tra ground truth.");
+      const done = "Đã tải lên và kiểm tra ground truth.";
+      return wasVerified && !data.scoring?.verified
+        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì ground truth vừa đổi; chạy thử lại trước khi publish.`
+        : done;
+    }, "groundTruth");
   }
 
   function runTest(file: File, revision: number) {
@@ -1426,7 +1520,8 @@ function ScoringPanel({
       setStatus(data);
       setTestResult(data.test);
       setForm((current) => ({ ...current, ...metricsFromKeys(data.test.observed_keys, current) }));
-    }, "Đã chạy thử bộ chấm.");
+      return "Đã chạy thử bộ chấm.";
+    }, "test");
   }
 
   /** Tệp .py chỉ là cách nhập nhanh: nội dung đọc vào editor và được lưu từ chính editor đó. */
@@ -1451,16 +1546,40 @@ function ScoringPanel({
 
   const scoring = status?.scoring ?? null;
   const locked = Boolean(status?.locked);
-  const disabled = busy || locked;
+  const disabled = busy !== null || locked;
+  const hasSource = Boolean(scoring?.evaluator.source_sha256);
   const verification = scoring?.verification ?? null;
-  /** Sáu điều kiện publish của kế hoạch; `status.ready` là phán quyết của backend cho cả nhóm. */
+  /**
+   * Sáu điều kiện publish của kế hoạch; `status.ready` là phán quyết của backend cho cả nhóm.
+   * Mỗi mục trỏ tới vùng cần xử lý để admin đi thẳng tới việc còn thiếu thay vì tự tìm.
+   */
   const checklist = [
-    { label: "Định dạng dữ liệu đã lưu", done: scoring !== null },
-    { label: "Ground truth hợp lệ", done: status?.ground_truth != null },
-    { label: "Đã lưu source bộ chấm", done: Boolean(scoring?.evaluator.source_sha256) },
-    { label: "Đã khai báo metric", done: scoring?.output_contract != null },
-    { label: "Đã chạy thử và khớp cấu hình hiện tại", done: Boolean(scoring?.verified) },
-    { label: "Đã chọn chỉ số chính", done: status?.primary_metric != null },
+    { label: "Định dạng dữ liệu đã lưu", done: scoring !== null, target: "scoring-section-schema" },
+    {
+      label: "Ground truth hợp lệ",
+      done: status?.ground_truth != null,
+      target: "scoring-section-ground-truth",
+    },
+    {
+      label: "Đã lưu source bộ chấm",
+      done: Boolean(scoring?.evaluator.source_sha256),
+      target: "scoring-section-evaluator",
+    },
+    {
+      label: "Đã khai báo metric",
+      done: scoring?.output_contract != null,
+      target: "scoring-section-metrics",
+    },
+    {
+      label: "Đã chạy thử và khớp cấu hình hiện tại",
+      done: Boolean(scoring?.verified),
+      target: "scoring-section-test",
+    },
+    {
+      label: "Đã chọn chỉ số chính",
+      done: status?.primary_metric != null,
+      target: "scoring-section-metrics",
+    },
   ];
   const testMetrics = testResult
     ? Object.entries(testResult.metrics)
@@ -1475,40 +1594,112 @@ function ScoringPanel({
           Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
         </div>
       )}
-      {message && (
-        <div className="status-banner success" role="status">
-          <span>{message}</span>
-          <button
-            type="button"
-            className="banner-dismiss"
-            aria-label="Đóng thông báo"
-            onClick={() => setMessage("")}
-          >
-            ×
-          </button>
-        </div>
-      )}
-      {error !== null && (
-        <div className="admin-section-error">
-          <ErrorBox error={error} />
-          {status === null && (
-            <button className="btn btn-secondary btn-sm" type="button" onClick={() => void load()}>
-              Thử lại
-            </button>
+      {/* Phản hồi dính dưới thanh tab: nút gửi nằm cuối trang nên khối ở đầu form sẽ
+          rơi ngoài tầm mắt nếu không ghim. Lượt chạy thử có thể mất hàng chục giây nên
+          khi đang chạy phải có dải nhãn kèm spinner, không để nút khóa im lặng. */}
+      {(busy !== null || message || error !== null) && (
+        <div className="scoring-feedback">
+          {busy !== null && (
+            <div className="status-banner busy" role="status">
+              <span className="spinner" aria-hidden />
+              <span>{SCORING_ACTION_LABEL[busy]}</span>
+            </div>
+          )}
+          {message && (
+            <div className="status-banner success" role="status">
+              <span>{message}</span>
+              <button
+                type="button"
+                className="banner-dismiss"
+                aria-label="Đóng thông báo"
+                onClick={() => setMessage("")}
+              >
+                ×
+              </button>
+            </div>
+          )}
+          {error !== null && (
+            <div className="admin-section-error">
+              <ErrorBox error={error} />
+              {status === null && (
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  onClick={() => void load()}
+                >
+                  Thử lại
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
 
       <section className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconCheck className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Trạng thái sẵn sàng publish</h2>
+              <p className="admin-detail-card-desc">
+                Publish chỉ mở khi đủ cả sáu điều kiện; thay đổi chưa lưu không được tính.
+              </p>
+            </div>
+          </div>
+          <span className={`status-badge ${status?.ready ? "success" : "warning"}`}>
+            {status?.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
+          </span>
+        </div>
+        <dl className="scoring-metadata">
+          {checklist.map((item) => (
+            <div className="scoring-meta-item" key={item.label}>
+              <dt>
+                <a
+                  className="scoring-checklist-link"
+                  href={`#${item.target}`}
+                  onClick={() => {
+                    const section = document.getElementById(item.target);
+                    // Bấm lại đúng mục vừa bấm thì hash không đổi nên trình duyệt không cuộn;
+                    // tự cuộn để lần bấm sau vẫn tới vùng đích (lần đầu đã có hash lo cuộn).
+                    if (window.location.hash === `#${item.target}`) {
+                      section?.scrollIntoView?.({ block: "start" });
+                    }
+                    // Focus tường minh (không cuộn) để bàn phím và trình đọc màn hình đọc
+                    // tiếp ngay tại vùng đích.
+                    section?.focus({ preventScroll: true });
+                  }}
+                >
+                  {item.label}
+                </a>
+              </dt>
+              <dd>
+                <span className={`status-badge ${item.done ? "success" : "warning"}`}>
+                  {item.done ? "Đã đạt" : "Chưa đạt"}
+                </span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {status?.not_ready_reason && (
+          <div className="status-banner warning">{status.not_ready_reason.message}</div>
+        )}
+      </section>
+
+      <section
+        className="admin-detail-card scoring-section"
+        id="scoring-section-schema"
+        data-tone="red"
+        tabIndex={-1}
+      >
         <div className="admin-detail-section-heading">
           <span className="admin-detail-card-icon" aria-hidden="true">
             <IconGauge className="admin-detail-card-icon-glyph" />
           </span>
           <div>
             <h2 className="admin-detail-card-title">Định dạng dữ liệu</h2>
-            <p className="admin-detail-card-desc">
-              Khai báo cột của đáp án và của bài nộp; tên cột phải khớp chính xác tệp CSV.
-            </p>
+            <p className="admin-detail-card-desc">Tên cột phải khớp chính xác tệp CSV.</p>
           </div>
         </div>
         {status?.config && (
@@ -1533,6 +1724,8 @@ function ScoringPanel({
         <ColumnEditor
           title="Ground truth"
           idPrefix="gt"
+          icon={<IconKey className="scoring-file-icon-glyph" />}
+          tone="yellow"
           hint="Đáp án do admin giữ, thí sinh không thấy tệp này."
           schema={form.groundTruth}
           disabled={disabled}
@@ -1541,7 +1734,9 @@ function ScoringPanel({
         <ColumnEditor
           title="Submission"
           idPrefix="sub"
-          hint="Bài nộp của thí sinh. Cột nào dùng để tính điểm do source Python quyết định."
+          icon={<IconUpload className="scoring-file-icon-glyph" />}
+          tone="blue"
+          hint="Cột nào dùng để tính điểm do source Python quyết định."
           schema={form.submission}
           disabled={disabled}
           onChange={(submission) => setForm({ ...form, submission })}
@@ -1551,26 +1746,70 @@ function ScoringPanel({
             <dt>Khớp bài nộp với đáp án</dt>
             <dd>
               Theo cột ID: <code>{form.groundTruth.idColumn || "chưa chọn"}</code> ↔{" "}
-              <code>{form.submission.idColumn || "chưa chọn"}</code>. Hai bên phải cùng kiểu và có
-              đủ ID như nhau.
+              <code>{form.submission.idColumn || "chưa chọn"}</code>
             </dd>
           </div>
         </dl>
+        {/* Nút lưu ngay cuối card: sửa xong hai bảng cột là bấm được luôn. Cùng một form
+            nên hai nút lưu chung một đường. */}
+        <div className="scoring-schema-footer">
+          <button
+            className="btn btn-secondary admin-detail-outline-action"
+            type="submit"
+            disabled={disabled}
+          >
+            {busy === "save" ? "Đang lưu..." : "Lưu"}
+          </button>
+        </div>
       </section>
 
-      <section className="admin-detail-card" data-tone="red">
-        <div className="admin-detail-section-heading">
-          <span className="admin-detail-card-icon" aria-hidden="true">
-            <IconInfo className="admin-detail-card-icon-glyph" />
-          </span>
-          <div>
-            <h2 className="admin-detail-card-title">Ground truth private</h2>
-            <p className="admin-detail-card-desc">
-              CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>. File không có
-              public download URL.
-            </p>
+      <section
+        className="admin-detail-card scoring-section"
+        id="scoring-section-ground-truth"
+        data-tone="yellow"
+        tabIndex={-1}
+      >
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconInfo className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Ground truth private</h2>
+              <p className="admin-detail-card-desc">
+                CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>.
+              </p>
+            </div>
           </div>
+          <FileButton
+            className="btn btn-secondary admin-detail-outline-action"
+            inputLabel="Upload ground truth CSV"
+            accept=".csv,text/csv"
+            disabled={disabled}
+            onFile={(file) => {
+              // Thay ground truth cũ phải qua xác nhận; chưa lưu cấu hình thì tệp nằm chờ
+              // và được tải lên ngay sau lượt lưu đầu tiên.
+              if (status?.ground_truth || scoring === null) {
+                setPendingGroundTruth(file);
+                return;
+              }
+              setPendingGroundTruth(null);
+              uploadGroundTruth(file);
+            }}
+          >
+            {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+          </FileButton>
         </div>
+        {pendingGroundTruth && !status?.ground_truth ? (
+          <p className="text-muted">
+            Đã chọn <strong>{pendingGroundTruth.name}</strong> — tải lên và kiểm tra ngay sau khi
+            lưu cấu hình.
+          </p>
+        ) : !pendingGroundTruth && scoring === null ? (
+          <p className="text-muted">
+            Chưa lưu cấu hình — tệp chọn trước được tải lên và kiểm tra ngay sau khi lưu.
+          </p>
+        ) : null}
         {status?.ground_truth ? (
           <dl className="scoring-metadata">
             <div className="scoring-meta-item">
@@ -1589,22 +1828,14 @@ function ScoringPanel({
         ) : (
           <p className="text-muted">Chưa có ground truth.</p>
         )}
-        <FileButton
-          className="btn btn-secondary admin-detail-outline-action"
-          inputLabel="Upload ground truth CSV"
-          accept=".csv,text/csv"
-          disabled={disabled || scoring === null}
-          onFile={(file) => {
-            if (status?.ground_truth) setPendingGroundTruth(file);
-            else uploadGroundTruth(file);
-          }}
-        >
-          {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
-        </FileButton>
-        {scoring === null && <p className="text-muted">Lưu định dạng dữ liệu trước khi upload.</p>}
       </section>
 
-      <section className="admin-detail-card" data-tone="yellow">
+      <section
+        className="admin-detail-card scoring-section"
+        id="scoring-section-evaluator"
+        data-tone="blue"
+        tabIndex={-1}
+      >
         <div className="admin-detail-section-heading">
           <span className="admin-detail-card-icon" aria-hidden="true">
             <IconFileText className="admin-detail-card-icon-glyph" />
@@ -1612,8 +1843,8 @@ function ScoringPanel({
           <div>
             <h2 className="admin-detail-card-title">Bộ chấm Python</h2>
             <p className="admin-detail-card-desc">
-              Module Python có hàm <code>evaluate(ground_truth_path, submission_path)</code> trả về
-              dictionary số. Tối đa {status?.source_limit_kb ?? 256} KiB.
+              Hàm <code>evaluate(ground_truth_path, submission_path)</code> trả về dictionary số.
+              Tối đa {status?.source_limit_kb ?? 256} KiB.
             </p>
           </div>
         </div>
@@ -1632,15 +1863,25 @@ function ScoringPanel({
           </div>
           <div className="form-field">
             <span className="field-label">Nhập nhanh từ tệp</span>
-            <FileButton
-              className="btn btn-secondary"
-              inputLabel="Tải tệp Python"
-              accept=".py,text/x-python"
-              disabled={disabled}
-              onFile={(file) => void readSourceFile(file)}
-            >
-              Đọc nội dung tệp .py
-            </FileButton>
+            <div className="scoring-import-actions">
+              <FileButton
+                className="btn btn-secondary"
+                inputLabel="Tải tệp Python"
+                accept=".py,text/x-python"
+                disabled={disabled}
+                onFile={(file) => void readSourceFile(file)}
+              >
+                Đọc nội dung tệp .py
+              </FileButton>
+              <a
+                className="btn btn-secondary admin-detail-outline-action"
+                href="/evaluator-mau.py"
+                download="evaluator-mau.py"
+              >
+                <IconDownload className="admin-detail-primary-icon" />
+                <span>Tải tệp .py mẫu</span>
+              </a>
+            </div>
           </div>
         </div>
         <div className="form-field">
@@ -1657,23 +1898,29 @@ function ScoringPanel({
             onChange={(event) => setForm({ ...form, sourceCode: event.target.value })}
           />
         </div>
-        <div className="form-field">
-          <span className="field-label">Chạy thử</span>
-          {scoring ? (
-            <>
-              <p className="text-muted">
-                Chạy source đã lưu với ground truth thật và một CSV mẫu có đủ ID. Khóa metric được
-                nhận diện từ kết quả chạy thật, không suy đoán từ source.
-              </p>
+        <div className="form-field scoring-section" id="scoring-section-test" tabIndex={-1}>
+          <div className="scoring-test-head">
+            <span className="field-label">Chạy thử</span>
+            {scoring && (
               <FileButton
                 className="btn btn-secondary admin-detail-outline-action"
                 inputLabel="Chọn CSV mẫu để chạy thử"
                 accept=".csv,text/csv"
-                disabled={disabled}
+                disabled={disabled || !hasSource}
                 onFile={(file) => runTest(file, scoring.revision)}
               >
-                Chọn CSV mẫu để chạy thử
+                {busy === "test" ? "Đang chạy thử…" : "Chọn CSV mẫu để chạy thử"}
               </FileButton>
+            )}
+          </div>
+          {scoring && !hasSource ? (
+            <p className="text-muted">Lưu source bộ chấm trước khi chạy thử.</p>
+          ) : scoring ? (
+            <>
+              <p className="text-muted">
+                Chạy source đã lưu với ground truth thật và CSV mẫu có đủ ID. Khóa metric lấy từ
+                kết quả chạy thật, không suy đoán từ source.
+              </p>
               <dl className="scoring-metadata">
                 <div className="scoring-meta-item">
                   <dt>Khóa metric đã chạy</dt>
@@ -1700,7 +1947,12 @@ function ScoringPanel({
         </div>
       </section>
 
-      <section className="admin-detail-card" data-tone="blue">
+      <section
+        className="admin-detail-card scoring-section"
+        id="scoring-section-metrics"
+        data-tone="red"
+        tabIndex={-1}
+      >
         <div className="admin-detail-section-heading">
           <span className="admin-detail-card-icon" aria-hidden="true">
             <IconTarget className="admin-detail-card-icon-glyph" />
@@ -1708,8 +1960,7 @@ function ScoringPanel({
           <div>
             <h2 className="admin-detail-card-title">Kết quả và metric</h2>
             <p className="admin-detail-card-desc">
-              Bảng metric phải khớp đúng các khóa bộ chấm trả về. Khóa do code quyết định, tên hiển
-              thị do admin đặt.
+              Khóa do bộ chấm quyết định; tên hiển thị và quyền xem của thí sinh do admin đặt.
             </p>
           </div>
         </div>
@@ -1725,6 +1976,7 @@ function ScoringPanel({
                     <th scope="col">Tên hiển thị</th>
                     <th scope="col">Thập phân</th>
                     <th scope="col">Chỉ số chính</th>
+                    <th scope="col">Thí sinh thấy</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1764,6 +2016,17 @@ function ScoringPanel({
                           onChange={() => setForm({ ...form, primaryMetric: row.key })}
                         />
                       </td>
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={`Cho thí sinh thấy ${row.key}`}
+                          checked={row.visible}
+                          disabled={disabled}
+                          onChange={(event) =>
+                            patchMetric(index, { visible: event.target.checked })
+                          }
+                        />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1786,51 +2049,23 @@ function ScoringPanel({
                 <option value="lower">Điểm thấp xếp trên</option>
               </select>
             </div>
+            {/* Chỉ số chính bị ẩn vẫn dùng để xếp hạng ngầm; chỉ mất phần hiển thị điểm cho thí sinh. */}
+            {form.metrics.some((row) => row.key === form.primaryMetric && !row.visible) && (
+              <p className="text-muted">
+                Chỉ số chính đang bị ẩn: bảng xếp hạng vẫn xếp theo nó nhưng thí sinh không thấy
+                điểm.
+              </p>
+            )}
           </>
         )}
         <button className="btn admin-detail-primary-action" type="submit" disabled={disabled}>
-          {busy ? "Đang lưu..." : "Lưu cấu hình chấm điểm"}
+          {busy === "save" ? "Đang lưu..." : "Lưu cấu hình chấm điểm"}
         </button>
-        <p className="text-muted">
-          Lưu áp dụng cho cả định dạng dữ liệu, source bộ chấm và bảng metric ở trên.
-        </p>
+        <p className="text-muted">Lưu áp dụng cho cả định dạng, source và bảng metric.</p>
       </section>
 
-      <section className="admin-detail-card" data-tone="red">
-        <div className="admin-detail-card-head">
-          <div className="admin-detail-section-heading">
-            <span className="admin-detail-card-icon" aria-hidden="true">
-              <IconCheck className="admin-detail-card-icon-glyph" />
-            </span>
-            <div>
-              <h2 className="admin-detail-card-title">Trạng thái sẵn sàng publish</h2>
-              <p className="admin-detail-card-desc">
-                Publish chỉ mở khi mọi điều kiện đã đạt; backend vẫn kiểm tra lại khi nhận request.
-              </p>
-            </div>
-          </div>
-          <span className={`status-badge ${status?.ready ? "success" : "warning"}`}>
-            {status?.ready ? "Sẵn sàng chấm điểm" : "Chưa sẵn sàng"}
-          </span>
-        </div>
-        <dl className="scoring-metadata">
-          {checklist.map((item) => (
-            <div className="scoring-meta-item" key={item.label}>
-              <dt>{item.label}</dt>
-              <dd>
-                <span className={`status-badge ${item.done ? "success" : "warning"}`}>
-                  {item.done ? "Đã đạt" : "Chưa đạt"}
-                </span>
-              </dd>
-            </div>
-          ))}
-        </dl>
-        {status?.not_ready_reason && (
-          <div className="status-banner warning">{status.not_ready_reason.message}</div>
-        )}
-      </section>
-
-      {pendingGroundTruth && (
+      {/* Chỉ hỏi khi thay thế ground truth đã có; tệp chọn trước lượt lưu đầu nằm chờ, không cần xác nhận. */}
+      {pendingGroundTruth && status?.ground_truth && (
         <ConfirmModal
           title="Thay ground truth"
           body="File ground truth hiện tại sẽ bị thay thế và lượt chạy thử cũ mất hiệu lực. Hãy chắc chắn file mới đúng schema đã khai báo."
@@ -2818,15 +3053,134 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
   );
 }
 
-/** ---------- Thành viên & mã tham gia ---------- */
+/** ---------- Mã tham gia & thành viên ---------- */
 
-function MembersPanel({
+function JoinCodePanel({
   competition,
   onCompetitionChanged,
 }: {
   competition: Competition;
   onCompetitionChanged: () => Promise<void>;
 }) {
+  const [codeConfigured, setCodeConfigured] = useState(competition.join_code_configured);
+  const [joinCode, setJoinCode] = useState("");
+  const [pendingJoinCode, setPendingJoinCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [message, setMessage] = useState("");
+  const messageTimer = useRef<number | null>(null);
+
+  function notify(text: string) {
+    if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    setMessage(text);
+    messageTimer.current = window.setTimeout(() => {
+      setMessage("");
+      messageTimer.current = null;
+    }, 4500);
+  }
+
+  useEffect(
+    () => () => {
+      if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+    },
+    [],
+  );
+
+  async function setCode(code: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.put(`/admin/competitions/${competition.id}/join-code`, { join_code: code });
+      setCodeConfigured(true);
+      setJoinCode("");
+      notify("Đã đặt mã tham gia.");
+      await onCompetitionChanged();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <aside className="admin-members-code-card admin-detail-card" data-tone="red">
+        <div className="admin-detail-section-heading">
+          <span className="admin-detail-card-icon admin-detail-card-icon-key" aria-hidden="true">
+            <IconKey className="admin-detail-card-icon-glyph" />
+          </span>
+          <h2 className="admin-detail-card-title">Mã tham gia</h2>
+        </div>
+        {competition.join_mode !== "code" ? (
+          <p className="text-muted admin-members-note">
+            Cuộc thi này dùng chế độ tham gia{" "}
+            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} - không dùng mã.
+          </p>
+        ) : (
+          <form
+            className="admin-members-code-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (codeConfigured) setPendingJoinCode(joinCode);
+              else void setCode(joinCode);
+            }}
+          >
+            <input
+              className="input"
+              type="password"
+              aria-label="Mã tham gia mới"
+              placeholder={codeConfigured ? "Đã đặt mã - nhập mã mới để đổi" : "Chưa đặt mã"}
+              value={joinCode}
+              onChange={(event) => setJoinCode(event.target.value)}
+              minLength={8}
+              maxLength={128}
+              required
+              autoComplete="off"
+            />
+            <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
+              {codeConfigured ? "Đổi mã" : "Đặt mã"}
+            </button>
+          </form>
+        )}
+      </aside>
+      {message && (
+        <div className="status-banner success admin-members-message" role="status">
+          <span>{message}</span>
+          <button
+            className="banner-dismiss"
+            type="button"
+            aria-label="Đóng thông báo"
+            onClick={() => {
+              if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
+              messageTimer.current = null;
+              setMessage("");
+            }}
+          >×</button>
+        </div>
+      )}
+      {Boolean(error) && <ErrorBox error={error} />}
+      {pendingJoinCode && (
+        <ConfirmModal
+          title="Đổi mã tham gia"
+          body="Mã cũ sẽ mất hiệu lực ngay. Các thí sinh chưa tham gia cần nhận mã mới."
+          confirmLabel="Đổi mã"
+          danger
+          onConfirm={async () => {
+            const code = pendingJoinCode;
+            await api.put(`/admin/competitions/${competition.id}/join-code`, { join_code: code });
+            notify("Đã cập nhật mã tham gia.");
+            setPendingJoinCode("");
+            setJoinCode("");
+            await onCompetitionChanged();
+          }}
+          onClose={() => setPendingJoinCode("")}
+        />
+      )}
+    </>
+  );
+}
+
+function MembersPanel({ competition }: { competition: Competition }) {
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [total, setTotal] = useState(0);
   const [activeTotal, setActiveTotal] = useState(0);
@@ -2834,9 +3188,6 @@ function MembersPanel({
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
-  const [codeConfigured, setCodeConfigured] = useState(competition.join_code_configured);
-  const [joinCode, setJoinCode] = useState("");
-  const [pendingJoinCode, setPendingJoinCode] = useState("");
   const [pendingMember, setPendingMember] = useState<MemberItem | null>(null);
   const [pendingDelete, setPendingDelete] = useState<MemberItem | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2918,58 +3269,6 @@ function MembersPanel({
 
   return (
     <div className="admin-members">
-      <aside className="admin-members-code-card admin-detail-card" data-tone="red">
-        <div className="admin-detail-section-heading">
-          <span className="admin-detail-card-icon admin-detail-card-icon-key" aria-hidden="true">
-            <IconKey className="admin-detail-card-icon-glyph" />
-          </span>
-          <h2 className="admin-detail-card-title">Mã tham gia</h2>
-        </div>
-        {competition.join_mode !== "code" ? (
-          <p className="text-muted admin-members-note">
-            Cuộc thi này dùng chế độ tham gia{" "}
-            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} - không dùng mã.
-          </p>
-        ) : (
-          <form
-            className="admin-members-code-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (codeConfigured) setPendingJoinCode(joinCode);
-              else {
-                const code = joinCode;
-                void run(
-                  () => api.put(`/admin/competitions/${competition.id}/join-code`, { join_code: code }),
-                  "Đã đặt mã tham gia.",
-                ).then((saved) => {
-                  if (saved) {
-                    setCodeConfigured(true);
-                    setJoinCode("");
-                    void onCompetitionChanged();
-                  }
-                });
-              }
-            }}
-          >
-            <input
-              className="input"
-              type="password"
-              aria-label="Mã tham gia mới"
-              placeholder={codeConfigured ? "Đã đặt mã - nhập mã mới để đổi" : "Chưa đặt mã"}
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value)}
-              minLength={8}
-              maxLength={128}
-              required
-              autoComplete="off"
-            />
-            <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
-              {codeConfigured ? "Đổi mã" : "Đặt mã"}
-            </button>
-          </form>
-        )}
-      </aside>
-
       <section className="admin-members-list admin-detail-card" data-tone="blue">
         <div className="admin-members-head">
           <div className="admin-detail-section-heading">
@@ -3067,25 +3366,6 @@ function MembersPanel({
           )}
         </div>
       </section>
-      {pendingJoinCode && (
-        <ConfirmModal
-          title="Đổi mã tham gia"
-          body="Mã cũ sẽ mất hiệu lực ngay. Các thí sinh chưa tham gia cần nhận mã mới."
-          confirmLabel="Đổi mã"
-          danger
-          onConfirm={async () => {
-            const code = pendingJoinCode;
-            await runConfirmed(
-              () => api.put(`/admin/competitions/${competition.id}/join-code`, { join_code: code }),
-              "Đã cập nhật mã tham gia.",
-            );
-            setPendingJoinCode("");
-            setJoinCode("");
-            await onCompetitionChanged();
-          }}
-          onClose={() => setPendingJoinCode("")}
-        />
-      )}
       {pendingMember && (
         <ConfirmModal
           title={pendingMember.active ? "Vô hiệu hóa thành viên" : "Kích hoạt thành viên"}

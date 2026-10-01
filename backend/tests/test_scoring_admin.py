@@ -97,6 +97,7 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
             ],
             "primary_metric": "f1",
             "higher_is_better": True,
+            "visible_metrics": None,
         },
         "quota_per_day": 5,
         "max_upload_mb": 10,
@@ -165,6 +166,7 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
             ],
             "primary_metric": "f1",
             "higher_is_better": True,
+            "visible_metrics": None,
         },
     }
     assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404

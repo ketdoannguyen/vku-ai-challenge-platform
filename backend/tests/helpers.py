@@ -244,6 +244,8 @@ V2_CONTRACT = {
     ],
     "primary_metric": "accuracy",
     "higher_is_better": True,
+    # `None` = thí sinh thấy mọi metric; test whitelist truyền danh sách riêng.
+    "visible_metrics": None,
 }
 
 
@@ -257,7 +259,7 @@ def put_scoring_v2(
     input_schema: dict | None = None,
     name: str = "Bộ chấm thử",
 ):
-    """Lưu cấu hình v2; `source_code=None` để kiểm tra nhánh thiếu source."""
+    """Lưu cấu hình v2; `source_code=None` để lưu bản nháp chưa có source."""
     return client.put(
         f"/api/admin/competitions/{competition_id}/scoring",
         json={

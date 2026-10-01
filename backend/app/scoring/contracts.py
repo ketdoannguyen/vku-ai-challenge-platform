@@ -38,6 +38,41 @@ def contract_payload(competition: dict) -> dict:
     return result_contract(competition).model_dump(mode="json")
 
 
+def participant_contract(competition: dict) -> OutputContract:
+    """Hợp đồng như thí sinh nhìn thấy.
+
+    `visible_metrics` là `None` khi admin chưa giới hạn gì: trả nguyên hợp đồng để mọi đường hiển
+    thị cũ không đổi. Có whitelist thì bỏ metric ngoài danh sách, và bỏ cả chỉ số chính nếu chính
+    nó bị ẩn - bảng xếp hạng vẫn xếp theo nó, chỉ không trả giá trị cho thí sinh.
+    """
+    contract = result_contract(competition)
+    if contract.visible_metrics is None:
+        return contract
+    visible = set(contract.visible_metrics)
+    return OutputContract(
+        metrics=[metric for metric in contract.metrics if metric.key in visible],
+        primary_metric=contract.primary_metric if contract.primary_metric in visible else None,
+        higher_is_better=contract.higher_is_better,
+        visible_metrics=contract.visible_metrics,
+    )
+
+
+def apply_metric_visibility(payload: dict, contract: OutputContract) -> None:
+    """Lọc `metrics`/`primary_score` của một payload thí sinh theo whitelist của admin.
+
+    Chỉ lọc khi admin đã đặt whitelist; chưa đặt thì payload giữ nguyên như trước. `contract` phải
+    là hợp đồng của thí sinh (xem `participant_contract`).
+    """
+    if contract.visible_metrics is None:
+        return
+    visible = set(contract.visible_metrics)
+    metrics = payload.get("metrics")
+    if isinstance(metrics, dict):
+        payload["metrics"] = {key: value for key, value in metrics.items() if key in visible}
+    if contract.primary_metric is None:
+        payload["primary_score"] = None
+
+
 def ranking(competition: dict) -> tuple[str, bool] | None:
     """`(metric chính, chiều xếp hạng)` khi đã cấu hình xong, `None` khi bản nháp còn thiếu."""
     contract = result_contract(competition)

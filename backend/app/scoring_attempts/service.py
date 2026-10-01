@@ -19,6 +19,7 @@ from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.scoring import contracts
 from app.scoring_attempts import store
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import (
@@ -274,6 +275,7 @@ async def attempt_payload(
                 submission,
                 await remaining_quota(db, competition, account, now),
                 ai_visible=ai_settings.participant_visible(competition),
+                contract=contracts.participant_contract(competition),
             )
     return payload
 

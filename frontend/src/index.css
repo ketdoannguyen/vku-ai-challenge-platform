@@ -1369,6 +1369,16 @@ select.input {
   background: var(--warning-soft);
   color: var(--warning);
 }
+/* Dải "đang chạy": lượt chạy thử có thể mất hàng chục giây nên phải có dấu hiệu sống động
+   trong tầm mắt thay vì nút khóa im lặng. */
+.status-banner.busy {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
 
 .empty-state {
   padding: 48px var(--space-lg);
@@ -4249,6 +4259,8 @@ button.resource-link:disabled {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
+  /* Khe tối thiểu giữa nhãn và giá trị: hàng hẹp thì giá trị xuống dòng chứ không dính chữ. */
+  gap: var(--space-md);
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
@@ -4272,6 +4284,177 @@ button.resource-link:disabled {
   font-weight: 500;
   color: var(--text);
   font-family: var(--font-mono);
+}
+
+/* S15: Scoring admin - heading hai bảng schema (icon + tiêu đề bên trái, mô tả bên phải),
+   hàng "Thêm cột" cuối bảng, hướng dẫn giá trị hợp lệ và checklist sẵn sàng publish dẫn
+   thẳng tới từng vùng cần xử lý. Chỉ áp cho tab Chấm điểm. */
+.scoring-file-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem var(--space-md);
+  margin-bottom: 0.75rem;
+}
+
+.scoring-file-ident {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* Badge icon tách hẳn Ground truth (đáp án admin giữ) khỏi Submission (bài nộp). */
+.scoring-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: var(--radius-lg);
+}
+
+.scoring-file-icon-blue {
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-800);
+}
+
+.scoring-file-icon-yellow {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+}
+
+.scoring-file-icon-glyph {
+  width: 1rem;
+  height: 1rem;
+}
+
+.scoring-file-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--vku-ink);
+}
+
+.scoring-file-hint {
+  margin: 0;
+  max-width: 34rem;
+  text-align: right;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+/* Hàng "Thêm cột" cuối bảng schema: tách khỏi hàng dữ liệu cuối bằng đường kẻ trên,
+   vì `.table tbody tr:last-child td` đã bỏ viền dưới. */
+.scoring-columns tfoot td {
+  padding: 0.5rem var(--space-md);
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
+
+/* Hai hành động nhập source đứng chung một hàng. */
+.scoring-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* Nhãn "Chạy thử" và nút chọn CSV mẫu chung hàng; nút sát lề phải. */
+.scoring-test-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem var(--space-md);
+}
+
+.scoring-test-head .field-label {
+  margin-bottom: 0;
+}
+
+/* Nút lưu đặt ngay cuối card định dạng: sửa xong hai bảng cột là bấm được luôn,
+   không phải cuộn ngược lên hàng tiêu đề. */
+.scoring-schema-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Khối heading trần của thẻ (không nằm trong .admin-detail-card-head) phải tự chừa khe
+   trước nội dung, nếu không tiêu đề và bảng dính vào nhau. */
+.scoring-section > .admin-detail-section-heading {
+  margin-bottom: 1.25rem;
+}
+
+/* Nhịp dọc trong tab rộng hơn mặc định để tiêu đề, chú giải và bảng tách hẳn nhau. */
+.scoring-section .form-field {
+  margin-bottom: 1.5rem;
+}
+
+/* Bảng trong tab chừa khe thở trước khối chú giải hoặc control kế tiếp (bảng schema,
+   bảng metric trước ô chọn chiều xếp hạng). */
+.scoring-section .table-wrap {
+  margin-bottom: 0.625rem;
+}
+
+/* Phản hồi lưu/upload/chạy thử ghim dưới thanh tab: khối thông báo nằm đầu form còn
+   nút gửi nằm cuối trang, không ghim thì phản hồi rơi ngoài tầm mắt. Nền trang che
+   nội dung cuộn phía sau khi ghim. */
+.scoring-feedback {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+}
+
+/* Từ lg thanh tab dính dưới header (cao ~52px) nên phản hồi ghim ngay dưới nó. */
+@media (min-width: 64rem) {
+  .scoring-feedback {
+    top: calc(var(--header-band) + 3.25rem);
+  }
+}
+
+.scoring-allowed-hint {
+  margin: 0 0 0.875rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.scoring-checklist-link {
+  color: var(--vku-blue-800);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.scoring-checklist-link:hover {
+  color: var(--vku-blue-700);
+}
+
+/* Vùng đích của checklist không bị header và thanh tab dính che khi nhảy trong trang. */
+.scoring-section {
+  scroll-margin-top: calc(var(--header-band) + 4.5rem);
+}
+
+.scoring-section:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 63.99rem) {
+  /* Dưới lg thanh tab không dính nên chỉ chừa chỗ cho header. */
+  .scoring-section {
+    scroll-margin-top: calc(var(--header-band) + var(--space-md));
+  }
+  /* Hàng heading xuống dòng thì mô tả dồn về lề trái thay vì hở khoảng giữa. */
+  .scoring-file-hint {
+    text-align: left;
+  }
 }
 
 /* =============================================================================
@@ -4969,22 +5152,30 @@ button.resource-link:disabled {
   font-size: var(--text-body-sm);
 }
 
-.sub-result-cards {
+/* Giữ lưới kết quả riêng; tự dàn theo số metric, không ép ba cột trên mobile. */
+.metric-grid.sub-result-cards {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 @media (min-width: 48rem) {
-  .sub-result-cards {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .metric-grid.sub-result-cards {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
   }
 }
 
-.sub-result-card {
+/* Màu theo vị trí thẻ để các metric tuỳ biến cũng có đủ bộ màu VKU. */
+.metric-card.sub-result-card {
+  --result-card-tint: var(--vku-blue-50);
+  --result-card-tint-strong: var(--vku-blue-100);
+  --result-card-accent: var(--vku-blue-600);
+  --result-card-ink: var(--vku-blue-800);
+
   position: relative;
-  background: var(--surface);
+  background: var(--result-card-tint);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--result-card-accent);
   border-radius: var(--radius-xl);
   padding: 16px 14px;
   box-shadow: var(--shadow-sm);
@@ -4994,39 +5185,25 @@ button.resource-link:disabled {
   overflow: hidden;
 }
 
-/* Chỉ số chính dùng vòng nhấn riêng để không ghi đè màu nhận diện của metric. */
+.metric-card.sub-result-card:nth-child(3n + 2) {
+  --result-card-tint: var(--vku-red-50);
+  --result-card-tint-strong: var(--vku-red-100);
+  --result-card-accent: var(--vku-red-600);
+  --result-card-ink: var(--vku-red-800);
+}
+
+.metric-card.sub-result-card:nth-child(3n + 3) {
+  --result-card-tint: var(--vku-yellow-50);
+  --result-card-tint-strong: var(--vku-yellow-100);
+  --result-card-accent: var(--vku-yellow-600);
+  --result-card-ink: var(--vku-yellow-800);
+}
+
+/* Điểm chính giữ màu của thẻ nhưng có nền, viền và vòng nhấn rõ hơn. */
 .metric-card.sub-result-card.primary {
-  border-color: var(--border);
-  border-width: 1px;
-  box-shadow: 0 0 0 2px var(--accent), var(--shadow-sm);
-}
-
-/* Màu metric là lớp nhận diện bổ sung; tên metric vẫn truyền đạt ý nghĩa chính. */
-.metric-card.sub-result-card[data-metric="f1"] {
-  border-top: 3px solid var(--vku-blue-600);
-  background: var(--vku-blue-50);
-}
-
-.metric-card.sub-result-card[data-metric="precision"] {
-  border-top: 3px solid var(--vku-red-600);
-  background: var(--vku-red-50);
-}
-
-.metric-card.sub-result-card[data-metric="recall"] {
-  border-top: 3px solid var(--vku-yellow-600);
-  background: var(--vku-yellow-50);
-}
-
-.metric-card.sub-result-card[data-metric="f1"] .sub-result-metric-label {
-  color: var(--vku-blue-700);
-}
-
-.metric-card.sub-result-card[data-metric="precision"] .sub-result-metric-label {
-  color: var(--vku-red-700);
-}
-
-.metric-card.sub-result-card[data-metric="recall"] .sub-result-metric-label {
-  color: var(--vku-yellow-800);
+  background: var(--result-card-tint-strong);
+  border-color: var(--result-card-ink);
+  box-shadow: 0 0 0 2px var(--result-card-ink), var(--shadow-sm);
 }
 
 .sub-result-card-top {
@@ -5044,22 +5221,34 @@ button.resource-link:disabled {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-/* "Chỉ số chính" là tên gọi chỉ định chứ không phải trạng thái thành công: dùng badge xanh hệ thống. */
+/* Badge chỉ định điểm chính theo màu thẻ, không hàm ý điểm tốt hay xấu. */
 .sub-result-metric-badge {
   padding: 1px 6px;
-  border: 1px solid var(--vku-blue-500);
+  border: 1px solid var(--result-card-accent);
   border-radius: var(--radius-pill);
   font-family: var(--font-sans);
   font-size: 0.625rem;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--result-card-tint);
+  color: var(--result-card-ink);
   font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 3px;
   white-space: nowrap;
+}
+
+.metric-card.sub-result-card .sub-result-metric-badge {
+  color: var(--result-card-ink);
+  font-weight: 600;
+  display: inline-flex;
+}
+
+.metric-card.sub-result-card .sub-result-metric-label {
+  color: var(--result-card-ink);
 }
 
 .sub-result-score {
@@ -5071,6 +5260,24 @@ button.resource-link:disabled {
   color: var(--text);
   margin: 6px 0;
   white-space: nowrap;
+}
+
+.metric-card.sub-result-card .sub-result-score {
+  color: var(--result-card-ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.metric-card.sub-result-card .sub-result-score strong {
+  color: inherit;
+  font-weight: 600;
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+
+.metric-card.sub-result-card.primary .sub-result-score strong {
+  font-weight: 700;
 }
 
 .sub-result-quota-card {

@@ -159,27 +159,31 @@ notebook của thí sinh sẽ đi tới đâu trước khi bật AI.
 Hai host ở `AI_REVIEW_ALLOWED_PRIVATE_HOSTS`/`_HTTP_HOSTS` chỉ nên có mặt trên môi trường phát triển;
 đây là danh sách **mở khoá**, nên một entry ở đây nới rộng biên chứ không thu hẹp nó.
 
-### 3.3 Bộ chấm Python và hàng đợi chấm (ADR-048) - **bộ chấm đã lên production, hàng đợi thì chưa**
+### 3.3 Bộ chấm Python và hàng đợi chấm (ADR-048) - **đã lên production**
 
-Trạng thái thật, đọc trước khi định nâng cấp: **bộ chấm đang chạy trên production** từ 2026-09-30 (mốc
-ở `docs/DECISIONS.md`, ADR-048): `evaluator-runner` là service thứ tư, image runtime
-`vku-evaluator-runtime:1` build **tay** một lần trên VM và `runtime_id` ghim theo nội dung. Cấu hình đo
-là `EVALUATOR_MAX_CONCURRENCY=2`; số đo 1/10/15/20 bài nộp đồng thời ở
-`docs/SCORING_V2_E2E_PROD_2026-09-30.md`.
+Trạng thái thật, đọc trước khi định nâng cấp: **cả bộ chấm lẫn hàng đợi đang chạy trên production** từ
+2026-09-30 (mốc ở `docs/DECISIONS.md`, ADR-048). `evaluator-runner` là service thứ tư,
+`scoring-worker` là service thứ **năm**; image runtime `vku-evaluator-runtime:1` build **tay** một lần
+trên VM và `runtime_id` ghim theo nội dung. Cấu hình đang chạy: `EVALUATOR_MAX_CONCURRENCY=4` +
+`SCORING_WORKER_CONCURRENCY=4`, trần chờ `20`, hạn `60 s`. Hai đợt đo trên VPS:
+`docs/SCORING_V2_E2E_PROD_2026-09-30.md` (trước hàng đợi, 1/10/15/20 người) và
+`docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md` (hàng đợi, tới 24/25 người và hạn 60 s).
 
-**Chưa lên production: hàng đợi chấm** - nó thêm service thứ **năm**, `scoring-worker`: cùng image với
-`api` (`target: api`) nhưng chạy `python -m app.scoring_attempts.worker`, **không** có docker socket
-(đường duy nhất tới docker daemon vẫn là `evaluator-runner`), chỉ đọc/ghi Mongo rồi gọi runner qua HTTP.
-Từ release này thí sinh bấm Nút là **vào hàng đợi** thay vì nhận 503 khi runner bận, nên
-`EVALUATOR_MAX_CONCURRENCY` trở thành **trần phòng vệ** của runner chứ không còn là trần của cả hệ thống.
+`scoring-worker` dùng **cùng image** với `api` (`target: api`) nhưng chạy
+`python -m app.scoring_attempts.worker`, **không** có docker socket (đường duy nhất tới docker daemon
+vẫn là `evaluator-runner`), chỉ đọc/ghi Mongo rồi gọi runner qua HTTP. Thí sinh bấm Nút là **vào hàng
+đợi** thay vì nhận 503 khi runner bận, nên `EVALUATOR_MAX_CONCURRENCY` từ đây là **trần phòng vệ** của
+runner chứ không còn là trần của cả hệ thống.
 
-Hai việc phải làm, đúng thứ tự:
+Hai việc phải làm khi nâng cấp, đúng thứ tự:
 
-1. **Cài lại deployer từ commit đã duyệt TRƯỚC khi push release khai `scoring-worker`**
-   (`sudo deploy/vps/install-auto-deploy.sh`). Bản đóng băng trên VM không biết service này: nó build
+1. **Cài lại deployer từ commit đã duyệt TRƯỚC khi push release khai một service mới**
+   (`sudo deploy/vps/install-auto-deploy.sh`). Bản đóng băng trên VM không biết service đó: nó build
    và recreate những service nó biết rồi **bỏ quên** worker mà không báo gì - tính năng im lặng không
    chạy dù release đã lên, và một rollback sẽ để container cũ chạy mã của bản vừa hỏng. Đã xảy ra một
-   lần với `ai-review-worker`, một lần với `evaluator-runner`.
+   lần với `ai-review-worker`, một lần với `evaluator-runner`. Deployer trên VM **đã** biết
+   `scoring-worker` (cài ở Release A ngày 2026-09-30), nên chỉ cần lặp lại bước này nếu tương lai có
+   service thứ sáu.
 2. **Nâng số slot, hai biến phải đổi cùng nhau**: `EVALUATOR_MAX_CONCURRENCY` (trần của runner) và
    `SCORING_WORKER_CONCURRENCY` (số lượt chấm song song của worker). Worker **từ chối khởi động** (exit
    2 rồi restart vô hạn, trong khi mọi healthcheck của runner vẫn xanh) nếu số của nó lớn hơn trần
@@ -190,7 +194,10 @@ Hai việc phải làm, đúng thứ tự:
 
 Bốn slot là lựa chọn **đã đo**, không phải phỏng đoán: trên máy dev (2 lõi, 4 container 1 CPU / 1 GiB)
 bốn lượt đồng thời xong trong 7,2-7,5 s mỗi lượt, đỉnh RSS mỗi container 145-192 MiB (tổng lớn nhất
-~800 MiB trên ~5,9 GiB khả dụng), rất xa trần 30 s - số đo đầy đủ ở ADR-048. Đổi hai biến thì
+~800 MiB trên ~5,9 GiB khả dụng), rất xa trần 30 s - số đo đầy đủ ở ADR-048. Điều **chưa** đo là bộ
+chấm nặng chạy trên chính VPS 2 lõi: mọi số đo production đều dùng bộ chấm thử `sleep`, và production
+hiện chưa có cuộc thi v2 nào, nên cuộc thi v2 đầu tiên có bộ chấm nặng phải được đo lại CPU/RAM trước
+khi tin cấu hình 4 slot (`docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md` §8a). Đổi hai biến thì
 `recreate` cả `evaluator-runner` lẫn `scoring-worker` (`api` cũng đọc `SCORING_*`, cho vào cùng lượt).
 Rollback: chờ các lượt đang chấm kết thúc (hoặc để nguyên - lượt quá 60 s tự đóng và hoàn quota) rồi mới
 lùi; lùi về bản chưa khai `scoring-worker` thì deployer `rm -sf scoring-worker` thay vì chạy lại nó.
