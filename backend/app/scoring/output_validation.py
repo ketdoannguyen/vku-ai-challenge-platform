@@ -15,14 +15,31 @@ OUTPUT_MISMATCH = "EVALUATOR_OUTPUT_MISMATCH"
 def validate_metrics(payload: object) -> dict[str, float]:
     """Chuẩn hoá dictionary trả về; từ chối `bool` và mọi thứ không phải số hữu hạn.
 
+    Ba dạng sai khác nhau - không trả gì, trả kiểu khác, trả dictionary rỗng - có ba câu khác nhau:
+    admin sửa chúng theo ba cách khác nhau, nên câu gộp chung không nói được phải sửa ở đâu.
+
     Phần lớn kiểu NumPy (`np.int64`, `np.float32`, `ndarray`) cùng NaN/Inf đã chết sớm hơn, ở bước
     chuyển JSON của `entrypoint.py`; riêng `np.float64` tới được đây và qua, vì từ NumPy 2 nó là lớp
     con của `float`. Cứ trả `float(...)`/`int(...)` để kiểu dữ liệu không phụ thuộc lượt chấm chạy ở
     tiến trình nào.
     """
-    if not isinstance(payload, dict) or not payload:
+    if payload is None:
         raise ScoringValidationError(
-            OUTPUT_MISMATCH, "Bộ chấm phải trả về một dictionary không rỗng."
+            OUTPUT_MISMATCH,
+            "Hàm evaluate không trả về giá trị nào. Kiểm tra câu lệnh return: hàm phải trả về "
+            'dictionary các chỉ số, ví dụ {"accuracy": 0.5}.',
+        )
+    if not isinstance(payload, dict):
+        raise ScoringValidationError(
+            OUTPUT_MISMATCH,
+            f"Hàm evaluate trả về {type(payload).__name__}; phải trả về dictionary các chỉ số, "
+            'ví dụ {"accuracy": 0.5}.',
+        )
+    if not payload:
+        raise ScoringValidationError(
+            OUTPUT_MISMATCH,
+            "Hàm evaluate trả về dictionary rỗng. Cần trả về ít nhất một chỉ số, "
+            'ví dụ {"accuracy": 0.5}.',
         )
     metrics: dict[str, float] = {}
     for key, value in payload.items():

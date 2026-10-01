@@ -112,6 +112,9 @@ async def test_scoring(
         raise api_error(422, "EVALUATOR_REQUIRED", "Cần lưu cấu hình bộ chấm v2 trước khi chạy thử.")
     _require_revision(config.revision, expected_revision)
 
+    if not config.evaluator.source_path or not config.evaluator.source_sha256:
+        # Bản nháp mới có schema chưa có source; nói đúng việc cần làm thay vì lỗi đọc file.
+        raise api_error(422, "EVALUATOR_REQUIRED", "Cần lưu source bộ chấm trước khi chạy thử.")
     source = _read_source(config)
     ground_truth_data = _read_ground_truth(competition)
     submission_data = await _read_limited(file)
@@ -191,11 +194,11 @@ async def _save_v2(
     current = models.stored_config_or_none(competition)
     current_revision = current.revision if current else revisions.INITIAL_REVISION
     _require_revision(current_revision, body.expected_revision)
+    # Bản nháp lưu được từng bước: schema trước, tên bộ chấm / source / metric sau. Ba thứ đó chỉ là
+    # điều kiện publish (readiness giữ), không phải điều kiện của một lượt lưu - nếu không thì
+    # "khai định dạng rồi lưu trước khi viết bộ chấm" là bất khả thi.
     try:
         models.validate_input_schema(body.input_schema)
-        models.validate_evaluator_config(
-            models.EvaluatorConfig(name=body.evaluator.name, entrypoint=models.DEFAULT_ENTRYPOINT)
-        )
         if body.output_contract is not None:
             models.validate_output_contract(body.output_contract)
     except ScoringValidationError as exc:
@@ -216,8 +219,6 @@ async def _save_v2(
         except OSError:
             logger.exception("Không ghi được source bộ chấm competition=%s", competition["_id"])
             raise api_error(500, "FILE_WRITE_FAILED", "Không thể lưu source bộ chấm.")
-    if not source_path or not source_sha256:
-        raise api_error(422, "EVALUATOR_REQUIRED", "Lần lưu đầu tiên phải gửi kèm source bộ chấm.")
 
     config = models.ScoringConfigV2(
         revision=current_revision + 1,

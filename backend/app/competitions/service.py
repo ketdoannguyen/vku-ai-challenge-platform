@@ -205,7 +205,7 @@ def public_competition(competition: dict, membership: dict | None = None) -> dic
         **_competition_core(competition),
         "membership": public_membership(membership),
         "submission_config": _submission_config(
-            competition, include_pos_label=_is_active_member(membership)
+            competition, include_pos_label=_is_active_member(membership), participant=True
         ),
     }
 
@@ -218,7 +218,9 @@ def admin_competition(competition: dict) -> dict:
         **_competition_core(competition),
         "created_by": competition["created_by"],
         "membership": public_membership(None),
-        "submission_config": _submission_config(competition, include_pos_label=True),
+        "submission_config": _submission_config(
+            competition, include_pos_label=True, participant=False
+        ),
     }
 
 
@@ -244,11 +246,12 @@ def _is_active_member(membership: dict | None) -> bool:
     return membership is not None and membership.get("active", True)
 
 
-def _submission_config(competition: dict, *, include_pos_label: bool) -> dict:
+def _submission_config(competition: dict, *, include_pos_label: bool, participant: bool) -> dict:
     """Dạng bài nộp và metric mà UI cần, đọc theo đúng đời cấu hình của cuộc thi.
 
-    `pos_label` là nhãn dương thật nên chỉ trả cho admin và thành viên đang hoạt động. Cuộc thi v1
-    giữ nguyên hình dạng cũ; v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
+    `pos_label` là nhãn dương thật nên chỉ trả cho admin và thành viên đang hoạt động.
+    `participant` chọn hợp đồng thí sinh: metric admin ẩn không rời khỏi backend. Cuộc thi v1 giữ
+    nguyên hình dạng cũ; v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
     """
     from app.core.config import get_settings
     from app.scoring import contracts, models
@@ -257,15 +260,19 @@ def _submission_config(competition: dict, *, include_pos_label: bool) -> dict:
     is_v2 = models.is_v2(competition)
     config = None if is_v2 else competition.get("scoring_config")
     config_v2 = models.stored_config_or_none(competition)
-    ranking = contracts.ranking(competition)
+    contract = (
+        contracts.participant_contract(competition)
+        if participant
+        else contracts.result_contract(competition)
+    )
     payload = {
         "ready": bool((config or config_v2) and ground_truth_available(competition)),
         "version": 2 if is_v2 else 1,
         "max_upload_mb": get_settings().max_upload_mb,
         "max_notebook_mb": get_settings().max_notebook_mb,
-        "primary_metric": ranking[0] if ranking else None,
-        "higher_is_better": ranking[1] if ranking else None,
-        "result_contract": contracts.contract_payload(competition),
+        "primary_metric": contract.primary_metric,
+        "higher_is_better": contract.higher_is_better if contract.primary_metric else None,
+        "result_contract": contract.model_dump(mode="json"),
     }
     if is_v2:
         # Cấu hình v2 hỏng đọc ra None: coi như chưa cấu hình để trang hiển thị đúng trạng thái chờ,

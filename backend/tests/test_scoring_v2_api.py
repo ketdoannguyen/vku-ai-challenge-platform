@@ -118,18 +118,38 @@ def test_v2_contract_without_primary_metric_is_a_draft_that_cannot_publish(clien
     assert fixed.json()["not_ready_reason"]["code"] == "GROUND_TRUTH_REQUIRED"
 
 
-def test_v2_save_rejects_missing_or_broken_source(client):
+def test_v2_save_without_source_is_a_draft_that_cannot_publish(client):
+    """Schema-first: lưu bản nháp khi chưa có source (và chưa đặt tên bộ chấm) vẫn được; publish và
+    lượt chạy thử là hai chỗ đòi source, và cả hai phải nói đúng việc cần làm."""
     cid = _competition(client)["id"]
-    missing = put_scoring_v2(client, cid, expected_revision=0, source_code=None)
-    assert missing.status_code == 422
-    assert missing.json()["error"]["code"] == "EVALUATOR_REQUIRED"
+    draft = put_scoring_v2(
+        client, cid, expected_revision=0, source_code=None, name="", output_contract=V2_CONTRACT
+    )
+    assert draft.status_code == 200, draft.text
+    body = draft.json()
+    assert body["scoring"]["evaluator"]["source_sha256"] is None
+    assert body["ready"] is False
+    assert body["not_ready_reason"] == {
+        "code": "SCORING_CONFIG_INVALID",
+        "message": "Bộ chấm cần có tên để hiển thị và đối chiếu.",
+    }
 
-    broken = put_scoring_v2(client, cid, expected_revision=0, source_code="x = 1\n")
+    tested = run_scoring_test_v2(client, cid, expected_revision=1)
+    assert tested.status_code == 422
+    assert tested.json()["error"]["code"] == "EVALUATOR_REQUIRED"
+    assert tested.json()["error"]["message"] == "Cần lưu source bộ chấm trước khi chạy thử."
+
+    # Lưu tiếp source trên cùng bản nháp: revision tiến lên, chặn kế tiếp là ground truth.
+    saved = put_scoring_v2(client, cid, expected_revision=1, output_contract=V2_CONTRACT)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["scoring"]["evaluator"]["source_sha256"] == revisions.sha256_bytes(
+        V2_SOURCE.encode()
+    )
+    assert saved.json()["not_ready_reason"]["code"] == "GROUND_TRUTH_REQUIRED"
+
+    broken = put_scoring_v2(client, cid, expected_revision=2, source_code="x = 1\n")
     assert broken.status_code == 422
     assert broken.json()["error"]["code"] == "EVALUATOR_INVALID"
-
-    # Chưa lưu được gì thì revision vẫn là 0.
-    assert put_scoring_v2(client, cid, expected_revision=0).status_code == 200
 
 
 def test_v2_save_rejects_stale_revision(client):
@@ -267,17 +287,52 @@ def test_v2_test_run_discovers_keys_then_verifies_contract(client, fake_runner):
     assert declared.status_code == 200, declared.text
     assert declared.json()["primary_metric"] == "accuracy"
     assert declared.json()["higher_is_better"] is True
-    # Khai báo metric đổi config fingerprint nên lượt chạy thử lúc dò khóa hết hiệu lực.
-    assert declared.json()["not_ready_reason"]["code"] == "SCORING_TEST_REQUIRED"
-
-    verified = run_scoring_test_v2(client, cid, expected_revision=3)
-    assert verified.status_code == 200, verified.text
-    assert verified.json()["ready"] is True
-    assert verified.json()["test"]["matches_contract"] is True
-    assert verified.json()["scoring"]["verification"]["tested_by"] == "admin@vku.vn"
-    assert verified.json()["scoring"]["verification"]["observed_keys"] == ["accuracy", "n_items"]
+    # Khai đúng tập khóa vừa dò không làm lượt chạy thử hết hiệu lực: một lượt vừa dò vừa xác minh,
+    # publish mở ngay mà không cần chạy lại.
+    assert declared.json()["scoring"]["verified"] is True
+    assert declared.json()["ready"] is True
+    assert declared.json()["scoring"]["verification"]["tested_by"] == "admin@vku.vn"
+    assert declared.json()["scoring"]["verification"]["observed_keys"] == ["accuracy", "n_items"]
 
     assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 200
+
+
+def test_v2_khai_lech_tap_khoa_lam_bang_chung_het_hieu_luc(client, fake_runner):
+    cid = _competition(client)["id"]
+    assert put_scoring_v2(client, cid, expected_revision=0).status_code == 200
+    assert upload_v2_ground_truth(client, cid, expected_revision=1).status_code == 200
+    assert run_scoring_test_v2(client, cid, expected_revision=2).status_code == 200
+
+    # Khai một khóa bộ chấm không trả về: tập khóa lệch nên bằng chứng cũ hết hiệu lực.
+    wrong = {
+        **V2_CONTRACT,
+        "metrics": [
+            *V2_CONTRACT["metrics"],
+            {"key": "f1_macro", "label": "Macro F1", "decimals": 4},
+        ],
+    }
+    declared = put_scoring_v2(client, cid, expected_revision=2, output_contract=wrong)
+    assert declared.status_code == 200, declared.text
+    assert declared.json()["scoring"]["verified"] is False
+    assert declared.json()["not_ready_reason"]["code"] == "SCORING_TEST_REQUIRED"
+
+    # Chạy thử lại với hợp đồng lệch cũng không cứu được: bộ chấm thiếu khóa đã khai nên bị chặn
+    # ngay ở bước đối chiếu, không có bằng chứng nào được ghi.
+    mismatched = run_scoring_test_v2(client, cid, expected_revision=3)
+    assert mismatched.status_code == 422
+    assert mismatched.json()["error"]["code"] == "EVALUATOR_OUTPUT_MISMATCH"
+
+    # Khai lại đúng tập khóa vừa dò là bằng chứng cũ sống lại, không cần lượt chạy mới.
+    fixed = put_scoring_v2(client, cid, expected_revision=3, output_contract=V2_CONTRACT)
+    assert fixed.status_code == 200, fixed.text
+    assert fixed.json()["scoring"]["verified"] is True
+    assert fixed.json()["ready"] is True
+
+    # Chạy thử khi hợp đồng đã đúng vẫn chạy được và báo khớp hợp đồng.
+    rerun = run_scoring_test_v2(client, cid, expected_revision=4)
+    assert rerun.status_code == 200, rerun.text
+    assert rerun.json()["test"]["matches_contract"] is True
+    assert rerun.json()["ready"] is True
 
 
 def test_v2_test_run_rejects_output_outside_contract(client, fake_runner):

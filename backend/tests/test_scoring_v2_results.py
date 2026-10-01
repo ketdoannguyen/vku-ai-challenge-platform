@@ -13,7 +13,7 @@ from openpyxl import load_workbook
 
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.submissions.service import SUBMISSIONS_COLLECTION
-from tests.helpers import publish_v2_competition
+from tests.helpers import membership_document, publish_v2_competition
 
 BASE = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
 # Hợp đồng "càng thấp càng tốt": chiều xếp hạng phải đọc từ cấu hình chứ không mặc định giảm dần.
@@ -22,6 +22,17 @@ LOSS_CONTRACT = {
     "primary_metric": "loss",
     "higher_is_better": False,
 }
+# Admin chỉ cho thí sinh thấy accuracy; f1 là chỉ số chính bị ẩn khỏi mọi payload thí sinh.
+HIDDEN_PRIMARY_CONTRACT = {
+    "metrics": [
+        {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+        {"key": "f1", "label": "F1", "decimals": 4},
+    ],
+    "primary_metric": "f1",
+    "higher_is_better": True,
+    "visible_metrics": ["accuracy"],
+}
+HIDDEN_PRIMARY_METRICS = {"accuracy": 0.9, "f1": 0.8}
 
 
 def _run(awaitable):
@@ -234,3 +245,68 @@ def test_global_admin_list_carries_each_competitions_metric_metadata(client, fak
         "precision",
         "recall",
     ]
+
+
+def test_whitelist_ap_cho_hop_dong_va_bang_xep_hang_thi_sinh(client, fake_runner):
+    """Thí sinh chỉ thấy accuracy: hợp đồng công khai và bảng xếp hạng không lộ f1 đã bị ẩn."""
+    # Lượt chạy thử lúc publish phải trả đúng khóa của hợp đồng hai metric.
+    fake_runner.metrics = dict(HIDDEN_PRIMARY_METRICS)
+    competition = publish_v2_competition(
+        client, slug="v2-an-metric", output_contract=HIDDEN_PRIMARY_CONTRACT
+    )
+    competition_id = ObjectId(competition["id"])
+    _submission(
+        client,
+        competition_id,
+        _create_account(client, "Đội Ẩn", "doi-an@vku.vn"),
+        metrics=dict(HIDDEN_PRIMARY_METRICS),
+        primary_score=0.8,
+        created_at=BASE,
+    )
+
+    # Client đang là thí sinh sau publish_v2_competition.
+    public_config = client.get("/api/competitions/v2-an-metric").json()["submission_config"]
+    assert [metric["key"] for metric in public_config["result_contract"]["metrics"]] == ["accuracy"]
+    assert public_config["result_contract"]["primary_metric"] is None
+    assert public_config["primary_metric"] is None
+
+    board = client.get(f"/api/competitions/{competition_id}/leaderboard").json()
+    assert board["primary_metric"] is None
+    assert board["entries"][0]["metrics"] == {"accuracy": 0.9}
+    assert board["entries"][0]["primary_score"] is None
+
+    # Đường admin vẫn thấy đủ hai metric, chỉ số chính và điểm chính như trước.
+    _login_admin(client)
+    admin_config = client.get(f"/api/admin/competitions/{competition_id}").json()[
+        "submission_config"
+    ]
+    admin_contract = admin_config["result_contract"]
+    assert [metric["key"] for metric in admin_contract["metrics"]] == ["accuracy", "f1"]
+    assert admin_contract["primary_metric"] == "f1"
+    assert admin_contract["visible_metrics"] == ["accuracy"]
+    assert admin_config["primary_metric"] == "f1"
+    admin_board = client.get(f"/api/admin/competitions/{competition_id}/leaderboard").json()
+    assert admin_board["primary_metric"] == "f1"
+    assert admin_board["entries"][0]["metrics"] == {"accuracy": 0.9, "f1": 0.8}
+    assert admin_board["entries"][0]["primary_score"] == 0.8
+
+
+def test_whitelist_ap_cho_lich_su_bai_nop_cua_thi_sinh(client, fake_runner):
+    fake_runner.metrics = dict(HIDDEN_PRIMARY_METRICS)
+    competition = publish_v2_competition(
+        client, slug="v2-an-lich-su", output_contract=HIDDEN_PRIMARY_CONTRACT
+    )
+    competition_id = ObjectId(competition["id"])
+    membership = membership_document(client, competition["id"])
+    _submission(
+        client,
+        competition_id,
+        membership["account_id"],
+        metrics=dict(HIDDEN_PRIMARY_METRICS),
+        primary_score=0.8,
+        created_at=BASE,
+    )
+
+    history = client.get(f"/api/competitions/{competition_id}/submissions/me").json()
+    assert history["submissions"][0]["metrics"] == {"accuracy": 0.9}
+    assert history["submissions"][0]["primary_score"] is None

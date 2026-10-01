@@ -82,6 +82,9 @@ class OutputContract(BaseModel):
     metrics: list[MetricDefinition]
     primary_metric: str | None = None
     higher_is_better: bool = True
+    # `None` = thí sinh thấy mọi metric (mặc định cũ); danh sách = chỉ những khóa này. Mảng rỗng là
+    # "ẩn hết", khác `None` là "không giới hạn".
+    visible_metrics: list[str] | None = None
 
 
 class Verification(BaseModel):
@@ -263,6 +266,18 @@ def validate_output_contract(
         raise ScoringValidationError(
             code, "Metric chính phải nằm trong danh sách metric đã khai báo."
         )
+    visible = contract.visible_metrics
+    if visible is not None:
+        unknown = [key for key in visible if key not in keys]
+        if unknown:
+            raise ScoringValidationError(
+                code,
+                "Metric cho thí sinh thấy phải nằm trong danh sách metric đã khai báo: "
+                + ", ".join(unknown)
+                + ".",
+            )
+        if len(visible) != len(set(visible)):
+            raise ScoringValidationError(code, "Danh sách metric cho thí sinh thấy bị trùng.")
 
 
 def validate_evaluator_config(evaluator: EvaluatorConfig, *, code: str = "SCORING_CONFIG_INVALID") -> None:

@@ -18,7 +18,7 @@ from app.core.config import get_settings
 from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
-from app.scoring import evaluator_client, models
+from app.scoring import contracts, evaluator_client, models
 from app.scoring import service as scoring_service
 from app.scoring.errors import EvaluatorError, ScoringValidationError
 from app.scoring_attempts import service as attempts_service
@@ -261,7 +261,10 @@ async def _submit_scored(
         submission_no,
     )
     return service.public_submission(
-        document, max(quota - quota_used, 0), ai_visible=ai_settings.participant_visible(competition)
+        document,
+        max(quota - quota_used, 0),
+        ai_visible=ai_settings.participant_visible(competition),
+        contract=contracts.participant_contract(competition),
     )
 
 
@@ -367,6 +370,7 @@ async def my_submissions(
         limit=limit,
         offset=offset,
         ai_visible=ai_settings.participant_visible(competition),
+        contract=contracts.participant_contract(competition),
     )
     return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 
