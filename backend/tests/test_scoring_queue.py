@@ -99,6 +99,29 @@ def test_mot_lan_nhan_nut_la_mot_luot_cho_duoc_cham(client, fake_runner, fake_ar
     assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
 
 
+def test_whitelist_metric_ap_cho_ket_qua_luot_cham(client, fake_runner, fake_artifact_storage):
+    """Kết quả trả về theo lượt chấm cũng theo whitelist; chỉ số chính bị ẩn thì không trả điểm."""
+    contract = {
+        "metrics": [
+            {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+            {"key": "n_items", "label": "Số mẫu", "decimals": 0},
+        ],
+        "primary_metric": "accuracy",
+        "higher_is_better": True,
+        "visible_metrics": ["n_items"],
+    }
+    competition = publish_v2_competition(client, slug="v2-an-diem", output_contract=contract)
+    cid = competition["id"]
+
+    accepted = submit(client, cid, V2_SUBMISSION)
+    assert accepted.status_code == 202, accepted.text
+    assert run_worker(client) == 1
+
+    submission = attempt_status(client, cid, accepted.json()["attempt_id"])["submission"]
+    assert submission["metrics"] == {"n_items": 4.0}
+    assert submission["primary_score"] is None
+
+
 def test_cung_mot_lan_nhan_nut_thi_khong_tao_luot_thu_hai(client, fake_runner):
     competition = publish_v2_competition(client)
     cid = competition["id"]

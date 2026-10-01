@@ -64,10 +64,14 @@ async def ranked_entries(db, competition: dict) -> list[dict]:
     return entries
 
 
-def _participant_entry(entry: dict, current_account_id) -> dict:
-    """Bỏ account_id và gắn cờ người xem - `me` dùng chung serializer này để không lộ định danh."""
+def _participant_entry(entry: dict, current_account_id, contract) -> dict:
+    """Bỏ account_id và gắn cờ người xem - `me` dùng chung serializer này để không lộ định danh.
+
+    `contract` là hợp đồng thí sinh: metric admin ẩn không rời khỏi backend.
+    """
     item = {key: value for key, value in entry.items() if key != "account_id"}
     item["is_current_user"] = entry["account_id"] == str(current_account_id)
+    contracts.apply_metric_visibility(item, contract)
     return item
 
 
@@ -80,19 +84,20 @@ def leaderboard_response(
     offset: int = 0,
 ) -> dict:
     """Trang participant: `rank` giữ nguyên thứ hạng toàn cục; `me` tìm trên full list rồi mới cắt trang."""
+    contract = contracts.participant_contract(competition)
     page = entries[offset : offset + limit]
     me = next(
         (entry for entry in entries if entry["account_id"] == str(current_account_id)), None
     )
     return {
         "competition_id": str(competition["_id"]),
-        "primary_metric": _primary_metric(competition),
-        "entries": [_participant_entry(entry, current_account_id) for entry in page],
+        "primary_metric": contract.primary_metric,
+        "entries": [_participant_entry(entry, current_account_id, contract) for entry in page],
         "total": len(entries),
         "limit": limit,
         "offset": offset,
         "has_more": offset + len(page) < len(entries),
-        "me": _participant_entry(me, current_account_id) if me else None,
+        "me": _participant_entry(me, current_account_id, contract) if me else None,
     }
 
 

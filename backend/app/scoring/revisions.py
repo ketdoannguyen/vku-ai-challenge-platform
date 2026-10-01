@@ -1,8 +1,10 @@
 """Dấu vân tay của cấu hình chấm và bộ đếm revision.
 
-Một lượt chạy thử chỉ còn giá trị khi mọi thứ nó đã chạy vẫn đúng là thứ đang được lưu: source,
-ground truth, schema và runtime. `execution_fingerprint` gói đúng bốn thứ đó lại; đổi bất kỳ thứ nào
-làm lượt chạy thử cũ mất hiệu lực, nên publish không thể dựa vào bằng chứng đã cũ.
+Một lượt chạy thử chỉ còn giá trị khi phần nó đã chạy vẫn đúng là phần đang được lưu — source,
+ground truth, schema, runtime (`execution_fingerprint`) — **và** tập khóa metric khai báo đúng bằng
+tập khóa lượt đó đã quan sát. Đổi tên hiển thị, số thập phân, ẩn/hiện hay chỉ số chính không làm mất
+hiệu lực: lượt chạy thử không quan sát được chúng, nên bắt chạy lại vì chúng chỉ tạo thêm lượt chứ
+không thêm bằng chứng.
 """
 
 import hashlib
@@ -52,7 +54,11 @@ def execution_fingerprint(
 
 
 def config_fingerprint(execution: str, contract: OutputContract | None) -> str:
-    """Bổ sung phần trình bày kết quả: đổi metric chính hay chiều xếp hạng cũng là đổi cấu hình."""
+    """Dấu vết của đúng cấu hình lúc chạy thử, ghim vào bằng chứng và `scoring_ref` để hậu kiểm.
+
+    Không phải điều kiện hiệu lực: hiệu lực so theo tập khóa metric đã quan sát
+    (`verification_matches`), không so toàn bộ hợp đồng.
+    """
     payload = {
         "execution": execution,
         "contract": contract.model_dump(mode="json") if contract else None,
@@ -61,12 +67,19 @@ def config_fingerprint(execution: str, contract: OutputContract | None) -> str:
 
 
 def verification_matches(verification, *, execution: str, contract: OutputContract | None) -> bool:
-    """Lượt chạy thử đã lưu còn hiệu lực cho đúng cấu hình đang có hay không."""
+    """Lượt chạy thử đã lưu còn hiệu lực cho đúng cấu hình đang có hay không.
+
+    Hai phần của hiệu lực: phần đã chạy (schema, source, ground truth, runtime) không đổi, và tập
+    khóa metric khai báo đúng bằng tập khóa lượt chạy đã quan sát. Chưa khai hợp đồng (bản nháp dò
+    khóa) thì chỉ cần phần đã chạy — nhờ vậy khai đúng tập khóa vừa dò cũng không làm mất hiệu lực.
+    """
     if verification is None or verification.state != "passed":
         return False
     if verification.execution_fingerprint != execution:
         return False
-    return verification.config_fingerprint == config_fingerprint(execution, contract)
+    if contract is None:
+        return True
+    return sorted(verification.observed_keys) == sorted(metric.key for metric in contract.metrics)
 
 
 def utc_now() -> datetime:

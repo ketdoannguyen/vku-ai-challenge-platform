@@ -185,7 +185,8 @@ export interface LeaderboardEntry {
   /** Thứ hạng toàn cục, không đánh lại số theo trang. */
   rank: number;
   display_name: string;
-  primary_score: number;
+  /** `null` khi chỉ số chính bị admin ẩn khỏi thí sinh; bảng xếp hạng vẫn xếp theo nó. */
+  primary_score: number | null;
   metrics: Metrics;
   best_submission_id: string;
   best_submission_at: string;

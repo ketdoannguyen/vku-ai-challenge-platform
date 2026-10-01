@@ -90,6 +90,7 @@ const SCORING = {
       metrics: CONTRACT_METRICS,
       primary_metric: "f1",
       higher_is_better: true,
+      visible_metrics: null,
     },
     verified: true,
     verification: {
@@ -238,7 +239,7 @@ const TAB_LABELS = [
   "Tài nguyên",
   "Chấm điểm",
   "Kết quả",
-  "Thành viên & mã tham gia",
+  "Thành viên",
   "Cài đặt",
 ];
 
@@ -321,9 +322,9 @@ test("rail quản trị: đủ 7 khu vực, panel gắn đúng tab đang mở", 
   expect(tabs[0].getAttribute("aria-controls")).toBe(contentsPanelId);
 
   // Chuyển khu vực: panel cũ biến mất, panel mới do đúng tab đó điều khiển.
-  const members = within(rail).getByRole("tab", { name: "Thành viên & mã tham gia" });
+  const members = within(rail).getByRole("tab", { name: "Thành viên" });
   fireEvent.click(members);
-  const next = await screen.findByRole("tabpanel", { name: "Thành viên & mã tham gia" });
+  const next = await screen.findByRole("tabpanel", { name: "Thành viên" });
   expect(next.id).not.toBe(contentsPanelId);
   expect(members.getAttribute("aria-controls")).toBe(next.id);
   expect(screen.queryByRole("tabpanel", { name: "Nội dung" })).toBeNull();
@@ -605,7 +606,7 @@ test("thêm thành viên gửi email đúng endpoint", async () => {
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
   await waitFor(() => expect(calls.some((call) => call.url.includes("/members?limit=200"))).toBe(true));
   const input = await screen.findByLabelText("Email thành viên");
   fireEvent.change(input, { target: { value: "thi.sinh@vku.vn" } });
@@ -620,12 +621,12 @@ test("thêm thành viên gửi email đúng endpoint", async () => {
 test("đổi mã tham gia không bao giờ hiển thị mã trong DOM", async () => {
   mockApi((url) => {
     if (url.includes("/join-code")) return { body: { join_code_configured: true }, status: 200 };
-    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Cài đặt" }));
   const input = await screen.findByLabelText("Mã tham gia mới");
   fireEvent.change(input, { target: { value: "new-secret-2026" } });
   fireEvent.submit(input.closest("form")!);
@@ -634,6 +635,92 @@ test("đổi mã tham gia không bao giờ hiển thị mã trong DOM", async ()
   fireEvent.click(screen.getAllByRole("button", { name: "Đổi mã" })[1]);
   await waitFor(() => screen.getByText("Đã cập nhật mã tham gia."));
   expect(screen.queryByDisplayValue("new-secret-2026")).toBeNull();
+});
+
+test("đặt mã ở Cài đặt cập nhật trạng thái publish; Thành viên không còn form mã", async () => {
+  let codeConfigured = false;
+  mockApi((url, init) => {
+    if (url.endsWith("/join-code") && init?.method === "PUT") {
+      codeConfigured = true;
+      return { body: { join_code_configured: true }, status: 200 };
+    }
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        status: "draft",
+        join_code_configured: codeConfigured,
+        publish_blocked_reason: codeConfigured
+          ? null
+          : { code: "JOIN_CODE_REQUIRED", message: "Cần cấu hình mã tham gia trước khi publish cuộc thi." },
+      },
+      status: 200,
+    };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
+  expect(screen.queryByLabelText("Mã tham gia mới")).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "Cài đặt" }));
+
+  const input = await screen.findByLabelText("Mã tham gia mới");
+  expect(input).toHaveAttribute("type", "password");
+  fireEvent.change(input, { target: { value: "first-secret-2026" } });
+  fireEvent.submit(input.closest("form")!);
+
+  await screen.findByText("Đã đặt mã tham gia.");
+  await waitFor(() => expect(screen.queryByText("Chưa thể publish.")).toBeNull());
+  expect(screen.getByRole("button", { name: "Publish" })).not.toBeDisabled();
+  expect(screen.queryByDisplayValue("first-secret-2026")).toBeNull();
+  expect(JSON.parse(calls.find((call) => call.url.endsWith("/join-code"))!.init!.body as string))
+    .toEqual({ join_code: "first-secret-2026" });
+});
+
+test("đổi mã thất bại giữ hộp xác nhận để thử lại, hủy không gửi PUT", async () => {
+  let attempts = 0;
+  mockApi((url, init) => {
+    if (url.endsWith("/join-code") && init?.method === "PUT") {
+      attempts += 1;
+      return attempts === 1
+        ? { body: { detail: "Không thể đổi mã" }, status: 500 }
+        : { body: { join_code_configured: true }, status: 200 };
+    }
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Cài đặt" }));
+  const input = await screen.findByLabelText("Mã tham gia mới");
+  fireEvent.change(input, { target: { value: "new-secret-2026" } });
+  fireEvent.submit(input.closest("form")!);
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Đổi mã tham gia" })).getByRole("button", { name: "Hủy" }));
+  expect(attempts).toBe(0);
+  fireEvent.submit(input.closest("form")!);
+  const dialog = screen.getByRole("dialog", { name: "Đổi mã tham gia" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Đổi mã" }));
+  await within(dialog).findByRole("alert");
+  expect(input).toHaveValue("new-secret-2026");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Đổi mã" }));
+  await screen.findByText("Đã cập nhật mã tham gia.");
+  expect(attempts).toBe(2);
+  expect(screen.queryByRole("dialog", { name: "Đổi mã tham gia" })).toBeNull();
+});
+
+test.each([
+  ["open", "tự do"],
+  ["invite_only", "chỉ mời"],
+])("chế độ %s hiển thị nhắc không dùng mã ở Cài đặt", async (joinMode, label) => {
+  mockApi((url) => {
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, join_mode: joinMode }, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Cài đặt" }));
+  expect(screen.getByText(`Cuộc thi này dùng chế độ tham gia ${label} - không dùng mã.`)).toBeTruthy();
+  expect(screen.queryByLabelText("Mã tham gia mới")).toBeNull();
 });
 
 test("đổi trạng thái member yêu cầu xác nhận rồi mới PATCH", async () => {
@@ -646,7 +733,7 @@ test("đổi trạng thái member yêu cầu xác nhận rồi mới PATCH", asy
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
   const toggle = await screen.findByRole("button", { name: "Vô hiệu hóa" });
   fireEvent.click(toggle);
   expect(screen.getByRole("dialog", { name: "Vô hiệu hóa thành viên" })).toBeTruthy();
@@ -723,9 +810,35 @@ test("lưu cấu hình chấm điểm gửi đủ schema, source và hợp đồ
         metrics: CONTRACT_METRICS,
         primary_metric: "f1",
         higher_is_better: true,
+        // Tích hết là mặc định cũ: gửi `null` để backend giữ nguyên hành vi không giới hạn.
+        visible_metrics: null,
       },
     });
   });
+});
+
+test("card định dạng dữ liệu có nút Lưu ở cuối card, nằm cùng form với nút cuối trang", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring") && init?.method === "PUT") return { body: SCORING, status: 200 };
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  // Nút là phần tử cuối card (sau hai bảng cột và khối khớp ID): sửa xong là bấm ngay,
+  // không phải cuộn ngược lên hàng tiêu đề.
+  const card = (await screen.findByText("Định dạng dữ liệu")).closest("section") as HTMLElement;
+  const save = within(card).getByRole("button", { name: "Lưu" });
+  expect(card.lastElementChild).toBe(save.parentElement);
+  expect(save.closest(".admin-detail-card-head")).toBeNull();
+  expect(save).toHaveAttribute("type", "submit");
+
+  fireEvent.click(save);
+  expect(await screen.findByText("Đã lưu cấu hình chấm điểm.")).toBeTruthy();
+  const puts = calls.filter((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT");
+  expect(puts).toHaveLength(1);
 });
 
 test("upload ground truth dùng endpoint private và form data", async () => {
@@ -745,6 +858,52 @@ test("upload ground truth dùng endpoint private và form data", async () => {
     const put = calls.find((call) => call.url.endsWith("/ground-truth") && call.init?.method === "PUT");
     expect(put?.init?.body).toBeInstanceOf(FormData);
   });
+});
+
+test("chưa lưu cấu hình vẫn chọn trước được ground truth, tệp tải lên ngay sau lượt lưu", async () => {
+  const UNSAVED = { ...SCORING, ready: false, scoring: null, config: null, ground_truth: null };
+  // Lượt lưu đầu trả revision mới; upload nối theo phải dùng đúng revision đó chứ không phải bản cũ.
+  const SAVED = { ...SCORING, ready: false, scoring: { ...SCORING.scoring, revision: 1 }, ground_truth: null };
+  mockApi((url, init) => {
+    if (url.endsWith("/ground-truth") && init?.method === "PUT") {
+      return { body: { ...SAVED, ground_truth: SCORING.ground_truth }, status: 200 };
+    }
+    if (url.endsWith("/scoring") && init?.method === "PUT") return { body: SAVED, status: 200 };
+    if (url.endsWith("/scoring")) return { body: UNSAVED, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV"), {
+    target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] },
+  });
+
+  // Chưa lưu cấu hình: tệp nằm chờ trong form, chưa có request nào rời trình duyệt.
+  expect(await screen.findByText("truth.csv")).toBeTruthy();
+  expect(calls.some((call) => call.url.endsWith("/ground-truth"))).toBe(false);
+
+  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" }).closest("form")!);
+
+  expect(await screen.findByText("Đã lưu cấu hình và tải lên ground truth.")).toBeTruthy();
+  const saveIndex = calls.findIndex((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT");
+  const uploadIndex = calls.findIndex(
+    (call) => call.url.endsWith("/ground-truth") && call.init?.method === "PUT",
+  );
+  expect(saveIndex).toBeGreaterThanOrEqual(0);
+  expect(uploadIndex).toBeGreaterThan(saveIndex);
+  // Form chưa có gì: tên trống và source trống đi đúng dạng bản nháp. `null` là "không đổi
+  // source", không phải chuỗi rỗng để backend báo lỗi cú pháp - nhờ vậy lưu được schema trước.
+  expect(JSON.parse(calls[saveIndex]!.init!.body as string).evaluator).toEqual({
+    name: "",
+    source_code: null,
+  });
+  const uploadBody = calls[uploadIndex]?.init?.body as FormData | undefined;
+  expect(uploadBody?.get("expected_revision")).toBe("1");
+  // Tệp đã lên: hàng chờ tan, metadata ground truth thay chỗ dòng "đã chọn".
+  expect(screen.queryByText("truth.csv")).toBeNull();
+  expect(screen.getByText("4 dòng")).toBeTruthy();
 });
 
 test("upload ground truth xong thì banner publish biến mất và nút Publish mở khóa", async () => {
@@ -793,11 +952,11 @@ test("upload ground truth xong thì banner publish biến mất và nút Publish
   expect(screen.getByRole("button", { name: "Publish" })).not.toBeDisabled();
 });
 
-test("banner chặn vì thiếu mã tham gia mở tab Thành viên chứ không phải tab Chấm điểm", async () => {
+test("banner chặn vì thiếu mã tham gia mở tab Cài đặt chứ không phải tab Chấm điểm", async () => {
   mockApi((url) => {
     if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
-    if (url.includes("/members")) return { body: MEMBERS, status: 200 };
+    if (url.includes("/ai-review")) return { body: AI_REVIEW_SETTINGS, status: 200 };
     return {
       body: {
         ...COMPETITION,
@@ -817,9 +976,9 @@ test("banner chặn vì thiếu mã tham gia mở tab Thành viên chứ không 
   const banner = (await screen.findByText("Chưa thể publish.")).closest(
     ".status-banner",
   ) as HTMLElement;
-  fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Thành viên" }));
+  fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Cài đặt" }));
 
-  expect(screen.getByRole("tab", { name: "Thành viên & mã tham gia" })).toHaveAttribute(
+  expect(screen.getByRole("tab", { name: "Cài đặt" })).toHaveAttribute(
     "aria-selected",
     "true",
   );
@@ -848,6 +1007,7 @@ test("scoring controls bị khóa khi backend báo locked", async () => {
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
   expect(await screen.findByText(/đã bị khóa/i)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
   expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
   expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
   expect(screen.getByLabelText("Submission: cột 2: tên")).toBeDisabled();
@@ -1371,7 +1531,7 @@ test("xóa thành viên: xác nhận rồi mới DELETE", async () => {
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
   fireEvent.click(await screen.findByRole("button", { name: "Xóa" }));
 
   const dialog = screen.getByRole("dialog", { name: "Xóa thành viên" });
@@ -1403,7 +1563,7 @@ test("xóa thành viên đã có bài chấm điểm: 409 hiện ngay trong moda
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
   fireEvent.click(await screen.findByRole("button", { name: "Xóa" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Xóa thành viên" })).getByRole("button", { name: "Xóa" }));
 
@@ -1432,7 +1592,7 @@ test("đếm thành viên tách người đang hoạt động khỏi người đ
     return { body: COMPETITION, status: 200 };
   });
   renderPage();
-  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên & mã tham gia" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Thành viên" }));
 
   expect(await screen.findByText("1 đang hoạt động · 2 tổng cộng")).toBeTruthy();
 });
@@ -1913,8 +2073,8 @@ test("nhịp màu theo tab: mỗi panel dùng đúng chuỗi data-tone, không s
     ["Tài nguyên", ["yellow"]],
     ["Chấm điểm", ["blue", "red", "yellow", "blue", "red"]],
     ["Kết quả", ["yellow", "blue"]],
-    ["Thành viên & mã tham gia", ["red", "blue"]],
-    ["Cài đặt", ["blue", "yellow"]],
+    ["Thành viên", ["blue"]],
+    ["Cài đặt", ["red", "blue", "yellow"]],
   ] as Array<[string, string[]]>) {
     fireEvent.click(railTab(name));
     const panel = await screen.findByRole("tabpanel", { name });
@@ -2030,7 +2190,7 @@ test("năm bảng vẫn là vùng focus được và giữ nguyên accessible na
   expect(submissions).not.toHaveAttribute("tabindex");
   expect(within(submissions).getByRole("listitem")).toBeTruthy();
 
-  fireEvent.click(railTab("Thành viên & mã tham gia"));
+  fireEvent.click(railTab("Thành viên"));
   await expectRegion("Bảng thành viên cuộc thi");
 });
 
@@ -2066,7 +2226,7 @@ test("Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lư
   expect(within(v1Card).getByText("binary")).toBeTruthy();
   second.unmount();
 
-  // Chưa lưu định dạng: upload ground truth và chạy thử đều phải chờ schema.
+  // Chưa lưu định dạng: chọn trước được ground truth (chờ lượt lưu), chạy thử vẫn phải chờ schema.
   mockApi((url) => {
     if (url.endsWith("/scoring")) {
       return { body: { ...SCORING, ready: false, scoring: null, config: null, ground_truth: null }, status: 200 };
@@ -2076,10 +2236,40 @@ test("Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lư
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
-  expect(await screen.findByText("Lưu định dạng dữ liệu trước khi upload.")).toBeTruthy();
+  expect(
+    await screen.findByText(
+      "Chưa lưu cấu hình — tệp chọn trước được tải lên và kiểm tra ngay sau khi lưu.",
+    ),
+  ).toBeTruthy();
   expect(screen.getByText("Lưu cấu hình trước khi chạy thử.")).toBeTruthy();
   expect(screen.getByText("Chạy thử bộ chấm để nhận diện các khóa metric.")).toBeTruthy();
-  expect((screen.getByLabelText("Upload ground truth CSV") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText("Upload ground truth CSV") as HTMLInputElement).disabled).toBe(false);
+});
+
+test("đã lưu định dạng nhưng chưa có source: nút chạy thử khóa kèm nhắc lưu source", async () => {
+  await openScoring({
+    ...SCORING,
+    ready: false,
+    not_ready_reason: {
+      code: "SCORING_CONFIG_INVALID",
+      message: "Bộ chấm cần có tên để hiển thị và đối chiếu.",
+    },
+    scoring: {
+      ...SCORING.scoring,
+      evaluator: { name: "", source_sha256: null, runtime_id: null, source_code: "" },
+      output_contract: null,
+      verified: false,
+      verification: null,
+    },
+    primary_metric: null,
+  });
+
+  expect(screen.getByText("Lưu source bộ chấm trước khi chạy thử.")).toBeTruthy();
+  expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
+  // Chưa có source thì chưa có gì để chạy: bảng "khóa metric đã chạy" ẩn theo.
+  expect(screen.queryByText("Khóa metric đã chạy")).toBeNull();
+  // Bản nháp vẫn đọc đúng chỗ còn thiếu trên card trạng thái.
+  expect(screen.getByText("Bộ chấm cần có tên để hiển thị và đối chiếu.")).toBeTruthy();
 });
 
 test("chạy thử gửi expected_revision và mở bảng metric từ khóa thật", async () => {
@@ -2132,10 +2322,353 @@ test("chạy thử gửi expected_revision và mở bảng metric từ khóa th�
   expect(screen.getByText("120 ms")).toBeTruthy();
   // Khóa mới vào bảng với tên hiển thị mặc định là chính khóa, admin tự đổi.
   expect(screen.getByLabelText("Tên hiển thị của precision")).toHaveProperty("value", "precision");
+  // Khóa mới mặc định cho thí sinh thấy; admin bỏ tích nếu muốn ẩn.
+  expect(screen.getByLabelText("Cho thí sinh thấy precision")).toHaveProperty("checked", true);
 
   const call = calls.find((item) => item.url.endsWith("/scoring/test"));
   expect(call?.init?.method).toBe("POST");
   const body = call?.init?.body as FormData;
   expect(body.get("expected_revision")).toBe("3");
   expect((body.get("file") as File).name).toBe("sample.csv");
+});
+
+test("chạy thử: dải đang chạy hiện trong lúc chờ và nút khóa cho tới khi xong", async () => {
+  calls.length = 0;
+  let resolveTest!: (response: Response) => void;
+  // Lượt chạy thử mất hàng chục giây ở thật: giữ request treo để quan sát trạng thái đang chạy.
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith("/scoring/test")) {
+        return new Promise<Response>((resolve) => {
+          resolveTest = resolve;
+        });
+      }
+      const body = url.endsWith("/scoring")
+        ? SCORING
+        : url.includes("/contents")
+          ? CONTENTS
+          : COMPETITION;
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.change(await screen.findByLabelText("Chọn CSV mẫu để chạy thử"), {
+    target: { files: [new File(["id,f1\n1,0.5"], "sample.csv", { type: "text/csv" })] },
+  });
+
+  expect(await screen.findByText("Đang chạy thử bộ chấm…")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Đang chạy thử…" })).toBeDisabled();
+  expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
+
+  resolveTest(
+    new Response(
+      JSON.stringify({
+        ...SCORING,
+        test: { observed_keys: ["f1"], metrics: { f1: 0.5 }, duration_ms: 90 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+
+  expect(await screen.findByText("Đã chạy thử bộ chấm.")).toBeTruthy();
+  expect(screen.queryByText("Đang chạy thử bộ chấm…")).toBeNull();
+});
+
+test("lượt chạy thử lỗi hiện ngay trong khối phản hồi ghim", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring/test")) {
+      return {
+        body: { error: { code: "EVALUATOR_TIMEOUT", message: "Bộ chấm chạy quá thời gian cho phép." } },
+        status: 422,
+      };
+    }
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.change(await screen.findByLabelText("Chọn CSV mẫu để chạy thử"), {
+    target: { files: [new File(["id,f1\n1,0.5"], "sample.csv", { type: "text/csv" })] },
+  });
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Bộ chấm chạy quá thời gian cho phép.");
+  expect(alert.closest(".scoring-feedback")).toBeTruthy();
+});
+
+/** Sáu mục checklist publish, kèm id vùng đích mà mỗi mục phải dẫn tới. */
+const CHECKLIST_LINKS: Array<[string, string]> = [
+  ["Định dạng dữ liệu đã lưu", "scoring-section-schema"],
+  ["Ground truth hợp lệ", "scoring-section-ground-truth"],
+  ["Đã lưu source bộ chấm", "scoring-section-evaluator"],
+  ["Đã khai báo metric", "scoring-section-metrics"],
+  ["Đã chạy thử và khớp cấu hình hiện tại", "scoring-section-test"],
+  ["Đã chọn chỉ số chính", "scoring-section-metrics"],
+];
+
+/** Mở tab Chấm điểm và chờ bảng schema render xong; mặc định dùng SCORING đầy đủ. */
+async function openScoring(scoring: unknown = SCORING) {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: scoring, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  await screen.findByLabelText("Ground truth: cột 1: tên");
+}
+
+test("chưa giới hạn metric thì cột Thí sinh thấy tích hết", async () => {
+  await openScoring();
+
+  for (const key of ["f1", "precision", "recall"]) {
+    expect(screen.getByLabelText(`Cho thí sinh thấy ${key}`)).toHaveProperty("checked", true);
+  }
+});
+
+test("hợp đồng có whitelist thì cột Thí sinh thấy chỉ tích đúng khóa được phép", async () => {
+  await openScoring({
+    ...SCORING,
+    scoring: {
+      ...SCORING.scoring,
+      output_contract: { ...SCORING.scoring.output_contract, visible_metrics: ["f1"] },
+    },
+  });
+
+  expect(screen.getByLabelText("Cho thí sinh thấy f1")).toHaveProperty("checked", true);
+  expect(screen.getByLabelText("Cho thí sinh thấy precision")).toHaveProperty("checked", false);
+  expect(screen.getByLabelText("Cho thí sinh thấy recall")).toHaveProperty("checked", false);
+});
+
+test("ẩn chỉ số chính thì bảng metric nhắc thí sinh không thấy điểm nhưng vẫn xếp hạng", async () => {
+  await openScoring({
+    ...SCORING,
+    scoring: {
+      ...SCORING.scoring,
+      output_contract: { ...SCORING.scoring.output_contract, visible_metrics: ["precision"] },
+    },
+  });
+
+  expect(screen.getByText(/Chỉ số chính đang bị ẩn/)).toBeTruthy();
+});
+
+test("bỏ tích một metric thì lượt lưu gửi whitelist chỉ gồm các khóa còn tích", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring") && init?.method === "PUT") return { body: SCORING, status: 200 };
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  fireEvent.click(await screen.findByLabelText("Cho thí sinh thấy recall"));
+  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" }).closest("form")!);
+
+  // Phản hồi thành công nằm trong khối ghim để nút lưu ở cuối trang vẫn thấy được.
+  // Bám vào câu chữ của banner thành công, không phải role chung: dải "đang lưu" cũng là
+  // role=status và biến mất sau khi lưu xong, phần tử bắt được sẽ là nút rời rạc.
+  const success = await screen.findByText("Đã lưu cấu hình chấm điểm.");
+  expect(success.closest(".scoring-feedback")).toBeTruthy();
+  await waitFor(() => {
+    const put = calls.find((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT");
+    expect(put).toBeTruthy();
+    expect(JSON.parse(put!.init!.body as string).output_contract.visible_metrics).toEqual([
+      "f1",
+      "precision",
+    ]);
+  });
+});
+
+test("lưu cấu hình làm lượt chạy thử hết hiệu lực: banner nói rõ phải chạy lại", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring") && init?.method === "PUT") {
+      // Khai báo metric sau lượt chạy thử: hợp đồng đổi nên bằng chứng cũ hết hiệu lực.
+      return {
+        body: { ...SCORING, ready: false, scoring: { ...SCORING.scoring, verified: false } },
+        status: 200,
+      };
+    }
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.submit(
+    (await screen.findByRole("button", { name: "Lưu cấu hình chấm điểm" })).closest("form")!,
+  );
+
+  // Lượt chạy thử cũ vẫn còn số liệu trên màn hình, nên phải nói thẳng nó vừa mất hiệu lực
+  // ngay tại lượt lưu thay vì để admin tự phát hiện qua badge Chưa đạt.
+  expect(
+    await screen.findByText(
+      "Đã lưu cấu hình chấm điểm. Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi publish.",
+    ),
+  ).toBeTruthy();
+  // Checklist chỉ còn đúng mục chạy thử là chưa đạt; lý do nằm ở dòng hiệu lực trong card chạy thử.
+  expect(screen.getAllByText("Chưa đạt")).toHaveLength(1);
+  expect(
+    screen.getByText(
+      "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi publish.",
+    ),
+  ).toBeTruthy();
+});
+
+test("lưu thất bại thì lỗi backend hiện trong khối phản hồi của tab", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring") && init?.method === "PUT") {
+      return {
+        body: {
+          error: {
+            code: "EVALUATOR_INVALID",
+            message: "Source phải định nghĩa hàm evaluate ở cấp cao nhất.",
+          },
+        },
+        status: 422,
+      };
+    }
+    if (url.endsWith("/scoring")) return { body: SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  fireEvent.submit(
+    (await screen.findByRole("button", { name: "Lưu cấu hình chấm điểm" })).closest("form")!,
+  );
+
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Source phải định nghĩa hàm evaluate ở cấp cao nhất.");
+  expect(alert.closest(".scoring-feedback")).toBeTruthy();
+});
+
+test("checklist sẵn sàng publish đứng đầu tab và mỗi mục dẫn tới vùng cần xử lý", async () => {
+  await openScoring();
+
+  const panel = screen.getByRole("tabpanel", { name: "Chấm điểm" });
+  const firstCard = panel.querySelector(".admin-detail-card") as HTMLElement;
+  expect(within(firstCard).getByText("Trạng thái sẵn sàng publish")).toBeTruthy();
+  // Checklist đọc trạng thái đã lưu: sửa trong form mà chưa bấm Lưu thì các mục vẫn "Chưa đạt".
+  expect(within(firstCard).getByText(/thay đổi chưa lưu không được tính/)).toBeTruthy();
+
+  expect(within(firstCard).getAllByRole("link")).toHaveLength(CHECKLIST_LINKS.length);
+  for (const [label, target] of CHECKLIST_LINKS) {
+    expect(within(firstCard).getByRole("link", { name: label })).toHaveAttribute("href", `#${target}`);
+    const anchorTarget = document.getElementById(target) as HTMLElement;
+    expect(anchorTarget).toBeTruthy();
+    expect(anchorTarget).toHaveAttribute("tabindex", "-1");
+  }
+});
+
+test("kích hoạt mục checklist chuyển focus vào vùng đích", async () => {
+  await openScoring();
+
+  for (const [label, target] of CHECKLIST_LINKS) {
+    fireEvent.click(screen.getByRole("link", { name: label }));
+    expect(document.getElementById(target)).toHaveFocus();
+  }
+});
+
+test("hai bảng schema có heading riêng (kèm icon) và hướng dẫn giá trị hợp lệ gắn với ô nhập", async () => {
+  await openScoring();
+
+  // Heading đứng trên bảng, còn mô tả chữ nhỏ nằm cùng hàng bên phải.
+  const gtHeading = screen.getByRole("heading", { level: 3, name: "Ground truth" });
+  const subHeading = screen.getByRole("heading", { level: 3, name: "Submission" });
+  expect(
+    within(subHeading.closest(".scoring-file-heading") as HTMLElement).getByText(
+      /source Python quyết định/,
+    ),
+  ).toBeTruthy();
+  expect(gtHeading.closest(".scoring-file-heading")).toBeTruthy();
+  // Badge icon giúp phân biệt ngay đang khai báo cho tệp nào.
+  const gtIcon = gtHeading.closest(".scoring-file-ident")?.querySelector(".scoring-file-icon");
+  const subIcon = subHeading.closest(".scoring-file-ident")?.querySelector(".scoring-file-icon");
+  expect(gtIcon?.querySelector("svg")).toBeTruthy();
+  expect(gtIcon?.classList.contains("scoring-file-icon-yellow")).toBe(true);
+  expect(subIcon?.querySelector("svg")).toBeTruthy();
+  expect(subIcon?.classList.contains("scoring-file-icon-yellow")).toBe(false);
+  // Bảng gắn tên với heading của chính nó để trình đọc màn hình phân biệt hai bảng.
+  expect(document.querySelector("table[aria-labelledby='scoring-title-gt']")).toBeTruthy();
+  expect(document.querySelector("table[aria-labelledby='scoring-title-sub']")).toBeTruthy();
+
+  // Ô giá trị hợp lệ trỏ tới hướng dẫn mô tả đúng ý nghĩa "bỏ trống = không giới hạn".
+  const hint = document.getElementById("scoring-allowed-gt");
+  expect(hint?.textContent).toContain("không giới hạn");
+  const gtAllowed = screen.getByLabelText("Ground truth: cột 1: giá trị hợp lệ");
+  expect(gtAllowed).toHaveAttribute("aria-describedby", "scoring-allowed-gt");
+  expect(gtAllowed).toHaveAttribute("placeholder", "ví dụ: 0, 1");
+  expect(screen.getByLabelText("Submission: cột 1: giá trị hợp lệ")).toHaveAttribute(
+    "aria-describedby",
+    "scoring-allowed-sub",
+  );
+});
+
+test("nút thêm cột nằm ở hàng cuối bảng, thêm dòng và không gửi lượt lưu", async () => {
+  await openScoring();
+
+  const addButton = screen.getByRole("button", { name: "Ground truth: thêm cột" });
+  // Nút nằm trong hàng cuối (tfoot) của bảng schema, không chiếm hàng riêng bên ngoài.
+  expect(addButton.closest("tfoot")).toBeTruthy();
+  expect(addButton.closest("table")).toBeTruthy();
+  expect(addButton.querySelector("svg")).toBeTruthy();
+  fireEvent.click(addButton);
+
+  const newName = await screen.findByLabelText("Ground truth: cột 3: tên");
+  expect(newName).toHaveProperty("value", "");
+  // Dòng mới nằm trong bảng của chính editor đó.
+  const editor = addButton.closest(".form-field") as HTMLElement;
+  expect(editor.querySelector("table")?.contains(newName)).toBe(true);
+  // Trong form: bấm chỉ thêm dòng trống, không kích hoạt submit/PUT.
+  expect(calls.some((call) => call.init?.method === "PUT")).toBe(false);
+});
+
+test("khi cấu hình bị khóa, nút thêm cột bị vô hiệu nhưng checklist vẫn điều hướng", async () => {
+  await openScoring({ ...SCORING, locked: true });
+
+  expect(screen.getByRole("button", { name: "Submission: thêm cột" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("link", { name: "Đã khai báo metric" }));
+  expect(document.getElementById("scoring-section-metrics")).toHaveFocus();
+});
+
+test("nút upload ground truth và nút chạy thử nằm cùng hàng tiêu đề thay vì hàng riêng", async () => {
+  await openScoring();
+
+  // Hai nút file ẩn nằm chung khối head với tiêu đề thẻ / nhãn khối.
+  expect(
+    screen.getByLabelText("Upload ground truth CSV").closest(".admin-detail-card-head"),
+  ).toBeTruthy();
+  expect(
+    screen.getByLabelText("Chọn CSV mẫu để chạy thử").closest(".scoring-test-head"),
+  ).toBeTruthy();
+});
+
+/** Nội dung tệp .py mẫu trong public/, đọc bằng glob gốc như designSystemGuard (không theo cwd). */
+const SAMPLE_EVALUATOR = Object.values(
+  import.meta.glob<string>("/public/*.py", { query: "?raw", import: "default", eager: true }),
+)[0];
+
+test("tệp .py mẫu tải được và đúng hợp đồng bộ chấm", async () => {
+  await openScoring();
+
+  const link = screen.getByRole("link", { name: "Tải tệp .py mẫu" });
+  expect(link).toHaveAttribute("href", "/evaluator-mau.py");
+  expect(link).toHaveAttribute("download", "evaluator-mau.py");
+
+  // Link trỏ vào tệp tĩnh trong public/: thiếu tệp là link chết mà UI vẫn hiện.
+  expect(SAMPLE_EVALUATOR).toContain("def evaluate(ground_truth_path, submission_path)");
+  expect(SAMPLE_EVALUATOR).toContain("import pandas as pd");
+  expect(SAMPLE_EVALUATOR).toContain("from sklearn.metrics import");
 });
