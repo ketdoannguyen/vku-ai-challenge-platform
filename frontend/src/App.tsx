@@ -16,6 +16,7 @@ import { CompetitionContentPanel, CompetitionOverview } from "./pages/Competitio
 import { CompetitionGuidePage } from "./pages/CompetitionGuidePage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SignupPage } from "./pages/SignupPage";
 import { SubmissionPage } from "./pages/SubmissionPage";
 import { MySubmissionsPage } from "./pages/MySubmissionsPage";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
@@ -298,8 +299,8 @@ function Header() {
     setMenuOpen(false);
   }
 
-  // S01 (login) không có app shell: chỉ còn nút quay lại trong trang.
-  if (pathname === "/login") return null;
+  // S01 (login) và S01b (đăng ký) không có app shell: chỉ còn nút quay lại trong trang.
+  if (pathname === "/login" || pathname === "/register") return null;
 
   return (
     <header className="app-header">
@@ -374,8 +375,8 @@ function Header() {
 
 export function App() {
   const { pathname } = useLocation();
-  // Trang login không có header nên không giữ chỗ cho header.
-  const bare = pathname === "/login";
+  // Trang login/đăng ký không có header nên không giữ chỗ cho header.
+  const bare = pathname === "/login" || pathname === "/register";
   // Dashboard là lưới 3 cột nên cần trần rộng hơn các màn còn lại.
   const dashboard = pathname === "/";
   // Danh sách quản trị và bảng bài nộp toàn cục (8–9 cột) cũng cần trần rộng; màn chi
@@ -405,6 +406,7 @@ export function App() {
               gắn với danh tính mới chặn. */}
           <Route path="/" element={<DashboardPage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<SignupPage />} />
           <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
             <Route index element={<CompetitionOverview />} />
             <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />

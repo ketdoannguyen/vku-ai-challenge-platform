@@ -91,13 +91,13 @@ describe("LoginPage", () => {
     await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
   });
 
-  it("không có link đăng ký", () => {
+  it("có link sang trang tự đăng ký", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: { code: "UNAUTHORIZED", message: "x" } }) }),
     );
     renderLogin();
-    expect(screen.queryByText(/đăng ký/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Đăng ký" })).toHaveAttribute("href", "/register");
   });
 });
 

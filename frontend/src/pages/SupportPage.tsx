@@ -126,7 +126,12 @@ const STEP_TONES = ["blue", "red", "yellow"] as const;
 const GUIDE_STEPS: GuideStep[] = [
   {
     title: "Đăng nhập",
-    body: <>Dùng tài khoản do Ban Tổ chức cấp để đăng nhập tại trang Đăng nhập.</>,
+    body: (
+      <>
+        Dùng tài khoản do Ban Tổ chức cấp để đăng nhập tại trang Đăng nhập, hoặc tự đăng ký tại
+        trang <Link to="/register">Đăng ký</Link> và chờ Ban Tổ chức duyệt.
+      </>
+    ),
   },
   {
     title: "Chọn cuộc thi",
@@ -171,8 +176,8 @@ const FAQ_ITEMS: FaqItem[] = [
     question: "Tôi chưa có tài khoản thì làm sao?",
     answer: (
       <>
-        Nền tảng không có chức năng tự đăng ký. Liên hệ Ban Tổ chức cuộc thi hoặc đầu mối hỗ trợ
-        bên dưới để được cấp tài khoản.
+        Bạn có thể tự đăng ký tại trang Đăng ký; tài khoản mới cần Ban Tổ chức duyệt trước khi
+        đăng nhập. Nếu cần hỗ trợ, liên hệ Ban Tổ chức cuộc thi hoặc đầu mối bên dưới.
       </>
     ),
   },

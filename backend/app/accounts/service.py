@@ -73,20 +73,37 @@ def _random_suffix() -> str:
     return "".join(secrets.choice(_SLUG_ALPHABET) for _ in range(_SLUG_SUFFIX_LEN))
 
 
-async def create_account(db: AsyncIOMotorDatabase, data: AccountCreate) -> dict:
+async def create_account(
+    db: AsyncIOMotorDatabase,
+    data: AccountCreate,
+    *,
+    pending: bool = False,
+    password_hash: str | None = None,
+) -> dict | None:
+    """Tạo account. `pending=True` là đường tự đăng ký: chờ admin duyệt, chưa đăng nhập được.
+
+    Account pending vẫn giữ `active: False` để mọi cổng quyền hiện có (login, resolve_session) tự
+    chặn, và mang thêm marker `pending_approval` để phân biệt với tài khoản bị vô hiệu hóa.
+    `password_hash` chỉ dành cho đường công khai đã hash sẵn ngoài event loop (ADR-049); các đường
+    cũ truyền plain password và hash tại đây như trước.
+    """
     email = data.email.lower()
     now = datetime.now(timezone.utc)
-    result = await db[ACCOUNTS_COLLECTION].insert_one(
-        {
-            "email": email,
-            "name": data.name.strip(),
-            "password_hash": hash_password(data.password),
-            "role": data.role,
-            "active": True,
-            "created_at": now,
-            "updated_at": now,
-        }
-    )
+    document = {
+        "email": email,
+        "name": data.name.strip(),
+        "password_hash": password_hash if password_hash is not None else hash_password(data.password),
+        "role": data.role,
+        "active": not pending,
+        "created_at": now,
+        "updated_at": now,
+    }
+    if pending:
+        document["pending_approval"] = True
+    try:
+        result = await db[ACCOUNTS_COLLECTION].insert_one(document)
+    except DuplicateKeyError:
+        return None
     return await db[ACCOUNTS_COLLECTION].find_one({"_id": result.inserted_id})
 
 
@@ -95,12 +112,16 @@ async def find_account_by_email(db: AsyncIOMotorDatabase, email: str) -> dict | 
 
 
 async def account_stats(db: AsyncIOMotorDatabase) -> dict[str, int]:
-    """Đếm toàn hệ thống theo role/active. Tài khoản legacy thiếu `active` tính là đang hoạt động."""
-    stats = {"total": 0, "admin": 0, "participant": 0, "active": 0}
+    """Đếm toàn hệ thống theo role/active/pending. Tài khoản legacy thiếu `active` tính là đang hoạt động."""
+    stats = {"total": 0, "admin": 0, "participant": 0, "active": 0, "pending": 0}
     pipeline = [
         {
             "$group": {
-                "_id": {"role": "$role", "active": {"$ifNull": ["$active", True]}},
+                "_id": {
+                    "role": "$role",
+                    "active": {"$ifNull": ["$active", True]},
+                    "pending": {"$ifNull": ["$pending_approval", False]},
+                },
                 "count": {"$sum": 1},
             }
         }
@@ -111,8 +132,10 @@ async def account_stats(db: AsyncIOMotorDatabase) -> dict[str, int]:
         role = group["_id"]["role"]
         if role in ("admin", "participant"):
             stats[role] += count
-        if group["_id"]["active"]:
+        if group["_id"]["active"] and not group["_id"]["pending"]:
             stats["active"] += count
+        if group["_id"]["pending"]:
+            stats["pending"] += count
     return stats
 
 
@@ -123,6 +146,7 @@ def public_account(account: dict) -> dict:
         "name": account["name"],
         "role": account["role"],
         "active": account.get("active", True),
+        "pending": account.get("pending_approval", False),
     }
 
 

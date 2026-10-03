@@ -89,11 +89,11 @@ test("nền tảng được tách thành bốn feature item giữ nguyên nội 
     "Tài khoản",
     "Thể lệ và bài nộp",
   ]);
-  // Bốn mô tả cũ phải còn nguyên, chỉ đổi cách trình bày.
+  // Bốn mô tả bám hành vi thật của nền tảng (mô tả Tài khoản theo ADR-049).
   const text = [...features].map((feature) => feature.textContent).join(" ");
   expect(text).toContain("Mỗi cuộc thi có trang riêng gồm thể lệ, đề bài và tài liệu");
   expect(text).toContain("Danh sách và trang chi tiết cuộc thi đọc được không cần đăng nhập");
-  expect(text).toContain("Do Ban Tổ chức cấp; nền tảng không có đăng ký tự do");
+  expect(text).toContain("Tự đăng ký bằng email; tài khoản mới cần Ban Tổ chức duyệt trước khi đăng nhập");
   expect(text).toContain("hạn mức nộp do Ban Tổ chức cấu hình cho từng cuộc thi");
 });
 

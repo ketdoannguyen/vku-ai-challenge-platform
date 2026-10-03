@@ -1,6 +1,7 @@
-/** Admin accounts: list/search, tạo, reset password, enable/disable. Role check thật ở backend. */
+/** Admin accounts: list/search, duyệt tài khoản tự đăng ký, tạo, reset password, enable/disable.
+ *  Role check thật ở backend. */
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api, ApiClientError } from "../api/client";
 import { useOptionalAuth, type Account } from "../auth/AuthContext";
 import { ConfirmModal, Modal } from "../components/Modal";
@@ -21,14 +22,17 @@ interface AccountStats {
   admin: number;
   participant: number;
   active: number;
+  pending: number;
 }
 
 const PAGE_SIZE = 50;
 
-/** Truy vấn đang hiệu lực. `q` và `offset` luôn đổi cùng nhau để không fetch
- *  từ khóa mới ở offset cũ (kết quả sẽ trống oan). */
+/** Từ khóa, trạng thái và trang luôn đổi cùng nhau để không fetch trang cũ của bộ lọc mới. */
+type AccountStatus = "" | "pending" | "active" | "disabled";
+
 interface AccountsQuery {
   q: string;
+  status: AccountStatus;
   offset: number;
 }
 
@@ -40,22 +44,27 @@ export function AdminAccountsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [search, setSearch] = useState("");
-  const [query, setQuery] = useState<AccountsQuery>({ q: "", offset: 0 });
+  const [query, setQuery] = useState<AccountsQuery>({ q: "", status: "", offset: 0 });
   const [message, setMessage] = useState("");
   const [creating, setCreating] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkAction, setBulkAction] = useState<{ type: "approve" | "delete"; accounts: Account[] } | null>(null);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
   const requestSequence = useRef(0);
   const firstSearch = useRef(true);
   const hasData = useRef(false);
   const messageTimer = useRef<number | null>(null);
   useDocumentTitle("Quản lý tài khoản");
 
-  const load = useCallback(async (q: string, offset: number, keepRows = false) => {
+  const load = useCallback(async (q: AccountsQuery, keepRows = false) => {
     const sequence = ++requestSequence.current;
     setError(null);
     if (keepRows) setRefreshing(true);
     else setLoading(true);
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
-    if (q) params.set("q", q);
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(q.offset) });
+    if (q.q) params.set("q", q.q);
+    if (q.status) params.set("status", q.status);
     try {
       const response = await api.get<AccountsResponse>(`/admin/accounts?${params.toString()}`);
       if (sequence !== requestSequence.current) return;
@@ -64,10 +73,16 @@ export function AdminAccountsPage() {
       if (response.accounts.length === 0 && response.offset > 0) {
         const lastOffset = Math.max(0, Math.floor(Math.max(response.total - 1, 0) / PAGE_SIZE) * PAGE_SIZE);
         if (lastOffset !== response.offset) {
+          setSelectedIds(new Set());
           setQuery((current) => (current.offset === response.offset ? { ...current, offset: lastOffset } : current));
           return;
         }
       }
+      setSelectedIds((current) => {
+        const visible = new Set(response.accounts.map((account) => account.id));
+        const remaining = new Set([...current].filter((id) => visible.has(id)));
+        return remaining.size === current.size ? current : remaining;
+      });
       setData(response);
     } catch (err) {
       if (sequence === requestSequence.current) setError(err);
@@ -93,19 +108,30 @@ export function AdminAccountsPage() {
     firstSearch.current = false;
     const timer = window.setTimeout(() => {
       // Trả về chính object cũ khi không có gì đổi để React bỏ qua render và
-      // không phát thêm request trùng lúc mount.
+      // không phát thêm request trùng lúc mount. Bộ lọc trạng thái độc lập với từ khóa.
       setQuery((current) =>
         current.q === search.trim() && current.offset === 0
           ? current
-          : { q: search.trim(), offset: 0 },
+          : { q: search.trim(), status: current.status, offset: 0 },
       );
     }, delay);
     return () => window.clearTimeout(timer);
   }, [search]);
 
   useEffect(() => {
-    void load(query.q, query.offset, hasData.current);
+    void load(query, hasData.current);
   }, [load, query]);
+
+  const changeStatus = (status: AccountStatus) => {
+    if (query.status === status) return;
+    setSelectedIds(new Set());
+    setQuery((current) => ({ ...current, status, offset: 0 }));
+  };
+
+  const changePage = (offset: number) => {
+    setSelectedIds(new Set());
+    setQuery((current) => ({ ...current, offset }));
+  };
 
   useEffect(
     () => () => {
@@ -118,6 +144,21 @@ export function AdminAccountsPage() {
   const shownTo = data ? data.offset + data.accounts.length : 0;
   const hasNext = data ? shownTo < data.total : false;
   const stats = data?.stats ?? null;
+  const selectable = data?.accounts.filter((account) => account.id !== currentAccountId) ?? [];
+  const selected = selectable.filter((account) => selectedIds.has(account.id));
+  const allSelected = selectable.length > 0 && selected.length === selectable.length;
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = selected.length > 0 && !allSelected;
+  }, [selected.length, allSelected]);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="page admin-accounts">
@@ -128,7 +169,7 @@ export function AdminAccountsPage() {
           </span>
           <div className="page-hero-copy">
             <h1 className="page-hero-title">Quản lý tài khoản</h1>
-            <p className="page-hero-subtitle">Tạo, đặt lại mật khẩu, vô hiệu hóa và xóa tài khoản thí sinh/admin</p>
+            <p className="page-hero-subtitle">Duyệt tài khoản tự đăng ký, tạo, đặt lại mật khẩu, vô hiệu hóa và xóa tài khoản thí sinh/admin</p>
             <span className="vku-accent" aria-hidden="true">
               <span className="blue" />
               <span className="red" />
@@ -144,7 +185,7 @@ export function AdminAccountsPage() {
           label="Tổng tài khoản"
           detail="Toàn hệ thống"
           value={stats?.total ?? null}
-          pending={!data && !error}
+          loading={!data && !error}
           glyph={<IconUsers />}
         />
         <AccountStatCard
@@ -152,7 +193,7 @@ export function AdminAccountsPage() {
           label="Tài khoản Admin"
           detail="Có quyền quản trị"
           value={stats?.admin ?? null}
-          pending={!data && !error}
+          loading={!data && !error}
           glyph={<IconShield />}
         />
         <AccountStatCard
@@ -160,7 +201,7 @@ export function AdminAccountsPage() {
           label="Tài khoản Thí sinh"
           detail="Tài khoản dự thi"
           value={stats?.participant ?? null}
-          pending={!data && !error}
+          loading={!data && !error}
           glyph={<IconGraduationCap />}
         />
         <AccountStatCard
@@ -168,8 +209,16 @@ export function AdminAccountsPage() {
           label="Đang hoạt động"
           detail="Có thể đăng nhập"
           value={stats?.active ?? null}
-          pending={!data && !error}
+          loading={!data && !error}
           glyph={<IconUserCheck />}
+        />
+        <AccountStatCard
+          tone="yellow"
+          label="Chờ duyệt"
+          detail="Tài khoản tự đăng ký"
+          value={stats?.pending ?? null}
+          loading={!data && !error}
+          glyph={<IconUserClock />}
         />
       </section>
 
@@ -184,10 +233,26 @@ export function AdminAccountsPage() {
             aria-label="Tìm tài khoản"
             placeholder="Tìm theo email hoặc tên..."
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSelectedIds(new Set());
+              setSearch(event.target.value);
+            }}
           />
           {refreshing && <span className="admin-accounts-sync" role="status">Đang cập nhật…</span>}
         </label>
+        <div className="admin-accounts-filters" role="group" aria-label="Lọc trạng thái tài khoản">
+          {([ ["", "Tất cả"], ["pending", "Chờ duyệt"], ["active", "Hoạt động"], ["disabled", "Đã vô hiệu hóa"] ] as const).map(([status, label]) => (
+            <button
+              key={status}
+              className="admin-accounts-secondary admin-accounts-filter"
+              type="button"
+              aria-pressed={query.status === status}
+              onClick={() => changeStatus(status)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <button className="admin-accounts-create" type="button" onClick={() => setCreating(true)}>
           <span aria-hidden="true">+</span>
           Tạo tài khoản
@@ -202,6 +267,16 @@ export function AdminAccountsPage() {
       )}
       {Boolean(error) && data && <ErrorBox error={error} />}
 
+      {selected.length > 0 && (
+        <div className="admin-accounts-bulk" role="group" aria-label="Thao tác với tài khoản đã chọn">
+          <strong role="status">Đã chọn {selected.length} tài khoản</strong>
+          <button className="admin-accounts-secondary" type="button" aria-describedby={!selected.every((account) => account.pending) ? "bulk-approve-reason" : undefined} disabled={refreshing || !selected.every((account) => account.pending)} onClick={() => setBulkAction({ type: "approve", accounts: selected })}>Duyệt đã chọn</button>
+          <button className="admin-accounts-secondary" type="button" disabled={refreshing} onClick={() => setBulkAction({ type: "delete", accounts: selected })}>Xóa đã chọn</button>
+          <button className="admin-accounts-secondary" type="button" onClick={() => setSelectedIds(new Set())}>Bỏ chọn</button>
+          {!selected.every((account) => account.pending) && <span id="bulk-approve-reason">Chỉ duyệt hàng loạt tài khoản chờ duyệt.</span>}
+        </div>
+      )}
+
       <div className="admin-accounts-card">
         <div className="admin-accounts-card-head">
           <span className="admin-accounts-card-accent" aria-hidden="true" />
@@ -210,6 +285,7 @@ export function AdminAccountsPage() {
         </div>
 
         <div
+          ref={tableRef}
           className="admin-accounts-table-scroll"
           aria-busy={loading || refreshing}
           tabIndex={0}
@@ -218,17 +294,22 @@ export function AdminAccountsPage() {
         >
           <table className="admin-accounts-table">
             <thead>
-              <tr><th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr>
+              <tr>
+                <th scope="col" className="admin-account-select">
+                  <input ref={selectAllRef} type="checkbox" aria-label="Chọn tất cả trên trang" checked={allSelected} disabled={selectable.length === 0 || loading || refreshing} onChange={() => setSelectedIds(allSelected ? new Set() : new Set(selectable.map((account) => account.id)))} />
+                </th>
+                <th scope="col">Email</th><th scope="col">Tên</th><th scope="col">Vai trò</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th>
+              </tr>
             </thead>
             <tbody>
               {loading && !data ? (
-                <tr><td colSpan={5} className="table-state"><Loading /></td></tr>
+                <tr><td colSpan={6} className="table-state"><Loading /></td></tr>
               ) : error && !data ? (
                 <tr>
-                  <td colSpan={5} className="table-state">
+                  <td colSpan={6} className="table-state">
                     <div className="admin-accounts-error">
                       <ErrorBox error={error} />
-                      <button className="admin-accounts-secondary" type="button" onClick={() => void load(query.q, query.offset)}>Thử lại</button>
+                      <button className="admin-accounts-secondary" type="button" onClick={() => void load(query)}>Thử lại</button>
                     </div>
                   </td>
                 </tr>
@@ -238,16 +319,36 @@ export function AdminAccountsPage() {
                     key={account.id}
                     account={account}
                     isCurrent={account.id === currentAccountId}
-                    onChanged={() => void load(query.q, query.offset, true)}
+                    selected={selectedIds.has(account.id)}
+                    selectionDisabled={loading || refreshing}
+                    onToggleSelected={() => toggleSelected(account.id)}
+                    onChanged={() => void load(query, true)}
                     onMessage={notify}
                   />
                 ))
               ) : (
                 <tr>
-                  <td colSpan={5} className="table-state">
+                  <td colSpan={6} className="table-state">
                     <div className="admin-accounts-empty">
-                      <span>Không tìm thấy tài khoản nào.</span>
-                      {search && <button className="admin-accounts-secondary" type="button" onClick={() => setSearch("")}>Xóa bộ lọc</button>}
+                      <span>
+                        {query.status === "pending" ? "Không có tài khoản nào đang chờ duyệt."
+                          : query.status === "active" ? "Không có tài khoản nào đang hoạt động."
+                          : query.status === "disabled" ? "Không có tài khoản nào bị vô hiệu hóa."
+                          : "Không tìm thấy tài khoản nào."}
+                      </span>
+                      {(search || query.status) && (
+                        <button
+                          className="admin-accounts-secondary"
+                          type="button"
+                          onClick={() => {
+                            setSearch("");
+                            setSelectedIds(new Set());
+                            setQuery({ q: "", status: "", offset: 0 });
+                          }}
+                        >
+                          Xóa bộ lọc
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -273,7 +374,7 @@ export function AdminAccountsPage() {
                 aria-disabled={loading || refreshing || data.offset === 0}
                 onClick={() => {
                   if (!loading && !refreshing && data.offset > 0) {
-                    setQuery((current) => ({ ...current, offset: data.offset - PAGE_SIZE }));
+                    changePage(data.offset - PAGE_SIZE);
                   }
                 }}
               >
@@ -286,7 +387,7 @@ export function AdminAccountsPage() {
                 aria-disabled={loading || refreshing || !hasNext}
                 onClick={() => {
                   if (!loading && !refreshing && hasNext) {
-                    setQuery((current) => ({ ...current, offset: data.offset + PAGE_SIZE }));
+                    changePage(data.offset + PAGE_SIZE);
                   }
                 }}
               >
@@ -297,13 +398,25 @@ export function AdminAccountsPage() {
         )}
       </div>
 
+      {bulkAction && (
+        <BulkAccountActionModal
+          action={bulkAction.type}
+          accounts={bulkAction.accounts}
+          returnFocusRef={tableRef}
+          onClose={() => setBulkAction(null)}
+          onFinished={() => {
+            setSelectedIds(new Set());
+            void load(query, true);
+          }}
+        />
+      )}
       {creating && (
         <CreateAccountModal
           onClose={() => setCreating(false)}
           onCreated={(email) => {
             setCreating(false);
             notify(`Đã tạo tài khoản ${email}.`);
-            void load(query.q, query.offset, true);
+            void load(query, true);
           }}
         />
       )}
@@ -319,14 +432,14 @@ function AccountStatCard({
   label,
   detail,
   value,
-  pending,
+  loading,
   glyph,
 }: {
   tone: (typeof STAT_TONES)[number];
   label: string;
   detail: string;
   value: number | null;
-  pending: boolean;
+  loading: boolean;
   glyph: ReactNode;
 }) {
   return (
@@ -337,7 +450,7 @@ function AccountStatCard({
         {value === null ? (
           <>
             <span className="admin-account-stat-placeholder" aria-hidden="true" />
-            <span className="sr-only">{pending ? "Đang tải thống kê" : "Chưa tải được thống kê"}</span>
+            <span className="sr-only">{loading ? "Đang tải thống kê" : "Chưa tải được thống kê"}</span>
           </>
         ) : (
           <span className="admin-account-stat-value">{value}</span>
@@ -407,21 +520,40 @@ function IconUserCheck({ className }: { className?: string }) {
   );
 }
 
+function IconUserClock({ className }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="10" cy="8" r="3.4" />
+      <path d="M3.8 19.5v-1a4.3 4.3 0 0 1 4.3-4.3h2.4" />
+      <circle cx="17" cy="17" r="3.6" />
+      <path d="M17 15.3V17l1.2.8" />
+    </Glyph>
+  );
+}
+
 function AccountRow({
   account,
   isCurrent,
+  selected,
+  selectionDisabled,
+  onToggleSelected,
   onChanged,
   onMessage,
 }: {
   account: Account;
   isCurrent: boolean;
+  selected: boolean;
+  selectionDisabled: boolean;
+  onToggleSelected: () => void;
   onChanged: () => void;
   onMessage: (message: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [confirmingActiveChange, setConfirmingActiveChange] = useState(false);
+  const isPending = account.pending;
 
   async function toggleActive() {
     setBusy(true);
@@ -433,11 +565,24 @@ function AccountRow({
     }
   }
 
+  async function approve() {
+    setBusy(true);
+    try {
+      await api.post(`/admin/accounts/${account.id}/approve`);
+      onChanged();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const cannotDisableSelf = isCurrent && account.active;
 
   return (
     <>
       <tr>
+        <td className="admin-account-select">
+          <input type="checkbox" aria-label={`Chọn ${account.email}`} checked={selected} disabled={isCurrent || busy || selectionDisabled} onChange={onToggleSelected} />
+        </td>
         <td className="admin-account-email">
           <span>{account.email}</span>
           {isCurrent && <span className="admin-you-badge">Bạn</span>}
@@ -449,27 +594,41 @@ function AccountRow({
           </span>
         </td>
         <td>
-          <span className="admin-status-badge" data-active={account.active}>
-            <span className="admin-status-dot" aria-hidden="true" />
-            {account.active ? "Hoạt động" : "Vô hiệu"}
-          </span>
+          {isPending ? (
+            <span className="admin-status-badge" data-pending="true">
+              <span className="admin-status-dot" aria-hidden="true" />
+              Chờ duyệt
+            </span>
+          ) : (
+            <span className="admin-status-badge" data-active={account.active}>
+              <span className="admin-status-dot" aria-hidden="true" />
+              {account.active ? "Hoạt động" : "Vô hiệu"}
+            </span>
+          )}
         </td>
         <td className="col-actions">
           <span className="admin-account-actions">
-            <button className="admin-account-action" type="button" disabled={busy} onClick={() => setResetting(true)}>Đặt lại MK</button>
-            <button
-              className={`admin-account-action${account.active ? " admin-account-action-danger" : ""}`}
-              type="button"
-              disabled={busy || cannotDisableSelf}
-              aria-describedby={cannotDisableSelf ? `self-disable-reason-${account.id}` : undefined}
-              onClick={() => setConfirmingActiveChange(true)}
-            >
-              {account.active ? "Vô hiệu hóa" : "Kích hoạt"}
-            </button>
-            {cannotDisableSelf && (
-              <span className="sr-only" id={`self-disable-reason-${account.id}`}>
-                Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập.
-              </span>
+            {isPending ? (
+              // Tài khoản chờ duyệt chỉ có hai cửa ra: Duyệt hoặc Xóa (ADR-049).
+              <button className="admin-account-action" type="button" disabled={busy} onClick={() => setApproving(true)}>Duyệt</button>
+            ) : (
+              <>
+                <button className="admin-account-action" type="button" disabled={busy} onClick={() => setResetting(true)}>Đặt lại MK</button>
+                <button
+                  className={`admin-account-action${account.active ? " admin-account-action-danger" : ""}`}
+                  type="button"
+                  disabled={busy || cannotDisableSelf}
+                  aria-describedby={cannotDisableSelf ? `self-disable-reason-${account.id}` : undefined}
+                  onClick={() => setConfirmingActiveChange(true)}
+                >
+                  {account.active ? "Vô hiệu hóa" : "Kích hoạt"}
+                </button>
+                {cannotDisableSelf && (
+                  <span className="sr-only" id={`self-disable-reason-${account.id}`}>
+                    Bạn không thể tự vô hiệu hóa tài khoản đang đăng nhập.
+                  </span>
+                )}
+              </>
             )}
             <button
               className="admin-account-action admin-account-action-danger"
@@ -516,6 +675,19 @@ function AccountRow({
           onClose={() => setDeleting(false)}
         />
       )}
+      {approving && (
+        <ConfirmModal
+          title="Duyệt tài khoản"
+          body={`Duyệt ${account.email}? Người dùng sẽ có thể đăng nhập bằng tài khoản này.`}
+          confirmLabel="Duyệt"
+          onConfirm={async () => {
+            await approve();
+            setApproving(false);
+            onMessage(`Đã duyệt tài khoản ${account.email}.`);
+          }}
+          onClose={() => setApproving(false)}
+        />
+      )}
       {confirmingActiveChange && (
         <ConfirmModal
           title={account.active ? "Vô hiệu hóa tài khoản" : "Kích hoạt tài khoản"}
@@ -535,6 +707,91 @@ function AccountRow({
         />
       )}
     </>
+  );
+}
+
+function BulkAccountActionModal({
+  action,
+  accounts,
+  returnFocusRef,
+  onClose,
+  onFinished,
+}: {
+  action: "approve" | "delete";
+  accounts: Account[];
+  returnFocusRef: RefObject<HTMLElement | null>;
+  onClose: () => void;
+  onFinished: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const [processed, setProcessed] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+  const [failures, setFailures] = useState<Array<{ email: string; message: string }>>([]);
+  const runningRef = useRef(false);
+  const deleting = action === "delete";
+
+  async function confirm() {
+    if (runningRef.current || done || (deleting && typed !== "XÓA")) return;
+    runningRef.current = true;
+    setRunning(true);
+    const failed: Array<{ email: string; message: string }> = [];
+    for (const account of accounts) {
+      try {
+        if (deleting) {
+          await api.del(`/admin/accounts/${account.id}?confirm_email=${encodeURIComponent(account.email)}`);
+        } else {
+          await api.post(`/admin/accounts/${account.id}/approve`);
+        }
+      } catch (error) {
+        failed.push({ email: account.email, message: error instanceof Error ? error.message : "Lỗi không xác định" });
+        setFailures([...failed]);
+      }
+      setProcessed((current) => current + 1);
+    }
+    setDone(true);
+    setRunning(false);
+    runningRef.current = false;
+    onFinished();
+  }
+
+  return (
+    <Modal title={deleting ? "Xóa tài khoản đã chọn" : "Duyệt tài khoản đã chọn"} onClose={() => { if (!runningRef.current) onClose(); }} returnFocusRef={returnFocusRef}>
+      <div className="admin-accounts-bulk-modal">
+        {running && <p>Đang xử lý, vui lòng đợi. Không đóng hộp thoại trong khi thao tác chưa xong.</p>}
+        <p>{deleting
+          ? `Xóa vĩnh viễn ${accounts.length} tài khoản? Tư cách thành viên và bài nộp chưa được chấm sẽ bị xóa theo. Thao tác không hoàn tác được.`
+          : `Duyệt ${accounts.length} tài khoản? Những người này sẽ có thể đăng nhập.`}</p>
+        <ul className="admin-accounts-bulk-list" aria-label="Các tài khoản đã chọn">
+          {accounts.map((account) => <li key={account.id}>{account.email}</li>)}
+        </ul>
+        {deleting && !done && (
+          <label className="field-label">
+            Gõ XÓA để xác nhận
+            <input className="input" value={typed} disabled={running} autoComplete="off" onChange={(event) => setTyped(event.target.value)} />
+          </label>
+        )}
+        {running && <p role="status">Đang xử lý {processed}/{accounts.length} tài khoản…</p>}
+        {done && (
+          <div role="status">
+            <p>Đã {deleting ? "xóa" : "duyệt"} {accounts.length - failures.length}/{accounts.length} tài khoản.</p>
+            {failures.length > 0 && (
+              <ul className="admin-accounts-bulk-errors" aria-label="Tài khoản xử lý thất bại">
+                {failures.map(({ email, message }) => <li key={email}>{email}: {message}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" disabled={running} onClick={onClose}>{done ? "Đóng" : "Hủy"}</button>
+          {!done && (
+            <button type="button" className={`btn ${deleting ? "btn-danger" : ""}`} disabled={running || (deleting && typed !== "XÓA")} onClick={() => void confirm()}>
+              {running ? "Đang xử lý…" : `${deleting ? "Xóa" : "Duyệt"} ${accounts.length} tài khoản`}
+            </button>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }
 
