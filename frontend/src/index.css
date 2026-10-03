@@ -4222,6 +4222,102 @@ button.resource-link:disabled {
   font-family: var(--font-sans);
 }
 
+/* Editor Markdown kiểu notepad trong dialog Sửa MD: gutter số dòng bên trái, textarea bên
+   phải. Dòng dài tự xuống hàng (chỉ cuộn dọc); số dòng đếm theo dòng logic, phần wrap được
+   gutter chèn dòng trống cho khớp. Gutter, textarea và mirror đo wrap phải chung
+   font/line-height/padding/white-space; gutter cuộn dọc theo textarea qua JS nên tự ẩn
+   overflow, không sinh thanh cuộn thứ hai. */
+.md-editor {
+  display: flex;
+  align-items: stretch;
+  height: min(55vh, 30rem);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Cùng thang 1200px đã dùng cho `.modal:has(.ai-detail)`: editor cần bề ngang rộng để sửa
+   dòng Markdown dài. Chỉ modal chứa editor, không đụng `.modal-lg` dùng chung với form khác. */
+.modal:has(.md-editor) {
+  max-width: 1200px;
+}
+
+.md-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.md-editor-gutter {
+  flex: none;
+  margin: 0;
+  padding: 10px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--surface-container-low);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-code);
+  text-align: right;
+  user-select: none;
+}
+
+/* Cột phải: textarea hiển thị, mirror ẩn nằm đè phía sau chỉ để đo chỗ xuống dòng. */
+.md-editor-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.md-editor-input,
+.md-editor-mirror {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+
+.md-editor-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+  outline: none;
+  /* Chỉ cuộn dọc: dòng dài tự xuống hàng thay vì đẩy thanh cuộn ngang. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* `visibility: hidden` giữ layout để đo được; bề ngang thật do JS gán theo clientWidth
+   của textarea (trừ thanh cuộn dọc). */
+.md-editor-mirror {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.md-editor-confirm-note {
+  margin: var(--space-md) 0 0;
+  color: var(--warning);
+  font-size: var(--text-body-sm);
+}
+
+@media (max-width: 47.99rem) {
+  .md-editor {
+    height: min(45vh, 22rem);
+  }
+}
+
 /* S14: Assets */
 .asset-name-cell {
   display: flex;

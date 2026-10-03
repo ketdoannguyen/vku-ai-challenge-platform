@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2102,6 +2103,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
   const [message, setMessage] = useState("");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<AdminContent | null>(null);
+  const [editingMarkdown, setEditingMarkdown] = useState<AdminContent | null>(null);
   const [deleting, setDeleting] = useState<AdminContent | null>(null);
 
   const load = useCallback(async () => {
@@ -2218,6 +2220,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
                     first={index === 0}
                     last={index === contents.length - 1}
                     onEdit={() => setEditing(content)}
+                    onEditMarkdown={() => setEditingMarkdown(content)}
                     onDelete={() => setDeleting(content)}
                     onMove={(d) => void move(index, d)}
                     onChanged={notify}
@@ -2251,6 +2254,18 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
             onSaved={() => {
               setEditing(null);
               notify("Đã cập nhật trang nội dung.");
+            }}
+          />
+        )}
+        {editingMarkdown && (
+          <ContentMarkdownModal
+            competitionId={competitionId}
+            maxContentMb={maxContentMb}
+            content={editingMarkdown}
+            onClose={() => setEditingMarkdown(null)}
+            onSaved={() => {
+              setEditingMarkdown(null);
+              notify(`Đã lưu Markdown cho "${editingMarkdown.title}".`);
             }}
           />
         )}
@@ -2302,6 +2317,7 @@ function ContentRow({
   first,
   last,
   onEdit,
+  onEditMarkdown,
   onDelete,
   onMove,
   onChanged,
@@ -2314,6 +2330,7 @@ function ContentRow({
   first: boolean;
   last: boolean;
   onEdit: () => void;
+  onEditMarkdown: () => void;
   onDelete: () => void;
   onMove: (direction: -1 | 1) => void;
   onChanged: (message: string) => void;
@@ -2406,6 +2423,14 @@ function ContentRow({
               {content.size_bytes !== null ? "Thay .md" : "Upload .md"}{" "}
               <span className="upload-size-hint">≤ {maxContentMb} MiB</span>
             </FileButton>
+            <button
+              type="button"
+              className="btn btn-sm admin-detail-outline-action"
+              disabled={busy}
+              onClick={onEditMarkdown}
+            >
+              Sửa MD
+            </button>
             <button
               type="button"
               className="btn btn-sm admin-detail-outline-action"
@@ -2543,6 +2568,221 @@ function ContentFormModal({
           </button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Soạn Markdown thô kiểu notepad: số dòng bên trái, nội dung bên phải. Lưu bằng cách
+ * đóng gói text thành File .md rồi đi đúng endpoint upload hiện có, nên không cần API mới.
+ */
+function ContentMarkdownModal({
+  competitionId,
+  maxContentMb,
+  content,
+  onClose,
+  onSaved,
+}: {
+  competitionId: string;
+  maxContentMb: number;
+  content: AdminContent;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [text, setText] = useState("");
+  const [baseline, setBaseline] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const gutterRef = useRef<HTMLPreElement>(null);
+  const mirrorRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const keepEditingRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .get<AdminContent>(`/admin/competitions/${competitionId}/contents/${content.id}`)
+      .then((data) => {
+        if (cancelled) return;
+        // Trang chưa upload file không có trường `markdown`: editor bắt đầu trống.
+        const markdown = typeof data.markdown === "string" ? data.markdown : "";
+        setText(markdown);
+        setBaseline(markdown);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [competitionId, content.id, retryKey]);
+
+  /** Chạy lại từ đầu sau lỗi tải; trạng thái chờ đặt ở đây vì effect chỉ lo gọi API. */
+  function retry() {
+    setLoading(true);
+    setLoadError(null);
+    setRetryKey((key) => key + 1);
+  }
+
+  useEffect(() => {
+    if (confirmDiscard) keepEditingRef.current?.focus();
+  }, [confirmDiscard]);
+
+  const dirty = text !== baseline;
+  const empty = text.trim() === "";
+  const mirrorLines = useMemo(() => text.split("\n"), [text]);
+
+  // Dòng dài tự xuống hàng nên một dòng logic có thể chiếm nhiều dòng thị giác; gutter phải
+  // chèn dòng trống cho khớp, số chỉ hiện ở dòng logic bắt đầu (kiểu VS Code bật word wrap).
+  // Số dòng thị giác đo qua mirror ẩn - bản sao chữ của textarea cùng font/padding/white-space.
+  useLayoutEffect(() => {
+    const mirror = mirrorRef.current;
+    const input = inputRef.current;
+    const gutter = gutterRef.current;
+    if (!mirror || !input || !gutter) return;
+    // Thanh cuộn dọc ăn bề ngang của textarea, mirror phải rộng đúng phần còn lại mới xuống
+    // hàng cùng chỗ; clientWidth đã gồm padding nên khớp content box của textarea.
+    mirror.style.width = `${input.clientWidth}px`;
+    const lineHeight = parseFloat(getComputedStyle(mirror).lineHeight);
+    // jsdom không layout (lineHeight không đọc được) nên rơi về 1 dòng thị giác mỗi dòng logic.
+    const measurable = Number.isFinite(lineHeight) && lineHeight > 0;
+    const rows = Array.from(mirror.children, (child) =>
+      measurable
+        ? Math.max(1, Math.round(child.getBoundingClientRect().height / lineHeight))
+        : 1,
+    );
+    gutter.textContent = rows
+      .map((count, index) => `${index + 1}${"\n".repeat(count - 1)}`)
+      .join("\n");
+  }, [text, loading]);
+
+  // Đóng giữa chừng lúc đang lưu thì server vẫn nhận file nhưng trang không chạy onSaved
+  // nên không có banner và danh sách không refresh; có sửa chưa lưu thì hỏi trước khi bỏ.
+  function requestClose() {
+    if (saving) return;
+    if (dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    const file = new File([text], `${content.slug}.md`, { type: "text/markdown" });
+    const tooLarge = tooLargeMessage(file, maxContentMb);
+    if (tooLarge) {
+      setSaveError(tooLarge);
+      return;
+    }
+    setSaving(true);
+    setSaveError("");
+    api
+      .upload(`/admin/competitions/${competitionId}/contents/${content.id}/file`, file)
+      .then(() => onSaved())
+      .catch((err: unknown) => {
+        setSaveError(err instanceof Error ? err.message : "Lỗi không xác định");
+      })
+      .finally(() => setSaving(false));
+  }
+
+  return (
+    <Modal title={`Sửa Markdown - ${content.title}`} onClose={requestClose}>
+      {loading ? (
+        <Loading />
+      ) : loadError ? (
+        <div className="admin-section-error">
+          <ErrorBox error={loadError} />
+          <button className="btn btn-secondary btn-sm" type="button" onClick={retry}>
+            Thử lại
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={submit}>
+          <div className="form-field">
+            <label className="field-label" htmlFor="content-markdown">
+              Nội dung Markdown
+            </label>
+            <div className="md-editor">
+              <pre className="md-editor-gutter" aria-hidden="true" ref={gutterRef} />
+              <div className="md-editor-field">
+                {/* Bản sao ẩn của textarea để đo số dòng thị giác sau wrap; không có nội
+                    dung cho người đọc nên ẩn khỏi cả mắt lẫn trình đọc màn hình. */}
+                <div className="md-editor-mirror" aria-hidden="true" ref={mirrorRef}>
+                  {mirrorLines.map((line, index) => (
+                    <div key={index}>{line === "" ? <br /> : line}</div>
+                  ))}
+                </div>
+                <textarea
+                  id="content-markdown"
+                  ref={inputRef}
+                  className="md-editor-input"
+                  value={text}
+                  autoFocus
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setText(event.target.value);
+                    if (confirmDiscard) setConfirmDiscard(false);
+                  }}
+                  onScroll={(event) => {
+                    if (gutterRef.current) {
+                      gutterRef.current.scrollTop = event.currentTarget.scrollTop;
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            <small className="text-muted">
+              Số bên trái là số dòng. Tối đa {maxContentMb} MiB.
+            </small>
+          </div>
+          {saveError && (
+            <div className="error-box" role="alert">
+              {saveError}
+            </div>
+          )}
+          {confirmDiscard ? (
+            <>
+              <p className="md-editor-confirm-note" role="alert">
+                Thay đổi chưa lưu sẽ bị bỏ nếu bạn đóng bây giờ.
+              </p>
+              <div className="modal-actions">
+                <button
+                  ref={keepEditingRef}
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setConfirmDiscard(false)}
+                >
+                  Tiếp tục sửa
+                </button>
+                <button type="button" className="btn btn-danger" onClick={onClose}>
+                  Bỏ thay đổi
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={requestClose} disabled={saving}>
+                Hủy
+              </button>
+              <button
+                className="btn admin-detail-primary-action"
+                type="submit"
+                disabled={saving || empty}
+              >
+                {saving ? "Đang lưu..." : "Lưu"}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
     </Modal>
   );
 }

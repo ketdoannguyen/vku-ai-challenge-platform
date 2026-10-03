@@ -2160,6 +2160,284 @@ test("khối hướng dẫn dưới Quản lý nội dung liệt kê năm phần
   ]);
 });
 
+/** Nội dung chi tiết chỉ có ở GET từng trang; list không trả `markdown`. */
+const C1_MARKDOWN = "# Đề bài\n\nDòng cuối";
+
+/** Mở dialog Sửa MD của row chứa tiêu đề và trả về dialog để thao tác tiếp. */
+function openMarkdownEditor(title: string): HTMLElement {
+  const row = Array.from(document.querySelectorAll("tbody tr")).find((tr) =>
+    tr.textContent?.includes(title),
+  ) as HTMLElement;
+  fireEvent.click(within(row).getByRole("button", { name: "Sửa MD" }));
+  return screen.getByRole("dialog", { name: `Sửa Markdown - ${title}` });
+}
+
+test("nút Sửa MD hiện ở mọi row, kể cả trang chưa có file", async () => {
+  mockApi((url) => (url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: COMPETITION, status: 200 }));
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  for (const title of ["Đề bài", "Rules"]) {
+    const row = Array.from(document.querySelectorAll("tbody tr")).find((tr) =>
+      tr.textContent?.includes(title),
+    ) as HTMLElement;
+    expect(within(row).getByRole("button", { name: "Sửa MD" })).toBeTruthy();
+  }
+});
+
+test("Sửa MD trang có file: tải nội dung qua GET chi tiết, gutter đánh số theo dòng", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  expect(textarea).toHaveValue(C1_MARKDOWN);
+
+  const gutter = dialog.querySelector(".md-editor-gutter") as HTMLElement;
+  expect(gutter.getAttribute("aria-hidden")).toBe("true");
+  // Ba dòng, tính cả dòng trống, thành ba số liền mạch.
+  expect(gutter.textContent).toBe("1\n2\n3");
+
+  // Dòng dài tự xuống hàng (không còn wrap="off"); mirror đo wrap có một khối mỗi dòng
+  // logic và ẩn khỏi trình đọc màn hình.
+  expect(textarea.getAttribute("wrap")).toBeNull();
+  const mirror = dialog.querySelector(".md-editor-mirror") as HTMLElement;
+  expect(mirror.getAttribute("aria-hidden")).toBe("true");
+  expect(mirror.querySelectorAll("div")).toHaveLength(3);
+});
+
+test("Sửa MD: dòng trống cuối sau newline vẫn có số riêng trong gutter", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "a\n\nb\n" } });
+
+  // jsdom không layout nên mỗi dòng logic rơi về đúng một dòng thị giác; điều cần chốt ở
+  // đây là dòng trống cuối vẫn được tính, mirror và gutter không cắt mất nó.
+  const mirror = dialog.querySelector(".md-editor-mirror") as HTMLElement;
+  expect(mirror.querySelectorAll("div")).toHaveLength(4);
+  const gutter = dialog.querySelector(".md-editor-gutter") as HTMLElement;
+  expect(gutter.textContent).toBe("1\n2\n3\n4");
+});
+
+test("Sửa MD trang chưa có file: editor trống, lưu tạo file .md qua đúng endpoint upload", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/contents/c2/file") && init?.method === "PUT") return { body: CONTENTS.contents[1], status: 200 };
+    if (url.endsWith("/contents/c2")) return { body: CONTENTS.contents[1], status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Rules");
+
+  const dialog = openMarkdownEditor("Rules");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  expect(textarea).toHaveValue("");
+  // Backend từ chối file rỗng nên client chặn trước bằng nút khóa.
+  expect(within(dialog).getByRole("button", { name: "Lưu" })).toBeDisabled();
+
+  fireEvent.change(textarea, { target: { value: "# Thể lệ\n\nNội dung mới" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+  expect(await screen.findByText('Đã lưu Markdown cho "Rules".')).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: /Sửa Markdown/ })).toBeNull();
+
+  const put = calls.find((call) => call.url.endsWith("/contents/c2/file"));
+  expect(put?.init?.method).toBe("PUT");
+  const body = put?.init?.body as FormData;
+  const file = body.get("file") as File;
+  expect(file.name).toBe("rules.md");
+  expect(file.type).toBe("text/markdown");
+  expect(await file.text()).toBe("# Thể lệ\n\nNội dung mới");
+  // Danh sách được tải lại để badge "Chưa có file" chuyển trạng thái.
+  expect(calls.filter((call) => call.url.endsWith("/contents")).length).toBeGreaterThan(1);
+});
+
+test("Sửa MD: nội dung rỗng hoặc chỉ khoảng trắng không lưu được", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "   " } });
+
+  expect(within(dialog).getByRole("button", { name: "Lưu" })).toBeDisabled();
+  expect(calls.some((call) => call.url.endsWith("/file"))).toBe(false);
+});
+
+test("Sửa MD: nội dung vượt trần bị chặn ở client, không phát request", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: "# Đề" }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, upload_limits: { submission_mb: 11, content_mb: 1, asset_mb: 9 } }, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "x".repeat(1024 * 1024 + 1) } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 1 MiB.");
+  expect(calls.some((call) => call.url.endsWith("/file"))).toBe(false);
+});
+
+test("Sửa MD: lỗi tải nội dung hiện lỗi và Thử lại tải được", async () => {
+  let detailFails = true;
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) {
+      if (detailFails) {
+        return { body: { error: { code: "CONTENT_FILE_MISSING", message: "File Markdown không tồn tại." } }, status: 404 };
+      }
+      return { body: { ...CONTENTS.contents[0], markdown: "# Đề bài" }, status: 200 };
+    }
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("File Markdown không tồn tại.");
+
+  detailFails = false;
+  fireEvent.click(within(dialog).getByRole("button", { name: "Thử lại" }));
+
+  expect(await within(dialog).findByLabelText("Nội dung Markdown")).toHaveValue("# Đề bài");
+});
+
+test("Sửa MD: lỗi khi lưu giữ nguyên nội dung để thử lại", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/contents/c1/file") && init?.method === "PUT") {
+      return { body: { error: { code: "FILE_WRITE_FAILED", message: "Không thể lưu file Markdown." } }, status: 500 };
+    }
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "# Bản sửa" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Không thể lưu file Markdown.");
+  expect(textarea).toHaveValue("# Bản sửa");
+  expect(within(dialog).getByRole("button", { name: "Lưu" })).not.toBeDisabled();
+});
+
+test("Sửa MD: gutter cuộn dọc theo textarea", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  const gutter = dialog.querySelector(".md-editor-gutter") as HTMLElement;
+
+  fireEvent.scroll(textarea, { target: { scrollTop: 140 } });
+  expect(gutter.scrollTop).toBe(140);
+});
+
+test("Sửa MD: đóng khi có thay đổi chưa lưu hỏi trước khi bỏ", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/contents/c1")) return { body: { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }, status: 200 };
+    if (url.endsWith("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  // Chưa sửa gì thì đóng thẳng, không hỏi.
+  const dialog = openMarkdownEditor("Đề bài");
+  await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Đóng" }));
+  expect(screen.queryByRole("dialog", { name: /Sửa Markdown/ })).toBeNull();
+
+  const dirtyDialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dirtyDialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "# Đang sửa" } });
+
+  // Escape cũng phải hỏi thay vì đóng im lặng bỏ mất phần đang gõ.
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(within(dirtyDialog).getByRole("alert")).toHaveTextContent(
+    "Thay đổi chưa lưu sẽ bị bỏ nếu bạn đóng bây giờ.",
+  );
+
+  // Tiếp tục sửa: quay lại form, nội dung còn nguyên.
+  fireEvent.click(within(dirtyDialog).getByRole("button", { name: "Tiếp tục sửa" }));
+  expect(within(dirtyDialog).getByLabelText("Nội dung Markdown")).toHaveValue("# Đang sửa");
+
+  fireEvent.click(within(dirtyDialog).getByRole("button", { name: "Đóng" }));
+  fireEvent.click(within(dirtyDialog).getByRole("button", { name: "Bỏ thay đổi" }));
+  expect(screen.queryByRole("dialog", { name: /Sửa Markdown/ })).toBeNull();
+});
+
+test("Sửa MD: đang lưu thì không đóng được dialog", async () => {
+  calls.length = 0;
+  let resolvePut!: (response: Response) => void;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith("/contents/c1/file")) {
+        return new Promise<Response>((resolve) => {
+          resolvePut = resolve;
+        });
+      }
+      const body = url.endsWith("/contents/c1")
+        ? { ...CONTENTS.contents[0], markdown: C1_MARKDOWN }
+        : url.endsWith("/contents")
+          ? CONTENTS
+          : COMPETITION;
+      return Promise.resolve(
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
+      );
+    }),
+  );
+  renderPage();
+  await screen.findByText("Đề bài");
+
+  const dialog = openMarkdownEditor("Đề bài");
+  const textarea = await within(dialog).findByLabelText("Nội dung Markdown");
+  fireEvent.change(textarea, { target: { value: "# Đang lưu" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lưu" }));
+
+  expect(await within(dialog).findByRole("button", { name: "Đang lưu..." })).toBeDisabled();
+  expect(within(dialog).getByRole("button", { name: "Hủy" })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Đóng" }));
+  expect(screen.getByRole("dialog", { name: /Sửa Markdown/ })).toBeTruthy();
+
+  resolvePut(new Response(JSON.stringify(CONTENTS.contents[0]), { status: 200, headers: { "Content-Type": "application/json" } }));
+  expect(await screen.findByText('Đã lưu Markdown cho "Đề bài".')).toBeTruthy();
+  expect(screen.queryByRole("dialog", { name: /Sửa Markdown/ })).toBeNull();
+});
+
 test("năm bảng vẫn là vùng focus được và giữ nguyên accessible name", async () => {
   mockFullDetail();
   renderPage();
