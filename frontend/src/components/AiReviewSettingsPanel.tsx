@@ -8,16 +8,23 @@
  *
  * Chip đọc từ `verified_at` của server chứ không phải một biến của phiên: đó là chuyện của cấu hình
  * đang lưu, nên quay lại tab hay tải lại trang thì câu trả lời vẫn phải như cũ (ADR-043).
+ *
+ * Panel cũng cho nhập cấu hình từ một cuộc thi khác: server thay thế toàn bộ cấu hình đích (kể cả
+ * API key, sao chép nội bộ) và xoá dấu xác minh của đích, nên sau khi nhập admin phải kiểm tra lại
+ * kết nối. Trình duyệt chỉ gửi ID nguồn - không có key nào đi qua đây.
  */
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   deleteAiReviewApiKey,
   fetchAiReviewSettings,
+  importAiReviewSettings,
   testAiReviewConnection,
   updateAiReviewSettings,
   type AiReviewSettings,
 } from "../api/aiReview";
+import { api } from "../api/client";
+import type { AdminCompetition, AdminCompetitionsResponse } from "../api/competitions";
 import { ConfirmModal } from "./Modal";
 import { ErrorBox, Loading } from "./ui";
 
@@ -33,6 +40,11 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirmingKeyDelete, setConfirmingKeyDelete] = useState(false);
+  /** Cuộc thi khác lấy từ admin list để chọn nguồn nhập; `null` khi chưa tải xong. */
+  const [importSources, setImportSources] = useState<AdminCompetition[] | null>(null);
+  const [importError, setImportError] = useState<unknown>(null);
+  const [importSourceId, setImportSourceId] = useState("");
+  const [confirmingImport, setConfirmingImport] = useState(false);
 
   const [enabled, setEnabled] = useState(false);
   const [autoReview, setAutoReview] = useState(true);
@@ -62,6 +74,20 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** Admin list chỉ để chọn nguồn: nhập từ chính cuộc thi này là thao tác vô nghĩa nên lọc bỏ. */
+  const loadImportSources = useCallback(async () => {
+    try {
+      const data = await api.get<AdminCompetitionsResponse>("/admin/competitions");
+      setImportSources(data.competitions.filter((item) => item.id !== competitionId));
+    } catch (err) {
+      setImportError(err);
+    }
+  }, [competitionId]);
+
+  useEffect(() => {
+    void loadImportSources();
+  }, [loadImportSources]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -119,12 +145,36 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
     setNotice({ tone: "success", text: "Đã xóa API key của cuộc thi." });
   }
 
+  /**
+   * Nhập từ cuộc thi khác: request chỉ mang ID nguồn, còn key được server sao chép nội bộ. Đích là
+   * bản sao độc lập và mọi dấu xác minh đã bị xoá, nên phải nạp lại rồi nhắc admin kiểm tra lại.
+   */
+  async function importConfig() {
+    const origin = importSources?.find((item) => item.id === importSourceId);
+    if (!origin) return;
+    await importAiReviewSettings(competitionId, origin.id);
+    setConfirmingImport(false);
+    await load();
+    setNotice({
+      tone: "warning",
+      text: `Đã nhập cấu hình AI từ "${origin.name}". Hãy kiểm tra kết nối trước khi dùng.`,
+    });
+  }
+
   if (loading) return <Loading />;
 
   const config = settings?.config;
   const runtime = settings?.runtime;
   const source = settings?.content_source;
   const includedPages = source?.pages.filter((page) => page.included) ?? [];
+  const importSource = importSources?.find((item) => item.id === importSourceId) ?? null;
+  const importPlaceholder = importError
+    ? "Không tải được danh sách nguồn"
+    : importSources === null
+      ? "Đang tải danh sách..."
+      : importSources.length === 0
+        ? "Không có cuộc thi nào khác"
+        : "Chọn cuộc thi nguồn";
 
   // Form đã khác cấu hình đang lưu ở một trong ba trường quyết định gọi được provider hay không:
   // lúc đó vết xác minh của server nói về một cấu hình khác, nên chưa có gì để gọi là đã xác minh.
@@ -209,6 +259,53 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
         ) : null}
 
         <form onSubmit={save}>
+          {/* Nhập từ cuộc thi khác đứng ngoài fieldset: thao tác này thay thế toàn bộ cấu hình
+              kể cả khi AI đang tắt, và trạng thái bật/tắt của nguồn được nhập về theo. */}
+          <div className="form-field ai-import-field">
+            <label className="field-label" htmlFor="ai-import-source">
+              Nhập cấu hình AI từ cuộc thi khác
+            </label>
+            <div className="ai-key-row">
+              <select
+                id="ai-import-source"
+                className="input"
+                value={importSourceId}
+                disabled={busy || !importSources?.length}
+                onChange={(event) => setImportSourceId(event.target.value)}
+              >
+                <option value="">{importPlaceholder}</option>
+                {importSources?.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={busy || importSource === null}
+                onClick={() => setConfirmingImport(true)}
+              >
+                Nhập cấu hình
+              </button>
+            </div>
+            {importError ? (
+              <div className="admin-section-error">
+                <ErrorBox error={importError} />
+                <button
+                  className="btn btn-secondary btn-sm"
+                  type="button"
+                  onClick={() => {
+                    setImportError(null);
+                    void loadImportSources();
+                  }}
+                >
+                  Thử lại
+                </button>
+              </div>
+            ) : null}
+          </div>
+
           {/* `fieldset disabled` là một dòng thay cho việc gắn `disabled` vào từng control. */}
           <fieldset className="ai-config-fieldset" disabled={busy || !enabled}>
             <div className="form-grid">
@@ -322,6 +419,16 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
           </ul>
         )}
       </section>
+
+      {confirmingImport && importSource && (
+        <ConfirmModal
+          title="Nhập cấu hình AI"
+          body={`Nhập toàn bộ cấu hình AI từ "${importSource.name}" vào cuộc thi này? Cấu hình AI hiện tại sẽ bị thay thế hoàn toàn, kể cả API key (nếu nguồn có) - đây là bản sao độc lập nên sửa nguồn sau này không ảnh hưởng đích. Dấu xác minh kết nối sẽ bị xoá; hãy kiểm tra lại trước khi dùng.`}
+          confirmLabel="Nhập cấu hình"
+          onConfirm={importConfig}
+          onClose={() => setConfirmingImport(false)}
+        />
+      )}
 
       {confirmingKeyDelete && (
         <ConfirmModal

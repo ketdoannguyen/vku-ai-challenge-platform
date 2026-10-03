@@ -215,6 +215,27 @@ def build_update(
     return ConfigUpdate(set_fields=set_fields, unset_fields=unset_fields)
 
 
+def snapshot_config(competition: dict, *, updated_by: ObjectId, now: datetime, policy: EndpointPolicy) -> dict | None:
+    """Copy only supported AI fields. Verification and legacy metadata belong to the source."""
+    if not competition.get(CONFIG_FIELD):
+        return None
+    stored = stored_config(competition)
+    endpoint = resolve_endpoint(stored["base_url"], None, policy)
+    ciphertext = stored.get("api_key_ciphertext")
+    if ciphertext:
+        resolve_api_key(competition, None)  # Fail before writing if the master key/token is unusable.
+    if stored["enabled"]:
+        _require_ready(host=endpoint.host if endpoint else "", model=stored["model"], ciphertext=ciphertext)
+    return {
+        **{field: stored[field] for field in DEFAULTS if field not in ("base_url", "model")},
+        "base_url": endpoint.base_url if endpoint else "",
+        "model": stored["model"],
+        **({"api_key_ciphertext": ciphertext} if ciphertext else {}),
+        "updated_by": updated_by,
+        "updated_at": now,
+    }
+
+
 def resolve_endpoint(
     stored_base_url: str, override: str | None, policy: EndpointPolicy
 ) -> NormalizedEndpoint | None:

@@ -12,7 +12,7 @@ from app.scoring.models import EvaluatorConfig
 
 
 def _root() -> Path:
-    return Path(get_settings().data_dir)
+    return Path(get_settings().data_dir).resolve()
 
 
 def _relative_path(competition: dict, relative: str) -> str:

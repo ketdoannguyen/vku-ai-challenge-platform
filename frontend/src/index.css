@@ -6650,6 +6650,10 @@ button.resource-link:disabled {
 }
 
 /* Tắt công tắc thì cả nhóm cấu hình mờ đi: trạng thái nhìn thấy được, không chỉ đoán được. */
+.ai-import-field {
+  margin-bottom: var(--space-lg);
+}
+
 .ai-config-fieldset {
   min-width: 0;
   margin: 0;

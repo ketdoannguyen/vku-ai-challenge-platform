@@ -12,7 +12,7 @@ from bson import ObjectId
 
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
-from app.scoring import revisions
+from app.scoring import revisions, storage as scoring_storage
 from app.scoring.errors import EvaluatorError
 from tests.helpers import (
     V2_CONTRACT,
@@ -599,8 +599,53 @@ def test_v2_participant_sees_schema_and_contract(client, fake_runner):
     assert "pos_label" not in config
 
 
-def test_v2_clone_copies_evaluator_but_not_ground_truth(client, fake_runner, isolated_data_dir):
-    """Bản sao nhận source, schema và hợp đồng metric; tự lo ground truth và lượt chạy thử riêng."""
+def test_v2_clone_accepts_legacy_ground_truth_path(client, fake_runner, isolated_data_dir):
+    competition = publish_v2_competition(client, slug="v2-legacy-path-clone")
+    login(client)
+
+    async def set_legacy_path():
+        db = client.app.state.mongo.db
+        oid = ObjectId(competition["id"])
+        document = await db[COMPETITIONS_COLLECTION].find_one({"_id": oid})
+        data = scoring_storage.read_ground_truth(document)
+        legacy = isolated_data_dir / "competitions" / competition["id"] / "private" / "ground_truth.csv"
+        legacy.write_bytes(data)
+        await db[COMPETITIONS_COLLECTION].update_one(
+            {"_id": oid},
+            {"$set": {"ground_truth.path": f"competitions/{competition['id']}/private/ground_truth.csv"}},
+        )
+
+    asyncio.run(set_legacy_path())
+    result = client.post(f"/api/admin/competitions/{competition['id']}/clone")
+    assert result.status_code == 201, result.text
+    clone = result.json()
+    view = client.get(f"/api/admin/competitions/{clone['id']}/scoring").json()
+    assert view["ground_truth"] is not None
+    assert view["not_ready_reason"]["code"] == "SCORING_TEST_REQUIRED"
+
+
+def test_v2_clone_accepts_reordered_schema_without_reuploading_ground_truth(client, fake_runner):
+    competition = publish_v2_competition(client, slug="v2-reordered-clone")
+    login(client)
+    cid = competition["id"]
+    schema = deepcopy(V2_SCHEMA)
+    schema["ground_truth"]["columns"].reverse()
+    changed = put_scoring_v2(
+        client, cid, expected_revision=_revision(client, cid),
+        input_schema=schema, output_contract=V2_CONTRACT,
+    )
+    assert changed.status_code == 200, changed.text
+    assert run_scoring_test_v2(client, cid, expected_revision=_revision(client, cid)).status_code == 200
+
+    cloned = client.post(f"/api/admin/competitions/{cid}/clone")
+    assert cloned.status_code == 201, cloned.text
+    view = client.get(f"/api/admin/competitions/{cloned.json()['id']}/scoring").json()
+    assert view["ground_truth"] is not None
+    assert view["not_ready_reason"]["code"] == "SCORING_TEST_REQUIRED"
+
+
+def test_v2_clone_copies_evaluator_and_ground_truth_but_not_verification(client, fake_runner, isolated_data_dir):
+    """Bản sao có source/đáp án riêng nhưng vẫn cần chạy thử bộ chấm mới."""
     competition = publish_v2_competition(client, slug="v2-clone-cup")
     login(client)
 
@@ -611,7 +656,8 @@ def test_v2_clone_copies_evaluator_but_not_ground_truth(client, fake_runner, iso
     assert clone["submission_config"]["version"] == 2
     assert clone["submission_config"]["id_column"] == "id"
     assert clone["submission_config"]["result_contract"] == V2_CONTRACT
-    assert clone["submission_config"]["ready"] is False
+    assert clone["submission_config"]["ready"] is True
+    assert clone["publish_blocked_reason"]["code"] == "SCORING_TEST_REQUIRED"
 
     view = client.get(f"/api/admin/competitions/{clone['id']}/scoring").json()
     assert view["scoring"]["revision"] == 0
@@ -624,8 +670,8 @@ def test_v2_clone_copies_evaluator_but_not_ground_truth(client, fake_runner, iso
     }
     assert view["scoring"]["output_contract"] == V2_CONTRACT
     assert view["scoring"]["verified"] is False
-    assert view["ground_truth"] is None
-    assert view["not_ready_reason"]["code"] == "GROUND_TRUTH_REQUIRED"
+    assert view["ground_truth"] is not None
+    assert view["not_ready_reason"]["code"] == "SCORING_TEST_REQUIRED"
 
     # Source được ghi lại trong thư mục riêng của bản sao, không dùng chung file với cuộc thi gốc.
     source_file = (
@@ -638,9 +684,9 @@ def test_v2_clone_copies_evaluator_but_not_ground_truth(client, fake_runner, iso
     )
     assert source_file.read_text(encoding="utf-8") == V2_SOURCE
 
-    # Bản sao độc lập: tải ground truth riêng, chạy thử rồi publish được.
-    assert upload_v2_ground_truth(client, clone["id"], expected_revision=0).status_code == 200
-    assert run_scoring_test_v2(client, clone["id"], expected_revision=1).status_code == 200
+    # Bản sao độc lập: ground truth đã có, chỉ cần chạy thử lại rồi publish.
+    assert list((isolated_data_dir / "competitions" / clone["id"] / "private").glob("ground_truth-*.csv"))
+    assert run_scoring_test_v2(client, clone["id"], expected_revision=0).status_code == 200
     assert client.post(f"/api/admin/competitions/{clone['id']}/publish").status_code == 200
 
 

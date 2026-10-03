@@ -39,7 +39,7 @@ const CONFIRMATION: Record<
   }),
   clone: (name) => ({
     title: "Clone cuộc thi",
-    body: `Clone "${name}" thành một bản nháp mới?`,
+    body: `Clone "${name}" thành một bản nháp độc lập? Bản sao chép đầy đủ đề, ảnh, đáp án, cấu hình chấm và cấu hình AI (kể cả API key), nhưng không chép người dự thi, mã tham gia hay bài nộp. Phải kiểm tra lại bộ chấm và kết nối AI trước khi publish.`,
     label: "Clone",
     danger: false,
   }),
