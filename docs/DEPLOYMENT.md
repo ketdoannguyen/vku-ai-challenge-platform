@@ -109,6 +109,7 @@ openssl rand -hex 24    # -> MONGO_PASSWORD, MINIO_ROOT_PASSWORD, MINIO_SECRET_K
 | `APP_NAME` | Tên hiển thị |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Chỉ dùng khi chạy kèm `deploy/docker-compose.tunnel.named.yml` (§6). Để trống với Quick Tunnel |
 | `LLM_CONFIG_ENCRYPTION_KEY` + nhóm `AI_REVIEW_*` | **Tuỳ chọn**, xem §3.2. Thiếu hết vẫn deploy và chạy bình thường |
+| `PUBLIC_REGISTRATION_ENABLED` / `REGISTRATION_RATE_LIMIT_PER_HOUR` | Đăng ký công khai + duyệt tài khoản (ADR-049), xem §3.4. Mặc định `true`/`100`, không khai vẫn chạy |
 
 `APP_ENV=production`, `DATA_DIR=/data` và `MONGO_HOST=mongo` do compose đặt cứng, không khai trong `.env`.
 `SESSION_SECRET` trong `.env.example` là config chết (ADR-008) - không dùng, không cần sinh.
@@ -274,6 +275,26 @@ lẫn GET, app credential put/get/delete được, và byte round-trip khớp - 
 
 Đổi `MINIO_SECRET_KEY` trong `.env` thì phải chạy lại `minio-init` (lệnh `up -d minio minio-init` ở
 trên) rồi tạo lại container `api` để nó nhận credential mới.
+
+### 3.4 Đăng ký công khai và duyệt tài khoản (ADR-049)
+
+Người ngoài tự đăng ký ở `/register`; tài khoản nằm ở trạng thái **chờ duyệt** (`pending_approval`,
+`active: false`) và **không đăng nhập được** cho tới khi admin bấm **Duyệt** ở `/admin/accounts` (ô KPI
+**Chờ duyệt** + nút lọc). Hai biến điều khiển, cả hai chỉ `api` đọc:
+
+| Biến | Ý nghĩa |
+|---|---|
+| `PUBLIC_REGISTRATION_ENABLED` | Công tắc đăng ký công khai, mặc định `true`. Đặt `false` thì `POST /api/auth/register` trả `403 REGISTRATION_DISABLED`. Tắt **không cần deploy**: sửa `.env` rồi `up -d api` (chỉ container `api`) |
+| `REGISTRATION_RATE_LIMIT_PER_HOUR` | Ngân sách đăng ký toàn hệ thống mỗi giờ, mặc định `100`. Hai ngưỡng còn lại là hằng số trong code (mỗi email 5/giờ, toàn cục 10/phút) vì chúng bảo vệ tài nguyên máy, không phải chính sách nghiệp vụ |
+
+Hai điều vận hành phải nhớ:
+
+1. **Rollback phải tắt đăng ký TRƯỚC.** Backend **trước** ADR-049 không có điều kiện pending trong nút
+   "Kích hoạt", nên lùi bản khi đang có tài khoản chờ duyệt là mở đường vòng kích hoạt chúng. Quy
+   trình: `PUBLIC_REGISTRATION_ENABLED=false` → xử lý (Duyệt/Xóa) hàng chờ đang có → rồi mới rollback.
+2. **Không có xác minh email** (chấp nhận có ý thức): email rác/gõ nhầm vẫn vào hàng chờ, admin là bộ
+   lọc duy nhất. Tài khoản cũ (trước ADR-049) **không** có marker `pending_approval` nên tự động hợp lệ -
+   không cần backfill, không cần thao tác dữ liệu.
 
 ## 4. Phát triển và kiểm thử ở local
 
@@ -856,6 +877,8 @@ pipe qua `ssh 'bash -s'`, mọi lệnh phía sau bị nuốt mất và script d�
 - Ngoài scope, không thêm: Redis, queue, Kubernetes, Terraform, R2, D1, Durable Objects.
 
 ## 12. Rollback
+
+**Lưu ý đăng ký (ADR-049):** Trước khi lùi backend về bản chưa hỗ trợ tài khoản chờ duyệt, tắt `PUBLIC_REGISTRATION_ENABLED` và xử lý hết tài khoản đang chờ theo §3.4. Nếu deployer tự rollback vì lỗi smoke test sau khi đã có tài khoản chờ duyệt, không mở đăng ký lại hoặc duyệt tài khoản mới cho tới khi backend hỗ trợ marker `pending_approval` được khôi phục. Bản backend cũ không biết marker này nên có thể kích hoạt tài khoản chờ duyệt qua đường cũ.
 
 Từng tầng rollback độc lập:
 

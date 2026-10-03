@@ -23,6 +23,10 @@ services:
       MAX_NOTEBOOK_MB: ${MAX_NOTEBOOK_MB:-20}
       MAX_CONTENT_MB: ${MAX_CONTENT_MB:-2}
       MAX_ASSET_MB: ${MAX_ASSET_MB:-2}
+      # Tự đăng ký công khai (ADR-049): tài khoản mới chờ admin duyệt. Cờ tắt để đóng khi bị spam;
+      # ngân sách giờ là trần toàn hệ thống cho các lượt đăng ký đủ hình dạng.
+      PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-true}
+      REGISTRATION_RATE_LIMIT_PER_HOUR: ${REGISTRATION_RATE_LIMIT_PER_HOUR:-100}
       DATA_DIR: /data
       # Artifact của submission nằm trong MinIO private (ADR-028). API chỉ nhận credential của app;
       # credential root chỉ có ở `minio` và `minio-init`.

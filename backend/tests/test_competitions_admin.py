@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 
-from app.competitions import service
+from app.competitions import clone as clone_service, service
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import Settings, get_settings
 from app.core.slugs import SLUG_MAX, is_valid_slug
@@ -396,6 +396,128 @@ def test_edit_allowed_again_after_reopen(client):
     assert client.patch(f"/api/admin/competitions/{cid}", json={"primary_metric": "recall"}).status_code == 422
 
 
+def test_clone_copies_content_assets_ground_truth_and_v1_config(client, isolated_data_dir):
+    _login(client)
+    source = client.post('/api/admin/competitions', json=_body()).json()
+    cid = source['id']
+    configure_scoring(client, cid)
+    page = client.post(f'/api/admin/competitions/{cid}/contents', json={
+        'title': 'Thể lệ', 'slug': 'the-le', 'visibility': 'public', 'order': 10,
+    }).json()
+    assert client.put(
+        f"/api/admin/competitions/{cid}/contents/{page['id']}/file",
+        files={'file': ('rules.md', b'![anh](assets/sample.png)', 'text/markdown')},
+    ).status_code == 200
+    asset = client.post(
+        f'/api/admin/competitions/{cid}/assets',
+        files={'file': ('sample.png', b'\x89PNG\r\n\x1a\nimage', 'image/png')},
+    )
+    assert asset.status_code == 201
+    cloned = client.post(f'/api/admin/competitions/{cid}/clone')
+    assert cloned.status_code == 201, cloned.text
+    copy = cloned.json()
+    assert copy['submission_config']['ready'] is True
+    assert copy['status'] == 'draft'
+    contents = client.get(f"/api/admin/competitions/{copy['id']}/contents").json()['contents']
+    assert len(contents) == 1 and contents[0]['id'] != page['id']
+    assert client.get(f"/api/admin/competitions/{copy['id']}/contents/{contents[0]['id']}").json()['markdown'] == '![anh](assets/sample.png)'
+    assert (isolated_data_dir / 'competitions' / copy['id'] / 'private' / 'ground_truth.csv').is_file()
+    assert (isolated_data_dir / 'competitions' / copy['id'] / 'assets' / asset.json()['name']).read_bytes() == b'\x89PNG\r\n\x1a\nimage'
+
+
+def test_clone_rejects_missing_source_markdown_without_creating_draft(client, isolated_data_dir):
+    _login(client)
+    cid = client.post('/api/admin/competitions', json=_body()).json()['id']
+    page = client.post(f'/api/admin/competitions/{cid}/contents', json={
+        'title': 'Thể lệ', 'slug': 'the-le',
+    }).json()
+    assert client.put(
+        f"/api/admin/competitions/{cid}/contents/{page['id']}/file",
+        files={'file': ('rules.md', b'rules', 'text/markdown')},
+    ).status_code == 200
+    (isolated_data_dir / 'competitions' / cid / 'content' / f"{page['id']}.md").unlink()
+    result = client.post(f'/api/admin/competitions/{cid}/clone')
+    assert result.status_code == 409
+    assert result.json()['error']['code'] == 'CLONE_SOURCE_INVALID'
+    assert len(client.get('/api/admin/competitions').json()['competitions']) == 1
+
+
+def test_clone_with_relative_data_dir_reads_own_files(client, monkeypatch, isolated_data_dir):
+    _login(client)
+    cid = client.post('/api/admin/competitions', json=_body()).json()['id']
+    configure_scoring(client, cid)
+    page = client.post(f'/api/admin/competitions/{cid}/contents', json={
+        'title': 'Thể lệ', 'slug': 'the-le',
+    }).json()
+    assert client.put(
+        f"/api/admin/competitions/{cid}/contents/{page['id']}/file",
+        files={'file': ('rules.md', b'rules', 'text/markdown')},
+    ).status_code == 200
+    with monkeypatch.context() as env:
+        env.chdir(isolated_data_dir.parent)
+        env.setenv('DATA_DIR', isolated_data_dir.name)
+        get_settings.cache_clear()
+        cloned = client.post(f'/api/admin/competitions/{cid}/clone')
+    get_settings.cache_clear()
+    assert cloned.status_code == 201, cloned.text
+
+
+def test_v1_ground_truth_upload_with_relative_data_dir(client, monkeypatch, isolated_data_dir):
+    _login(client)
+    cid = client.post('/api/admin/competitions', json=_body()).json()['id']
+    with monkeypatch.context() as env:
+        env.chdir(isolated_data_dir.parent)
+        env.setenv('DATA_DIR', isolated_data_dir.name)
+        get_settings.cache_clear()
+        configured = configure_scoring(client, cid)
+    get_settings.cache_clear()
+    assert configured['ground_truth']['row_count'] == 4
+    assert (isolated_data_dir / 'competitions' / cid / 'private' / 'ground_truth.csv').is_file()
+    result = client.post(f'/api/admin/competitions/{cid}/clone')
+    assert result.status_code == 201, result.text
+
+
+def test_clone_rejects_missing_ground_truth_without_creating_draft(client, isolated_data_dir):
+    _login(client)
+    cid = client.post('/api/admin/competitions', json=_body()).json()['id']
+    configure_scoring(client, cid)
+    (isolated_data_dir / 'competitions' / cid / 'private' / 'ground_truth.csv').unlink()
+    result = client.post(f'/api/admin/competitions/{cid}/clone')
+    assert result.status_code == 409
+    assert result.json()['error']['code'] == 'CLONE_SOURCE_INVALID'
+    assert len(client.get('/api/admin/competitions').json()['competitions']) == 1
+
+
+def test_clone_cleans_up_on_file_write_failure(client, monkeypatch, isolated_data_dir):
+    _login(client)
+    cid = client.post('/api/admin/competitions', json=_body()).json()['id']
+    page = client.post(f'/api/admin/competitions/{cid}/contents', json={
+        'title': 'Thể lệ', 'slug': 'the-le',
+    }).json()
+    assert client.put(
+        f"/api/admin/competitions/{cid}/contents/{page['id']}/file",
+        files={'file': ('rules.md', b'rules', 'text/markdown')},
+    ).status_code == 200
+    original = clone_service.files.write_atomic
+
+    # The clone uses its own ObjectId paths; fail on its first file write.
+    calls = 0
+
+    def fail_second_write(path, data):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError('mock disk failure')
+        return original(path, data)
+
+    monkeypatch.setattr(clone_service.files, 'write_atomic', fail_second_write)
+    result = client.post(f'/api/admin/competitions/{cid}/clone')
+    assert result.status_code == 500
+    assert result.json()['error']['code'] == 'CLONE_WRITE_FAILED'
+    assert len(client.get('/api/admin/competitions').json()['competitions']) == 1
+    assert [item.name for item in (isolated_data_dir / 'competitions').iterdir()] == [cid]
+
+
 def test_clone_copies_config_not_status_dates_submissions(client):
     _login(client)
     cid = client.post("/api/admin/competitions", json=_body(quota_per_day=9)).json()["id"]
@@ -532,9 +654,10 @@ def test_admin_mutations_return_readiness_so_ui_state_stays_correct(client):
     assert closed.json()["publish_ready"] is True
 
     cloned = client.post(f"/api/admin/competitions/{cid}/clone").json()
-    # Draft mới chưa có scoring config nên bị chặn đúng như một draft vừa tạo.
-    assert cloned["publish_ready"] is False
-    assert cloned["publish_blocked_reason"]["code"] == "SCORING_CONFIG_REQUIRED"
+    # v1 mang theo cả cấu hình và ground truth; bản sao vẫn là draft nhưng đã sẵn sàng publish.
+    assert cloned["status"] == "draft"
+    assert cloned["publish_ready"] is True
+    assert cloned["publish_blocked_reason"] is None
 
 
 def test_admin_list_does_not_carry_readiness(client):

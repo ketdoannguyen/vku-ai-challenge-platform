@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { useAuth, loginErrorMessage } from "../auth/AuthContext";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useAuth, authErrorMessage } from "../auth/AuthContext";
 import { safeReturnTo } from "../auth/returnTo";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -141,7 +141,7 @@ export function LoginPage() {
       const from = safeReturnTo((location.state as { from?: unknown } | null)?.from);
       navigate(from, { replace: true });
     } catch (err) {
-      setServerError(loginErrorMessage(err));
+      setServerError(authErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +163,7 @@ export function LoginPage() {
           <div className="login-head">
             <Emblem />
             <h1 className="login-title">VKU AI Challenge Platform</h1>
-            <p className="login-subtitle">Đăng nhập bằng tài khoản được cấp</p>
+            <p className="login-subtitle">Đăng nhập bằng tài khoản đã được duyệt</p>
             <span className="vku-accent" aria-hidden="true">
               <span className="blue" />
               <span className="red" />
@@ -254,7 +254,10 @@ export function LoginPage() {
           </div>
 
           <div className="login-divider" />
-          <p className="login-note">Liên hệ Ban Tổ chức nếu bạn chưa có tài khoản.</p>
+          <p className="login-note">
+            Chưa có tài khoản? <Link to="/register">Đăng ký</Link> — tài khoản mới cần Ban Tổ
+            chức duyệt trước khi đăng nhập.
+          </p>
         </form>
       </div>
     </div>

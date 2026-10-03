@@ -119,6 +119,10 @@ services:
       SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-aic_session}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-auto}
       SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-lax}
+      # Tự đăng ký công khai (ADR-049): tài khoản mới chờ admin duyệt. Đặt false để đóng tức thì khi
+      # bị spam (chỉ cần recreate `api`, không cần deploy); ngân sách giờ áp cho cả hệ thống.
+      PUBLIC_REGISTRATION_ENABLED: ${PUBLIC_REGISTRATION_ENABLED:-true}
+      REGISTRATION_RATE_LIMIT_PER_HOUR: ${REGISTRATION_RATE_LIMIT_PER_HOUR:-100}
       # AI Notebook Review (ADR-036/ADR-037), tất cả dùng `${VAR:-}` chứ KHÔNG `${VAR:?}`: thiếu cấu
       # hình AI chỉ làm tính năng AI không bật được, tuyệt đối không được chặn deploy (quyết định sản
       # phẩm #3). Credential Mongo/MinIO ở trên vẫn fail-fast vì thiếu chúng thì stack không chạy được.

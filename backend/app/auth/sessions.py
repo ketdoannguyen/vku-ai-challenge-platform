@@ -54,7 +54,9 @@ async def resolve_session(
         await db[SESSIONS_COLLECTION].delete_one({"_id": session["_id"]})
         return None
     account = await db["accounts"].find_one({"_id": session["account_id"]})
-    if account is None or not account.get("active", False):
+    if account is None or not account.get("active", False) or account.get("pending_approval", False):
+        # `pending_approval` là phòng thủ hai lớp (ADR-049): kể cả khi marker bị bỏ sót ở một đường
+        # ghi nào đó và `active` bị bật nhầm, tài khoản chưa duyệt vẫn không vào được.
         return None
     return account
 

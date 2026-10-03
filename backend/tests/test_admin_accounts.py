@@ -1,4 +1,4 @@
-"""Admin accounts API: role guard 401/403, list/search, create, reset password, enable/disable, delete."""
+"""Admin accounts API: role guard 401/403, list/search, create, approve pending, reset password, enable/disable, delete."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -181,6 +181,7 @@ def test_admin_endpoints_require_login(client):
     for resp in (
         client.get("/api/admin/accounts"),
         client.post("/api/admin/accounts", json={}),
+        client.post("/api/admin/accounts/abc/approve"),
         client.post("/api/admin/accounts/abc/reset-password", json={}),
         client.patch("/api/admin/accounts/abc", json={"active": False}),
     ):
@@ -209,18 +210,18 @@ def test_admin_list_accounts_no_password_hash(client):
 def test_admin_list_returns_global_stats(client):
     _login(client)
     body = client.get("/api/admin/accounts").json()
-    assert body["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+    assert body["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2, "pending": 0}
 
 
 def test_admin_list_stats_ignore_search_and_pagination(client):
     _login(client)
     searched = client.get("/api/admin/accounts", params={"q": "Thí Sinh"}).json()
     assert searched["total"] == 1
-    assert searched["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+    assert searched["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2, "pending": 0}
 
     paged = client.get("/api/admin/accounts", params={"limit": 1, "offset": 0}).json()
     assert len(paged["accounts"]) == 1
-    assert paged["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2}
+    assert paged["stats"] == {"total": 2, "admin": 1, "participant": 1, "active": 2, "pending": 0}
 
 
 def test_admin_list_stats_follow_create_and_disable(client):
@@ -230,18 +231,182 @@ def test_admin_list_stats_follow_create_and_disable(client):
         json={"email": "thong.ke@vku.vn", "name": "Thống Kê", "password": "matkhau-thong-ke", "role": "participant"},
     ).json()
     after_create = client.get("/api/admin/accounts").json()["stats"]
-    assert after_create == {"total": 3, "admin": 1, "participant": 2, "active": 3}
+    assert after_create == {"total": 3, "admin": 1, "participant": 2, "active": 3, "pending": 0}
 
     client.patch(f"/api/admin/accounts/{created['id']}", json={"active": False})
     after_disable = client.get("/api/admin/accounts").json()["stats"]
-    assert after_disable == {"total": 3, "admin": 1, "participant": 2, "active": 2}
+    assert after_disable == {"total": 3, "admin": 1, "participant": 2, "active": 2, "pending": 0}
 
 
 def test_admin_list_stats_count_legacy_account_without_active_field(client, mock_db):
     _login(client)
     asyncio.run(mock_db[ACCOUNTS_COLLECTION].insert_one({"email": "legacy@vku.vn", "name": "Legacy", "role": "participant"}))
     body = client.get("/api/admin/accounts").json()
-    assert body["stats"] == {"total": 3, "admin": 1, "participant": 2, "active": 3}
+    assert body["stats"] == {"total": 3, "admin": 1, "participant": 2, "active": 3, "pending": 0}
+
+
+def _register_pending(client, email="cho.duyet@vku.vn", name="Chờ Duyệt", password="matkhauchoduyet1"):
+    resp = client.post("/api/auth/register", json={"email": email, "name": name, "password": password})
+    assert resp.status_code == 202
+
+
+def test_admin_list_status_filters(client, mock_db):
+    _register_pending(client, email="a@vku.vn", name="A")
+    _register_pending(client, email="b@vku.vn", name="B")
+    _login(client)
+    participant = _account_id(mock_db, "thi.sinh@vku.vn")
+    assert client.patch(f"/api/admin/accounts/{participant}", json={"active": False}).status_code == 200
+    asyncio.run(mock_db[ACCOUNTS_COLLECTION].insert_one({"email": "legacy@vku.vn", "name": "Legacy", "role": "participant"}))
+    # Pending với active bị set nhầm true vẫn phải lọc là pending, không phải hoạt động.
+    asyncio.run(mock_db[ACCOUNTS_COLLECTION].update_one({"_id": _account_id(mock_db, "b@vku.vn")}, {"$set": {"active": True}}))
+
+    pending = client.get("/api/admin/accounts", params={"status": "pending"}).json()
+    assert [a["email"] for a in pending["accounts"]] == ["a@vku.vn", "b@vku.vn"]
+    active = client.get("/api/admin/accounts", params={"status": "active"}).json()
+    assert [a["email"] for a in active["accounts"]] == ["admin@vku.vn", "legacy@vku.vn"]
+    disabled = client.get("/api/admin/accounts", params={"status": "disabled"}).json()
+    assert [a["email"] for a in disabled["accounts"]] == ["thi.sinh@vku.vn"]
+    assert pending["stats"] == active["stats"] == disabled["stats"]
+    assert active["stats"]["active"] == 2  # chỉ admin và legacy, không tính pending lỡ active=true
+
+    combined = client.get("/api/admin/accounts", params={"status": "pending", "q": "a@vku.vn"}).json()
+    assert combined["total"] == 1
+    assert combined["accounts"][0]["email"] == "a@vku.vn"
+    paged = client.get("/api/admin/accounts", params={"status": "active", "limit": 1, "offset": 1}).json()
+    assert paged["total"] == 2
+    assert [a["email"] for a in paged["accounts"]] == ["legacy@vku.vn"]
+    assert client.get("/api/admin/accounts").json()["total"] == 5
+
+
+def test_admin_list_invalid_status_returns_422(client):
+    _login(client)
+    resp = client.get("/api/admin/accounts", params={"status": "unknown"})
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_admin_stats_pending_follows_approve_and_delete(client, mock_db):
+    _register_pending(client, email="a@vku.vn", name="A")
+    _register_pending(client, email="b@vku.vn", name="B")
+    _login(client)
+
+    assert client.get("/api/admin/accounts").json()["stats"] == {
+        "total": 4,
+        "admin": 1,
+        "participant": 3,
+        "active": 2,
+        "pending": 2,
+    }
+
+    a_id = _account_id(mock_db, "a@vku.vn")
+    assert client.post(f"/api/admin/accounts/{a_id}/approve").status_code == 200
+    assert client.get("/api/admin/accounts").json()["stats"] == {
+        "total": 4,
+        "admin": 1,
+        "participant": 3,
+        "active": 3,
+        "pending": 1,
+    }
+
+    b_id = _account_id(mock_db, "b@vku.vn")
+    deleted = client.delete(f"/api/admin/accounts/{b_id}", params={"confirm_email": "b@vku.vn"})
+    assert deleted.status_code == 200
+    assert client.get("/api/admin/accounts").json()["stats"] == {
+        "total": 3,
+        "admin": 1,
+        "participant": 2,
+        "active": 3,
+        "pending": 0,
+    }
+
+
+def test_admin_approve_pending_account(client, mock_db):
+    _register_pending(client)
+    target = _account_id(mock_db, "cho.duyet@vku.vn")
+    _login(client)
+
+    resp = client.post(f"/api/admin/accounts/{target}/approve")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pending"] is False
+    assert body["active"] is True
+    assert "password_hash" not in body
+
+    # Duyệt lần hai: không còn gì để duyệt, không được âm thầm thành công.
+    again = client.post(f"/api/admin/accounts/{target}/approve")
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "ACCOUNT_NOT_PENDING"
+
+    # Tài khoản đã duyệt đăng nhập được ngay.
+    client.cookies.delete("aic_session")
+    login = client.post(
+        "/api/auth/login", json={"identifier": "cho.duyet@vku.vn", "password": "matkhauchoduyet1"}
+    )
+    assert login.status_code == 200
+
+
+def test_admin_approve_non_pending_409(client, mock_db):
+    _login(client)
+    target = _account_id(mock_db, "thi.sinh@vku.vn")
+    resp = client.post(f"/api/admin/accounts/{target}/approve")
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "ACCOUNT_NOT_PENDING"
+
+
+def test_admin_approve_unknown_id_404(client):
+    _login(client)
+    for account_id in ("000000000000000000000000", "khong-phai-objectid"):
+        resp = client.post(f"/api/admin/accounts/{account_id}/approve")
+        assert resp.status_code == 404
+
+
+def test_approve_participant_gets_403(client):
+    _login_participant(client)
+    resp = client.post("/api/admin/accounts/abc/approve")
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_pending_set_nham_active_van_bi_chan_login_va_van_duyet_duoc(client, mock_db):
+    """Pending bị đường ghi cũ set nhầm `active=true` vẫn phải fail-closed và cứu được qua nút Duyệt."""
+    _register_pending(client)
+    target = _account_id(mock_db, "cho.duyet@vku.vn")
+    asyncio.run(mock_db[ACCOUNTS_COLLECTION].update_one({"_id": target}, {"$set": {"active": True}}))
+
+    blocked = client.post(
+        "/api/auth/login", json={"identifier": "cho.duyet@vku.vn", "password": "matkhauchoduyet1"}
+    )
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "ACCOUNT_PENDING"
+
+    _login(client)
+    resp = client.post(f"/api/admin/accounts/{target}/approve")
+    assert resp.status_code == 200
+    assert resp.json()["pending"] is False
+
+
+def test_admin_patch_pending_account_409(client, mock_db):
+    _register_pending(client)
+    target = _account_id(mock_db, "cho.duyet@vku.vn")
+    _login(client)
+
+    resp = client.patch(f"/api/admin/accounts/{target}", json={"active": True})
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "ACCOUNT_PENDING_APPROVAL"
+    # PATCH không được âm thầm bật active cho tài khoản còn chờ duyệt.
+    doc = asyncio.run(mock_db[ACCOUNTS_COLLECTION].find_one({"_id": target}))
+    assert doc["active"] is False
+    assert doc["pending_approval"] is True
+
+
+def test_admin_delete_pending_account(client, mock_db):
+    _register_pending(client)
+    target = _account_id(mock_db, "cho.duyet@vku.vn")
+    _login(client)
+
+    resp = client.delete(f"/api/admin/accounts/{target}", params={"confirm_email": "cho.duyet@vku.vn"})
+    assert resp.status_code == 200
+    assert asyncio.run(mock_db[ACCOUNTS_COLLECTION].find_one({"_id": target})) is None
 
 
 def test_admin_list_search_by_name(client):
@@ -284,6 +449,23 @@ def test_admin_create_duplicate_email_409(client):
     resp = client.post(
         "/api/admin/accounts",
         json={"email": "admin@vku.vn", "name": "Trùng", "password": "matkhau-trung-12", "role": "participant"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "ACCOUNT_EXISTS"
+
+
+def test_admin_create_duplicate_after_precheck_409(client, monkeypatch):
+    from app.accounts import admin_router
+
+    _login(client)
+
+    async def raced_create(db, body):
+        return None
+
+    monkeypatch.setattr(admin_router, "create_account", raced_create)
+    resp = client.post(
+        "/api/admin/accounts",
+        json={"email": "race@vku.vn", "name": "Race", "password": "matkhau-race-123", "role": "participant"},
     )
     assert resp.status_code == 409
     assert resp.json()["error"]["code"] == "ACCOUNT_EXISTS"

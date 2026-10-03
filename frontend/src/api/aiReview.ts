@@ -324,6 +324,21 @@ export function deleteAiReviewApiKey(competitionId: string): Promise<{ config: A
   return api.del(`/admin/competitions/${competitionId}/ai-review/api-key`);
 }
 
+/**
+ * Nhập cấu hình AI từ cuộc thi khác: server thay thế toàn bộ cấu hình đích, kể cả API key.
+ *
+ * Ciphertext được sao chép thẳng giữa hai document trên server; request chỉ mang ID nguồn nên key
+ * không bao giờ đi qua trình duyệt, và response cũng chỉ có `api_key_configured` như mọi lần đọc.
+ */
+export function importAiReviewSettings(
+  competitionId: string,
+  sourceCompetitionId: string,
+): Promise<{ config: AiReviewConfig }> {
+  return api.post(`/admin/competitions/${competitionId}/ai-review/import`, {
+    source_competition_id: sourceCompetitionId,
+  });
+}
+
 /** Thử cấu hình chưa lưu: field vắng mặt lấy từ config đang có trên server. */
 export function testAiReviewConnection(
   competitionId: string,

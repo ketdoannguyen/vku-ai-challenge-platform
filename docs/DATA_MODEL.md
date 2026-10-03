@@ -17,13 +17,15 @@ Fields:
 - `name`
 - `password_hash` (Argon2id, argon2-cffi defaults)
 - `role`: `admin` | `participant`
-- `active`: bool - khóa toàn nền tảng (disable hủy hiệu lực mọi session)
+- `active`: bool - khóa toàn nền tảng (disable hủy hiệu lực mọi session). Tài khoản tự đăng ký chờ duyệt cũng mang `active: false` (ADR-049) - hai trạng thái phân biệt được nhờ marker `pending_approval`.
+- `pending_approval`: bool (chỉ ghi khi `true`) - marker tài khoản tự đăng ký đang chờ admin duyệt (ADR-049). **Vắng mặt = đã duyệt** - đúng cho mọi tài khoản cũ và tài khoản do admin tạo, nên không có backfill. Duyệt = một update nguyên tử `$set active:true, updated_at` + `$unset pending_approval`; `PATCH {active}` bị chặn khi marker còn (điều kiện update loại pending), và `resolve_session`/login kiểm marker như phòng thủ hai lớp kể cả khi `active` bị bật nhầm. Không bao giờ lộ ra ngoài dưới dạng field thô - API chỉ trả `pending: bool` qua `public_account()`.
 - `slug` (str | absent ở account cũ) - dùng làm segment đường dẫn artifact trên MinIO (ADR-033). Sinh tự động từ `name` ở **lần nộp bài đầu tiên**, không nhập tay, không bao giờ sinh lại (đổi `name` không đổi slug). Trùng thì thêm `-` + 3 ký tự random. Không có trong representation nào trả về API.
 - `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
-- unique trên `email` - tạo idempotent ở app startup (`ensure_indexes`)
+- unique trên `email` - tạo idempotent ở app startup (`ensure_indexes`); cũng là chốt chặn hai lượt đăng ký tranh nhau (ADR-049, `DuplicateKeyError` → cùng response 202)
 - unique **sparse** trên `slug` - sparse để account cũ chưa có field này không cùng rơi vào giá trị null và chặn nhau (ADR-033)
+- Không thêm index cho `pending_approval`: collection nhỏ, và cả `pending_only` lẫn `stats.pending` đều là đường quản trị chạy không thường xuyên - quét collection rẻ hơn chi phí ghi thêm index.
 
 ## 2. sessions - implemented (Sprint 02)
 
@@ -265,6 +267,26 @@ Hai đường xoá submission ở trên dùng chung một hiện thực `submiss
 
 Xoá competition `published` không có trong phạm vi: cuộc thi đang chạy phải Kết thúc trước. `draft` và `closed` xoá được (cascade), nên "đã kết thúc" không phải là bảo đảm còn dữ liệu - muốn giữ lịch sử thi thì đừng xoá (ADR-027).
 
+## 10b. Clone cuộc thi - bản sao độc lập (ADR-050)
+
+`POST /api/admin/competitions/{id}/clone` tạo một document `competitions` **mới** (luôn `draft`) cùng các document `competition_contents` mới. Mọi file của bản sao nằm dưới thư mục riêng `competitions/<clone_id>/` (`content/`, `assets/`, `private/`); **không** document hay file nào được chia sẻ với nguồn.
+
+Được copy:
+- Config cấp cuộc thi: `join_mode`, `primary_metric`, `quota_per_day`, `leaderboard_visible`, `resources`; `name` = `"<tên nguồn> (bản sao)"`, `slug` mới `<slug>-copy`, `start_at`/`end_at` mới (now → +1 năm), `created_by` = admin thực hiện. Slug hết 5 ứng viên → 409 `SLUG_EXISTS`.
+- `competition_contents`: title/slug/order/visibility giữ nguyên; `_id`, `markdown_path` và file là của bản sao. Markdown chỉ copy khi nguồn có `size_bytes`; ghi atomic rồi cập nhật `size_bytes`; trang chưa upload giữ `size_bytes: null`.
+- Assets: giữ nguyên tên `uuid4.<ext>` (để link tương đối `assets/...` trong Markdown vẫn trỏ đúng), đọc và kiểm signature như endpoint list trước khi ghi vào `assets/` của bản sao.
+- `scoring_config`: v1 copy nguyên cấu hình cột cố định; v2 copy `input_schema`/`evaluator`/`output_contract` nhưng `revision = 0`, `evaluator.runtime_id = null`, `verification = null`; source bộ chấm ghi lại dưới `private/evaluator/<sha256>.py` của bản sao.
+- `ground_truth` + file: v1 ghi `private/ground_truth.csv`; v2 ghi `private/ground-truth-<sha256[:16]>.csv`; `path` trỏ về bản sao, `sha256`/`row_count`/`columns` giữ nguyên sau khi đối chiếu với file thật và schema.
+- `ai_review_config`: các field hỗ trợ (`enabled`, `auto_review`, `participant_visible`, `provider`, `base_url`, `model`) và `api_key_ciphertext` copy **nguyên bytes** - cùng deployment nên cùng khoá Fernet, không decrypt→re-encrypt; `updated_by`/`updated_at` mới; `verified_at`/`verified_fingerprint`/`transfer_acknowledgement` **không** copy.
+
+Không copy: `status`, `join_code_hash`, ngày thi gốc, memberships, submissions, `scoring_attempts`, `ai_review_jobs`/`ai_reviews`, `competition_content_revisions`, bằng chứng chạy thử scoring và dấu xác minh kết nối AI.
+
+Hệ quả và giới hạn:
+- Bản sao **độc lập**: sửa/xoá nguồn không đổi bản sao (file riêng), và xoá bản sao không đụng nguồn.
+- Preflight đọc và kiểm toàn bộ nguồn **trước mọi lượt ghi**: Markdown mất dù metadata nói có, size/hash lệch, asset sai định dạng, source bộ chấm lệch hash, CSV ground truth không hợp schema, ciphertext không giải mã được, endpoint vi phạm network policy → 409 `CLONE_SOURCE_INVALID`, **không** document/file nào được tạo. Phần nguồn chưa cấu hình thì bản sao cũng trống phần đó; bản sao dùng đúng bytes đã chụp, không đọc lại file nguồn sau insert.
+- Lỗi ghi sau insert → xoá content/competition/thư mục của **chính bản sao** rồi trả 500 `CLONE_WRITE_FAILED`; lỗi ở bước dọn chỉ được log.
+- Mongo standalone **không có transaction**: rollback chỉ chạy khi process còn sống. Process bị kill giữa lúc ghi có thể để lại bản sao dở dang (content thiếu file, hoặc document đã tạo nhưng chưa có scoring/AI config) và **không** tự dọn; log ghi `clone=<id>` làm manh mối để người vận hành xoá tay. Không có bảo đảm atomicity tuyệt đối.
+
 ## 11. AI Notebook Review (ADR-036)
 
 Kiểm tra notebook bằng AI là trục trạng thái **thứ ba**, chạy bất đồng bộ và **chỉ tham khảo**. Ba collection dưới đây không tham gia `eligible_query()`, không chứa điểm, và xoá chúng không làm đổi kết quả cuộc thi.
@@ -293,6 +315,8 @@ Quy tắc ghi:
 - `transfer_acknowledgement` là trường của cơ chế xác nhận chuyển dữ liệu **đã bỏ ở ADR-042**. Mọi lần PUT đều `$unset` nó, nên document cũ tự sạch sau lần ghi kế tiếp.
 - `verified_at`/`verified_fingerprint` chỉ do `POST .../ai-review/test` chạm, và chỉ khi body **rỗng** (probe bằng chính cấu hình đã lưu): thành công ghi cả hai, hỏng `$unset` cả hai. Vân tay băm `(phiên bản, base_url, model, api_key_ciphertext)`; `public_config` trả `verified_at` **chỉ khi** vân tay còn khớp, nên không đường ghi nào phải nhớ xoá vết - đổi một trong ba trường là vết tự hết hiệu lực. Document cũ thiếu hai field được đọc như "chưa từng xác minh", không cần migration.
 - `enabled=true` đòi URL/model/key hợp lệ. Readiness này **không** tham gia publish/scoring readiness: cuộc thi publish được dù AI cấu hình sai.
+- Clone (ADR-050) copy nguyên ciphertext + các field hỗ trợ nhưng **không** copy `verified_at`/`verified_fingerprint` (vết xác minh thuộc cuộc thi nguồn) và `updated_by`/`updated_at` là của admin clone.
+- Import (`POST .../ai-review/import`, ADR-050) ghi **cả object** bằng một `$set` (khác dotted `$set` của PUT) nên key cũ của đích bị xoá nếu nguồn không có key, và hai field xác minh của đích bị xoá theo snapshot; key vẫn chỉ tồn tại dạng ciphertext, không bao giờ rời server dưới dạng plaintext.
 
 ### 11.2 `competition_content_revisions` - bản thể lệ bất biến
 

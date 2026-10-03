@@ -263,7 +263,7 @@ async def _store_v1_ground_truth(db, competition: dict, data: bytes, admin: Admi
         raise api_error(422, "GROUND_TRUTH_INVALID", "Đường dẫn ground truth không hợp lệ.")
     _write_file(path, data, competition)
     metadata = {
-        "path": path.relative_to(Path(get_settings().data_dir)).as_posix(),
+        "path": path.relative_to(Path(get_settings().data_dir).resolve()).as_posix(),
         "row_count": ground_truth.row_count,
         "columns": list(ground_truth.columns),
         "uploaded_at": revisions.utc_now(),

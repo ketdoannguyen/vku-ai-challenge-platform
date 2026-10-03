@@ -40,6 +40,8 @@ test("nêu các bước tham gia theo đúng hành vi nền tảng", () => {
   expect(screen.getByText(/tài khoản do Ban Tổ chức cấp/)).toBeTruthy();
   expect(screen.getByText(/mở tự do, cần mã do Ban Tổ chức cấp hoặc chỉ theo lời mời/)).toBeTruthy();
   expect(screen.getByText(/Nộp bài CSV/)).toBeTruthy();
+  // Bước đăng nhập trỏ tới trang tự đăng ký (ADR-049).
+  expect(screen.getByRole("link", { name: "Đăng ký" })).toHaveAttribute("href", "/register");
 });
 
 test("lưới sáu bước trình bày đủ và đúng thứ tự", () => {
@@ -67,7 +69,7 @@ test("nhịp màu số bước xoay vòng và chỉ mang tính trang trí", () =
 
 test("FAQ trả lời các tình huống đã có trong hệ thống", () => {
   renderPage();
-  expect(screen.getByText(/không có chức năng tự đăng ký/)).toBeTruthy();
+  expect(screen.getByText(/tự đăng ký tại trang Đăng ký/)).toBeTruthy();
   expect(screen.getByText(/quản trị viên đặt lại mật khẩu/)).toBeTruthy();
   expect(screen.getByText(/quyền tham gia đang bị vô hiệu hoá/)).toBeTruthy();
   expect(screen.getByText(/hết lượt nộp trong ngày/)).toBeTruthy();

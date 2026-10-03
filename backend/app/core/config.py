@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     session_cookie_secure: str = "auto"
     session_cookie_samesite: str = "lax"
 
+    # Tự đăng ký công khai (ADR-049). Kill switch để tạm đóng khi bị spam; ngân sách giờ là trần
+    # toàn hệ thống cho mọi lượt đăng ký đủ hình dạng (đọc lúc import module rate_limit).
+    public_registration_enabled: bool = True
+    registration_rate_limit_per_hour: int = 100
+
     # AI Notebook Review (ADR-036/ADR-037). Mọi giá trị đều có default để app vẫn boot khi tính năng
     # chưa được cấu hình: thiếu khoá mã hoá nghĩa là không lưu được key, không phải app hỏng. Host
     # công khai không cần khai gì; hai danh sách dưới chỉ là ngoại lệ hẹp cho provider tự dựng.

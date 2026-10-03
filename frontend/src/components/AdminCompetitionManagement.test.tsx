@@ -6,7 +6,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
-import { CompetitionFormModal } from "./AdminCompetitionManagement";
+import { CompetitionActionConfirmModal, CompetitionFormModal } from "./AdminCompetitionManagement";
 
 const BASE: Competition = {
   id: "1",
@@ -368,6 +368,46 @@ test("shell: header/footer là anh em trực tiếp của body, không bị bọ
   // Mọi section nằm trong body, không section nào lọt ra ngoài.
   expect(body.querySelectorAll(".ac-form-section")).toHaveLength(5);
   expect(root.querySelectorAll(".ac-form-section")).toHaveLength(5);
+});
+
+test("xác nhận clone nói rõ phạm vi sao chép đầy đủ và các phần không chép", async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ ...BASE, id: "2" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+  const onSuccess = vi.fn();
+  render(
+    <CompetitionActionConfirmModal
+      action="clone"
+      competition={BASE}
+      onSuccess={onSuccess}
+      onClose={vi.fn()}
+    />,
+  );
+
+  const dialog = screen.getByRole("dialog", { name: "Clone cuộc thi" });
+  // Copy phải nói rõ có copy API key/đề/đáp án, không copy người dự thi/mã tham gia, và phải
+  // kiểm tra lại trước khi publish.
+  expect(dialog).toHaveTextContent(/API key/);
+  expect(dialog).toHaveTextContent(/không chép người dự thi, mã tham gia/);
+  expect(dialog).toHaveTextContent(/kiểm tra lại bộ chấm và kết nối AI trước khi publish/);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Clone" }));
+
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toBe(`/api/admin/competitions/${BASE.id}/clone`);
+  expect(calls[0].init?.method).toBe("POST");
+  // POST clone vẫn không có body: server tự quyết định phạm vi sao chép.
+  expect(calls[0].init?.body).toBeUndefined();
+  expect(onSuccess.mock.calls[0][0]).toBe("clone");
 });
 
 test("section 05 giữ nguyên hành vi thêm/xóa và trần 10 tài nguyên", () => {
