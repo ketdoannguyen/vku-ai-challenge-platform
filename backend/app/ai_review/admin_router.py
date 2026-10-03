@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Request
+from pydantic import BaseModel, ConfigDict
+from pymongo import ReturnDocument
 
 from app.ai_review import (
     constants,
@@ -82,6 +84,46 @@ async def update_ai_review_settings(
         admin["email"],
         competition["_id"],
         update.set_fields[f"{config.CONFIG_FIELD}.enabled"],
+    )
+    return {"config": config.public_config(updated)}
+
+
+class ImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_competition_id: str
+
+
+@router.post("/{competition_id}/ai-review/import")
+async def import_ai_review_settings(
+    competition_id: str, body: ImportRequest, request: Request, admin: AdminAccount
+) -> dict:
+    db = request.app.state.mongo.db
+    target = await _get_competition_or_404(db, competition_id)
+    source = await _get_competition_or_404(db, body.source_competition_id)
+    if target["_id"] == source["_id"]:
+        raise api_error(422, "AI_IMPORT_SAME_COMPETITION", "Không thể nhập cấu hình từ chính cuộc thi này.")
+    try:
+        snapshot = config.snapshot_config(
+            source,
+            updated_by=admin["_id"],
+            now=datetime.now(timezone.utc),
+            policy=_runtime_policy(get_settings()),
+        )
+    except config.SettingsError as exc:
+        raise api_error(422, exc.code, exc.message)
+    if snapshot is None:
+        raise api_error(422, "AI_IMPORT_SOURCE_NOT_CONFIGURED", "Cuộc thi nguồn chưa có cấu hình AI.")
+    updated = await db[COMPETITIONS_COLLECTION].find_one_and_update(
+        {"_id": target["_id"]},
+        {"$set": {config.CONFIG_FIELD: snapshot}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated is None:
+        raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
+    logger.info(
+        "AI review config imported admin=%s target=%s source=%s",
+        admin["email"], target["_id"], source["_id"],
     )
     return {"config": config.public_config(updated)}
 

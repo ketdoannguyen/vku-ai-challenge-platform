@@ -11,7 +11,7 @@ from mongomock_motor import AsyncMongoMockClient
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.accounts.service import AccountCreate  # noqa: E402
-from app.auth.rate_limit import login_limiter  # noqa: E402
+from app.auth.rate_limit import login_limiter, reset_signup_limiters  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.database import MongoContext  # noqa: E402
 from tests.fake_minio import FakeMinio  # noqa: E402
@@ -33,8 +33,10 @@ def isolated_data_dir(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def reset_login_limiter():
     login_limiter.reset_all()
+    reset_signup_limiters()
     yield
     login_limiter.reset_all()
+    reset_signup_limiters()
 
 
 @pytest.fixture(autouse=True)

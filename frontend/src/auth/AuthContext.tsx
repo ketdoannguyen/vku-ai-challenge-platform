@@ -9,6 +9,8 @@ export interface Account {
   name: string;
   role: "admin" | "participant";
   active: boolean;
+  /** Tài khoản tự đăng ký đang chờ admin duyệt (ADR-049). Người dùng thường luôn nhận false. */
+  pending: boolean;
 }
 
 interface AuthState {
@@ -66,8 +68,8 @@ export function useOptionalAuth(): AuthState | null {
   return useContext(AuthContext);
 }
 
-/** Lỗi login hiển thị cho user: message từ API (đã tiếng Việt, dễ hiểu). */
-export function loginErrorMessage(error: unknown): string {
+/** Lỗi auth (login/đăng ký) hiển thị cho user: message từ API (đã tiếng Việt, dễ hiểu). */
+export function authErrorMessage(error: unknown): string {
   if (error instanceof ApiClientError) return error.message;
   return "Không kết nối được server. Thử lại sau.";
 }

@@ -222,7 +222,7 @@ const PLATFORM_FEATURES: PlatformFeature[] = [
   },
   {
     title: "Tài khoản",
-    body: "Do Ban Tổ chức cấp; nền tảng không có đăng ký tự do.",
+    body: "Tự đăng ký bằng email; tài khoản mới cần Ban Tổ chức duyệt trước khi đăng nhập.",
     icon: <IconUser />,
     tone: "red",
   },

@@ -1931,6 +1931,16 @@ select.input {
   text-align: center;
 }
 
+/* Link đăng ký/đăng nhập chéo giữa S01 và S01b: nổi khỏi chữ ghi chú màu muted. */
+.login-note a {
+  color: var(--vku-blue-600);
+  font-weight: 600;
+}
+
+.login-note a:hover {
+  color: var(--vku-blue-700);
+}
+
 /* =============================================================================
    Competition cards (dashboard)
    ============================================================================= */
@@ -4210,6 +4220,102 @@ button.resource-link:disabled {
   font-weight: 500;
   opacity: 0.85;
   font-family: var(--font-sans);
+}
+
+/* Editor Markdown kiểu notepad trong dialog Sửa MD: gutter số dòng bên trái, textarea bên
+   phải. Dòng dài tự xuống hàng (chỉ cuộn dọc); số dòng đếm theo dòng logic, phần wrap được
+   gutter chèn dòng trống cho khớp. Gutter, textarea và mirror đo wrap phải chung
+   font/line-height/padding/white-space; gutter cuộn dọc theo textarea qua JS nên tự ẩn
+   overflow, không sinh thanh cuộn thứ hai. */
+.md-editor {
+  display: flex;
+  align-items: stretch;
+  height: min(55vh, 30rem);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* Cùng thang 1200px đã dùng cho `.modal:has(.ai-detail)`: editor cần bề ngang rộng để sửa
+   dòng Markdown dài. Chỉ modal chứa editor, không đụng `.modal-lg` dùng chung với form khác. */
+.modal:has(.md-editor) {
+  max-width: 1200px;
+}
+
+.md-editor:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.md-editor-gutter {
+  flex: none;
+  margin: 0;
+  padding: 10px 8px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--surface-container-low);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-code);
+  text-align: right;
+  user-select: none;
+}
+
+/* Cột phải: textarea hiển thị, mirror ẩn nằm đè phía sau chỉ để đo chỗ xuống dòng. */
+.md-editor-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.md-editor-input,
+.md-editor-mirror {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: var(--leading-code);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  tab-size: 2;
+}
+
+.md-editor-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  resize: none;
+  outline: none;
+  /* Chỉ cuộn dọc: dòng dài tự xuống hàng thay vì đẩy thanh cuộn ngang. */
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* `visibility: hidden` giữ layout để đo được; bề ngang thật do JS gán theo clientWidth
+   của textarea (trừ thanh cuộn dọc). */
+.md-editor-mirror {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.md-editor-confirm-note {
+  margin: var(--space-md) 0 0;
+  color: var(--warning);
+  font-size: var(--text-body-sm);
+}
+
+@media (max-width: 47.99rem) {
+  .md-editor {
+    height: min(45vh, 22rem);
+  }
 }
 
 /* S14: Assets */
@@ -6544,6 +6650,10 @@ button.resource-link:disabled {
 }
 
 /* Tắt công tắc thì cả nhóm cấu hình mờ đi: trạng thái nhìn thấy được, không chỉ đoán được. */
+.ai-import-field {
+  margin-bottom: var(--space-lg);
+}
+
 .ai-config-fieldset {
   min-width: 0;
   margin: 0;
@@ -7629,11 +7739,11 @@ button.resource-link:disabled {
 
 /* Panel đầu trang dùng `.page-hero`; màn này bắt đầu từ các thẻ KPI. */
 
-/* Bốn KPI là bốn card rời; tone chỉ để nhận diện thương hiệu, không dùng để suy
+/* Năm KPI là năm card rời; tone chỉ để nhận diện thương hiệu, không dùng để suy
    ra trạng thái hay quyền thao tác. Số liệu lấy từ aggregate toàn hệ thống. */
 .admin-accounts-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 20px;
   margin-bottom: var(--space-lg);
 }
@@ -7740,6 +7850,7 @@ button.resource-link:disabled {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--space-md);
   margin-bottom: var(--space-lg);
   padding: 12px 16px;
@@ -7755,6 +7866,8 @@ button.resource-link:disabled {
   position: relative;
   display: block;
   width: min(100%, 480px);
+  flex: 1 1 240px;
+  min-width: 0;
 }
 
 .admin-accounts-search > svg {
@@ -7999,6 +8112,13 @@ button.resource-link:disabled {
   color: #047857;
 }
 
+/* "Chờ duyệt" dùng tông vàng cảnh báo như thẻ KPI, khác hẳn "Vô hiệu" (xám). */
+.admin-status-badge[data-pending="true"] {
+  border-color: #f6d987;
+  background: #fff7de;
+  color: var(--vku-yellow-800);
+}
+
 .admin-status-dot {
   flex: none;
   width: 7px;
@@ -8096,6 +8216,55 @@ button.resource-link:disabled {
   background: var(--surface);
   color: #172b4d;
 }
+
+.admin-accounts-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-right: auto;
+}
+
+.admin-accounts-filter[aria-pressed="true"],
+.admin-accounts-filter[aria-pressed="true"]:hover {
+  border-color: #f6d987;
+  background: #fff7de;
+  color: var(--vku-yellow-800);
+}
+
+.admin-accounts-bulk {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: var(--space-md);
+  padding: 12px 16px;
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: var(--text-label);
+}
+
+.admin-accounts-bulk strong { margin-right: auto; }
+.admin-accounts-bulk button:disabled { opacity: 0.5; cursor: not-allowed; }
+.admin-accounts-bulk > span { width: 100%; color: var(--acc-secondary); }
+.admin-account-select { width: 50px; text-align: center; }
+.admin-account-select input { width: 18px; height: 18px; cursor: pointer; }
+.admin-account-select input:disabled { cursor: not-allowed; }
+
+.admin-accounts-bulk-modal { display: grid; gap: var(--space-md); }
+.admin-accounts-bulk-modal p { margin: 0; }
+.admin-accounts-bulk-list,
+.admin-accounts-bulk-errors {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 12px 12px 12px 32px;
+  border: 1px solid var(--vku-border);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.admin-accounts-bulk-errors { color: var(--vku-red-700); }
+.admin-accounts-bulk-modal .field-label { display: grid; gap: 6px; }
 
 .admin-accounts-pagination {
   display: flex;

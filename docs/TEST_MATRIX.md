@@ -65,7 +65,7 @@ Ma trận test theo chức năng. `Status`: `planned` (chưa có test), `passing
 | Edit rules: draft sửa được, slug/status immutable; published khóa primary_metric; closed từ chối | passing | `backend/tests/test_competitions_admin.py` |
 | Publish/close/reopen transition đúng; draft→close, published→publish/reopen, closed→publish/close đều 422 INVALID_TRANSITION | passing | `backend/tests/test_competitions_admin.py` |
 | Reopen là hoàn tác: quyền sửa quay lại nhưng chỉ ở mức published (primary_metric vẫn khoá), và cuộc thi nhận bài trở lại chứ không chỉ đổi status | passing | `backend/tests/test_competitions_admin.py`, `backend/tests/test_submissions.py` |
-| Clone: copy config, draft mới, slug -copy, không copy status/submissions | passing | `backend/tests/test_competitions_admin.py` |
+| Clone: copy config + resources, draft mới, slug -copy, không copy status/submissions; clone đầy đủ đề/đáp án/cấu hình AI từ ADR-050 xem §20 | passing | `backend/tests/test_competitions_admin.py` |
 | Participant list chỉ thấy published/closed, không lộ join_code | passing | `backend/tests/test_competitions_public.py` |
 | Draft detail → 404 như không tồn tại | passing | `backend/tests/test_competitions_public.py` |
 | Khách chưa đăng nhập đọc được list/detail, draft vẫn 404, không lộ join_code (ADR-014) | passing | `backend/tests/test_competitions_public.py` |
@@ -1531,7 +1531,7 @@ chứng hai đời cấu hình cùng sống.
 | Lỗi bộ chấm khi chạy thử được ánh xạ thành **mã lỗi** (timeout, source hỏng, output sai) chứ không phải 500 trần | passing | `test_v2_test_run_maps_evaluator_failures` |
 | Publish từ chối khi guard không còn khớp cấu hình đang lưu | passing | `test_v2_publish_rejects_a_guard_that_no_longer_matches` |
 | Cấu hình bị khoá sau bài nộp đầu tiên | passing | `test_v2_config_is_locked_after_the_first_submission` |
-| Clone copy bộ chấm **nhưng không** copy bằng chứng đã chạy thử | passing | `test_v2_clone_copies_evaluator_but_not_ground_truth` |
+| Clone copy bộ chấm **và ground truth** nhưng **không** copy bằng chứng đã chạy thử (mở rộng bởi ADR-050) | passing | `test_v2_clone_copies_evaluator_and_ground_truth_but_not_verification` |
 
 ### Backend - chấm bài, xếp hạng và export
 
@@ -1751,3 +1751,134 @@ Hai assertion **trung gian của script** sai vì kỳ vọng rank 4 ở một n
 | **Cuộc thi thật** nào chấm bằng bộ chấm v2 | **chưa có** | Hạ tầng đã chạy trên production và đã đo dưới tải (hai bảng production phía trên), nhưng tính năng mới chỉ được dùng bởi các cuộc thi diễn tập `[LOAD TEST]` đã xoá. Cuộc thi thật duy nhất trên production, `tabular-lightweight`, chấm bằng **v1 trong tiến trình** (không sinh container chấm), nên đường v2 và hàng đợi chưa có phơi nhiễm thật |
 | Trần thời gian/RAM thật của container **trên VPS 2 lõi** với bộ chấm thật | **chưa đo** | Cổng tài nguyên 4 slot đã **đạt trên máy dev** với bộ chấm `pandas`/`scikit-learn` thật (4 lượt đồng thời trên 2 lõi: 7,2-7,5 s và 145-192 MiB mỗi container - bảng diễn tập phía trên), nhưng **mọi** số đo production đều dùng bộ chấm thử `sleep`, nên chúng đo **đường ống**: 33,5 s cho 20 lượt là **sàn**, không phải dự báo. Production đang chạy `EVALUATOR_MAX_CONCURRENCY=4` (quyết định có chủ ý, điều kiện đo lại ghi ở `docs/SCORING_QUEUE_E2E_PROD_2026-09-30.md` §8a/§10): cuộc thi v2 đầu tiên có bộ chấm nặng phải được đo lại CPU/RAM với chính bộ chấm đó trước khi tin cấu hình 4 slot |
 | Chất lượng bộ chấm do admin viết | **ngoài phạm vi** | Nền tảng chỉ bảo đảm nó chạy trong hộp cát và trả đúng hợp đồng; không kiểm tra nó có công bằng không. Xem ADR-048 mục "hệ quả" |
+
+## 19. Tự đăng ký & duyệt tài khoản (ADR-049) - passing
+
+`backend/tests/test_register.py` (10 case mới) khoá đường công khai; `test_admin_accounts.py` thêm 9
+case cho danh sách/duyệt/chặn. Frontend: `SignupPage.test.tsx` (7 case mới), `AdminAccountsPage.test.tsx`
+(5 case thuộc ADR-049, thêm 8 case cho ADR-051, tổng 30) và `LoginPage.test.tsx` (1 case link sang `/register`).
+
+### Backend - đăng ký công khai
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Đăng ký tạo participant **chờ duyệt**: `active:false` + marker `pending_approval`, không session, không cookie, không trả hash | passing | `test_register.py::test_register_creates_pending_account` |
+| Mật khẩu đúng nhưng chưa duyệt → 403 `ACCOUNT_PENDING` (không phải `ACCOUNT_DISABLED`); sau khi duyệt login được | passing | `test_register.py::test_pending_account_cannot_login`, `test_approved_account_can_login` |
+| Email trùng (đang pending hoặc đã có tài khoản) → **cùng** 202 generic, không ghi đè mật khẩu/tài khoản cũ | passing | `test_register.py::test_register_duplicate_email_returns_same_accepted_response` |
+| Input sai (email/name/password) → 422 và không tạo account | passing | `test_register.py::test_register_invalid_input_rejected_without_creating_account` |
+| Trần theo email 5 lượt/giờ; trần toàn hệ thống theo phút/giờ; lượt trùng email vẫn tiêu ngân sách | passing | `test_register.py::test_register_rate_limits_per_email`, `test_register_rate_limits_globally` |
+| Kill switch `PUBLIC_REGISTRATION_ENABLED=false` → 403 `REGISTRATION_DISABLED`, không tạo account | passing | `test_register.py::test_register_kill_switch_blocks_endpoint` |
+| Client gửi `role`/`active`/`pending` bị bỏ qua; role luôn là participant và tài khoản luôn chờ duyệt | passing | `test_register.py::test_register_ignores_client_supplied_role_and_active` |
+| Log không chứa password | passing | `test_register.py::test_register_logs_do_not_include_password` |
+
+### Backend - admin: đếm, lọc, duyệt, chặn
+
+| Check | Status | Cách verify |
+|---|---|---|
+| `status=pending|active|disabled` tách pending khỏi disabled dù cùng `active:false`; pending lỡ `active:true` không được coi là active; legacy thiếu `active` vẫn được lọc active; `status` AND với `q`, `total` phân trang đúng, status sai → 422 | passing | `test_admin_accounts.py::test_admin_list_status_filters`, `test_admin_list_invalid_status_returns_422` |
+| `stats.pending` đúng và cập nhật sau duyệt/xóa; `stats.active` không tính tài khoản pending bị set nhầm `active:true` | passing | `test_admin_accounts.py::test_admin_stats_pending_follows_approve_and_delete`, `test_admin_list_status_filters` |
+| Admin tạo account gặp duplicate race giữa pre-check và insert vẫn trả 409 `ACCOUNT_EXISTS` | passing | `test_admin_accounts.py::test_admin_create_duplicate_after_precheck_409` |
+| Duyệt: 200, `pending:false`, `active:true`, marker biến mất; không tạo session | passing | `test_admin_accounts.py::test_admin_approve_pending_account` |
+| Duyệt lại → 409 `ACCOUNT_NOT_PENDING`; id lạ → 404; participant gọi → 403 | passing | `test_admin_accounts.py::test_admin_approve_non_pending_409`, `test_admin_approve_unknown_id_404`, `test_approve_participant_gets_403` |
+| Pending bị set nhầm `active=true` vẫn bị chặn login (fail-closed hai lớp) và vẫn duyệt được qua nút Duyệt | passing | `test_admin_accounts.py::test_pending_set_nham_active_van_bi_chan_login_va_van_duyet_duoc` |
+| `PATCH {active}` trên tài khoản pending → 409 `ACCOUNT_PENDING_APPROVAL` | passing | `test_admin_accounts.py::test_admin_patch_pending_account_409` |
+| Xóa tài khoản pending chạy được - đường "từ chối" duy nhất, email được giải phóng | passing | `test_admin_accounts.py::test_admin_delete_pending_account` |
+
+### Frontend - trang Đăng ký (`/register`)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Form đủ field + tiêu đề tab | passing | `frontend/src/pages/SignupPage.test.tsx` |
+| Chặn submit rỗng, focus field lỗi đầu tiên, không gọi API | passing | `SignupPage.test.tsx` |
+| Email sai định dạng / mật khẩu < 6 ký tự bị chặn tại client; xác nhận mật khẩu không khớp bị chặn tại field xác nhận | passing | `SignupPage.test.tsx` |
+| Gửi thành công: trim email/tên, hiện thông điệp trung tính + link quay lại đăng nhập | passing | `SignupPage.test.tsx` |
+| 429 hiện message từ API trong alert và focus alert; đang gửi thì khóa form | passing | `SignupPage.test.tsx` |
+| Trang Đăng nhập có link sang `/register` | passing | `frontend/src/pages/LoginPage.test.tsx` |
+
+### Frontend - trang Tài khoản (admin)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| **Năm** ô thống kê đọc aggregate toàn hệ thống (kể cả `Chờ duyệt`), không lấy 50 dòng của page đầu và không đổi khi tìm kiếm | passing | `AdminAccountsPage.test.tsx::năm ô thống kê đọc aggregate toàn hệ thống, không phải 50 dòng của page đầu` |
+| Lọc Chờ duyệt: gửi `status=pending`, reset `offset`, giữ nguyên khi đổi từ khóa, `aria-pressed` phản ánh trạng thái | passing | `AdminAccountsPage.test.tsx::lọc Chờ duyệt: gửi status, reset offset và giữ nguyên khi đổi từ khóa` |
+| Hoạt động/Vô hiệu hóa không lẫn tài khoản chờ duyệt | passing | `AdminAccountsPage.test.tsx::lọc Hoạt động và Vô hiệu hóa phân biệt chờ duyệt` |
+| Chọn riêng/chọn cả trang (tối đa 50), không chọn chính mình, bỏ chọn khi đổi trang/lọc | passing | `AdminAccountsPage.test.tsx::chọn trang hiện tại, chọn một phần, và bỏ chọn khi chuyển trang/lọc`, `không chọn được tài khoản đang đăng nhập để xóa hàng loạt` |
+| Danh sách lẫn trạng thái không duyệt hàng loạt; duyệt tuần tự, 409 một dòng được báo theo email và các dòng sau vẫn chạy | passing | `AdminAccountsPage.test.tsx::chỉ duyệt được khi tất cả tài khoản đã chọn đang chờ duyệt`, `duyệt nhiều tài khoản tuần tự và báo lỗi từng email` |
+| Xóa nhiều tài khoản mọi trạng thái chỉ sau khi gõ `XÓA`, mỗi DELETE kèm `confirm_email` đúng dòng; 409 một dòng vẫn xử lý tiếp và hiển thị lý do | passing | `AdminAccountsPage.test.tsx::xóa tài khoản mọi trạng thái cần gõ XÓA và giữ guard email từng dòng`, `xóa hàng loạt tiếp tục khi một tài khoản có bài đã chấm và hiển thị lý do` |
+| Đổi từ khóa bỏ chọn ngay cả trước khi debounce tải danh sách mới | passing | `AdminAccountsPage.test.tsx::đổi từ khóa bỏ chọn trước khi hết debounce; chọn lại chỉ khi thấy trang mới` |
+| Lọc không kết quả: câu rỗng riêng, "Xóa bộ lọc" tắt cả từ khóa lẫn lọc | passing | `AdminAccountsPage.test.tsx::lọc Chờ duyệt không có kết quả: câu rỗng riêng và Xóa bộ lọc tắt lọc` |
+| Hàng chờ duyệt: badge riêng, chỉ có nút Duyệt và Xóa (không Đặt lại MK/Kích hoạt/Vô hiệu hóa) | passing | `AdminAccountsPage.test.tsx::hàng chờ duyệt: badge riêng, chỉ có Duyệt và Xóa` |
+| Duyệt: modal xác nhận rồi gọi `POST /approve` và tải lại danh sách | passing | `AdminAccountsPage.test.tsx::duyệt tài khoản: xác nhận rồi gọi POST /approve và tải lại danh sách` |
+| Duyệt thất bại 409 (người khác vừa duyệt): lỗi hiện trong modal, modal vẫn mở | passing | `AdminAccountsPage.test.tsx::duyệt tài khoản đã bị người khác duyệt: 409 hiện trong modal, modal vẫn mở` |
+
+**Mốc ADR-051 trên working tree (2026-10-03):** backend `855 passed` (`test_admin_accounts.py` 38 passed), frontend `571 passed` (35 file), build sạch và lint không lỗi (còn cảnh báo); test trang Tài khoản `30 passed`, test backend Tài khoản `38 passed`. Chưa chạy E2E stack dev cho **luồng hàng loạt**; bằng chứng diễn tập dưới đây chỉ áp dụng cho ADR-049 và tham số `pending_only` ở thời điểm diễn tập, trước khi thay bằng `status`.
+
+### Bằng chứng chạy tay trên dev stack (2026-10-03)
+
+Chạy trên stack Compose dev đã dựng từ working tree (`localhost:8080` → nginx → api → Mongo thật),
+script diễn tập ở `/tmp/flow-check-049.sh` - **không** nằm trong repo, tài khoản diễn tập xoá sạch sau lượt chạy.
+
+| Check | Kết quả | Phạm vi đã xác minh |
+|---|---|---|
+| `register → login chặn → admin thấy số/filter → duyệt → login được → disable thì session mất hiệu lực` | **18/18 đạt** | Đăng ký mới → 202 `pending:true`; login trước duyệt → 403 `ACCOUNT_PENDING`; admin `pending_only+q` thấy đúng hàng + `stats.pending`; duyệt → 200 `pending:false`; duyệt lại → 409 `ACCOUNT_NOT_PENDING`; login sau duyệt → 200 + `/me` 200; `PATCH {active:false}` → session cũ `/me` 401 |
+| `register → admin xóa → email đăng ký lại` | đạt | Đăng ký user2 → 202; `DELETE ?confirm_email=` → 200; đăng ký lại **cùng email** → 202 (unique index đã giải phóng) |
+
+### Chưa kiểm
+
+| Check | Status | Ghi chú |
+|---|---|---|
+| Lượt chạy thật trên production | **chưa có** | Code đã xong và đã kiểm trên dev; triển khai là bước riêng sau khi BTC duyệt. Nhắc lại caveat rollback của ADR-049: backend cũ không biết marker nên nút "Kích hoạt" của nó mở được tài khoản pending - đóng đăng ký trước khi rollback |
+| Trần abuse chạy thật ở quy mô lớn | **chưa có** | Ba lớp rate limit đã có test; số đo production chỉ có sau đợt mở đăng ký thật (theo dõi qua log `Signup rate limited`/`Signup pending`) |
+
+## 20. Clone đầy đủ và nhập cấu hình AI (ADR-050) - passing
+
+Clone tạo bản nháp độc lập với đầy đủ đề/ảnh/đáp án/cấu hình chấm/AI key (bỏ mọi dấu xác minh), và admin nhập được cấu hình AI từ cuộc thi khác mà key không đi qua trình duyệt. Các case dưới đây chạy trên working tree ngày 2026-10-03; case cũ về slug/retry/status vẫn xanh.
+
+### Backend - clone đầy đủ
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Clone v1 copy content + Markdown + ảnh + ground truth + cấu hình chấm; ID/file đều thuộc bản sao, nguồn còn nguyên | passing | `test_competitions_admin.py::test_clone_copies_content_assets_ground_truth_and_v1_config` |
+| Markdown/ground truth nguồn mất dù metadata nói có → 409 `CLONE_SOURCE_INVALID`, **không** tạo draft nào | passing | `test_competitions_admin.py::test_clone_rejects_missing_source_markdown_without_creating_draft`, `::test_clone_rejects_missing_ground_truth_without_creating_draft` |
+| `DATA_DIR` tương đối: upload ground truth v1 và clone đọc lại file thành công | passing | `test_competitions_admin.py::test_v1_ground_truth_upload_with_relative_data_dir`, `::test_clone_with_relative_data_dir_reads_own_files` |
+| Lỗi ghi file sau insert → 500 `CLONE_WRITE_FAILED`, xoá content/competition/thư mục của bản sao, nguồn không bị đụng | passing | `test_competitions_admin.py::test_clone_cleans_up_on_file_write_failure` |
+| Clone v2 copy source bộ chấm + ground truth vào thư mục riêng (`revision=0`, `runtime_id=null`, `verified=false`); chạy thử lại là publish được; giữ tương thích đường dẫn ground truth v1 và schema đã đổi thứ tự cột | passing | `test_scoring_v2_api.py::test_v2_clone_copies_evaluator_and_ground_truth_but_not_verification`, `::test_v2_clone_accepts_legacy_ground_truth_path`, `::test_v2_clone_accepts_reordered_schema_without_reuploading_ground_truth` |
+| Clone copy ciphertext AI key nhưng **không** copy `verified_at`; key thật dùng được trên bản sao và không lộ plaintext/ciphertext trong response | passing | `test_ai_review_settings.py::test_clone_copies_ai_api_key_but_not_verification` |
+| Ciphertext nguồn không giải mã được (khoá mã hoá đổi) → 409 `CLONE_SOURCE_INVALID`, không tạo draft | passing | `test_ai_review_settings.py::test_clone_rejects_unreadable_ai_key_without_creating_draft` |
+| Hành vi cũ giữ nguyên: slug hợp lệ/`-copy2`/retry có bound/409 khi hết ứng viên, copy resources, không copy status/dates/submissions | passing | `test_competitions_admin.py::test_clone_copies_resources`, `::test_clone_slug_stays_valid_and_within_max_length`, `::test_clone_second_copy_gets_numbered_slug`, `::test_clone_retries_when_candidate_slug_is_taken_at_insert_time`, `::test_clone_gives_409_when_every_candidate_is_taken`, `::test_clone_copies_config_not_status_dates_submissions` |
+
+### Backend - nhập cấu hình AI
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Nhập copy key (ciphertext y hệt) nhưng reset xác minh của đích; response không lộ key; nguồn đổi sau đó không làm đích đổi | passing | `test_ai_review_settings.py::test_import_copies_key_without_leaking_it_and_resets_verification` |
+| Nguồn chưa cấu hình → 422 `AI_IMPORT_SOURCE_NOT_CONFIGURED`, đích **không đổi** | passing | `test_ai_review_settings.py::test_import_rejects_unconfigured_source_without_changing_target` |
+| Nguồn không có key → key cũ của đích bị xoá (thay thế toàn bộ object) | passing | `test_ai_review_settings.py::test_import_keyless_config_removes_target_key` |
+| Guard: tự nhập chính mình → 422, nguồn không tồn tại → 404, participant → 403 | passing | `test_ai_review_settings.py::test_import_requires_admin_and_distinct_existing_source` |
+
+### Frontend
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Dialog clone nói rõ copy API key/đề/đáp án, không chép người dự thi/mã tham gia, phải kiểm tra lại trước publish; POST vẫn không body | passing | `AdminCompetitionManagement.test.tsx::xác nhận clone nói rõ phạm vi sao chép đầy đủ và các phần không chép` |
+| Danh sách nguồn lọc bỏ chính cuộc thi này; chưa chọn thì chưa nhập được | passing | `AiReviewSettingsPanel.test.tsx::danh sách nguồn lọc bỏ chính cuộc thi này và chưa chọn thì chưa nhập được` |
+| Xác nhận thay thế toàn bộ (kể cả API key, xoá dấu xác minh), chỉ gửi `source_competition_id`, nạp lại và nhắc kiểm tra kết nối; key không quay lại form | passing | `AiReviewSettingsPanel.test.tsx::nhập cấu hình: xác nhận thay thế toàn bộ, gửi ID nguồn, nạp lại và nhắc kiểm tra kết nối` |
+| Nhập thất bại: modal giữ mở, hiện lỗi, cấu hình đích không đổi | passing | `AiReviewSettingsPanel.test.tsx::nhập thất bại: modal giữ mở, hiện lỗi và cấu hình đích không đổi` |
+| Trạng thái tải / không có nguồn / lỗi danh sách nguồn đều khoá select đúng và cho thử lại | passing | `AiReviewSettingsPanel.test.tsx::đang tải danh sách nguồn thì select khoá và báo đang tải`, `::không có cuộc thi nào khác thì select khoá và nói rõ vì sao`, `::tải danh sách nguồn lỗi thì hiện lỗi và cho thử lại` |
+
+### Bằng chứng tự động (2026-10-03)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && .venv/bin/pytest -q tests/test_competitions_admin.py tests/test_scoring_v2_api.py tests/test_ai_review_settings.py` | **99 passed** (152,62 s), gồm sửa `DATA_DIR` tương đối và schema v2 đổi thứ tự cột |
+| `cd backend && .venv/bin/pytest -q tests` | **855 passed** (225,16 s), 0 failed; có cảnh báo deprecation từ dependency |
+| `cd frontend && npm test` | **571 passed (35 files)** (48,56 s) - gồm các case AI import, clone UI, đăng ký và tài khoản |
+| `cd frontend && npm run build && npm run lint` | **exit 0**; build cảnh báo bundle >500 kB, lint còn warnings (trong đó hai `set-state-in-effect` tại `AiReviewSettingsPanel.tsx`) |
+
+### Chưa kiểm
+
+| Check | Status | Ghi chú |
+|---|---|---|
+| Clone cuộc thi thật trên production | **chưa có** | Toàn bộ đợt nằm ở working tree, chưa deploy; cần một lượt E2E theo kế hoạch trước khi tin |
+| Process bị kill giữa lúc clone | **chưa kiểm** | Rollback không chạy khi process chết; có thể còn document/file mồ côi phải dọn tay theo log `clone=<id>` (giới hạn đã ghi trong ADR-050) |
+| Import AI giữa hai deployment khác khoá mã hoá | **không hỗ trợ** | Ciphertext chỉ dùng được trong cùng deployment (cùng `LLM_CONFIG_ENCRYPTION_KEY`); khác deployment phải nhập lại key |

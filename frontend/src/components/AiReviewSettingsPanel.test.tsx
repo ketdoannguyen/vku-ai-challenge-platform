@@ -7,10 +7,22 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AiReviewSettings } from "../api/aiReview";
+import type { AdminCompetition } from "../api/competitions";
 import { AiReviewSettingsPanel } from "./AiReviewSettingsPanel";
 
 const COMPETITION_ID = "64a000000000000000000001";
+const SOURCE_ID = "64a000000000000000000002";
 const SAVED_KEY = "sk-live-do-not-leak-me";
+
+/** Panel chỉ đọc `id` và `name` từ admin list nên fixture không cần dựng cả document cuộc thi. */
+function competition(id: string, name: string): AdminCompetition {
+  return { id, name } as AdminCompetition;
+}
+
+const ADMIN_COMPETITIONS = [
+  competition(SOURCE_ID, "Cuộc thi nguồn"),
+  competition(COMPETITION_ID, "Cuộc thi hiện tại"),
+];
 
 function settings(overrides: Partial<AiReviewSettings["config"]> = {}): AiReviewSettings {
   return {
@@ -62,7 +74,7 @@ interface Request {
 }
 
 /** Mock fetch ghi lại mọi request để test soi được payload đã gửi. */
-function mockApi(handler: (url: string, init: RequestInit) => Response) {
+function mockApi(handler: (url: string, init: RequestInit) => Response | Promise<Response>) {
   const requests: Request[] = [];
   vi.stubGlobal(
     "fetch",
@@ -89,24 +101,35 @@ function json(body: unknown, status = 200) {
 const CONFIG_URL = `/api/admin/competitions/${COMPETITION_ID}/ai-review`;
 const TEST_URL = `${CONFIG_URL}/test`;
 const KEY_URL = `${CONFIG_URL}/api-key`;
+const IMPORT_URL = `${CONFIG_URL}/import`;
+const COMPETITIONS_URL = "/api/admin/competitions";
 
 /**
- * Router của bốn lời gọi panel phát ra; mặc định trả cấu hình đã lưu và một probe thành công.
+ * Router của sáu lời gọi panel phát ra; mặc định trả cấu hình đã lưu và một probe thành công.
  *
  * Nó giữ vết xác minh giữa các request đúng như cột `verified_at` thật (ADR-043): probe bằng cấu
- * hình đã lưu thì ghi vết, xoá key thì vết hết hiệu lực, và mọi lần đọc cấu hình sau đó đều mang
- * theo vết ấy. Nhờ vậy test hỏi được câu "quay lại tab thì chip còn xanh không" mà không phải tự
- * dựng lại luật của server ở phía client.
+ * hình đã lưu thì ghi vết, xoá key hoặc nhập từ cuộc thi khác thì vết hết hiệu lực, và mọi lần
+ * đọc cấu hình sau đó đều mang theo vết ấy. Nhờ vậy test hỏi được câu "quay lại tab thì chip còn
+ * xanh không" mà không phải tự dựng lại luật của server ở phía client.
  */
 function route(overrides: {
   get?: () => Response;
   put?: () => Response;
   test?: () => Response;
   del?: () => Response;
+  competitions?: () => Response | Promise<Response>;
+  importConfig?: () => Response;
 }) {
+  // "Server" giữ cấu hình đang lưu; nhập từ cuộc thi khác thay thế nó bằng cấu hình của nguồn.
+  let stored = settings();
   let verifiedAt: string | null = null;
-  const current = () => settings({ verified_at: verifiedAt });
+  const publicConfig = () => ({ ...stored.config, verified_at: verifiedAt });
+  const view = () => ({ ...stored, config: publicConfig() });
+
   return (url: string, init: RequestInit) => {
+    if (url === COMPETITIONS_URL) {
+      return overrides.competitions?.() ?? json({ competitions: ADMIN_COMPETITIONS });
+    }
     if (url === TEST_URL) {
       if (overrides.test) return overrides.test();
       verifiedAt = "2026-09-22T10:00:00Z";
@@ -115,14 +138,20 @@ function route(overrides: {
     if (url === KEY_URL) {
       // Không còn key thì vân tay cấu hình đổi, nên vết cũ không còn nói được gì.
       verifiedAt = null;
-      return (
-        overrides.del?.() ?? json({ config: settings({ api_key_configured: false }).config })
-      );
+      stored = { ...stored, config: { ...stored.config, api_key_configured: false } };
+      return overrides.del?.() ?? json({ config: publicConfig() });
+    }
+    if (url === IMPORT_URL) {
+      if (overrides.importConfig) return overrides.importConfig();
+      // Nhập là thay thế toàn bộ: cấu hình nguồn về đích, còn dấu xác minh của đích bị xoá.
+      verifiedAt = null;
+      stored = settings({ base_url: "https://llm.source.test/v1", model: "source-model" });
+      return json({ config: publicConfig() });
     }
     if (url === CONFIG_URL && init.method === "PUT") {
-      return overrides.put?.() ?? json({ config: current().config });
+      return overrides.put?.() ?? json({ config: publicConfig() });
     }
-    return overrides.get?.() ?? json(current());
+    return overrides.get?.() ?? json(view());
   };
 }
 
@@ -433,4 +462,157 @@ test("hai tuỳ chọn hành vi đi thẳng vào payload", async () => {
     auto_review: false,
     participant_visible: false,
   });
+});
+
+test("danh sách nguồn lọc bỏ chính cuộc thi này và chưa chọn thì chưa nhập được", async () => {
+  mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  expect(await screen.findByRole("option", { name: "Cuộc thi nguồn" })).toBeTruthy();
+  expect(screen.queryByRole("option", { name: "Cuộc thi hiện tại" })).toBeNull();
+  expect(screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác")).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Nhập cấu hình" })).toBeDisabled();
+  const importField = screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác").closest(".form-field");
+  const connectionField = screen.getByLabelText("Base URL (OpenAI-compatible)").closest(".form-field");
+  expect(importField?.compareDocumentPosition(connectionField!)).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+});
+
+test("nhập cấu hình: xác nhận thay thế toàn bộ, gửi ID nguồn, nạp lại và nhắc kiểm tra kết nối", async () => {
+  const requests = mockApi(route({}));
+  renderPanel();
+  await screen.findByLabelText("API key");
+  await screen.findByRole("option", { name: "Cuộc thi nguồn" });
+
+  fireEvent.change(screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác"), {
+    target: { value: SOURCE_ID },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Nhập cấu hình" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "Nhập cấu hình AI" });
+  // Xác nhận phải nói rõ: thay thế toàn bộ kể cả API key, là bản sao độc lập, và phải xác minh lại.
+  expect(dialog).toHaveTextContent("Cuộc thi nguồn");
+  expect(dialog).toHaveTextContent("thay thế hoàn toàn");
+  expect(dialog).toHaveTextContent("API key");
+  expect(dialog).toHaveTextContent("bản sao độc lập");
+  expect(dialog).toHaveTextContent("Dấu xác minh kết nối sẽ bị xoá");
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nhập cấu hình" }));
+
+  await waitFor(() => expect(requests.some((item) => item.url === IMPORT_URL)).toBe(true));
+  const call = requests.find((item) => item.url === IMPORT_URL)!;
+  expect(call.method).toBe("POST");
+  // Chỉ ID nguồn đi qua trình duyệt: key chỉ được server sao chép nội bộ.
+  expect(call.body).toEqual({ source_competition_id: SOURCE_ID });
+
+  // Nạp lại mang cấu hình nguồn về form, chip về chưa xác minh, kèm nhắc kiểm tra kết nối.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Base URL (OpenAI-compatible)")).toHaveValue(
+      "https://llm.source.test/v1",
+    ),
+  );
+  expect(screen.getByLabelText("Model")).toHaveValue("source-model");
+  expect(screen.getByText("Chưa xác minh")).toBeTruthy();
+  expect(screen.getByText(/Đã nhập cấu hình AI từ "Cuộc thi nguồn"/)).toBeTruthy();
+  expect(screen.getByText(/kiểm tra kết nối/)).toBeTruthy();
+  // Key không về trình duyệt: ô nhập vẫn rỗng, chỉ biết nguồn có key.
+  const keyInput = screen.getByLabelText("API key") as HTMLInputElement;
+  expect(keyInput.value).toBe("");
+  expect(keyInput.placeholder).toBe("Đã cấu hình");
+});
+
+test("nhập thất bại: modal giữ mở, hiện lỗi và cấu hình đích không đổi", async () => {
+  const requests = mockApi(
+    route({
+      importConfig: () =>
+        json(
+          {
+            error: {
+              code: "AI_IMPORT_SOURCE_UNCONFIGURED",
+              message: "Cuộc thi nguồn chưa có cấu hình AI.",
+            },
+          },
+          422,
+        ),
+    }),
+  );
+  renderPanel();
+  await screen.findByLabelText("API key");
+  await screen.findByRole("option", { name: "Cuộc thi nguồn" });
+
+  fireEvent.change(screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác"), {
+    target: { value: SOURCE_ID },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Nhập cấu hình" }));
+  const dialog = await screen.findByRole("dialog", { name: "Nhập cấu hình AI" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nhập cấu hình" }));
+
+  expect(await within(dialog).findByText("Cuộc thi nguồn chưa có cấu hình AI.")).toBeTruthy();
+  expect(screen.getByRole("dialog", { name: "Nhập cấu hình AI" })).toBeTruthy();
+  // Đích chưa bị sửa: form vẫn là cấu hình cũ và không có thông báo thành công nào.
+  expect(screen.getByLabelText("Base URL (OpenAI-compatible)")).toHaveValue(
+    "https://api.example.com/v1",
+  );
+  expect(screen.queryByText(/Đã nhập cấu hình AI/)).toBeNull();
+  expect(requests.filter((item) => item.url === IMPORT_URL)).toHaveLength(1);
+});
+
+test("đang tải danh sách nguồn thì select khoá và báo đang tải", async () => {
+  let release!: (value: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  mockApi(route({ competitions: () => pending }));
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  const select = screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác");
+  expect(select).toBeDisabled();
+  expect(screen.getByRole("option", { name: "Đang tải danh sách..." })).toBeTruthy();
+
+  release(json({ competitions: ADMIN_COMPETITIONS }));
+  expect(await screen.findByRole("option", { name: "Cuộc thi nguồn" })).toBeTruthy();
+  expect(select).not.toBeDisabled();
+});
+
+test("không có cuộc thi nào khác thì select khoá và nói rõ vì sao", async () => {
+  mockApi(
+    route({
+      competitions: () =>
+        json({ competitions: [competition(COMPETITION_ID, "Cuộc thi hiện tại")] }),
+    }),
+  );
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  expect(await screen.findByRole("option", { name: "Không có cuộc thi nào khác" })).toBeTruthy();
+  expect(screen.getByLabelText("Nhập cấu hình AI từ cuộc thi khác")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Nhập cấu hình" })).toBeDisabled();
+});
+
+test("tải danh sách nguồn lỗi thì hiện lỗi và cho thử lại", async () => {
+  let attempts = 0;
+  mockApi(
+    route({
+      competitions: () => {
+        attempts += 1;
+        return attempts === 1
+          ? json(
+              { error: { code: "UNKNOWN", message: "Không tải được danh sách cuộc thi." } },
+              500,
+            )
+          : json({ competitions: ADMIN_COMPETITIONS });
+      },
+    }),
+  );
+  renderPanel();
+  await screen.findByLabelText("API key");
+
+  expect(await screen.findByText("Không tải được danh sách cuộc thi.")).toBeTruthy();
+  expect(screen.getByRole("option", { name: "Không tải được danh sách nguồn" })).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Thử lại" }));
+  expect(await screen.findByRole("option", { name: "Cuộc thi nguồn" })).toBeTruthy();
 });

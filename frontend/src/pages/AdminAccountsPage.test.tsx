@@ -9,6 +9,17 @@ const ACCOUNT = {
   name: "Đội Một",
   role: "participant",
   active: true,
+  pending: false,
+};
+
+/** Tài khoản tự đăng ký chờ duyệt (ADR-049): `active: false` + marker `pending`. */
+const PENDING_ACCOUNT = {
+  id: "64a000000000000000000002",
+  email: "cho.duyet@vku.vn",
+  name: "Chờ Duyệt",
+  role: "participant",
+  active: false,
+  pending: true,
 };
 
 const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -33,17 +44,18 @@ function manyAccounts(total: number) {
 const json = (body: unknown) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 
-/** Thống kê toàn hệ thống: tính trên TOÀN BỘ dataset, không phụ thuộc q/limit/offset. */
+/** Thống kê toàn hệ thống: tính trên TOÀN BỘ dataset, không phụ thuộc q/status/limit/offset. */
 function statsOf(accounts: Array<Record<string, unknown>>) {
   return {
     total: accounts.length,
     admin: accounts.filter((a) => a.role === "admin").length,
     participant: accounts.filter((a) => a.role === "participant").length,
     active: accounts.filter((a) => a.active !== false).length,
+    pending: accounts.filter((a) => a.pending === true).length,
   };
 }
 
-/** Giả lập `offset`/`q`/`limit` như backend thật để test được chuyển trang và tìm kiếm. */
+/** Giả lập `offset`/`q`/`status`/`limit` như backend thật để test chuyển trang và lọc. */
 function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
   calls.length = 0;
   vi.stubGlobal(
@@ -53,16 +65,23 @@ function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
       calls.push({ url, init });
       if (init?.method === "DELETE") return json({ deleted: true });
       if (init?.method === "PATCH") return json({ ...ACCOUNT, active: false });
+      if (init?.method === "POST") return json({ ...ACCOUNT, pending: false, active: true });
       const params = new URL(url, "http://localhost").searchParams;
       const q = (params.get("q") ?? "").toLowerCase();
+      const status = params.get("status");
       const offset = Number(params.get("offset") ?? 0);
       const limit = Number(params.get("limit") ?? 50);
-      const matched = q
-        ? accounts.filter(
-            (a) =>
-              String(a.email).toLowerCase().includes(q) || String(a.name).toLowerCase().includes(q),
-          )
-        : accounts;
+      let matched = accounts.filter((a) =>
+        status === "pending" ? a.pending === true
+          : status === "active" ? a.pending !== true && a.active !== false
+          : status === "disabled" ? a.pending !== true && a.active === false : true,
+      );
+      if (q) {
+        matched = matched.filter(
+          (a) =>
+            String(a.email).toLowerCase().includes(q) || String(a.name).toLowerCase().includes(q),
+        );
+      }
       return json({
         accounts: matched.slice(offset, offset + limit),
         total: matched.length,
@@ -273,30 +292,37 @@ test("trang cuối rỗng đi thì lùi về trang còn dữ liệu", async () =
   expect(screen.queryByText("Không tìm thấy tài khoản nào.")).toBeNull();
 });
 
-/** Dataset 230 dòng trộn vai trò/trạng thái: page đầu chỉ có 50 dòng nên nếu KPI
- *  đọc từ page thay vì aggregate thì các số dưới đây sẽ sai. */
+/** Dataset 230 dòng trộn vai trò/trạng thái/chờ duyệt: page đầu chỉ có 50 dòng nên nếu
+ *  KPI đọc từ page thay vì aggregate thì các số dưới đây sẽ sai. */
 function mixedAccounts() {
-  return manyAccounts(230).map((account, i) => ({
-    ...account,
-    role: i % 25 === 0 ? "admin" : "participant",
-    active: i % 10 !== 0,
-  }));
+  return manyAccounts(230).map((account, i) => {
+    const pending = i % 46 === 5;
+    return {
+      ...account,
+      role: i % 25 === 0 ? "admin" : "participant",
+      active: !pending && i % 10 !== 0,
+      pending,
+    };
+  });
 }
 
 function statsRegion() {
   return within(screen.getByRole("region", { name: "Tổng quan tài khoản" }));
 }
 
-test("bốn ô thống kê đọc aggregate toàn hệ thống, không phải 50 dòng của page đầu", async () => {
+test("năm ô thống kê đọc aggregate toàn hệ thống, không phải 50 dòng của page đầu", async () => {
   mockApi(mixedAccounts());
   renderPage();
   await screen.findByText("team0@vku.vn");
 
-  // 230 dòng: 10 admin (i chia hết cho 25), 220 thí sinh, 23 dòng bị vô hiệu.
+  // 230 dòng: 10 admin (i chia hết cho 25), 220 thí sinh, 28 dòng bị vô hiệu
+  // (i chia hết cho 10 hoặc đang chờ duyệt), 5 dòng chờ duyệt.
   expect(statsRegion().getByText("230")).toBeTruthy();
   expect(statsRegion().getByText("10")).toBeTruthy();
   expect(statsRegion().getByText("220")).toBeTruthy();
-  expect(statsRegion().getByText("207")).toBeTruthy();
+  expect(statsRegion().getByText("202")).toBeTruthy();
+  expect(statsRegion().getByText("Chờ duyệt")).toBeTruthy();
+  expect(statsRegion().getByText("5")).toBeTruthy();
 });
 
 test("tìm kiếm không làm đổi thống kê toàn hệ thống", async () => {
@@ -308,16 +334,166 @@ test("tìm kiếm không làm đổi thống kê toàn hệ thống", async () =
   expect(await screen.findByText("team12@vku.vn")).toBeTruthy();
 
   expect(statsRegion().getByText("230")).toBeTruthy();
-  expect(statsRegion().getByText("207")).toBeTruthy();
+  expect(statsRegion().getByText("202")).toBeTruthy();
+  expect(statsRegion().getByText("5")).toBeTruthy();
 });
 
-test("bảng giữ đủ năm cột trong vùng cuộn focus được", async () => {
+test("lọc Chờ duyệt: gửi status, reset offset và giữ nguyên khi đổi từ khóa", async () => {
+  mockApi([
+    ...manyAccounts(60),
+    { ...PENDING_ACCOUNT, id: "pending-1", email: "p1@vku.vn", name: "P1" },
+    { ...PENDING_ACCOUNT, id: "pending-2", email: "p2@vku.vn", name: "P2" },
+  ]);
+  renderPage();
+  await screen.findByText("team0@vku.vn");
+
+  // Đang ở trang 2 thì bật lọc: phải quay về trang đầu của tập đã lọc.
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await screen.findByText("team50@vku.vn");
+  fireEvent.click(screen.getByRole("button", { name: "Chờ duyệt" }));
+
+  expect(await screen.findByText("p1@vku.vn")).toBeTruthy();
+  expect(screen.queryByText("team0@vku.vn")).toBeNull();
+  expect(calls.at(-1)?.url).toContain("status=pending");
+  expect(calls.at(-1)?.url).toContain("offset=0");
+  expect(screen.getByRole("button", { name: "Chờ duyệt" })).toHaveAttribute("aria-pressed", "true");
+
+  // Đổi từ khóa khi đang lọc: bộ lọc phải được giữ trong query mới.
+  fireEvent.change(screen.getByLabelText("Tìm tài khoản"), { target: { value: "p1" } });
+  await waitFor(() => expect(calls.at(-1)?.url).toContain("q=p1"));
+  expect(calls.at(-1)?.url).toContain("status=pending");
+  expect(await screen.findByText("p1@vku.vn")).toBeTruthy();
+
+  // Tắt lọc: không còn tham số lọc, từ khóa vẫn giữ.
+  fireEvent.click(screen.getByRole("button", { name: "Tất cả" }));
+  await waitFor(() => expect(calls.at(-1)?.url).not.toContain("status="));
+  expect(await screen.findByText("p1@vku.vn")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Chờ duyệt" })).toHaveAttribute("aria-pressed", "false");
+});
+
+test("lọc Chờ duyệt không có kết quả: câu rỗng riêng và Xóa bộ lọc tắt lọc", async () => {
+  mockApi([ACCOUNT]);
+  renderPage();
+  await screen.findByText("team@vku.vn");
+
+  fireEvent.click(screen.getByRole("button", { name: "Chờ duyệt" }));
+  expect(await screen.findByText("Không có tài khoản nào đang chờ duyệt.")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Xóa bộ lọc" }));
+  expect(await screen.findByText("team@vku.vn")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Chờ duyệt" })).toHaveAttribute("aria-pressed", "false");
+  expect(calls.at(-1)?.url).not.toContain("status=");
+});
+
+test("lọc Hoạt động và Vô hiệu hóa phân biệt chờ duyệt", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT, { ...ACCOUNT, id: "disabled", email: "disabled@vku.vn", active: false }]);
+  renderPage();
+  await screen.findByText("team@vku.vn");
+  fireEvent.click(screen.getByRole("button", { name: "Hoạt động" }));
+  await waitFor(() => expect(calls.at(-1)?.url).toContain("status=active"));
+  expect(screen.queryByText("cho.duyet@vku.vn")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Đã vô hiệu hóa" }));
+  expect(await screen.findByText("disabled@vku.vn")).toBeTruthy();
+  expect(calls.at(-1)?.url).toContain("status=disabled");
+  expect(screen.queryByText("cho.duyet@vku.vn")).toBeNull();
+});
+
+test("hàng chờ duyệt: badge riêng, chỉ có Duyệt và Xóa", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("cho.duyet@vku.vn");
+
+  const region = screen.getByRole("region", { name: "Bảng tài khoản" });
+  const row = within(region).getByText("cho.duyet@vku.vn").closest("tr") as HTMLElement;
+  // Pending có `active: false` nhưng phải hiện "Chờ duyệt", không phải "Vô hiệu".
+  expect(within(row).getByText("Chờ duyệt")).toBeTruthy();
+  expect(within(row).queryByText("Vô hiệu")).toBeNull();
+  expect(within(row).getByRole("button", { name: "Duyệt" })).toBeTruthy();
+  expect(within(row).getByRole("button", { name: "Xóa" })).toBeTruthy();
+  expect(within(row).queryByRole("button", { name: "Đặt lại MK" })).toBeNull();
+  expect(within(row).queryByRole("button", { name: "Kích hoạt" })).toBeNull();
+  expect(within(row).queryByRole("button", { name: "Vô hiệu hóa" })).toBeNull();
+});
+
+test("duyệt tài khoản: xác nhận rồi gọi POST /approve và tải lại danh sách", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("cho.duyet@vku.vn");
+
+  fireEvent.click(screen.getByRole("button", { name: "Duyệt" }));
+  const dialog = screen.getByRole("dialog", { name: "Duyệt tài khoản" });
+  expect(calls.some((call) => call.init?.method === "POST")).toBe(false);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Duyệt" }));
+  await waitFor(() => {
+    expect(
+      calls.some(
+        (call) =>
+          call.init?.method === "POST" &&
+          call.url.includes(`/admin/accounts/${PENDING_ACCOUNT.id}/approve`),
+      ),
+    ).toBe(true);
+  });
+  expect(await screen.findByText("Đã duyệt tài khoản cho.duyet@vku.vn.")).toBeTruthy();
+  // Sau khi duyệt, danh sách được tải lại (thêm một GET ngoài lần tải đầu).
+  await waitFor(() =>
+    expect(calls.filter((call) => call.init?.method === undefined).length).toBeGreaterThan(1),
+  );
+});
+
+test("duyệt tài khoản đã bị người khác duyệt: 409 hiện trong modal, modal vẫn mở", async () => {
+  calls.length = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: "ACCOUNT_NOT_PENDING",
+              message: "Tài khoản không ở trạng thái chờ duyệt.",
+            },
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return json({
+        accounts: [PENDING_ACCOUNT],
+        total: 1,
+        limit: 50,
+        offset: 0,
+        stats: statsOf([PENDING_ACCOUNT]),
+      });
+    }),
+  );
+  renderPage();
+  await screen.findByText("cho.duyet@vku.vn");
+
+  fireEvent.click(screen.getByRole("button", { name: "Duyệt" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Duyệt tài khoản" })).getByRole("button", {
+      name: "Duyệt",
+    }),
+  );
+
+  expect(await screen.findByText("Tài khoản không ở trạng thái chờ duyệt.")).toBeTruthy();
+  // Modal còn nguyên để admin đọc lý do và tài khoản không bị đổi trạng thái trên UI.
+  expect(screen.getByRole("dialog", { name: "Duyệt tài khoản" })).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Bảng tài khoản" })).getByText("Chờ duyệt"),
+  ).toBeTruthy();
+});
+
+test("bảng giữ đủ sáu cột trong vùng cuộn focus được", async () => {
   mockApi();
   renderPage();
   await screen.findByText("team@vku.vn");
 
   const region = screen.getByRole("region", { name: "Bảng tài khoản" });
   expect(within(region).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "",
     "Email",
     "Tên",
     "Vai trò",
@@ -428,6 +604,128 @@ test("admin không thể tự xóa: nút bị khóa kèm lý do và không phát
   fireEvent.click(remove);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(calls.some((call) => call.init?.method === "DELETE")).toBe(false);
+});
+
+test("chọn trang hiện tại, chọn một phần, và bỏ chọn khi chuyển trang/lọc", async () => {
+  mockApi(manyAccounts(51));
+  renderPage();
+  await screen.findByText("team0@vku.vn");
+  const selectAll = screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }) as HTMLInputElement;
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn team0@vku.vn" }));
+  expect(selectAll.indeterminate).toBe(true);
+  expect(screen.getByText("Đã chọn 1 tài khoản")).toBeTruthy();
+  fireEvent.click(selectAll);
+  expect(screen.getByText("Đã chọn 50 tài khoản")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await screen.findByText("team50@vku.vn");
+  expect(screen.queryByText(/Đã chọn 50 tài khoản/)).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn team50@vku.vn" }));
+  fireEvent.click(screen.getByRole("button", { name: "Chờ duyệt" }));
+  await screen.findByText("Không có tài khoản nào đang chờ duyệt.");
+  expect(screen.queryByText(/Đã chọn 1 tài khoản/)).toBeNull();
+});
+
+test("không chọn được tài khoản đang đăng nhập để xóa hàng loạt", async () => {
+  mockCurrentAccountId = ACCOUNT.id;
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("team@vku.vn");
+  expect(screen.getByRole("checkbox", { name: "Chọn team@vku.vn" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }));
+  expect(screen.getByText("Đã chọn 1 tài khoản")).toBeTruthy();
+});
+
+test("chỉ duyệt được khi tất cả tài khoản đã chọn đang chờ duyệt", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("cho.duyet@vku.vn");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }));
+  expect(screen.getByRole("button", { name: "Duyệt đã chọn" })).toBeDisabled();
+  expect(screen.getByText(/Chỉ duyệt hàng loạt tài khoản chờ duyệt/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Xóa đã chọn" })).not.toBeDisabled();
+});
+
+test("duyệt nhiều tài khoản tuần tự và báo lỗi từng email", async () => {
+  const accounts = [
+    { ...PENDING_ACCOUNT, id: "p1", email: "p1@vku.vn" },
+    { ...PENDING_ACCOUNT, id: "p2", email: "p2@vku.vn" },
+  ];
+  mockApi(accounts);
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "POST" && String(input).includes("/p1/approve")) {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ error: { code: "ACCOUNT_NOT_PENDING", message: "Không còn chờ duyệt." } }), { status: 409, headers: { "Content-Type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }));
+  renderPage();
+  await screen.findByText("p1@vku.vn");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }));
+  fireEvent.click(screen.getByRole("button", { name: "Duyệt đã chọn" }));
+  const dialog = screen.getByRole("dialog", { name: "Duyệt tài khoản đã chọn" });
+  expect(within(dialog).getByText("p1@vku.vn")).toBeTruthy();
+  expect(within(dialog).getByText("p2@vku.vn")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Duyệt 2 tài khoản" }));
+  expect(await within(dialog).findByText(/Đã duyệt 1\/2 tài khoản/)).toBeTruthy();
+  expect(within(dialog).getByText(/p1@vku.vn: Không còn chờ duyệt/)).toBeTruthy();
+  const posts = calls.filter((call) => call.init?.method === "POST");
+  expect(posts.map((call) => call.url)).toEqual(["/api/admin/accounts/p1/approve", "/api/admin/accounts/p2/approve"]);
+  expect(calls.filter((call) => call.init?.method === undefined)).toHaveLength(2);
+});
+
+test("xóa tài khoản mọi trạng thái cần gõ XÓA và giữ guard email từng dòng", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("cho.duyet@vku.vn");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }));
+  fireEvent.click(screen.getByRole("button", { name: "Xóa đã chọn" }));
+  const dialog = screen.getByRole("dialog", { name: "Xóa tài khoản đã chọn" });
+  const confirm = within(dialog).getByRole("button", { name: "Xóa 2 tài khoản" });
+  expect(confirm).toBeDisabled();
+  fireEvent.change(within(dialog).getByLabelText(/Gõ XÓA/), { target: { value: "XÓA" } });
+  fireEvent.click(confirm);
+  expect(await within(dialog).findByText(/Đã xóa 2\/2 tài khoản/)).toBeTruthy();
+  expect(calls.filter((call) => call.init?.method === "DELETE").map((call) => call.url)).toEqual([
+    `/api/admin/accounts/${ACCOUNT.id}?confirm_email=team%40vku.vn`,
+    `/api/admin/accounts/${PENDING_ACCOUNT.id}?confirm_email=cho.duyet%40vku.vn`,
+  ]);
+});
+
+test("xóa hàng loạt tiếp tục khi một tài khoản có bài đã chấm và hiển thị lý do", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === "DELETE" && String(input).includes(ACCOUNT.id)) {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify({ error: { code: "ACCOUNT_HAS_SUBMISSIONS", message: "Đã có bài được chấm." } }), {
+        status: 409, headers: { "Content-Type": "application/json" },
+      });
+    }
+    return originalFetch(input, init);
+  }));
+  renderPage();
+  await screen.findByText("team@vku.vn");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn tất cả trên trang" }));
+  fireEvent.click(screen.getByRole("button", { name: "Xóa đã chọn" }));
+  const dialog = screen.getByRole("dialog", { name: "Xóa tài khoản đã chọn" });
+  fireEvent.change(within(dialog).getByLabelText(/Gõ XÓA/), { target: { value: "XÓA" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Xóa 2 tài khoản" }));
+  expect(await within(dialog).findByText(/Đã xóa 1\/2 tài khoản/)).toBeTruthy();
+  expect(within(dialog).getByText(/team@vku.vn: Đã có bài được chấm/)).toBeTruthy();
+  expect(calls.filter((call) => call.init?.method === "DELETE")).toHaveLength(2);
+  expect(calls.filter((call) => !call.init?.method)).toHaveLength(2);
+});
+
+test("đổi từ khóa bỏ chọn trước khi hết debounce; chọn lại chỉ khi thấy trang mới", async () => {
+  mockApi([ACCOUNT, PENDING_ACCOUNT]);
+  renderPage();
+  await screen.findByText("team@vku.vn");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Chọn team@vku.vn" }));
+  fireEvent.change(screen.getByLabelText("Tìm tài khoản"), { target: { value: "cho.duyet" } });
+  expect(screen.queryByRole("button", { name: "Xóa đã chọn" })).toBeNull();
+  expect(await screen.findByText("cho.duyet@vku.vn")).toBeTruthy();
+  await waitFor(() => expect(calls.at(-1)?.url).toContain("q=cho.duyet"));
 });
 
 test("tiêu đề tab đặt theo tên trang", async () => {

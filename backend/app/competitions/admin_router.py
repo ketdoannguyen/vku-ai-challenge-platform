@@ -1,21 +1,18 @@
 """Admin competition API: list (kể cả draft), create, detail, edit, publish, close, reopen, clone, delete."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query, Request
 from bson import ObjectId
 from bson.errors import InvalidId
-from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.auth.dependencies import AdminAccount
-from app.competitions import service
+from app.competitions import clone as clone_service, service
 from app.core.config import get_settings
 from app.core.errors import api_error
 from app.core.slugs import is_valid_slug
-from app.scoring import models, revisions
-from app.scoring import storage as scoring_storage
 from app.scoring.readiness import blocked_reason, check_readiness
 
 logger = logging.getLogger(__name__)
@@ -257,24 +254,22 @@ async def _transition(
 
 @router.post("/{competition_id}/clone", status_code=201)
 async def clone_competition(competition_id: str, request: Request, admin: AdminAccount) -> dict:
-    """Clone config baseline thành draft mới. KHÔNG copy status/dates/submissions/memberships (ADR-009).
-
-    Bộ chấm v2 (source, schema, hợp đồng metric) được copy sang; ground truth và bằng chứng chạy thử
-    thì không - xem `_copy_scoring_config`.
-    """
+    """Clone đề, bộ chấm và AI key thành draft riêng; không mang lịch sử hay mã tham gia."""
     db = request.app.state.mongo.db
     source = await _get_competition_or_404(db, competition_id)
+    data_snapshot = await clone_service.snapshot(db, source, admin_id=admin["_id"])
     for attempt in range(1, _CLONE_SLUG_ATTEMPTS + 1):
         # Ứng viên phải hợp lệ và nằm trong giới hạn trước khi tra DB; slug gốc dài có thể cắt cụt.
         slug = _clone_slug_candidate(source["slug"], attempt)
         if not is_valid_slug(slug) or await service.find_competition_by_slug(db, slug) is not None:
             continue
+        now = datetime.now(timezone.utc)
         data = service.CompetitionCreate(
             slug=slug,
             name=f"{source['name']} (bản sao)",
             short_description=source.get("short_description", ""),
-            start_at=datetime.now(timezone.utc),
-            end_at=datetime.now(timezone.utc).replace(year=datetime.now(timezone.utc).year + 1),
+            start_at=now,
+            end_at=now + timedelta(days=365),
             join_mode=source["join_mode"],
             primary_metric=source["primary_metric"],
             quota_per_day=source["quota_per_day"],
@@ -285,62 +280,10 @@ async def clone_competition(competition_id: str, request: Request, admin: AdminA
             clone = await service.insert_competition(db, data, created_by=admin["email"])
         except DuplicateKeyError:
             continue  # Request khác vừa chiếm slug - thử ứng viên kế tiếp.
-        clone = await _copy_scoring_config(db, source, clone)
+        clone = await clone_service.populate(db, clone, data_snapshot)
         logger.info("Admin %s cloned competition %s -> %s", admin["email"], source["slug"], slug)
         return _admin_detail(clone)
     raise api_error(409, "SLUG_EXISTS", _SLUG_EXISTS_MESSAGE)
-
-
-async def _copy_scoring_config(db, source: dict, clone: dict) -> dict:
-    """Copy bộ chấm v2 sang bản sao: source, tên, schema hai CSV và hợp đồng metric.
-
-    Ground truth, bằng chứng chạy thử và trạng thái khóa không đi theo bản sao (ADR-009): bản sao là
-    draft, admin tự tải ground truth riêng và chạy thử lại trước khi publish. Source được ghi lại
-    dưới thư mục của bản sao vì xoá cuộc thi gốc là xoá luôn file riêng tư của nó.
-
-    Bộ chấm chỉ được copy khi đọc lại được source và hash còn khớp; nếu không, bản sao giữ nguyên
-    trạng thái chưa cấu hình thay vì mang theo một cấu hình không chạy được.
-    """
-    config = models.stored_config_or_none(source)
-    if config is None or not config.evaluator.source_path:
-        return clone
-    try:
-        raw = scoring_storage.read_evaluator_source(config.evaluator)
-        source_code = raw.decode("utf-8")
-    except (KeyError, OSError, ValueError, UnicodeDecodeError):
-        logger.warning("Clone bỏ qua bộ chấm: không đọc được source của %s", source["slug"])
-        return clone
-    if config.evaluator.source_sha256 != revisions.sha256_bytes(raw):
-        logger.warning("Clone bỏ qua bộ chấm: source của %s không khớp hash", source["slug"])
-        return clone
-
-    relative = scoring_storage.write_evaluator_source(
-        clone, source_code, sha256=config.evaluator.source_sha256
-    )
-    return await db[service.COMPETITIONS_COLLECTION].find_one_and_update(
-        {"_id": clone["_id"]},
-        {
-            "$set": {
-                "scoring_config": {
-                    "version": 2,
-                    "revision": 0,
-                    "input_schema": config.input_schema.model_dump(mode="json"),
-                    "evaluator": {
-                        **config.evaluator.model_dump(mode="json"),
-                        "source_path": relative,
-                        # Runtime là bằng chứng của lượt chạy thử, không phải thuộc tính của source.
-                        "runtime_id": None,
-                    },
-                    "output_contract": (
-                        config.output_contract.model_dump(mode="json")
-                        if config.output_contract
-                        else None
-                    ),
-                }
-            }
-        },
-        return_document=ReturnDocument.AFTER,
-    )
 
 
 def _clone_slug_candidate(base_slug: str, attempt: int) -> str:

@@ -96,6 +96,99 @@ def test_ai_review_settings_require_an_admin_session(client, ai_env):
     assert client.get(_url(client, competition["id"])).status_code == 403
 
 
+def test_import_copies_key_without_leaking_it_and_resets_verification(client, ai_env, provider_stub):
+    source = _competition(client, slug="import-source")
+    target = _competition(client, slug="import-target")
+    assert client.put(_url(client, source["id"]), json=VALID_CONFIG).status_code == 200
+    assert _probe(client, source["id"]) == 200
+    assert _verified_at(client, source["id"]) is not None
+    assert client.put(
+        _url(client, target["id"]),
+        json={**VALID_CONFIG, "api_key": "previous-target-key", "model": "old-model"},
+    ).status_code == 200
+
+    result = client.post(
+        f"{_url(client, target['id'])}/import",
+        json={"source_competition_id": source["id"]},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["config"]["api_key_configured"] is True
+    assert result.json()["config"]["verified_at"] is None
+    assert API_KEY not in result.text
+    assert "api_key_ciphertext" not in result.text
+    assert _stored_config(client, target["id"])["api_key_ciphertext"] == _stored_config(client, source["id"])["api_key_ciphertext"]
+    assert _probe(client, target["id"]) == 200
+    assert client.put(_url(client, source["id"]), json={"model": "changed-model"}).status_code == 200
+    assert _stored_config(client, target["id"])["model"] == VALID_CONFIG["model"]
+
+
+def test_clone_copies_ai_api_key_but_not_verification(client, ai_env, provider_stub):
+    source = _competition(client, slug="clone-ai-source")
+    assert client.put(_url(client, source["id"]), json=VALID_CONFIG).status_code == 200
+    assert _probe(client, source["id"]) == 200
+    copy = client.post(f"/api/admin/competitions/{source['id']}/clone")
+    assert copy.status_code == 201, copy.text
+    copied = copy.json()
+    assert copied["status"] == "draft"
+    assert copied["join_code_configured"] is False
+    assert API_KEY not in copy.text
+    stored = _stored_config(client, copied["id"])
+    assert stored["api_key_ciphertext"] == _stored_config(client, source["id"])["api_key_ciphertext"]
+    assert stored.get("verified_at") is None
+    assert _verified_at(client, copied["id"]) is None
+    assert _probe(client, copied["id"]) == 200
+
+
+def test_clone_rejects_unreadable_ai_key_without_creating_draft(client, ai_env, monkeypatch):
+    source = _competition(client, slug="clone-ai-unreadable")
+    assert client.put(_url(client, source["id"]), json=VALID_CONFIG).status_code == 200
+    monkeypatch.setenv("LLM_CONFIG_ENCRYPTION_KEY", Fernet.generate_key().decode("ascii"))
+    get_settings.cache_clear()
+    result = client.post(f"/api/admin/competitions/{source['id']}/clone")
+    assert result.status_code == 409
+    assert result.json()["error"]["code"] == "CLONE_SOURCE_INVALID"
+    assert len(client.get("/api/admin/competitions").json()["competitions"]) == 1
+
+
+def test_import_rejects_unconfigured_source_without_changing_target(client, ai_env):
+    source = _competition(client, slug="empty-import-source")
+    target = _competition(client, slug="empty-import-target")
+    assert client.put(_url(client, target["id"]), json=VALID_CONFIG).status_code == 200
+    before = _stored_config(client, target["id"])
+    response = client.post(
+        f"{_url(client, target['id'])}/import",
+        json={"source_competition_id": source["id"]},
+    )
+    assert response.status_code == 422
+    assert _stored_config(client, target["id"]) == before
+
+
+def test_import_keyless_config_removes_target_key(client, ai_env):
+    source = _competition(client, slug="import-keyless-source")
+    target = _competition(client, slug="import-keyless-target")
+    assert client.put(_url(client, source["id"]), json={
+        "enabled": False, "base_url": VALID_CONFIG["base_url"], "model": "source-model",
+    }).status_code == 200
+    assert client.put(_url(client, target["id"]), json=VALID_CONFIG).status_code == 200
+    result = client.post(
+        f"{_url(client, target['id'])}/import",
+        json={"source_competition_id": source["id"]},
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["config"]["api_key_configured"] is False
+    assert "api_key_ciphertext" not in _stored_config(client, target["id"])
+    assert _stored_config(client, target["id"])["model"] == "source-model"
+
+
+def test_import_requires_admin_and_distinct_existing_source(client, ai_env):
+    source = _competition(client, slug="import-guard-source")
+    path = f"{_url(client, source['id'])}/import"
+    assert client.post(path, json={"source_competition_id": source["id"]}).status_code == 422
+    assert client.post(path, json={"source_competition_id": "000000000000000000000000"}).status_code == 404
+    login(client, *PARTICIPANT_CREDENTIALS)
+    assert client.post(path, json={"source_competition_id": source["id"]}).status_code == 403
+
+
 def test_get_reports_disabled_defaults_and_runtime_flags(client, ai_env):
     competition = _competition(client)
     body = client.get(_url(client, competition["id"])).json()
