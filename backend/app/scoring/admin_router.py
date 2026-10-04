@@ -65,6 +65,72 @@ async def configure_scoring(
     return await _save_v1(db, competition, body, admin)
 
 
+@router.put("/{competition_id}/scoring/result-display")
+async def update_result_display(
+    competition_id: str,
+    body: models.ResultDisplayRequest,
+    request: Request,
+    admin: AdminAccount,
+) -> dict:
+    """Sửa cách hiển thị hợp đồng kết quả của cuộc thi đang publish, kể cả sau khi đã có điểm.
+
+    Chỉ tên hiển thị, số thập phân và quyền xem đổi được: khóa metric, metric chính và chiều xếp
+    hạng bám theo bộ chấm và điểm đã chấm nên không được diễn giải lại. Đây là đường duy nhất còn
+    mở sau khi khóa, nên nó tự kiểm tra trạng thái thay vì đi qua `_ensure_unlocked`.
+    """
+    db = request.app.state.mongo.db
+    competition = await _get_competition_or_404(db, competition_id)
+    if competition["status"] != "published":
+        raise api_error(
+            422,
+            "SCORING_LOCKED",
+            "Chỉ sửa được cách hiển thị metric khi cuộc thi đang publish.",
+        )
+    config = models.stored_config_or_none(competition)
+    contract = config.output_contract if config else None
+    if contract is None:
+        raise api_error(
+            422,
+            "SCORING_CONFIG_REQUIRED",
+            "Cần khai báo metric trước khi sửa cách hiển thị.",
+        )
+    _require_revision(config.revision, body.expected_revision)
+    if [metric.key for metric in body.metrics] != [metric.key for metric in contract.metrics]:
+        raise api_error(
+            422,
+            "SCORING_LOCKED",
+            "Khóa metric do bộ chấm quyết định; chỉ sửa được tên hiển thị, số thập phân và quyền xem.",
+        )
+    updated_contract = models.OutputContract(
+        metrics=body.metrics,
+        primary_metric=contract.primary_metric,
+        higher_is_better=contract.higher_is_better,
+        visible_metrics=body.visible_metrics,
+    )
+    try:
+        models.validate_output_contract(updated_contract)
+    except ScoringValidationError as exc:
+        raise api_error(422, exc.code, exc.message)
+
+    updated = config.model_copy(
+        update={
+            "revision": config.revision + 1,
+            # Giữ vết xác minh: tập khóa không đổi nên bằng chứng chạy thử còn hiệu lực.
+            "output_contract": updated_contract,
+        }
+    )
+    await _update_published_display(
+        db,
+        competition,
+        expected_revision=body.expected_revision,
+        sets={"scoring_config": updated.model_dump(mode="json")},
+    )
+    logger.info(
+        "Admin %s edited result display competition=%s", admin["email"], competition["_id"]
+    )
+    return await _scoring_view(db, await _reload(db, competition))
+
+
 @router.put("/{competition_id}/ground-truth")
 async def upload_ground_truth(
     competition_id: str,
@@ -388,6 +454,33 @@ async def _update(
         {"$set": {**sets, "updated_at": revisions.utc_now()}},
     )
     if result.matched_count == 0:
+        raise api_error(
+            409,
+            REVISION_CONFLICT,
+            "Cấu hình đã được thay đổi ở nơi khác, tải lại trang rồi thử lại.",
+        )
+
+
+async def _update_published_display(
+    db, competition: dict, *, expected_revision: int, sets: dict
+) -> None:
+    """Ghi cách hiển thị với điều kiện cuộc thi vẫn publish ngay tại thời điểm ghi.
+
+    Đọc và ghi không nằm trong một transaction (Mongo standalone), nên cuộc thi vừa bị đóng giữa
+    chừng phải làm lượt ghi trượt thay vì âm thầm sửa một cuộc thi đã đóng.
+    """
+    result = await db[competitions_service.COMPETITIONS_COLLECTION].update_one(
+        {**_revision_filter(competition["_id"], expected_revision), "status": "published"},
+        {"$set": {**sets, "updated_at": revisions.utc_now()}},
+    )
+    if result.matched_count == 0:
+        current = await _reload(db, competition)
+        if current is None or current["status"] != "published":
+            raise api_error(
+                422,
+                "SCORING_LOCKED",
+                "Cuộc thi đã đóng trong lúc lưu; cách hiển thị chỉ sửa được khi đang publish.",
+            )
         raise api_error(
             409,
             REVISION_CONFLICT,

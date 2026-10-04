@@ -1112,10 +1112,15 @@ function fileSchemaPayload(row: FileSchemaRow): ScoringFileSchema {
   };
 }
 
+/** Quyền xem của thí sinh: thấy hết là mặc định cũ, gửi `null` để giữ nguyên hành vi. */
+function visibleMetricsPayload(rows: MetricRow[]): string[] | null {
+  const visible = rows.filter((row) => row.visible).map((row) => row.key);
+  return visible.length === rows.length ? null : visible;
+}
+
 /** Hợp đồng kết quả để gửi lên; chưa khai báo metric nào là bản nháp, không phải hợp đồng rỗng. */
 function contractPayload(form: ScoringForm) {
   if (form.metrics.length === 0) return null;
-  const visible = form.metrics.filter((row) => row.visible).map((row) => row.key);
   return {
     metrics: form.metrics.map((row) => ({
       key: row.key,
@@ -1124,8 +1129,7 @@ function contractPayload(form: ScoringForm) {
     })),
     primary_metric: form.primaryMetric || null,
     higher_is_better: form.higherIsBetter,
-    // Thấy hết là mặc định cũ, gửi `null` để giữ nguyên hành vi; chỉ gửi danh sách khi có ẩn.
-    visible_metrics: visible.length === form.metrics.length ? null : visible,
+    visible_metrics: visibleMetricsPayload(form.metrics),
   };
 }
 
@@ -1385,10 +1389,11 @@ function ColumnEditor({
 }
 
 /** Việc đang chạy của tab Chấm điểm; nhãn hiện trong dải ghim để lượt dài không im lặng. */
-type ScoringAction = "save" | "groundTruth" | "test";
+type ScoringAction = "save" | "display" | "groundTruth" | "test";
 
 const SCORING_ACTION_LABEL: Record<ScoringAction, string> = {
   save: "Đang lưu cấu hình chấm điểm…",
+  display: "Đang lưu tên hiển thị và quyền xem…",
   groundTruth: "Đang tải lên và kiểm tra ground truth…",
   test: "Đang chạy thử bộ chấm…",
 };
@@ -1448,8 +1453,39 @@ function ScoringPanel({
     }
   }
 
+  /**
+   * Lượt lưu riêng cho cách hiển thị của hợp đồng kết quả: cuộc thi publish đã có điểm thì luật
+   * chấm khóa, nhưng tên hiển thị, số thập phân và quyền xem vẫn cần sửa được.
+   */
+  function saveResultDisplay() {
+    void submit(async () => {
+      const data = await api.put<ScoringStatus>(
+        `/admin/competitions/${competition.id}/scoring/result-display`,
+        {
+          expected_revision: status?.scoring?.revision ?? INITIAL_REVISION,
+          metrics: form.metrics.map((row) => ({
+            key: row.key,
+            label: row.label.trim(),
+            decimals: decimalsValue(row.decimals),
+          })),
+          visible_metrics: visibleMetricsPayload(form.metrics),
+        },
+      );
+      setStatus(data);
+      // Giá trị backend chuẩn hoá là bản đang áp dụng, nên form đọc lại từ response.
+      setForm(formFromView(data));
+      return "Đã lưu tên hiển thị và quyền xem metric. Điểm của các bài đã chấm giữ nguyên.";
+    }, "display");
+  }
+
   function saveConfig(event: FormEvent) {
     event.preventDefault();
+    // Đã khóa mà ô hiển thị còn sửa được (cuộc thi publish đã có điểm) thì Enter trong ô đó là
+    // lượt lưu cách hiển thị, không phải lượt lưu toàn cấu hình mà backend sẽ từ chối.
+    if (locked) {
+      if (displayEditable) saveResultDisplay();
+      return;
+    }
     // Ground truth chọn trước khi lưu nằm chờ ở đây: phải có schema đã lưu mới kiểm tra được.
     const queued = pendingGroundTruth;
     // Cấu hình đang có bằng chứng chạy thử hay không, đọc trước khi ghi: lượt lưu này làm bằng
@@ -1548,6 +1584,14 @@ function ScoringPanel({
   const scoring = status?.scoring ?? null;
   const locked = Boolean(status?.locked);
   const disabled = busy !== null || locked;
+  /**
+   * Cuộc thi publish đã có điểm: luật chấm khóa nhưng cách hiển thị của hợp đồng kết quả vẫn
+   * sửa được qua đường riêng; đóng hoặc chưa có hợp đồng thì khóa tất như cũ.
+   */
+  const displayEditable =
+    locked && competition.status === "published" && scoring?.output_contract != null;
+  /** Ô chỉ thuộc phần hiển thị: mở khi chưa khóa, hoặc khi khóa mà còn đường hiển thị. */
+  const displayDisabled = busy !== null || (locked && !displayEditable);
   const hasSource = Boolean(scoring?.evaluator.source_sha256);
   const verification = scoring?.verification ?? null;
   /**
@@ -1592,7 +1636,9 @@ function ScoringPanel({
     <form className="admin-detail-column" onSubmit={saveConfig}>
       {locked && (
         <div className="status-banner warning">
-          Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm.
+          {displayEditable
+            ? "Cuộc thi đã có bài được chấm điểm nên luật chấm đã bị khóa; tên hiển thị, số thập phân và quyền xem metric vẫn sửa được. Điểm đã chấm giữ nguyên và quyền xem mới áp dụng ngay."
+            : "Cấu hình đã bị khóa vì cuộc thi đã đóng hoặc đã có bài được chấm điểm."}
         </div>
       )}
       {/* Phản hồi dính dưới thanh tab: nút gửi nằm cuối trang nên khối ở đầu form sẽ
@@ -1991,7 +2037,7 @@ function ScoringPanel({
                           className="input"
                           aria-label={`Tên hiển thị của ${row.key}`}
                           value={row.label}
-                          disabled={disabled}
+                          disabled={displayDisabled}
                           onChange={(event) => patchMetric(index, { label: event.target.value })}
                         />
                       </td>
@@ -2003,7 +2049,7 @@ function ScoringPanel({
                           max={8}
                           aria-label={`Số thập phân của ${row.key}`}
                           value={row.decimals}
-                          disabled={disabled}
+                          disabled={displayDisabled}
                           onChange={(event) => patchMetric(index, { decimals: event.target.value })}
                         />
                       </td>
@@ -2022,7 +2068,7 @@ function ScoringPanel({
                           type="checkbox"
                           aria-label={`Cho thí sinh thấy ${row.key}`}
                           checked={row.visible}
-                          disabled={disabled}
+                          disabled={displayDisabled}
                           onChange={(event) =>
                             patchMetric(index, { visible: event.target.checked })
                           }
@@ -2059,10 +2105,26 @@ function ScoringPanel({
             )}
           </>
         )}
-        <button className="btn admin-detail-primary-action" type="submit" disabled={disabled}>
-          {busy === "save" ? "Đang lưu..." : "Lưu cấu hình chấm điểm"}
-        </button>
-        <p className="text-muted">Lưu áp dụng cho cả định dạng, source và bảng metric.</p>
+        {displayEditable ? (
+          // Đã khóa luật chấm: nút này chỉ lưu phần hiển thị, không phải lượt lưu toàn cấu hình.
+          <button
+            className="btn admin-detail-primary-action"
+            type="button"
+            disabled={busy !== null}
+            onClick={saveResultDisplay}
+          >
+            {busy === "display" ? "Đang lưu..." : "Lưu tên hiển thị và quyền xem"}
+          </button>
+        ) : (
+          <button className="btn admin-detail-primary-action" type="submit" disabled={disabled}>
+            {busy === "save" ? "Đang lưu..." : "Lưu cấu hình chấm điểm"}
+          </button>
+        )}
+        <p className="text-muted">
+          {displayEditable
+            ? "Chỉ lưu tên hiển thị, số thập phân và quyền xem; định dạng, bộ chấm và chỉ số chính giữ nguyên."
+            : "Lưu áp dụng cho cả định dạng, source và bảng metric."}
+        </p>
       </section>
 
       {/* Chỉ hỏi khi thay thế ground truth đã có; tệp chọn trước lượt lưu đầu nằm chờ, không cần xác nhận. */}

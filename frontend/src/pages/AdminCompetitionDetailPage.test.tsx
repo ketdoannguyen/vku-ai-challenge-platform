@@ -997,7 +997,7 @@ test("nút upload ground truth là <button> thật nên Tab/Enter mở được 
   expectKeyboardFilePicker("Thay ground truth CSV", "Upload ground truth CSV");
 });
 
-test("scoring controls bị khóa khi backend báo locked", async () => {
+test("locked: luật chấm khóa nhưng ba trường hiển thị vẫn sửa được qua nút lưu riêng", async () => {
   mockApi((url) => {
     if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
@@ -1006,11 +1006,130 @@ test("scoring controls bị khóa khi backend báo locked", async () => {
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
   expect(await screen.findByText(/đã bị khóa/i)).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeDisabled();
+  // Luật chấm và lượt lưu toàn cấu hình khóa như cũ.
+  expect(screen.queryByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeNull();
   expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
   expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
   expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
   expect(screen.getByLabelText("Submission: cột 2: tên")).toBeDisabled();
+  expect(screen.getByLabelText("Chọn f1 làm chỉ số chính")).toBeDisabled();
+  expect(screen.getByLabelText("Chiều xếp hạng")).toBeDisabled();
+  // Cách hiển thị của hợp đồng kết quả vẫn sửa được, qua nút lưu riêng.
+  expect(screen.getByLabelText("Tên hiển thị của f1")).not.toBeDisabled();
+  expect(screen.getByLabelText("Số thập phân của f1")).not.toBeDisabled();
+  expect(screen.getByLabelText("Cho thí sinh thấy f1")).not.toBeDisabled();
+  expect(
+    screen.getByRole("button", { name: "Lưu tên hiển thị và quyền xem" }),
+  ).not.toBeDisabled();
+});
+
+test("lưu cách hiển thị khi đã khóa: gửi đúng ba nhóm trường, không đụng luật chấm", async () => {
+  const UPDATED = {
+    ...SCORING,
+    locked: true,
+    scoring: {
+      ...SCORING.scoring,
+      revision: 4,
+      output_contract: {
+        metrics: [
+          { key: "f1", label: "F1 score", decimals: 2 },
+          { key: "precision", label: "Precision", decimals: 4 },
+          { key: "recall", label: "Recall", decimals: 4 },
+        ],
+        primary_metric: "f1",
+        higher_is_better: true,
+        visible_metrics: ["f1"],
+      },
+    },
+  };
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring/result-display") && init?.method === "PUT") {
+      return { body: UPDATED, status: 200 };
+    }
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  fireEvent.change(await screen.findByLabelText("Tên hiển thị của f1"), {
+    target: { value: "F1 score" },
+  });
+  fireEvent.change(screen.getByLabelText("Số thập phân của f1"), { target: { value: "2" } });
+  // Ẩn hai metric còn lại: quyền xem phải đi dạng whitelist.
+  fireEvent.click(screen.getByLabelText("Cho thí sinh thấy precision"));
+  fireEvent.click(screen.getByLabelText("Cho thí sinh thấy recall"));
+  fireEvent.click(screen.getByRole("button", { name: "Lưu tên hiển thị và quyền xem" }));
+
+  await waitFor(() => {
+    const put = calls.find(
+      (call) => call.url.endsWith("/scoring/result-display") && call.init?.method === "PUT",
+    );
+    expect(put).toBeTruthy();
+    expect(JSON.parse(put!.init!.body as string)).toEqual({
+      expected_revision: 3,
+      metrics: [
+        { key: "f1", label: "F1 score", decimals: 2 },
+        { key: "precision", label: "Precision", decimals: 4 },
+        { key: "recall", label: "Recall", decimals: 4 },
+      ],
+      visible_metrics: ["f1"],
+    });
+  });
+  expect(
+    await screen.findByText(
+      "Đã lưu tên hiển thị và quyền xem metric. Điểm của các bài đã chấm giữ nguyên.",
+    ),
+  ).toBeTruthy();
+  // Không có lượt lưu toàn cấu hình nào rời trình duyệt.
+  expect(
+    calls.some((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT"),
+  ).toBe(false);
+});
+
+test("Enter trong ô hiển thị khi đã khóa là lượt lưu hiển thị, không phải lượt lưu toàn cấu hình", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/scoring/result-display") && init?.method === "PUT") {
+      return { body: { ...SCORING, locked: true }, status: 200 };
+    }
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  const label = await screen.findByLabelText("Tên hiển thị của f1");
+  fireEvent.change(label, { target: { value: "F1 score" } });
+  fireEvent.submit(label.closest("form")!);
+
+  await waitFor(() => {
+    expect(
+      calls.some(
+        (call) => call.url.endsWith("/scoring/result-display") && call.init?.method === "PUT",
+      ),
+    ).toBe(true);
+  });
+  expect(
+    calls.some((call) => call.url.endsWith("/scoring") && call.init?.method === "PUT"),
+  ).toBe(false);
+});
+
+test("cuộc thi đã đóng: cả cách hiển thị cũng khóa", async () => {
+  mockApi((url) => {
+    if (url.endsWith("/scoring")) return { body: { ...SCORING, locked: true }, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: { ...COMPETITION, status: "closed" }, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+  expect(await screen.findByText(/đã bị khóa/i)).toBeTruthy();
+  expect(screen.getByLabelText("Tên hiển thị của f1")).toBeDisabled();
+  expect(screen.getByLabelText("Số thập phân của f1")).toBeDisabled();
+  expect(screen.getByLabelText("Cho thí sinh thấy f1")).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Lưu tên hiển thị và quyền xem" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeDisabled();
 });
 
 test("tab Kết quả hiển thị ranking, filter submission và link export", async () => {
