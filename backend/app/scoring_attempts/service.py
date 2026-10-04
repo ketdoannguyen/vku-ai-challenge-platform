@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 EXPIRED_CODE = "SUBMISSION_EXPIRED"
 EXPIRED_MESSAGE = "Bài nộp quá hạn chờ chấm nên không bị tính lượt. Bạn hãy nộp lại."
 GENERIC_MESSAGE = "Không thể chấm điểm bài nộp này."
+SUBMISSION_RULE_MESSAGE = (
+    "CSV không đáp ứng quy tắc nộp bài của cuộc thi. "
+    "Hãy đối chiếu với yêu cầu về file nộp và dữ liệu trong đề bài rồi nộp lại."
+)
 QUEUE_FULL_MESSAGE = "Hàng đợi chấm điểm đang đầy. Bạn thử lại sau ít phút nhé."
 # Câu chữ của những mã này là thứ thí sinh phải đọc để biết đường làm tiếp: file sai thì sửa file,
 # quá hạn thì nộp lại. Mọi mã khác là lỗi hệ thống, quy về một câu chung.
@@ -289,6 +293,8 @@ def public_error(error: dict | None) -> dict | None:
     if not error:
         return None
     code = error.get("code") or "SUBMISSION_FAILED"
+    if code == "SUBMISSION_RULE_VIOLATION":
+        return {"code": code, "message": SUBMISSION_RULE_MESSAGE}
     if code in SAFE_ERROR_CODES:
         return {"code": code, "message": error.get("message") or GENERIC_MESSAGE}
     return {"code": code, "message": GENERIC_MESSAGE}

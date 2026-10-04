@@ -125,6 +125,7 @@ def test_evaluate_doi_ma_loi_cua_sandbox_thanh_http_status():
         ("EVALUATOR_UNAVAILABLE", 503),
         ("EVALUATOR_TIMEOUT", 422),
         ("EVALUATOR_OUTPUT_MISMATCH", 422),
+        ("SUBMISSION_RULE_VIOLATION", 422),
     ]:
         fake = FakeSandbox(error=EvaluatorError(code, "Hỏng."))
         with runner_client(fake) as client:

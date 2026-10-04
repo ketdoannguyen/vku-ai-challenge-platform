@@ -12,7 +12,7 @@ from bson import ObjectId
 
 from app.core.config import get_settings
 from app.scoring.errors import EvaluatorError
-from app.scoring_attempts import worker
+from app.scoring_attempts import service as attempts_service, worker
 from app.scoring_attempts.store import ATTEMPTS_COLLECTION
 from app.submissions import service as submissions_service
 from tests.helpers import (
@@ -209,11 +209,37 @@ def test_bai_hong_thi_hoan_luot_va_khong_giu_file_tam(client, fake_runner, fake_
     queued = submit(client, cid, V2_SUBMISSION).json()
     assert run_worker(client) == 1
 
-    assert attempt_status(client, cid, queued["attempt_id"])["status"] == "FAILED"
+    body = attempt_status(client, cid, queued["attempt_id"])
+    assert body["status"] == "FAILED"
+    assert body["error"] == {
+        "code": "EVALUATOR_FAILED", "message": attempts_service.GENERIC_MESSAGE
+    }
     assert _quota_used(client, cid) == 0
     assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
     # Lượt hỏng không tiêu lượt nên thí sinh nộp lại được ngay.
     assert submit(client, cid, V2_SUBMISSION).status_code == 202
+
+
+def test_csv_rule_failure_shows_fixed_message_and_refunds(client, fake_runner, fake_artifact_storage):
+    competition = publish_v2_competition(client)
+    cid = competition["id"]
+    fake_runner.error = EvaluatorError(
+        "SUBMISSION_RULE_VIOLATION", "SECRET: ground truth must not leak"
+    )
+
+    queued = submit(client, cid, V2_SUBMISSION).json()
+    assert run_worker(client) == 1
+
+    body = attempt_status(client, cid, queued["attempt_id"])
+    assert body["status"] == "FAILED"
+    assert body["error"] == {
+        "code": "SUBMISSION_RULE_VIOLATION",
+        "message": attempts_service.SUBMISSION_RULE_MESSAGE,
+    }
+    assert "SECRET" not in str(body)
+    assert _quota_used(client, cid) == 0
+    assert not submission_documents(client)
+    assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
 
 
 def test_hoan_luot_hai_lan_khong_thanh_hai_suat(client, fake_runner):
