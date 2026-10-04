@@ -1,6 +1,6 @@
 /** Join CTA theo join_mode + membership state. Dùng chung dashboard card và competition header. */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import type { Competition, JoinResponse, LeaveResponse, Membership } from "../api/competitions";
@@ -74,6 +74,7 @@ export function JoinControl({
   onMembershipChange,
   showLeave = true,
   showEnter = true,
+  onEngagedChange,
 }: {
   competition: Competition;
   onMembershipChange: (membership: Membership) => void;
@@ -81,6 +82,8 @@ export function JoinControl({
   showLeave?: boolean;
   /** Masthead trang chi tiết đã nằm trong cuộc thi nên link vào cuộc thi là thừa. */
   showEnter?: boolean;
+  /** Báo đang mở modal/gọi API để trang tạm dừng tự làm mới dữ liệu. */
+  onEngagedChange?: (engaged: boolean) => void;
 }) {
   const membership = competition.membership;
   const auth = useOptionalAuth();
@@ -89,6 +92,12 @@ export function JoinControl({
   // Ngoài AuthProvider (test dựng component lẻ) không biết được trạng thái phiên nên
   // giữ nguyên hành vi cũ; trong app thì khách thấy lối đăng nhập thay vì POST ăn 401.
   const isGuest = auth !== null && !auth.loading && auth.account === null;
+
+  useEffect(() => {
+    if (!showLeave || !leaveOpen) return;
+    onEngagedChange?.(true);
+    return () => onEngagedChange?.(false);
+  }, [leaveOpen, onEngagedChange, showLeave]);
 
   if (membership.active) {
     return (
@@ -188,21 +197,29 @@ export function JoinControl({
   }
 
   if (competition.join_mode === "code") {
-    return <CodeJoin competition={competition} onMembershipChange={onMembershipChange} />;
+    return <CodeJoin competition={competition} onMembershipChange={onMembershipChange} onEngagedChange={onEngagedChange} />;
   }
 
-  return <OpenJoin competition={competition} onMembershipChange={onMembershipChange} />;
+  return <OpenJoin competition={competition} onMembershipChange={onMembershipChange} onEngagedChange={onEngagedChange} />;
 }
 
 function OpenJoin({
   competition,
   onMembershipChange,
+  onEngagedChange,
 }: {
   competition: Competition;
   onMembershipChange: (membership: Membership) => void;
+  onEngagedChange?: (engaged: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!busy) return;
+    onEngagedChange?.(true);
+    return () => onEngagedChange?.(false);
+  }, [busy, onEngagedChange]);
 
   async function join() {
     setBusy(true);
@@ -234,14 +251,22 @@ function OpenJoin({
 function CodeJoin({
   competition,
   onMembershipChange,
+  onEngagedChange,
 }: {
   competition: Competition;
   onMembershipChange: (membership: Membership) => void;
+  onEngagedChange?: (engaged: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open && !busy) return;
+    onEngagedChange?.(true);
+    return () => onEngagedChange?.(false);
+  }, [busy, onEngagedChange, open]);
 
   function openModal() {
     setError("");

@@ -34,7 +34,6 @@ import {
   AI_STATE_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
-  hasPendingAiReview,
   type AiReviewFilter,
   type AiVerdict,
 } from "../api/aiReview";
@@ -55,8 +54,9 @@ import {
   type ResultContract,
   type ReviewPayload,
 } from "../api/results";
-import { usePendingPolling } from "../hooks/usePendingPolling";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { AiReviewDetailModal } from "./AiReviewDetailModal";
+import { AutoRefreshNotice } from "./AutoRefreshNotice";
 import { ArtifactLinks } from "./ArtifactLinks";
 import { ConfirmModal } from "./Modal";
 import { SubmissionRejectModal } from "./SubmissionReviewModal";
@@ -67,6 +67,8 @@ const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 300;
 /** Băng báo thành công tự tắt; đủ lâu để đọc hết một câu. */
 const MESSAGE_TIMEOUT_MS = 4500;
+/** Nhịp tự làm mới ngầm khi tab đang mở. */
+const AUTO_REFRESH_MS = 3_000;
 
 const STATUS_OPTIONS = [
   { value: "", label: "Mọi trạng thái chấm" },
@@ -171,6 +173,8 @@ export function AdminSubmissionsPanel({
   const [message, setMessage] = useState("");
   const requestSequence = useRef(0);
   const hasData = useRef(false);
+  /** Số lượt tải do người dùng chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
+  const manualLoads = useRef(0);
   const messageTimer = useRef<number | null>(null);
   /** Nút vừa mở modal; dùng để trả focus về đúng chỗ sau khi đóng. */
   const triggerRef = useRef<HTMLElement | null>(null);
@@ -197,11 +201,14 @@ export function AdminSubmissionsPanel({
 
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const load = useCallback(
-    async (next: Query, keepRows: boolean) => {
+    async (next: Query, keepRows: boolean, silent = false) => {
       const sequence = ++requestSequence.current;
-      setError(null);
-      if (keepRows) setRefreshing(true);
-      else setLoading(true);
+      if (!silent) {
+        manualLoads.current += 1;
+        setError(null);
+        if (keepRows) setRefreshing(true);
+        else setLoading(true);
+      }
       const params = new URLSearchParams({
         limit: String(PAGE_SIZE),
         offset: String(next.offset),
@@ -221,17 +228,25 @@ export function AdminSubmissionsPanel({
         if (sequence !== requestSequence.current) return;
         hasData.current = true;
         setData(response);
+        // Lượt ngầm thành công cũng xoá băng lỗi cũ: dữ liệu mới đã về thì lỗi hết đúng.
+        setError(null);
         // Tổng co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
         const lastOffset = Math.max(0, Math.floor((response.total - 1) / PAGE_SIZE) * PAGE_SIZE);
         if (next.offset > lastOffset) {
           setQuery((current) => ({ ...current, offset: lastOffset, attempt: current.attempt + 1 }));
         }
       } catch (reason) {
-        if (sequence === requestSequence.current) setError(reason);
+        if (sequence !== requestSequence.current) return;
+        // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
+        if (!silent) setError(reason);
+        if (silent) throw reason;
       } finally {
-        if (sequence === requestSequence.current) {
-          setLoading(false);
-          setRefreshing(false);
+        if (!silent) {
+          manualLoads.current -= 1;
+          if (sequence === requestSequence.current) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
       }
     },
@@ -336,10 +351,23 @@ export function AdminSubmissionsPanel({
   }
 
   const busy = loading || refreshing;
-  // Còn lượt AI đang chạy thì tự làm mới, nhưng có ngân sách: bảng không quay mãi một mình.
-  const pollExhausted = usePendingPolling(hasPendingAiReview(data?.submissions ?? []), () =>
-    requestPage(query.offset),
-  );
+
+  /**
+   * Lượt làm mới ngầm: nhường khi modal đang mở (admin đang đọc/xử lý một bài), khi có lượt
+   * tải chủ động, hoặc khi admin đang bôi đen nội dung.
+   */
+  const silentRefresh = useCallback(async () => {
+    if (manualLoads.current > 0 || rejecting || restoring || aiDetail) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return false;
+    await load(query, true, true);
+  }, [load, query, rejecting, restoring, aiDetail]);
+
+  // Bảng đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
+  const refreshStatus = useAutoRefresh(true, silentRefresh, {
+    intervalMs: AUTO_REFRESH_MS,
+  });
+
   const hasFilters = Boolean(
     query.competition_id ||
       query.status ||
@@ -623,19 +651,7 @@ export function AdminSubmissionsPanel({
         </div>
       )}
 
-      {/* Polling tự dừng sau ngân sách lượt: nói rõ để không bị đọc thành "AI đã chạy xong". */}
-      {pollExhausted && (
-        <div className="status-banner warning admin-submissions-banner" role="status">
-          <span>Đã tạm dừng tự động làm mới sau nhiều lượt chờ. Bảng có thể chưa hiện kết quả mới nhất.</span>
-          <button
-            className="btn btn-secondary btn-sm"
-            type="button"
-            onClick={() => requestPage(query.offset)}
-          >
-            Làm mới
-          </button>
-        </div>
-      )}
+      <AutoRefreshNotice {...refreshStatus} />
 
       {Boolean(error) && data && (
         <div className="admin-section-error admin-submissions-error">

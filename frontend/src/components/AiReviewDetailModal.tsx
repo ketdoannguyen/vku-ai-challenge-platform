@@ -33,10 +33,14 @@ import {
   type FindingVerification,
 } from "../api/aiReview";
 import type { ArtifactMeta, AdminSubmissionItem } from "../api/results";
-import { usePendingPolling } from "../hooks/usePendingPolling";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { downloadArtifact } from "../lib/downloadArtifact";
+import { AutoRefreshNotice } from "./AutoRefreshNotice";
 import { ConfirmModal, Modal } from "./Modal";
 import { ErrorBox, Loading } from "./ui";
+
+/** Nhịp tự làm mới ngầm khi modal còn mở. */
+const AUTO_REFRESH_MS = 3_000;
 
 /**
  * Tông màu của một finding. Đây là quy ước trình bày của modal chứ không phải dữ liệu API: backend
@@ -102,11 +106,14 @@ export function AiReviewDetailModal({
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
   const requestSequence = useRef(0);
+  /** Số lượt tải do admin chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
+  const manualLoads = useRef(0);
 
   const load = useCallback(
-    async (keepCurrent: boolean) => {
+    async (silent: boolean) => {
       const sequence = ++requestSequence.current;
-      if (!keepCurrent) {
+      if (!silent) {
+        manualLoads.current += 1;
         setError(null);
         // Tải lại từ đầu (lần đầu, bấm "Thử lại", hoặc sau khi chạy lại) phải hiện lại trạng thái
         // đang tải: nếu không, modal rơi vào nhánh chính với `detail` cũ và báo sai là không có lượt.
@@ -119,9 +126,15 @@ export function AiReviewDetailModal({
         setDetail(response);
         setError(null);
       } catch (reason) {
-        if (sequence === requestSequence.current && !keepCurrent) setError(reason);
+        if (sequence !== requestSequence.current) return;
+        if (!silent) setError(reason);
+        // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
+        if (silent) throw reason;
       } finally {
-        if (sequence === requestSequence.current) setLoading(false);
+        if (!silent) {
+          manualLoads.current -= 1;
+          if (sequence === requestSequence.current) setLoading(false);
+        }
       }
     },
     [submission.id],
@@ -132,9 +145,24 @@ export function AiReviewDetailModal({
   }, [load]);
 
   const state = detail?.ai_review?.state ?? null;
-  // Lượt đang chờ thì poll trong lúc modal còn mở, để admin thấy kết quả ngay tại chỗ.
+  // Lượt đang chờ vẫn có dòng trạng thái riêng; modal tự làm mới ngầm trong lúc còn mở.
   const pending = state === "QUEUED" || state === "RUNNING";
-  const exhausted = usePendingPolling(pending, () => void load(true));
+
+  /**
+   * Lượt làm mới ngầm: nhường khi admin đang chạy lại, đang xác nhận chạy lại, đang bôi đen
+   * nội dung, hoặc khi có lượt tải chủ động đang chạy.
+   */
+  const silentRefresh = useCallback(async () => {
+    if (busy || confirmingRerun || manualLoads.current > 0) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return false;
+    await load(true);
+  }, [load, busy, confirmingRerun]);
+
+  // Modal còn mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
+  const refreshStatus = useAutoRefresh(true, silentRefresh, {
+    intervalMs: AUTO_REFRESH_MS,
+  });
 
   async function rerun() {
     setBusy(true);
@@ -245,11 +273,7 @@ export function AiReviewDetailModal({
               nên không chạy lại được cho bài này.
             </div>
           )}
-          {exhausted && (
-            <div className="status-banner warning">
-              Đã tạm dừng tự động làm mới. Đóng và mở lại để xem kết quả mới nhất.
-            </div>
-          )}
+          <AutoRefreshNotice {...refreshStatus} />
 
           {pending && (
             <p className="ai-status" role="status">

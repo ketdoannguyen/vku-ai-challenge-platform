@@ -15,7 +15,9 @@ import {
 import { fetchContents, type ContentSummary } from "../api/contents";
 import { ErrorBox } from "../components/ui";
 import { CompetitionResources } from "../components/CompetitionResources";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { JoinControl } from "../components/JoinControl";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useCountdown } from "../hooks/useCountdown";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
@@ -163,6 +165,10 @@ export function CompetitionDetailPage() {
   const [contentsError, setContentsError] = useState<unknown>(null);
   /** Slug của request mới nhất: response của slug cũ không được ghi vào state khi đổi nhanh. */
   const requestedSlug = useRef(slug);
+  /** Response cũ không được ghi đè dữ liệu mới hơn (làm mới sau nộp bài, làm mới ngầm). */
+  const competitionSequence = useRef(0);
+  /** Thao tác tham gia/rời đang chờ hoặc modal đang mở: dừng tự làm mới để không ghi đè. */
+  const [joinEngaged, setJoinEngaged] = useState(false);
 
   const loadCompetition = useCallback(async () => {
     const forSlug = slug;
@@ -179,16 +185,22 @@ export function CompetitionDetailPage() {
     }
   }, [slug]);
 
+  /** Refetch im lặng, lỗi ném ra cho hook tự xử lý trạng thái thử lại. */
+  const silentRefreshCompetition = useCallback(async () => {
+    const forSlug = slug;
+    const sequence = ++competitionSequence.current;
+    const data = await api.get<Competition>(`/competitions/${forSlug}`);
+    if (requestedSlug.current === forSlug && sequence === competitionSequence.current) setCompetition(data);
+  }, [slug]);
+
   /** Refetch im lặng: quota là thông tin phụ, lỗi mạng không được xoá nội dung đang xem. */
   const refreshCompetition = useCallback(async () => {
-    const forSlug = slug;
     try {
-      const data = await api.get<Competition>(`/competitions/${forSlug}`);
-      if (requestedSlug.current === forSlug) setCompetition(data);
+      await silentRefreshCompetition();
     } catch {
       // Giữ nguyên dữ liệu cũ; lần nộp kế tiếp vẫn được backend kiểm tra quota thật.
     }
-  }, [slug]);
+  }, [silentRefreshCompetition]);
 
   // Danh sách nội dung tải độc lập với cuộc thi: lỗi ở đây hiện trạng thái lỗi + "Thử lại",
   // tuyệt đối không rơi về "chưa có nội dung" vì hai tình huống này khác nhau.
@@ -229,6 +241,14 @@ export function CompetitionDetailPage() {
   const remaining = useCountdown(competition?.end_at ?? "");
   const isContentRoute = pathname.includes("/content/");
   useDocumentTitle(shellTitle({ isContentRoute, pathname, error, competition }));
+
+  // Chỉ làm mới khi đúng cuộc thi của slug hiện tại đang hiển thị: trạng thái/quota đổi từ
+  // phía Ban Tổ chức hay lượt nộp sẽ tự hiện, không nháy skeleton và không mất nội dung đang xem.
+  const refreshStatus = useAutoRefresh(
+    competition !== null && competition.slug === slug && !joinEngaged,
+    silentRefreshCompetition,
+    { intervalMs: 5_000 },
+  );
 
   if (loading) {
     return (
@@ -292,6 +312,7 @@ export function CompetitionDetailPage() {
 
   return (
     <div className="page comp-page">
+      <AutoRefreshNotice {...refreshStatus} />
       <nav className="comp-crumbs" aria-label="Đường dẫn">
         <Link className="comp-crumb-back" to="/">
           <Icon>
@@ -335,7 +356,10 @@ export function CompetitionDetailPage() {
             <JoinControl
               competition={c}
               showEnter={false}
+              onEngagedChange={setJoinEngaged}
               onMembershipChange={(membership: Membership) => {
+                // Vô hiệu hoá response đang bay (có thể mang membership trước khi join) trước khi vá state.
+                competitionSequence.current += 1;
                 setCompetition({ ...c, membership });
                 // Quota chỉ xuất hiện sau khi join - tải lại để chỗ nộp bài biết còn bao nhiêu lượt.
                 void refreshCompetition();

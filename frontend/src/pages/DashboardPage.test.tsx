@@ -1,10 +1,11 @@
 /** Dashboard: render competitions từ API, join states, empty state, error state. */
 
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AuthProvider } from "../auth/AuthContext";
+import { setDocumentHidden } from "../test/timers";
 import { DashboardPage } from "./DashboardPage";
 
 const PUBLISHED = {
@@ -77,7 +78,17 @@ function inSeconds(seconds: number): string {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  setDocumentHidden(false);
 });
+
+/** Chạy hết timer giả trong `ms` và để chuỗi fetch → setState render xong. */
+async function advance(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
 
 test("hiển thị competition với status badge; chưa join có nút Tham gia, đã join có link vào", async () => {
   mockApi({ competitions: [PUBLISHED, JOINED, CLOSED] });
@@ -451,4 +462,100 @@ test("tiêu đề tab đặt theo tên trang", async () => {
   renderDashboard();
   await screen.findByRole("link", { name: "AI Challenge 2026" });
   expect(document.title).toBe("Cuộc thi - AI Challenge");
+});
+
+test("tự làm mới giữ nguyên từ khóa tìm kiếm và cập nhật KPI khi có cuộc thi mới", async () => {
+  vi.useFakeTimers();
+  const competitions = [PUBLISHED, JOINED];
+  mockApi({ competitions });
+  renderDashboard();
+  await advance();
+
+  const stats = screen.getByRole("region", { name: "Thống kê cuộc thi" });
+  expect(within(stats).getByText("01")).toBeTruthy(); // Đã tham gia
+  fireEvent.change(screen.getByLabelText("Tìm kiếm cuộc thi"), { target: { value: "AI" } });
+
+  competitions.push({
+    ...PUBLISHED,
+    id: "new",
+    slug: "new-cup",
+    name: "AI Challenge Mới",
+    membership: { active: true, joined_at: "2026-10-01T00:00:00Z" },
+  });
+  await advance(6_000);
+
+  expect(screen.getByRole("heading", { name: "AI Challenge Mới" })).toBeTruthy();
+  // Dữ liệu được thay nhưng bộ lọc tìm kiếm của người dùng còn nguyên.
+  expect((screen.getByLabelText("Tìm kiếm cuộc thi") as HTMLInputElement).value).toBe("AI");
+  expect(within(stats).getByText("02")).toBeTruthy(); // Đã tham gia
+});
+
+test("một cuộc thi tham gia không làm bật polling khi cuộc thi khác còn modal mở", async () => {
+  vi.useFakeTimers();
+  const competitions = [
+    { ...PUBLISHED, id: "3", slug: "new-cup", name: "New Cup", membership: { active: false, joined_at: null as string | null } },
+    { ...PUBLISHED, id: "4", slug: "code-cup", name: "Code Cup", join_mode: "code", membership: { active: false, joined_at: null as string | null } },
+  ];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (init?.method === "POST" && url.endsWith("/join")) {
+      competitions[0] = { ...competitions[0], membership: { active: true, joined_at: "2026-10-01T00:00:00Z" } };
+      return json({ competition_id: "3", membership: competitions[0].membership, joined_now: true });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderDashboard();
+  await advance();
+  const listGets = () => fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/competitions")).length;
+  expect(listGets()).toBe(1);
+
+  // Chuyển trạng thái thẻ A trong khi modal thẻ B đang mở; B vẫn giữ polling tạm dừng.
+  fireEvent.click(screen.getByRole("button", { name: "Nhập mã tham gia" }));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getAllByRole("button", { name: "Tham gia" })[0]);
+  await advance();
+  await advance(10_000);
+  expect(listGets()).toBe(1);
+});
+
+test("trong lúc join thì tạm dừng tự làm mới; join xong thì dữ liệu thành viên được làm mới theo", async () => {
+  vi.useFakeTimers();
+  const competitions = [{ ...PUBLISHED, membership: { active: false, joined_at: null as string | null } }];
+  let resolveJoin!: (response: Response) => void;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (init?.method === "POST" && url.endsWith("/join")) {
+      return new Promise<Response>((resolve) => {
+        resolveJoin = resolve;
+      });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const listGets = () =>
+    fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/competitions")).length;
+
+  renderDashboard();
+  await advance();
+  expect(listGets()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
+  await advance(20_000);
+  // POST tham gia còn đang chờ: không có lượt làm mới nào chen vào.
+  expect(listGets()).toBe(1);
+
+  // Máy chủ ghi nhận thành viên trước khi trả response.
+  competitions[0].membership = { active: true, joined_at: "2026-10-01T00:00:00Z" };
+  resolveJoin(json({ competition_id: "1", membership: competitions[0].membership, joined_now: true }));
+  await advance();
+  expect(screen.queryByRole("button", { name: "Tham gia" })).toBeNull();
+  expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
+
+  // Lượt làm mới kế tiếp trả về membership mới, không quay lại trạng thái chưa tham gia.
+  await advance(6_000);
+  expect(listGets()).toBe(2);
+  expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
 });

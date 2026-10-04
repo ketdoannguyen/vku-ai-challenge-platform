@@ -356,12 +356,3 @@ export function rerunAiReview(
 ): Promise<{ submission: unknown }> {
   return api.post(`/admin/submissions/${submissionId}/ai-review/rerun`);
 }
-
-/** Có lượt nào đang chạy trong danh sách này không - quyết định bật/tắt polling. */
-export function hasPendingAiReview(
-  items: ReadonlyArray<{ ai_review?: ParticipantAiReview | null }>,
-): boolean {
-  return items.some(
-    (item) => item.ai_review?.state === "QUEUED" || item.ai_review?.state === "RUNNING",
-  );
-}

@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { setDocumentHidden } from "../test/timers";
 import { AdminAccountsPage } from "./AdminAccountsPage";
 
 const ACCOUNT = {
@@ -95,8 +96,18 @@ function mockApi(accounts: Array<Record<string, unknown>> = [ACCOUNT]) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  setDocumentHidden(false);
   mockCurrentAccountId = null;
 });
+
+/** Chạy hết timer giả trong `ms` và để chuỗi fetch → setState render xong. */
+async function advance(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
 
 test("loads the first page of accounts and protects passwords", async () => {
   mockApi();
@@ -737,4 +748,43 @@ test("tiêu đề tab đặt theo tên trang", async () => {
   );
   await screen.findByText("team@vku.vn");
   expect(document.title).toBe("Quản lý tài khoản - AI Challenge");
+});
+
+test("tài khoản tự đăng ký tự hiện và KPI chờ duyệt tự tăng, không cần thao tác", async () => {
+  vi.useFakeTimers();
+  const accounts: Array<Record<string, unknown>> = [{ ...ACCOUNT }];
+  mockApi(accounts);
+  renderPage();
+  await advance();
+  expect(screen.getByText("team@vku.vn")).toBeTruthy();
+  const stats = screen.getByRole("region", { name: "Tổng quan tài khoản" });
+  const pendingValue = () => within(within(stats).getByText("Chờ duyệt").closest("article") as HTMLElement);
+  expect(pendingValue().getByText("0")).toBeTruthy();
+
+  // Người dùng tự đăng ký trong lúc admin đang mở trang: lượt làm mới ngầm kế tiếp phải thấy.
+  accounts.push({ ...PENDING_ACCOUNT, id: "moi", email: "moi@vku.vn" });
+  await advance(3_500);
+
+  expect(screen.getByText("moi@vku.vn")).toBeTruthy();
+  expect(pendingValue().getByText("1")).toBeTruthy();
+});
+
+test("modal đang mở thì tạm dừng tự làm mới; đóng modal và tab hiện lại thì làm mới ngay", async () => {
+  vi.useFakeTimers();
+  mockApi([ACCOUNT]);
+  renderPage();
+  await advance();
+  const listGets = () => calls.filter((call) => !call.init?.method).length;
+  expect(listGets()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Tạo tài khoản" }));
+  await advance(20_000);
+  expect(listGets()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+  setDocumentHidden(true);
+  setDocumentHidden(false);
+  await advance();
+
+  expect(listGets()).toBe(2);
 });

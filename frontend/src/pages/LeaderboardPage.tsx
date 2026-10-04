@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
+import { ApiClientError } from "../api/client";
 import { formatLocal } from "../api/competitions";
 import {
   fetchLeaderboard,
@@ -9,10 +10,20 @@ import {
   type ParticipantLeaderboardResponse,
 } from "../api/results";
 import { ErrorBox, Loading } from "../components/ui";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 /** Số dòng mỗi trang; backend chặn 1–200 nên đây chỉ là lựa chọn hiển thị. */
 const PAGE_SIZE = 25;
+
+/** Nhịp tự làm mới ngầm khi tab đang mở. */
+const AUTO_REFRESH_MS = 3_000;
+
+/** 401/403 nghĩa là quyền xem đã mất: bảng vừa bị ẩn hoặc phiên đã hết hạn. */
+function accessLost(reason: unknown): boolean {
+  return reason instanceof ApiClientError && (reason.status === 401 || reason.status === 403);
+}
 
 /**
  * Câu mô tả quy tắc xếp hạng. Cuộc thi chưa khai báo metric chính (bản nháp v2) thì không nêu tên
@@ -40,21 +51,28 @@ export function LeaderboardPage() {
   const [query, setQuery] = useState({ offset: 0, attempt: 0 });
   const requestSequence = useRef(0);
   const hasData = useRef(false);
+  /** Số lượt tải do người dùng chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
+  const manualLoads = useRef(0);
 
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const loadData = useCallback(
-    async (nextOffset: number, keepRows: boolean) => {
+    async (nextOffset: number, keepRows: boolean, silent = false) => {
       if (!competition.leaderboard_visible) return;
       const sequence = ++requestSequence.current;
-      setError(null);
-      if (keepRows) setRefreshing(true);
-      else setLoading(true);
+      if (!silent) {
+        manualLoads.current += 1;
+        setError(null);
+        if (keepRows) setRefreshing(true);
+        else setLoading(true);
+      }
       try {
         const result = await fetchLeaderboard(competition.id, PAGE_SIZE, nextOffset);
         // Response cũ không được ghi đè response mới khi người dùng đổi trang liên tục.
         if (sequence !== requestSequence.current) return;
         hasData.current = true;
         setData(result);
+        // Lượt ngầm thành công cũng xoá băng lỗi cũ: dữ liệu mới đã về thì lỗi hết đúng.
+        setError(null);
         setLastUpdated(new Date().toLocaleTimeString("vi-VN"));
         // total co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
         const lastOffset = Math.max(0, Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE);
@@ -62,11 +80,24 @@ export function LeaderboardPage() {
           setQuery((current) => ({ offset: lastOffset, attempt: current.attempt + 1 }));
         }
       } catch (reason) {
-        if (sequence === requestSequence.current) setError(reason);
+        if (sequence !== requestSequence.current) return;
+        if (accessLost(reason)) {
+          // Bảng bị ẩn giữa chừng: điểm đã tải không được nằm lại trên màn hình.
+          hasData.current = false;
+          setData(null);
+          setError(reason);
+        } else if (!silent) {
+          setError(reason);
+        }
+        // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
+        if (silent) throw reason;
       } finally {
-        if (sequence === requestSequence.current) {
-          setLoading(false);
-          setRefreshing(false);
+        if (!silent) {
+          manualLoads.current -= 1;
+          if (sequence === requestSequence.current) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
       }
     },
@@ -81,6 +112,20 @@ export function LeaderboardPage() {
   const requestPage = useCallback((nextOffset: number) => {
     setQuery((current) => ({ offset: Math.max(0, nextOffset), attempt: current.attempt + 1 }));
   }, []);
+
+  /**
+   * Lượt làm mới ngầm: không đụng trạng thái tải để bảng không nháy, và nhường khi
+   * người dùng đang bấm nút hoặc đang bôi đen nội dung.
+   */
+  const silentRefresh = useCallback(async () => {
+    if (manualLoads.current > 0) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return false;
+    await loadData(query.offset, true, true);
+  }, [loadData, query.offset]);
+
+  // Bảng đang công bố thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
+  const refreshStatus = useAutoRefresh(competition.leaderboard_visible, silentRefresh, { intervalMs: AUTO_REFRESH_MS });
 
   const busy = loading || refreshing;
 
@@ -198,6 +243,7 @@ export function LeaderboardPage() {
             </p>
           </div>
         </div>
+        <AutoRefreshNotice {...refreshStatus} />
         <div className="empty-state">
           <div className="empty-state-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -259,6 +305,8 @@ export function LeaderboardPage() {
           </button>
         </div>
       </div>
+
+      <AutoRefreshNotice {...refreshStatus} />
 
       {/* Lỗi khi đổi trang: giữ nguyên các dòng cũ, chỉ báo lỗi ngay trên bảng. */}
       {Boolean(error) && (

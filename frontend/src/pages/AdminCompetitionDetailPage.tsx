@@ -42,9 +42,11 @@ import {
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
 import { AdminSubmissionsPanel } from "../components/AdminSubmissionsPanel";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { AiReviewSettingsPanel, IconSparkle } from "../components/AiReviewSettingsPanel";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, FileButton, Loading } from "../components/ui";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useAutoSlug } from "../hooks/useAutoSlug";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import {
@@ -898,6 +900,9 @@ export function AdminCompetitionDetailPage() {
 
 /** ---------- Kết quả & submissions ---------- */
 
+/** Nhịp tự làm mới ngầm khi tab Kết quả đang mở. */
+const RESULTS_AUTO_REFRESH_MS = 3_000;
+
 function ResultsPanel({ competition }: { competition: Competition }) {
   const contract = resultContract(competition.submission_config);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
@@ -905,6 +910,9 @@ function ResultsPanel({ competition }: { competition: Competition }) {
   const [leaderboardError, setLeaderboardError] = useState<unknown>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<unknown>(null);
+  const requestSequence = useRef(0);
+  /** Số lượt tải do người dùng chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
+  const manualLoads = useRef(0);
 
   async function exportResults() {
     if (exporting) return;
@@ -922,24 +930,58 @@ function ResultsPanel({ competition }: { competition: Competition }) {
     }
   }
 
-  const loadLeaderboard = useCallback(async () => {
-    setLeaderboardLoading(true);
-    setLeaderboardError(null);
-    try {
-      setLeaderboard(await api.get<LeaderboardResponse>(`/admin/competitions/${competition.id}/leaderboard`));
-    } catch (err) {
-      setLeaderboardError(err);
-    } finally {
-      setLeaderboardLoading(false);
-    }
-  }, [competition.id]);
+  const loadLeaderboard = useCallback(
+    async (silent = false) => {
+      const sequence = ++requestSequence.current;
+      if (!silent) {
+        manualLoads.current += 1;
+        setLeaderboardLoading(true);
+        setLeaderboardError(null);
+      }
+      try {
+        const response = await api.get<LeaderboardResponse>(
+          `/admin/competitions/${competition.id}/leaderboard`,
+        );
+        // Lượt tải cũ không được ghi đè lượt mới khi bảng được mở lại liên tiếp.
+        if (sequence !== requestSequence.current) return;
+        setLeaderboard(response);
+        setLeaderboardError(null);
+      } catch (err) {
+        if (sequence !== requestSequence.current) return;
+        // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
+        if (!silent) setLeaderboardError(err);
+        if (silent) throw err;
+      } finally {
+        if (!silent) {
+          manualLoads.current -= 1;
+          if (sequence === requestSequence.current) setLeaderboardLoading(false);
+        }
+      }
+    },
+    [competition.id],
+  );
 
   useEffect(() => {
     void loadLeaderboard();
   }, [loadLeaderboard]);
 
+  /**
+   * Lượt làm mới ngầm: không đụng trạng thái tải để bảng không nháy, và nhường khi người
+   * dùng đang bấm nút hoặc đang bôi đen nội dung.
+   */
+  const silentRefresh = useCallback(async () => {
+    if (manualLoads.current > 0) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return false;
+    await loadLeaderboard(true);
+  }, [loadLeaderboard]);
+
+  // Tab Kết quả đang mở thì bảng xếp hạng tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
+  const refreshStatus = useAutoRefresh(true, silentRefresh, { intervalMs: RESULTS_AUTO_REFRESH_MS });
+
   return (
     <div className="admin-results">
+      <AutoRefreshNotice {...refreshStatus} />
       <section className="results-section admin-detail-card" data-tone="yellow">
         <div className="results-head">
           <div className="admin-detail-section-heading">
@@ -3494,6 +3536,7 @@ function MembersPanel({ competition }: { competition: Competition }) {
   const [pendingDelete, setPendingDelete] = useState<MemberItem | null>(null);
   const [busy, setBusy] = useState(false);
   const messageTimer = useRef<number | null>(null);
+  const requestSequence = useRef(0);
 
   const notify = useCallback((text: string) => {
     if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
@@ -3512,27 +3555,37 @@ function MembersPanel({ competition }: { competition: Competition }) {
     setMessage("");
   }, []);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const fetchMembers = useCallback(async (silent = false) => {
+    const sequence = ++requestSequence.current;
+    if (!silent) setError(null);
     try {
       const data = await api.get<{
         members: MemberItem[];
         total: number;
         active_total: number;
       }>(`/admin/competitions/${competition.id}/members?limit=200`);
+      if (sequence !== requestSequence.current) return;
       setMembers(data.members);
       setActiveTotal(data.active_total);
       setTotal(data.total);
     } catch (err) {
+      if (sequence !== requestSequence.current) return;
+      if (silent) throw err;
       setError(err);
     } finally {
-      setLoading(false);
+      if (!silent && sequence === requestSequence.current) setLoading(false);
     }
   }, [competition.id]);
+
+  const load = useCallback(() => fetchMembers(), [fetchMembers]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Chỉ làm mới bảng thành viên khi tab đang mở và admin không nhập email/xác nhận/thực hiện thao tác.
+  const refreshStatus = useAutoRefresh(!loading && !busy && !email && !pendingMember && !pendingDelete,
+    () => fetchMembers(true), { intervalMs: 5_000 });
 
   useEffect(
     () => () => {
@@ -3571,6 +3624,7 @@ function MembersPanel({ competition }: { competition: Competition }) {
 
   return (
     <div className="admin-members">
+      <AutoRefreshNotice {...refreshStatus} />
       <section className="admin-members-list admin-detail-card" data-tone="blue">
         <div className="admin-members-head">
           <div className="admin-detail-section-heading">

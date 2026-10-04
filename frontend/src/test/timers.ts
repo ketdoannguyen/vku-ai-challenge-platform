@@ -8,12 +8,12 @@
 
 import { act } from "@testing-library/react";
 import { vi } from "vitest";
-import { POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
+const TIMER_STEP_MS = 8_000;
 
 /** Chạy hết timer giả trong `ms` và để React render xong trước khi test đọc DOM. */
 export async function flushTimers(ms = 0) {
-  const steps = Math.max(1, Math.ceil(ms / POLL_INTERVAL_MS));
-  const perStep = steps === 1 ? ms : POLL_INTERVAL_MS;
+  const steps = Math.max(1, Math.ceil(ms / TIMER_STEP_MS));
+  const perStep = steps === 1 ? ms : TIMER_STEP_MS;
   for (let step = 0; step < steps; step += 1) {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(perStep);

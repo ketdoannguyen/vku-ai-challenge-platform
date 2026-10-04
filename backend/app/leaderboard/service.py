@@ -1,11 +1,19 @@
 """Best-submission ranking shared by participant, admin and export APIs."""
 
-from collections import Counter
+import asyncio
+import time
+import weakref
+from collections import Counter, OrderedDict
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.core.datetimes import iso_z
 from app.scoring import contracts
 from app.submissions.service import SUBMISSIONS_COLLECTION, eligible_query
+
+# Bảng xếp hạng thô được cache rất ngắn: đủ lâu để gộp các lượt đọc trùng nhau lúc đông người xem,
+# đủ ngắn để bài nộp hay quyết định duyệt mới xuất hiện gần như tức thì. Trần entry chặn RAM.
+_CACHE_MAX_ENTRIES = 128
+_CACHE_TTL_SECONDS = 1.0
 
 
 def _rank_direction(competition: dict) -> int:
@@ -62,6 +70,115 @@ async def ranked_entries(db, competition: dict) -> list[dict]:
             }
         )
     return entries
+
+
+class _RankedEntriesCache:
+    """Cache TTL ngắn + single-flight cho danh sách xếp hạng thô.
+
+    - Khoá gồm danh tính DB, id cuộc thi và chiều xếp hạng nên hai cuộc thi, hai chiều hay hai DB
+      không bao giờ dùng chung kết quả - kể cả khi nhiều test chạy trong cùng một tiến trình.
+    - Chỉ cache danh sách thô đầy đủ metric; payload thí sinh vẫn lọc `visible_metrics` theo từng
+      request nên cache không thể làm lộ metric bị ẩn.
+    - Lượt đọc trùng khoá rơi vào lúc cache đang được nạp sẽ chờ chung một kết quả thay vì cùng
+      chạy truy vấn.
+    - `invalidate` tăng epoch: lượt nạp bắt đầu trước invalidate không được ghi lại vào cache và
+      người đọc sau invalidate không chờ chung lượt nạp cũ, nên bản trước quyết định duyệt không
+      thể quay lại phục vụ ai.
+    """
+
+    def __init__(
+        self, *, max_entries: int = _CACHE_MAX_ENTRIES, ttl_seconds: float = _CACHE_TTL_SECONDS
+    ) -> None:
+        self._max_entries = max_entries
+        self._ttl_seconds = ttl_seconds
+        self._entries: OrderedDict[tuple, tuple] = OrderedDict()
+        # Epoch tăng mỗi lần invalidate; lượt nạp ghi lại epoch lúc bắt đầu để biết mình còn hợp lệ.
+        self._epoch = 0
+        self._inflight: dict[tuple, tuple[int, asyncio.Future]] = {}
+
+    async def get(self, db, competition: dict, loader) -> list[dict]:
+        # `MongoContext.db` trả một wrapper mới mỗi lần đọc nên id(db) không ổn định; client và tên
+        # database mới là danh tính thật của nguồn dữ liệu.
+        key = (id(db.client), db.name, competition["_id"], _rank_direction(competition))
+        entries = self._lookup(key, db)
+        if entries is not None:
+            return entries
+
+        epoch = self._epoch
+        pending = self._inflight.get(key)
+        if pending is not None and pending[0] == epoch:
+            # Shield để một lượt chờ bỏ đi không hủy kết quả dùng chung của cả nhóm.
+            return await asyncio.shield(pending[1])
+
+        # Lượt nạp cũ (epoch khác) vẫn đang bay: người đọc lúc này tự nạp bản mới thay vì chờ chung
+        # bản trước invalidate; future mới thay chỗ trong `_inflight` để lượt cũ không dọn nhầm.
+        future = asyncio.get_running_loop().create_future()
+        inflight = (epoch, future)
+        self._inflight[key] = inflight
+        try:
+            entries = await loader(db, competition)
+        except BaseException as exc:
+            # Người đang chờ nhận đúng lỗi này thay vì treo; future không có ai chờ vẫn phải được
+            # đánh dấu đã đọc để asyncio không log "exception was never retrieved".
+            if not future.done():
+                future.set_exception(exc)
+                future.exception()
+            raise
+        finally:
+            if self._inflight.get(key) is inflight:
+                del self._inflight[key]
+        # Invalid giữa chừng: bản trước quyết định duyệt không được quay lại cache.
+        if self._epoch == epoch:
+            self._store(key, db, entries)
+        if not future.done():
+            future.set_result(entries)
+        return entries
+
+    def invalidate(self, competition_id) -> None:
+        # Tăng epoch trước khi xoá entry: lượt nạp đang bay của cuộc thi này trở thành cũ nên không
+        # ghi lại cache, còn người đọc sau invalidate không chờ chung nó.
+        self._epoch += 1
+        stale = [key for key in self._entries if key[2] == competition_id]
+        for key in stale:
+            del self._entries[key]
+
+    def _lookup(self, key, db) -> list[dict] | None:
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        client_ref, expires_at, entries = entry
+        # DB của lượt test trước có thể đã bị thu hồi và id bộ nhớ được cấp lại cho DB khác.
+        if client_ref() is not db.client or expires_at <= time.monotonic():
+            del self._entries[key]
+            return None
+        self._entries.move_to_end(key)
+        return entries
+
+    def _store(self, key, db, entries: list[dict]) -> None:
+        self._entries[key] = (
+            weakref.ref(db.client),
+            time.monotonic() + self._ttl_seconds,
+            entries,
+        )
+        self._entries.move_to_end(key)
+        while len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+
+
+_ranked_entries_cache = _RankedEntriesCache()
+
+
+async def cached_ranked_entries(db, competition: dict) -> list[dict]:
+    """Bản cache ngắn hạn của `ranked_entries` cho hai đường leaderboard.
+
+    Export không đi qua đây: file tải về phải khớp dữ liệu tại đúng thời điểm admin bấm.
+    """
+    return await _ranked_entries_cache.get(db, competition, ranked_entries)
+
+
+def invalidate_competition(competition_id) -> None:
+    """Bỏ cache của một cuộc thi ngay sau thao tác đổi tư cách tính điểm (duyệt/từ chối bài nộp)."""
+    _ranked_entries_cache.invalidate(competition_id)
 
 
 def _participant_entry(entry: dict, current_account_id, contract) -> dict:

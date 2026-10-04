@@ -1,8 +1,22 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { Competition } from "../api/competitions";
+import { setDocumentHidden } from "../test/timers";
 import { LeaderboardPage } from "./LeaderboardPage";
+
+/** Nhịp tự làm mới ngầm của bảng. */
+const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Chạy đồng hồ ảo kèm flush microtask. Hook cộng jitter ±10% vào nhịp, nên các test đọc mốc
+ * thời gian phải cố định `Math.random` về 0.5 (hệ số 1.0) để nhịp không trôi.
+ */
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 const COMPETITION = {
   id: "64a000000000000000000001",
@@ -129,7 +143,12 @@ function entry(rank: number, name: string, overrides: Record<string, unknown> = 
   };
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  setDocumentHidden(false);
+});
 
 test("leaderboard visible hiển thị rank, score và highlight current user", async () => {
   mockResponse(
@@ -162,11 +181,14 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
   expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
-test("leaderboard hidden hiển thị thông báo và không gọi API", () => {
+test("leaderboard hidden hiển thị thông báo và không gọi API", async () => {
+  vi.useFakeTimers();
   const fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   renderPage({ ...COMPETITION, leaderboard_visible: false });
   expect(screen.getByText("Bảng xếp hạng hiện chưa được công bố.")).toBeTruthy();
+  // Chưa công bố thì cả vòng tự làm mới ngầm cũng không được chạy.
+  await advance(AUTO_REFRESH_MS * 5);
   expect(fetchMock).not.toHaveBeenCalled();
 });
 
@@ -444,4 +466,152 @@ test("cuộc thi v2 chưa khai báo metric: không nêu tên metric, không đá
   // Chưa chọn metric chính thì câu mô tả không được lộ "null"/"undefined".
   const lead = screen.getByText(/Xếp theo điểm chấm của cuộc thi/);
   expect(lead.textContent).not.toMatch(/null|undefined/);
+});
+
+/* ---------------------------------------------------------------------------
+   Tự làm mới ngầm
+   --------------------------------------------------------------------------- */
+
+test("đang xem thì bảng tự làm mới ngầm theo nhịp, không nháy trạng thái tải", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let name = "Người 1";
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return jsonResponse(page({ total: 30, has_more: true, entries: [entry(1, name)] }));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(urls).toHaveLength(1);
+  expect(screen.getByText("Người 1")).toBeTruthy();
+
+  name = "Người mới";
+  await advance(AUTO_REFRESH_MS);
+  expect(urls).toHaveLength(2);
+  expect(screen.getByText("Người mới")).toBeTruthy();
+  expect(screen.queryByText("Người 1")).toBeNull();
+  // Lượt ngầm không đụng trạng thái tải: bảng không bật aria-busy và pager vẫn đọc số dòng.
+  expect(document.querySelector(".lb-table-wrap")).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByRole("status")).toHaveTextContent("Đã hiển thị 1–25 trong số 30 thí sinh có điểm");
+});
+
+test("làm mới ngầm giữ nguyên trang đang xem và focus của pager", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockPagedFetch();
+
+  renderPage();
+  await advance(0);
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await advance(0);
+  expect(screen.getByText("Người 26")).toBeTruthy();
+
+  const next = screen.getByRole("button", { name: "Trang sau" });
+  next.focus();
+  await advance(AUTO_REFRESH_MS);
+  // Lượt ngầm hỏi đúng trang đang xem, không kéo người dùng về trang một.
+  expect(urls.at(-1)).toContain("offset=25");
+  expect(screen.getByText("Người 26")).toBeTruthy();
+  expect(document.activeElement).toBe(next);
+  expect(screen.getByRole("status")).toHaveTextContent("Đã hiển thị 26–30 trong số 30 thí sinh có điểm");
+});
+
+test("bảng bị ẩn giữa chừng: 403 xoá điểm đã tải thay vì để điểm cũ trên màn hình", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let hidden = false;
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (hidden) {
+        return jsonResponse(
+          {
+            error: {
+              code: "LEADERBOARD_HIDDEN",
+              message: "Bảng xếp hạng hiện chưa được công bố.",
+            },
+          },
+          403,
+        );
+      }
+      return jsonResponse(page({ total: 1, entries: [entry(1, "Người 1")] }));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("Người 1")).toBeTruthy();
+
+  hidden = true;
+  await advance(AUTO_REFRESH_MS);
+  // Quyền xem đã mất: điểm cũ không được nằm lại trên màn hình.
+  expect(screen.queryByText("Người 1")).toBeNull();
+  expect(screen.getByRole("alert")).toHaveTextContent("Bảng xếp hạng hiện chưa được công bố.");
+
+  // 403 là lỗi quyền: vòng tự làm mới dừng hẳn, không quay lại hỏi nữa.
+  const calls = urls.length;
+  await advance(AUTO_REFRESH_MS * 5);
+  expect(urls).toHaveLength(calls);
+});
+
+test("lượt ngầm lỗi mạng giữ bảng và báo đang thử lại, sau đó tự phục hồi", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let failing = false;
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (failing) {
+        return jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500);
+      }
+      return jsonResponse(page({ total: 1, entries: [entry(1, "Người 1")] }));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("Người 1")).toBeTruthy();
+
+  failing = true;
+  await advance(AUTO_REFRESH_MS);
+  // Bảng cũ vẫn hiện, nhưng thông báo cho biết lượt làm mới đang thử lại.
+  expect(screen.getByText("Người 1")).toBeTruthy();
+  expect(screen.getByText(/Hệ thống đang tự thử lại/)).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  // Backoff sau lỗi đầu: 3000 * 2^1 = 6000ms (jitter đã cố định về hệ số 1.0).
+  await advance(5_999);
+  expect(urls).toHaveLength(2);
+  failing = false;
+  await advance(1);
+  expect(urls).toHaveLength(3);
+  expect(screen.getByText("Người 1")).toBeTruthy();
+  expect(screen.queryByText(/Hệ thống đang tự thử lại/)).toBeNull();
+});
+
+test("tab bị ẩn thì ngừng hỏi, quay lại thì cập nhật ngay", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockPagedFetch();
+
+  renderPage();
+  await advance(0);
+  expect(urls).toHaveLength(1);
+
+  setDocumentHidden(true);
+  await advance(AUTO_REFRESH_MS * 3);
+  expect(urls).toHaveLength(1);
+
+  setDocumentHidden(false);
+  await advance(0);
+  expect(urls).toHaveLength(2);
 });

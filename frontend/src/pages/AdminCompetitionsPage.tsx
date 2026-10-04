@@ -20,6 +20,8 @@ import {
   type CompetitionAction,
 } from "../components/AdminCompetitionManagement";
 import { Loading } from "../components/ui";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const PAGE_SIZE = 5;
@@ -166,20 +168,39 @@ export function AdminCompetitionsPage() {
   const editReturnFocus = useRef<HTMLButtonElement | null>(null);
   const confirmReturnFocus = useRef<HTMLButtonElement | null>(null);
   const deleteReturnFocus = useRef<HTMLButtonElement | null>(null);
+  /** Response cũ không được ghi đè dữ liệu mới hơn (làm mới thủ công, làm mới ngầm, sau thao tác). */
+  const requestSequence = useRef(0);
   useDocumentTitle("Quản lý cuộc thi");
 
   const load = useCallback(async (refresh = false) => {
+    const sequence = ++requestSequence.current;
     setError(null);
     if (refresh) setRefreshing(true);
     try {
-      setData(await api.get<AdminCompetitionsResponse>("/admin/competitions"));
+      const response = await api.get<AdminCompetitionsResponse>("/admin/competitions");
+      if (sequence === requestSequence.current) setData(response);
     } catch (err) {
-      setError(err);
+      if (sequence === requestSequence.current) setError(err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (sequence === requestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
+
+  /** Làm mới ngầm: không chạm loading/error của trang, lỗi ném cho hook tự xử lý. */
+  const silentLoad = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    const response = await api.get<AdminCompetitionsResponse>("/admin/competitions");
+    if (sequence === requestSequence.current) setData(response);
+  }, []);
+
+  const refreshStatus = useAutoRefresh(
+    data !== null && !loading && !refreshing && !creating && !editing && !confirming && !deleting,
+    silentLoad,
+    { intervalMs: 5_000 },
+  );
 
   useEffect(() => {
     void load();
@@ -256,6 +277,7 @@ export function AdminCompetitionsPage() {
 
   return (
     <div className="page ac-page">
+      <AutoRefreshNotice {...refreshStatus} />
       <header className="page-hero">
         <div className="page-hero-row">
           <span className="page-hero-icon" aria-hidden="true">

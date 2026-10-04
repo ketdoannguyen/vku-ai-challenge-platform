@@ -1,8 +1,9 @@
 /** Admin competitions UI: table render, tạo mới với validate, slug khóa khi edit. */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { setDocumentHidden } from "../test/timers";
 import { AdminCompetitionsPage } from "./AdminCompetitionsPage";
 
 const DRAFT = {
@@ -72,7 +73,17 @@ function statArticle(stats: HTMLElement, label: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  setDocumentHidden(false);
 });
+
+/** Chạy hết timer giả trong `ms` và để chuỗi fetch → setState render xong. */
+async function advance(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
 
 test("khu vực thống kê giữ đủ 4 ô; đầu bảng có tiêu đề khối kèm số cuộc thi", async () => {
   mockFetch((url) => (url.includes("/api/admin/competitions") ? { body: { competitions: [DRAFT] }, status: 200 } : { body: {}, status: 500 }));
@@ -549,4 +560,56 @@ test("tiêu đề tab đặt theo tên trang", async () => {
   );
   await screen.findByText("AI Challenge 2026");
   expect(document.title).toBe("Quản lý cuộc thi - AI Challenge");
+});
+
+test("tự làm mới cập nhật số thành viên/bài nộp và giữ nguyên từ khóa tìm kiếm", async () => {
+  vi.useFakeTimers();
+  const competitions = [{ ...DRAFT, member_count: 3, submission_count: 5 }];
+  mockFetch(() => ({ body: { competitions }, status: 200 }));
+  renderPage();
+  await advance();
+
+  const region = screen.getByRole("region", { name: "Bảng danh sách cuộc thi" });
+  expect(within(region).getByText("3")).toBeTruthy();
+  expect(within(region).getByText("5")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Tìm kiếm cuộc thi"), { target: { value: "AI" } });
+
+  // Thí sinh đăng ký và nộp bài ở phía máy chủ: lượt làm mới kế tiếp phải mang số mới về.
+  competitions[0].member_count = 4;
+  competitions[0].submission_count = 9;
+  await advance(6_000);
+
+  expect(within(region).getByText("4")).toBeTruthy();
+  expect(within(region).getByText("9")).toBeTruthy();
+  expect(within(region).queryByText("3")).toBeNull();
+  // Bảng đổi số nhưng từ khóa người dùng đang gõ còn nguyên.
+  expect((screen.getByLabelText("Tìm kiếm cuộc thi") as HTMLInputElement).value).toBe("AI");
+});
+
+test("form tạo đang mở thì tạm dừng tự làm mới; lượt làm mới ngầm lỗi vẫn giữ nguyên bảng", async () => {
+  vi.useFakeTimers();
+  let listCalls = 0;
+  mockFetch(() => {
+    listCalls += 1;
+    return listCalls === 1
+      ? { body: { competitions: [DRAFT] }, status: 200 }
+      : { body: { error: { code: "INTERNAL", message: "Máy chủ lỗi." } }, status: 500 };
+  });
+  renderPage();
+  await advance();
+  expect(listCalls).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Tạo cuộc thi" }));
+  await advance(20_000);
+  // Form tạo đang mở: không lượt làm mới nào chen vào sau lưng hộp thoại.
+  expect(listCalls).toBe(1);
+
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Tạo cuộc thi" })).getByRole("button", { name: "Hủy" }),
+  );
+  await advance(6_000);
+  expect(listCalls).toBe(2);
+  // Làm mới ngầm thất bại: bảng cũ còn nguyên, lỗi tải của trang không được bật.
+  expect(screen.getByText("AI Challenge 2026")).toBeTruthy();
+  expect(screen.queryByText("Không thể tải danh sách cuộc thi.")).toBeNull();
 });
