@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AdminAiReview, AiReviewDetail } from "../api/aiReview";
@@ -8,9 +8,21 @@ import type {
   ResultContract,
 } from "../api/results";
 import { AdminSubmissionsPanel } from "../components/AdminSubmissionsPanel";
-import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
-import { flushTimers, setDocumentHidden } from "../test/timers";
+import { setDocumentHidden } from "../test/timers";
 import { AdminSubmissionsPage } from "./AdminSubmissionsPage";
+
+/** Nhịp tự làm mới ngầm của bảng. */
+const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Chạy đồng hồ ảo kèm flush microtask. Hook cộng jitter ±10% vào nhịp, nên các test đọc mốc
+ * thời gian phải cố định `Math.random` về 0.5 (hệ số 1.0) để nhịp không trôi.
+ */
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 const ROW: GlobalSubmissionItem = {
   id: "s-0",
@@ -114,6 +126,13 @@ function renderPage() {
 /** Query string của request bảng bài nộp gần nhất. */
 function lastParams(urls: string[]): URLSearchParams {
   return new URL(urls.at(-1) as string, "http://localhost").searchParams;
+}
+
+/** Dải phân trang của bảng; chỉ có khi total vượt PAGE_SIZE. */
+function pagerStatus(): HTMLElement {
+  return within(document.querySelector(".admin-results-pagination") as HTMLElement).getByRole(
+    "status",
+  );
 }
 
 function statsRegion() {
@@ -1241,75 +1260,164 @@ test("Chi tiết AI mở đúng modal và chạy lại làm mới bảng mà kh�
   expect(reviewRequests(requests)).toEqual([]);
 });
 
-test("không có lượt AI nào đang chạy thì bảng không tự gọi lại", async () => {
+test("đang xem thì bảng tự làm mới ngầm theo nhịp, không nháy trạng thái tải", async () => {
   vi.useFakeTimers();
-  const { urls } = mockApi(() => jsonResponse(pageOf([AI_ROW])));
-
-  renderPage();
-  await flushTimers();
-  expect(urls).toHaveLength(1);
-
-  // Kết luận đã xong thì bảng đứng yên: không có lý do gì để quay vòng tải.
-  await flushTimers(POLL_INTERVAL_MS * 5);
-  expect(urls).toHaveLength(1);
-});
-
-test("còn lượt AI đang chạy thì tự làm mới theo nhịp, hết lượt thì dừng", async () => {
-  vi.useFakeTimers();
-  let pending = true;
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let name = "Đội 0";
   const { urls } = mockApi(() =>
-    jsonResponse(
-      pageOf([
-        {
-          ...AI_ROW,
-          ai_review: pending
-            ? { ...AI_ROW.ai_review!, state: "QUEUED", verdict: null }
-            : AI_ROW.ai_review,
-        },
-      ]),
-    ),
+    jsonResponse(pageOf([{ ...AI_ROW, account: { id: "a1", name, email: "team@vku.vn" } }], 120)),
   );
 
   renderPage();
-  await flushTimers();
+  await advance(0);
   expect(urls).toHaveLength(1);
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
 
-  await flushTimers(POLL_INTERVAL_MS * 2);
-  expect(urls).toHaveLength(3);
-
-  // Lượt AI đã xong ở lần tải kế tiếp: vòng poll tự tắt, không cần ai bảo.
-  pending = false;
-  await flushTimers(POLL_INTERVAL_MS);
-  expect(urls).toHaveLength(4);
-  await flushTimers(POLL_INTERVAL_MS * 5);
-  expect(urls).toHaveLength(4);
+  // Kết luận AI đã xong từ lâu vẫn được làm mới: điểm chấm cũng có thể về sau đó.
+  name = "Đội mới";
+  await advance(AUTO_REFRESH_MS);
+  expect(urls).toHaveLength(2);
+  expect(screen.getByText("Đội mới")).toBeTruthy();
+  expect(screen.queryByText("Đội 0")).toBeNull();
+  // Lượt ngầm không đụng trạng thái tải: vùng danh sách không bật aria-busy, pager vẫn đọc số dòng.
+  expect(
+    screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" }),
+  ).toHaveAttribute("aria-busy", "false");
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
 });
 
-test("tab bị ẩn thì ngừng tốn lượt poll, và dừng hẳn sau ngân sách", async () => {
+test("làm mới ngầm giữ nguyên bộ lọc, sắp xếp, trang đang xem và focus", async () => {
   vi.useFakeTimers();
-  const pending = { ...AI_ROW.ai_review!, state: "QUEUED" as const, verdict: null };
-  const { urls } = mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: pending }])));
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockApi((url) => {
+    const offset = Number(new URL(url, "http://localhost").searchParams.get("offset") ?? 0);
+    return jsonResponse(page(offset, 120));
+  });
 
   renderPage();
-  await flushTimers();
+  await advance(0);
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái chấm"), {
+    target: { value: "completed" },
+  });
+  await advance(0);
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await advance(0);
+  expect(screen.getByText("Đội 50")).toBeTruthy();
+
+  const next = screen.getByRole("button", { name: "Trang sau" });
+  next.focus();
+  await advance(AUTO_REFRESH_MS);
+  // Lượt ngầm hỏi đúng bộ lọc, đúng trang đang xem - không kéo admin về trang một.
+  const params = lastParams(urls);
+  expect(params.get("offset")).toBe("50");
+  expect(params.get("status")).toBe("completed");
+  expect(params.get("sort")).toBe("created_at");
+  expect(screen.getByText("Đội 50")).toBeTruthy();
+  expect(document.activeElement).toBe(next);
+});
+
+test("modal đang mở thì bảng nhường lượt làm mới ngầm", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockApi((url) => {
+    if (url.includes("/ai-review")) return jsonResponse(AI_DETAIL);
+    return jsonResponse(pageOf([AI_ROW], 1));
+  });
+
+  renderPage();
+  await advance(0);
+  const listCalls = () => urls.filter((url) => url.includes("/submissions?")).length;
+  expect(listCalls()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Chi tiết AI" }));
+  await advance(0);
+  expect(screen.getByRole("dialog")).toBeTruthy();
+
+  // Admin đang đọc một bài: bảng phía sau không chen thêm request nào.
+  const during = listCalls();
+  await advance(AUTO_REFRESH_MS * 3);
+  expect(listCalls()).toBe(during);
+
+  fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+  await advance(AUTO_REFRESH_MS);
+  expect(listCalls()).toBeGreaterThan(during);
+});
+
+test("mất quyền giữa chừng: 403 dừng tự làm mới và báo rõ", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let forbidden = false;
+  const { urls } = mockApi(() => {
+    if (forbidden) {
+      return jsonResponse({ error: { code: "FORBIDDEN", message: "Không có quyền." } }, 403);
+    }
+    return jsonResponse(pageOf([AI_ROW], 1));
+  });
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+
+  forbidden = true;
+  await advance(AUTO_REFRESH_MS);
+  expect(screen.getByText(/Đã dừng tự động làm mới/)).toBeTruthy();
+  // Bảng cũ vẫn còn, nhưng vòng tự làm mới đã dừng hẳn thay vì quay mãi.
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+
+  const calls = urls.length;
+  await advance(AUTO_REFRESH_MS * 5);
+  expect(urls).toHaveLength(calls);
+});
+
+test("lượt ngầm lỗi mạng giữ bảng và báo đang thử lại, sau đó tự phục hồi", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let failing = false;
+  const { urls } = mockApi(() => {
+    if (failing) {
+      return jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500);
+    }
+    return jsonResponse(pageOf([AI_ROW], 1));
+  });
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+
+  failing = true;
+  await advance(AUTO_REFRESH_MS);
+  // Bảng cũ ở lại; trạng thái thử lại vẫn hiển thị thay vì giả vờ dữ liệu đã mới.
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+  expect(screen.getByText(/Hệ thống đang tự thử lại/)).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  // Backoff sau lỗi đầu: 3000 * 2^1 = 6000ms (jitter đã cố định về hệ số 1.0).
+  await advance(5_999);
+  expect(urls).toHaveLength(2);
+  failing = false;
+  await advance(1);
+  expect(urls).toHaveLength(3);
+  expect(screen.getByText("Đội 0")).toBeTruthy();
+  expect(screen.queryByText(/Hệ thống đang tự thử lại/)).toBeNull();
+});
+
+test("tab bị ẩn thì ngừng làm mới ngầm, quay lại thì chạy tiếp", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockApi(() => jsonResponse(pageOf([AI_ROW], 1)));
+
+  renderPage();
+  await advance(0);
   expect(urls).toHaveLength(1);
 
   // Ẩn tab trước khi hết nhịp: không lượt nào được tiêu.
   setDocumentHidden(true);
-  await flushTimers(POLL_INTERVAL_MS * 3);
+  await advance(AUTO_REFRESH_MS * 3);
   expect(urls).toHaveLength(1);
 
   // Quay lại tab thì nhịp chạy tiếp.
   setDocumentHidden(false);
-  await flushTimers(POLL_INTERVAL_MS);
-  expect(urls.length).toBe(2);
-
-  await flushTimers(POLL_INTERVAL_MS * MAX_POLLS);
-  // Ngân sách đếm theo lượt thật sự gọi: dừng ở MAX_POLLS lượt poll, cộng lượt tải đầu.
-  expect(urls).toHaveLength(MAX_POLLS + 1);
-  expect(screen.getByText(/Đã tạm dừng tự động làm mới/)).toBeTruthy();
-
-  // Đã cạn ngân sách thì không tự quay lại nữa; đây là lúc nút Làm mới có việc.
-  await flushTimers(POLL_INTERVAL_MS * 3);
-  expect(urls).toHaveLength(MAX_POLLS + 1);
+  await advance(0);
+  expect(urls).toHaveLength(2);
 });

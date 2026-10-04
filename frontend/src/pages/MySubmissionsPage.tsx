@@ -5,7 +5,6 @@ import {
   AI_STATE_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
-  hasPendingAiReview,
 } from "../api/aiReview";
 import { formatLocal } from "../api/competitions";
 import {
@@ -17,15 +16,23 @@ import {
 } from "../api/results";
 import { ArtifactLinks } from "../components/ArtifactLinks";
 import { ErrorBox, Loading } from "../components/ui";
-import { usePendingPolling } from "../hooks/usePendingPolling";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 const PAGE_SIZE = 50;
+
+/** Nhịp tự làm mới ngầm khi tab đang mở. */
+const AUTO_REFRESH_MS = 3_000;
 
 export function MySubmissionsPage() {
   const { competition } = useOutletContext<CompetitionContext>();
   // Cuộc thi v2 khai báo metric riêng, nên cột chỉ số lấy từ hợp đồng thay vì cố định f1/precision/recall.
   const contract = resultContract(competition.submission_config);
+  const primaryMetric = contract.metrics.find((metric) => metric.key === contract.primary_metric);
+  const displayMetrics = primaryMetric
+    ? [primaryMetric, ...contract.metrics.filter((metric) => metric.key !== contract.primary_metric)]
+    : contract.metrics;
   const [data, setData] = useState<SubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,6 +43,8 @@ export function MySubmissionsPage() {
   const [copyError, setCopyError] = useState<string | null>(null);
   const requestSequence = useRef(0);
   const hasData = useRef(false);
+  /** Số lượt tải do người dùng chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
+  const manualLoads = useRef(0);
   const copyTimer = useRef<number | null>(null);
 
   useEffect(
@@ -47,28 +56,39 @@ export function MySubmissionsPage() {
 
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const loadData = useCallback(
-    async (nextOffset: number, keepRows: boolean) => {
+    async (nextOffset: number, keepRows: boolean, silent = false) => {
       const sequence = ++requestSequence.current;
-      setError(null);
-      if (keepRows) setRefreshing(true);
-      else setLoading(true);
+      if (!silent) {
+        manualLoads.current += 1;
+        setError(null);
+        if (keepRows) setRefreshing(true);
+        else setLoading(true);
+      }
       try {
         const result = await fetchMySubmissions(competition.id, PAGE_SIZE, nextOffset);
         // Response cũ không được ghi đè response mới khi người dùng đổi trang liên tục.
         if (sequence !== requestSequence.current) return;
         hasData.current = true;
         setData(result);
+        // Lượt ngầm thành công cũng xoá băng lỗi cũ: dữ liệu mới đã về thì lỗi hết đúng.
+        setError(null);
         // total co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
         const lastOffset = Math.max(0, Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE);
         if (nextOffset > lastOffset) {
           setQuery((current) => ({ offset: lastOffset, attempt: current.attempt + 1 }));
         }
       } catch (reason) {
-        if (sequence === requestSequence.current) setError(reason);
+        if (sequence !== requestSequence.current) return;
+        // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
+        if (!silent) setError(reason);
+        if (silent) throw reason;
       } finally {
-        if (sequence === requestSequence.current) {
-          setLoading(false);
-          setRefreshing(false);
+        if (!silent) {
+          manualLoads.current -= 1;
+          if (sequence === requestSequence.current) {
+            setLoading(false);
+            setRefreshing(false);
+          }
         }
       }
     },
@@ -109,10 +129,22 @@ export function MySubmissionsPage() {
   }
 
   const busy = loading || refreshing;
-  // Còn lượt AI đang chạy thì tự làm mới; hết ngân sách thì dừng và để thí sinh tự bấm Làm mới.
-  const pollExhausted = usePendingPolling(hasPendingAiReview(data?.submissions ?? []), () =>
-    requestPage(query.offset),
-  );
+
+  /**
+   * Lượt làm mới ngầm: không đụng trạng thái tải để bảng không nháy, và nhường khi
+   * người dùng đang bấm nút hoặc đang bôi đen nội dung.
+   */
+  const silentRefresh = useCallback(async () => {
+    if (manualLoads.current > 0) return false;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) return false;
+    await loadData(query.offset, true, true);
+  }, [loadData, query.offset]);
+
+  // Trang đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
+  const refreshStatus = useAutoRefresh(true, silentRefresh, {
+    intervalMs: AUTO_REFRESH_MS,
+  });
 
   // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
   if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
@@ -137,6 +169,7 @@ export function MySubmissionsPage() {
             <p className="subm-lead text-muted">Lịch sử của riêng bạn, mới nhất hiển thị trước.</p>
           </div>
         </div>
+        <AutoRefreshNotice {...refreshStatus} />
         <div className="empty-state">
           <div className="empty-state-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -187,8 +220,7 @@ export function MySubmissionsPage() {
 
   // Số thập phân của điểm tốt nhất phải theo metric chính trong hợp đồng; hợp đồng chưa chọn metric
   // chính thì giữ mức 4 của hợp đồng v1 để con số không đổi định dạng.
-  const bestScoreDecimals =
-    contract.metrics.find((metric) => metric.key === contract.primary_metric)?.decimals ?? 4;
+  const bestScoreDecimals = primaryMetric?.decimals ?? 4;
 
   return (
     <section className="subm-page">
@@ -276,6 +308,8 @@ export function MySubmissionsPage() {
         </div>
       )}
 
+      <AutoRefreshNotice {...refreshStatus} />
+
       {/* Lỗi khi đổi trang: giữ nguyên các dòng cũ, chỉ báo lỗi ngay trên bảng. */}
       {Boolean(error) && (
         <>
@@ -290,7 +324,7 @@ export function MySubmissionsPage() {
         </>
       )}
 
-      {/* Bảng kết quả: số cột chỉ số và nhãn của chúng theo hợp đồng của cuộc thi. */}
+      {/* Bảng kết quả: metric chính đứng đầu cụm chỉ số, các metric phụ giữ thứ tự hợp đồng. */}
       <div
         className="subm-table-wrap table-wrap"
         aria-busy={busy}
@@ -307,13 +341,13 @@ export function MySubmissionsPage() {
               {showsAi && (
                 <th scope="col" className="subm-col-ai">AI sơ bộ</th>
               )}
-              {contract.metrics.map((metric) => (
+              {displayMetrics.map((metric) => (
                 <th
                   key={metric.key}
                   scope="col"
                   className={metric.key === contract.primary_metric ? "subm-col-primary" : "subm-col-num"}
                 >
-                  {metric.label}
+                  {metric.key === contract.primary_metric ? `Điểm chính · ${metric.label}` : metric.label}
                 </th>
               ))}
             </tr>
@@ -408,9 +442,8 @@ export function MySubmissionsPage() {
                       )}
                     </td>
                   )}
-                  {/* Điểm chính là giá trị của metric chính trong hợp đồng, nên không vẽ thêm cột
-                      "Điểm chính" để tránh hiện cùng một con số ở hai chỗ. */}
-                  {contract.metrics.map((metric) => (
+                  {/* Điểm chính chỉ hiện trong cột metric chính, không nhân đôi giá trị. */}
+                  {displayMetrics.map((metric) => (
                     <td
                       key={metric.key}
                       className={
@@ -419,7 +452,13 @@ export function MySubmissionsPage() {
                           : "subm-score-cell score-cell"
                       }
                     >
-                      {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                      {metric.key === contract.primary_metric ? (
+                        <span className="subm-primary-score-value">
+                          {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                        </span>
+                      ) : (
+                        formatMetric(submission.metrics?.[metric.key], metric.decimals)
+                      )}
                     </td>
                   ))}
                 </tr>
@@ -430,13 +469,6 @@ export function MySubmissionsPage() {
       </div>
 
       {showsAi && <p className="subm-ai-note text-muted">{AI_PARTICIPANT_DISCLAIMER}</p>}
-
-      {/* Polling tự dừng sau ngân sách lượt; nói rõ để không bị đọc thành "AI đã chạy xong". */}
-      {pollExhausted && (
-        <div className="status-banner warning" role="status">
-          <span>Đã tạm dừng tự động làm mới. Bấm “Làm mới” để xem trạng thái AI mới nhất.</span>
-        </div>
-      )}
 
       {/* Phân trang */}
       {data.total > PAGE_SIZE && (

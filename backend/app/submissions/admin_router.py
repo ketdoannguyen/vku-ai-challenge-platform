@@ -203,6 +203,9 @@ async def set_submission_review(
             422, "INVALID_TRANSITION", "Chỉ xét duyệt được bài đã chấm điểm thành công."
         )
 
+    # Quyết định duyệt đổi tư cách tính điểm nên bảng xếp hạng đã cache phải bỏ ngay, không chờ TTL:
+    # admin vừa từ chối xong phải thấy bài rời bảng ở lượt đọc kế tiếp.
+    leaderboard_service.invalidate_competition(updated["competition_id"])
     account = await db[ACCOUNTS_COLLECTION].find_one({"_id": updated["account_id"]})
     # Nội dung lý do là dữ liệu của người dùng, không ghi vào log.
     logger.info(
@@ -380,7 +383,7 @@ async def admin_leaderboard(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    entries = await leaderboard_service.ranked_entries(db, competition)
+    entries = await leaderboard_service.cached_ranked_entries(db, competition)
     return leaderboard_service.admin_leaderboard_response(competition, entries)
 
 

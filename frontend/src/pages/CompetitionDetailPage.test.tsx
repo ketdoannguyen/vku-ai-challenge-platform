@@ -1,8 +1,9 @@
 /** Competition layout: load theo slug, header + sidebar content, submit enabled, Sprint 06 tabs disabled. */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
+import { setDocumentHidden } from "../test/timers";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
 import { CompetitionDetailPage } from "./CompetitionDetailPage";
 import { CompetitionGuidePage } from "./CompetitionGuidePage";
@@ -68,7 +69,17 @@ function renderAt(path: string) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
+  setDocumentHidden(false);
 });
+
+/** Chạy hết timer giả trong `ms` và để chuỗi fetch → setState render xong. */
+async function advance(ms = 0) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+}
 
 test("load competition + sidebar sắp theo order, dừng ở Tổng quan và tab active Tổng quan", async () => {
   apiMock((url) => {
@@ -494,4 +505,69 @@ test("trang lỗi có H1 mô tả trạng thái và tiêu đề tab tương ứn
   expect(await screen.findByRole("heading", { level: 1, name: "Không tìm thấy cuộc thi" })).toBeTruthy();
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   await waitFor(() => expect(document.title).toBe("Không tìm thấy cuộc thi - AI Challenge"));
+});
+
+test("trạng thái cuộc thi đổi từ phía Ban Tổ chức tự hiện, không nháy skeleton", async () => {
+  vi.useFakeTimers();
+  const competition = { ...COMPETITION };
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: competition, status: 200 };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await advance();
+  expect(screen.getByText("Đang diễn ra")).toBeTruthy();
+
+  competition.status = "closed";
+  await advance(6_000);
+
+  expect(screen.getByText("Đã kết thúc")).toBeTruthy();
+  expect(screen.queryByText("Đang diễn ra")).toBeNull();
+  // Cập nhật tại chỗ: masthead đổi badge nhưng không unmount trang để nháy skeleton.
+  expect(screen.queryByText("Đang tải cuộc thi…")).toBeNull();
+  expect(screen.getByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
+});
+
+test("lượt làm mới ngầm lỗi thì giữ nguyên nội dung đang xem, không hiện trang lỗi", async () => {
+  vi.useFakeTimers();
+  let detailCalls = 0;
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    detailCalls += 1;
+    return detailCalls === 1
+      ? { body: COMPETITION, status: 200 }
+      : { body: { error: { code: "INTERNAL", message: "Máy chủ lỗi." } }, status: 500 };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await advance();
+  expect(screen.getByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
+
+  await advance(6_000);
+  expect(detailCalls).toBe(2);
+  expect(screen.getByRole("heading", { name: "AI Challenge 2026" })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Không thể tải cuộc thi" })).toBeNull();
+  expect(screen.queryByText("Đang tải cuộc thi…")).toBeNull();
+});
+
+test("modal xác nhận rời cuộc thi đang mở thì tạm dừng tự làm mới", async () => {
+  vi.useFakeTimers();
+  let detailCalls = 0;
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    detailCalls += 1;
+    return { body: COMPETITION, status: 200 };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await advance();
+  expect(detailCalls).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Rời cuộc thi" }));
+  const dialog = screen.getByRole("dialog", { name: "Rời cuộc thi" });
+  await advance(20_000);
+  // Hộp thoại xác nhận đang mở: dữ liệu bên dưới không bị ghi đè.
+  expect(detailCalls).toBe(1);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Hủy" }));
+  await advance(6_000);
+  expect(detailCalls).toBe(2);
 });

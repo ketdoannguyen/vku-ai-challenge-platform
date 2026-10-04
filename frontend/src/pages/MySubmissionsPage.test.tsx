@@ -1,11 +1,23 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AI_PARTICIPANT_DISCLAIMER } from "../api/aiReview";
 import type { Competition } from "../api/competitions";
-import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
-import { flushTimers, setDocumentHidden } from "../test/timers";
+import { setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
+
+/** Nhịp tự làm mới ngầm của trang. */
+const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Chạy đồng hồ ảo kèm flush microtask. Hook cộng jitter ±10% vào nhịp, nên các test đọc mốc
+ * thời gian phải cố định `Math.random` về 0.5 (hệ số 1.0) để nhịp không trôi.
+ */
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 const COMPETITION: Competition = {
   id: "64a000000000000000000001",
@@ -107,6 +119,7 @@ function mockPagedFetch({ total = 120, gateOffset }: { total?: number; gateOffse
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.useRealTimers();
   setDocumentHidden(false);
 });
@@ -205,11 +218,15 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(screen.getByText("0.7000")).toBeTruthy();
 
   const rows = screen.getAllByRole("row");
+  expect(Array.from(rows[0].querySelectorAll("th")).slice(3).map((th) => th.textContent)).toEqual([
+    "Điểm chính · F1", "Precision", "Recall",
+  ]);
   // Dòng mới nhất có đủ hai nút; dòng legacy chỉ còn nút CSV.
   expect(within(rows[1]).getAllByRole("button")).toHaveLength(3);
   expect(within(rows[1]).getByRole("button", { name: "Notebook" })).toBeTruthy();
   expect(within(rows[2]).getAllByRole("button")).toHaveLength(2);
   expect(within(rows[2]).queryByRole("button", { name: "Notebook" })).toBeNull();
+  expect(rows[2].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
 });
 
 /** Cuộc thi v2 khai báo metric riêng: nhãn cột và số thập phân phải lấy từ hợp đồng, không phải bộ ba cố định. */
@@ -222,8 +239,8 @@ const V2_COMPETITION: Competition = {
     higher_is_better: true,
     result_contract: {
       metrics: [
-        { key: "accuracy", label: "Độ chính xác", decimals: 2 },
         { key: "n_items", label: "Số mẫu", decimals: 0 },
+        { key: "accuracy", label: "Độ chính xác", decimals: 2 },
       ],
       primary_metric: "accuracy",
       higher_is_better: true,
@@ -255,17 +272,43 @@ test("cuộc thi v2 hiện metric, nhãn và số thập phân theo hợp đồn
   await screen.findByTitle("v2.csv");
 
   const rows = screen.getAllByRole("row");
-  // Cột theo đúng thứ tự hợp đồng; nhãn lấy từ hợp đồng thay vì F1/Precision/Recall.
-  expect(within(rows[0]).getByText("Độ chính xác")).toBeTruthy();
-  expect(within(rows[0]).getByText("Số mẫu")).toBeTruthy();
+  // Metric chính khai báo sau nhưng đứng đầu cụm cột, nhãn nêu rõ vai trò xếp hạng.
+  expect(Array.from(rows[0].querySelectorAll("th")).slice(3).map((th) => th.textContent)).toEqual([
+    "Điểm chính · Độ chính xác", "Số mẫu",
+  ]);
   expect(within(rows[0]).queryByText("F1")).toBeNull();
 
   const cells = Array.from(rows[1].querySelectorAll(".score-cell"));
   expect(cells.map((cell) => cell.textContent)).toEqual(["0.91", "1200"]);
-  // Metric chính giữ đánh dấu nổi bật, và số của nó chỉ hiện một lần vì không còn cột "Điểm chính" riêng.
+  // Số chính có khung riêng, số phụ không có; không thêm cột điểm trùng lặp.
   expect(cells[0].className).toContain("primary-score");
+  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("0.91");
   expect(cells[1].className).not.toContain("primary-score");
+  expect(cells[1].querySelector(".subm-primary-score-value")).toBeNull();
   expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.91");
+});
+
+test("bài cũ thiếu metric chính vẫn hiện dấu gạch trước metric phụ", async () => {
+  mockResponse({
+    submissions: [{
+      id: "s-partial",
+      competition_id: COMPETITION.id,
+      status: "completed",
+      metrics: { n_items: 1200 },
+      primary_score: null,
+      created_at: "2026-09-15T09:00:00Z",
+      artifacts: { prediction: null, notebook: null },
+    }],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(V2_COMPETITION);
+  await screen.findByText("1200");
+
+  const cells = Array.from(screen.getAllByRole("row")[1].querySelectorAll(".score-cell"));
+  expect(cells.map((cell) => cell.textContent)).toEqual(["-", "1200"]);
+  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
 });
 
 test("bản nháp v2 chưa khai báo metric: ẩn cụm chỉ số thay vì hiện null/undefined", async () => {
@@ -792,54 +835,135 @@ test("kết luận AI không đổi việc chọn bài tốt nhất: chỉ từ 
   expect(within(rows[2]).getByText("Không chấp nhận")).toBeTruthy();
 });
 
-test("còn lượt AI đang chạy thì trang tự làm mới theo nhịp, hết lượt thì dừng", async () => {
+test("đang xem thì trang tự làm mới ngầm theo nhịp, không nháy trạng thái tải", async () => {
   vi.useFakeTimers();
-  let pending = true;
-  const { urls } = mockMutableResponse(() => pagesWithAi(pending));
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let id = "s-0";
+  const { urls } = mockMutableResponse(() => ({
+    ...submissionsPage(0, 120),
+    submissions: [{ ...submissionsPage(0, 120).submissions[0], id }],
+  }));
 
   renderPage();
-  await flushTimers();
+  await advance(0);
   expect(urls).toHaveLength(1);
+  expect(screen.getByText("#s-0")).toBeTruthy();
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
 
-  await flushTimers(POLL_INTERVAL_MS * 2);
+  id = "s-live";
+  await advance(AUTO_REFRESH_MS);
+  expect(urls).toHaveLength(2);
+  expect(screen.getByText("#s-live")).toBeTruthy();
+  expect(screen.queryByText("#s-0")).toBeNull();
+  // Lượt ngầm không đụng trạng thái tải: dải phân trang vẫn đọc số dòng, không thành "Đang cập nhật…".
+  expect(pagerStatus()).toHaveTextContent("Đã hiển thị 1–50 trong số 120 bài nộp");
+});
+
+test("làm mới ngầm giữ nguyên trang đang xem và focus của nút phân trang", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockPagedFetch();
+
+  renderPage();
+  await advance(0);
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  await advance(0);
+  expect(screen.getByText("#s-50")).toBeTruthy();
+
+  const next = screen.getByRole("button", { name: "Trang sau" });
+  next.focus();
+  await advance(AUTO_REFRESH_MS);
+  // Lượt ngầm hỏi đúng trang đang xem, không kéo người dùng về trang một.
+  expect(urls.at(-1)).toContain("offset=50");
+  expect(screen.getByText("#s-50")).toBeTruthy();
+  expect(document.activeElement).toBe(next);
+});
+
+test("mất quyền giữa chừng: 403 dừng tự làm mới và báo rõ", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let forbidden = false;
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (forbidden) {
+        return jsonResponse(
+          { error: { code: "FORBIDDEN", message: "Không có quyền xem bài nộp." } },
+          403,
+        );
+      }
+      return jsonResponse(submissionsPage(0, 1));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("#s-0")).toBeTruthy();
+
+  forbidden = true;
+  await advance(AUTO_REFRESH_MS);
+  expect(screen.getByText(/Đã dừng tự động làm mới/)).toBeTruthy();
+  // Bảng cũ vẫn còn, nhưng vòng tự làm mới đã dừng hẳn thay vì quay mãi.
+  expect(screen.getByText("#s-0")).toBeTruthy();
+
+  const calls = urls.length;
+  await advance(AUTO_REFRESH_MS * 5);
+  expect(urls).toHaveLength(calls);
+});
+
+test("lượt ngầm lỗi mạng giữ bảng và báo đang thử lại, sau đó tự phục hồi", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let failing = false;
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      if (failing) {
+        return jsonResponse({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500);
+      }
+      return jsonResponse(submissionsPage(0, 1));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("#s-0")).toBeTruthy();
+
+  failing = true;
+  await advance(AUTO_REFRESH_MS);
+  // Bảng cũ ở lại; trạng thái thử lại vẫn hiển thị thay vì giả vờ dữ liệu đã mới.
+  expect(screen.getByText("#s-0")).toBeTruthy();
+  expect(screen.getByText(/Hệ thống đang tự thử lại/)).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  // Backoff sau lỗi đầu: 3000 * 2^1 = 6000ms (jitter đã cố định về hệ số 1.0).
+  await advance(5_999);
+  expect(urls).toHaveLength(2);
+  failing = false;
+  await advance(1);
   expect(urls).toHaveLength(3);
-
-  pending = false;
-  await flushTimers(POLL_INTERVAL_MS);
-  expect(urls).toHaveLength(4);
-  await flushTimers(POLL_INTERVAL_MS * 5);
-  expect(urls).toHaveLength(4);
+  expect(screen.getByText("#s-0")).toBeTruthy();
+  expect(screen.queryByText(/Hệ thống đang tự thử lại/)).toBeNull();
 });
 
-test("hết ngân sách poll thì trang nói rõ đã dừng thay vì quay mãi", async () => {
+test("tab bị ẩn thì ngừng làm mới ngầm, quay lại thì cập nhật ngay", async () => {
   vi.useFakeTimers();
-  const { urls } = mockMutableResponse(() => pagesWithAi(true));
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const { urls } = mockMutableResponse(() => submissionsPage(0, 1));
 
   renderPage();
-  await flushTimers();
-  await flushTimers(POLL_INTERVAL_MS * MAX_POLLS);
-
-  // Ngân sách đếm theo lượt gọi thật: dừng ở MAX_POLLS lượt poll, cộng lượt tải đầu.
-  expect(urls).toHaveLength(MAX_POLLS + 1);
-  expect(screen.getByText(/Đã tạm dừng tự động làm mới/)).toBeTruthy();
-
-  await flushTimers(POLL_INTERVAL_MS * 3);
-  expect(urls).toHaveLength(MAX_POLLS + 1);
-});
-
-test("tab bị ẩn thì ngừng tốn lượt poll chờ AI", async () => {
-  vi.useFakeTimers();
-  const { urls } = mockMutableResponse(() => pagesWithAi(true));
-
-  renderPage();
-  await flushTimers();
+  await advance(0);
   expect(urls).toHaveLength(1);
 
   setDocumentHidden(true);
-  await flushTimers(POLL_INTERVAL_MS * 3);
+  await advance(AUTO_REFRESH_MS * 3);
   expect(urls).toHaveLength(1);
 
   setDocumentHidden(false);
-  await flushTimers(POLL_INTERVAL_MS);
+  await advance(0);
   expect(urls).toHaveLength(2);
 });

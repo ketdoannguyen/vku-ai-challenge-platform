@@ -1,9 +1,22 @@
 /** Admin competition detail: content table, member actions, join code không hiện trong DOM. */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AdminCompetitionDetailPage } from "./AdminCompetitionDetailPage";
+
+/** Nhịp tự làm mới ngầm của tab Kết quả. */
+const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Chạy đồng hồ ảo kèm flush microtask. Hook cộng jitter ±10% vào nhịp, nên các test đọc mốc
+ * thời gian phải cố định `Math.random` về 0.5 (hệ số 1.0) để nhịp không trôi.
+ */
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 const COMPETITION = {
   id: "64a000000000000000000001",
@@ -276,6 +289,7 @@ function expectKeyboardFilePicker(buttonName: string | RegExp, inputLabel: strin
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 test("tab Nội dung render table theo order + trạng thái file", async () => {
@@ -1692,6 +1706,29 @@ test("xóa thành viên đã có bài chấm điểm: 409 hiện ngay trong moda
   expect(screen.getByText("thi.sinh@vku.vn")).toBeTruthy();
 });
 
+test("thành viên mới tự xuất hiện khi đang xem tab, không cần tải lại", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const members = [{ ...MEMBERS.members[0] }];
+  mockApi((url) => {
+    if (url.includes("/members")) {
+      return { body: { members, total: members.length, active_total: members.length }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+  renderPage();
+  await advance(0);
+  fireEvent.click(screen.getByRole("tab", { name: "Thành viên" }));
+  await advance(0);
+  expect(screen.getByText("thi.sinh@vku.vn")).toBeTruthy();
+
+  members.push({ ...MEMBERS.members[0], account_id: "u2", email: "moi@vku.vn", name: "Mới" });
+  await advance(5_000);
+  expect(screen.getByText("moi@vku.vn")).toBeTruthy();
+  expect(screen.getByText("2 đang hoạt động")).toBeTruthy();
+});
+
 test("đếm thành viên tách người đang hoạt động khỏi người đã vô hiệu hóa", async () => {
   mockApi((url) => {
     if (url.includes("/members")) {
@@ -3068,4 +3105,96 @@ test("tệp .py mẫu tải được và đúng hợp đồng bộ chấm", asyn
   expect(SAMPLE_EVALUATOR).toContain("def evaluate(ground_truth_path, submission_path)");
   expect(SAMPLE_EVALUATOR).toContain("import pandas as pd");
   expect(SAMPLE_EVALUATOR).toContain("from sklearn.metrics import");
+});
+
+/* ---------------------------------------------------------------------------
+   Tự làm mới ngầm của tab Kết quả
+   --------------------------------------------------------------------------- */
+
+/** Mock tab Kết quả; bảng xếp hạng trả body tính lại mỗi lần gọi để test đổi dữ liệu giữa nhịp. */
+function mockResultsTab(leaderboard: () => { body: unknown; status: number }) {
+  mockApi((url) => {
+    if (url.endsWith("/leaderboard")) return leaderboard();
+    if (url.includes("/submissions")) {
+      return { body: { submissions: [], total: 0, limit: 50, offset: 0 }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: COMPETITION, status: 200 };
+  });
+}
+
+/** Dòng xếp hạng của tab Kết quả; `name` đổi được để nhận ra lượt làm mới ngầm. */
+function leaderboardBody(name: string) {
+  return {
+    competition_id: COMPETITION.id,
+    primary_metric: "f1",
+    total: 1,
+    entries: [
+      {
+        rank: 1,
+        account_id: "u1",
+        display_name: name,
+        primary_score: 0.9,
+        metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+        best_submission_id: "s1",
+        best_submission_at: "2026-09-15T09:00:00Z",
+        total_submissions: 2,
+      },
+    ],
+  };
+}
+
+test("tab Kết quả tự làm mới bảng xếp hạng ngầm, không nháy trạng thái tải", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let name = "Thí Sinh";
+  mockResultsTab(() => ({ body: leaderboardBody(name), status: 200 }));
+
+  renderPage();
+  await advance(0);
+  fireEvent.click(screen.getByRole("tab", { name: "Kết quả" }));
+  await advance(0);
+  expect(screen.getByText("Thí Sinh")).toBeTruthy();
+  const leaderboardCalls = () => calls.filter((call) => call.url.endsWith("/leaderboard")).length;
+  expect(leaderboardCalls()).toBe(1);
+
+  name = "Thí Sinh Mới";
+  await advance(AUTO_REFRESH_MS);
+  expect(leaderboardCalls()).toBe(2);
+  expect(screen.getByText("Thí Sinh Mới")).toBeTruthy();
+  expect(screen.queryByText("Thí Sinh")).toBeNull();
+  // Lượt ngầm không đụng trạng thái tải: bảng không rơi về màn "Đang tải..." giữa chừng.
+  expect(screen.queryByText("Đang tải...")).toBeNull();
+});
+
+test("lượt làm mới ngầm của bảng xếp hạng lỗi thì giữ bảng cũ, không hiện lỗi, và tự phục hồi", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  let failing = false;
+  mockResultsTab(() =>
+    failing
+      ? { body: { error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, status: 500 }
+      : { body: leaderboardBody("Thí Sinh"), status: 200 },
+  );
+
+  renderPage();
+  await advance(0);
+  fireEvent.click(screen.getByRole("tab", { name: "Kết quả" }));
+  await advance(0);
+  expect(screen.getByText("Thí Sinh")).toBeTruthy();
+  const leaderboardCalls = () => calls.filter((call) => call.url.endsWith("/leaderboard")).length;
+
+  failing = true;
+  await advance(AUTO_REFRESH_MS);
+  // Lỗi tạm của lượt ngầm là chuyện nội bộ: bảng cũ ở lại và không có màn lỗi nào.
+  expect(screen.getByText("Thí Sinh")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+
+  // Backoff sau lỗi đầu: 3000 * 2^1 = 6000ms (jitter đã cố định về hệ số 1.0).
+  await advance(5_999);
+  expect(leaderboardCalls()).toBe(2);
+  failing = false;
+  await advance(1);
+  expect(leaderboardCalls()).toBe(3);
+  expect(screen.getByText("Thí Sinh")).toBeTruthy();
 });
