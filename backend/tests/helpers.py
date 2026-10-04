@@ -272,6 +272,25 @@ def put_scoring_v2(
     )
 
 
+def put_result_display(
+    client,
+    competition_id: str,
+    *,
+    expected_revision: int,
+    metrics: list[dict],
+    visible_metrics: list[str] | None = None,
+):
+    """Sửa cách hiển thị hợp đồng kết quả; body chỉ mang phần hiển thị, không mang luật chấm."""
+    return client.put(
+        f"/api/admin/competitions/{competition_id}/scoring/result-display",
+        json={
+            "expected_revision": expected_revision,
+            "metrics": metrics,
+            "visible_metrics": visible_metrics,
+        },
+    )
+
+
 def upload_v2_ground_truth(
     client, competition_id: str, *, expected_revision: int, data: bytes = V2_GROUND_TRUTH
 ):

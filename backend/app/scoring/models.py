@@ -133,6 +133,20 @@ class ScoringConfigRequest(BaseModel):
     output_contract: OutputContract | None = None
 
 
+class ResultDisplayRequest(BaseModel):
+    """Body của `PUT /scoring/result-display`: chỉ phần hiển thị của hợp đồng kết quả.
+
+    Khóa metric, metric chính và chiều xếp hạng do bộ chấm quyết định, không đi qua body này -
+    `extra="forbid"` chặn luôn ý định gửi kèm.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int
+    metrics: list[MetricDefinition]
+    visible_metrics: list[str] | None = None
+
+
 def stored_config(competition: dict) -> ScoringConfigV2 | None:
     """Cấu hình v2 đã lưu, hoặc None khi cuộc thi chưa cấu hình hay đang chạy bộ chấm v1."""
     raw = competition.get("scoring_config")
