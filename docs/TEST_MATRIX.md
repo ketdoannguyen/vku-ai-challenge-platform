@@ -1141,6 +1141,16 @@ stack dev thật ở cuối mục.
 | Participant không bao giờ nhận mã lỗi kỹ thuật, provider, model, host, finding hay bằng chứng - kể cả khi state là ERROR | passing | `test_ai_review_api.py`; `MySubmissionsPage.test.tsx` (nhóm redaction) |
 | Notebook không bao giờ được execute/import/render: chỉ `json.loads` + kiểm cấu trúc nbformat 4 | passing | `test_ai_review_notebook.py` |
 
+### Backend - chẩn đoán timeout và nhịp worker (ADR-053)
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Connect/Read/Write/Pool timeout (và subtype không rõ) giữ mã/thông báo retryable cũ; subtype + thời lượng HTTP call được log theo host, không log key, prompt hay body/exception text | passing trên working tree, chưa rollout | `test_ai_review_provider.py::test_timeout_records_phase_without_leaking_content` |
+| Timeout chậm không ăn mất backoff: `run_after` tính từ `last_error.occurred_at` sau khi HTTP lỗi, không từ lúc bắt đầu attempt | passing trên working tree, chưa rollout | `test_ai_review_service.py::test_slow_timeout_retries_after_the_failure_not_the_start` |
+| Timeout terminal lưu model/host và phase, `created_at` là mốc đầu attempt cuối, `duration_ms` là thời gian toàn attempt đo được, `completed_at`/`updated_at`/`error.occurred_at` trùng mốc lỗi; job chốt đúng mốc đó | passing trên working tree, chưa rollout | `test_ai_review_service.py::test_terminal_timeout_records_elapsed_time_and_failure_phase` |
+| Error duration >1 giây giữ chính xác millisecond; worker chạy liên tục (`max_jobs=None`) thu hoạch và báo outcome của mỗi job đúng một lần, không giữ danh sách finished tới lúc dừng | passing trên working tree, chưa rollout | `test_ai_review_service.py::test_error_duration_preserves_exact_milliseconds`, `test_ai_review_worker.py::test_running_worker_reports_finished_jobs_without_a_job_limit` |
+| Subtype timeout thực tế và nguyên nhân ở production | **chưa xác định** | Log lịch sử không chứa subtype; chỉ đánh giá lượt mới sau khi có phê duyệt rollout riêng, không suy diễn ReadTimeout từ thông báo chung |
+
 ### Backend - 18 kịch bản bắt buộc (map từ `llm-ai-review.md`)
 
 | # | Kịch bản | Status | Cách verify |
@@ -1152,7 +1162,7 @@ stack dev thật ở cuối mục.
 | 5 | Prompt injection trong notebook không điều khiển reviewer | passing | `::test_a_prompt_injection_in_the_notebook_stays_inside_the_evidence_block` |
 | 6 | Notebook hỏng → ERROR | passing | `::test_a_malformed_notebook_is_refused_before_any_provider_call` |
 | 7 | Notebook rỗng/không nội dung hữu ích → từ chối trước khi gọi provider | passing | `::test_an_empty_notebook_is_refused_before_any_provider_call` (đồng thời ở tầng nộp bài: 422 `NOTEBOOK_INVALID`) |
-| 8 | Timeout: retry rồi kết thúc bằng ERROR | passing | `::test_retryable_transport_errors_go_back_to_the_queue`, `::test_a_transport_error_that_never_settles_ends_as_an_error_row` |
+| 8 | Timeout: retry rồi kết thúc bằng ERROR | passing | `::test_retryable_transport_errors_go_back_to_the_queue`, `::test_a_transport_error_that_never_settles_ends_as_an_error_row`, `::test_terminal_timeout_records_elapsed_time_and_failure_phase` |
 | 9 | 401 không retry | passing | `::test_terminal_provider_errors_do_not_burn_retries` |
 | 10 | 429 retry | passing | `::test_throttling_and_provider_errors_are_retried` |
 | 11 | 500 retry | passing | Cùng test trên |
