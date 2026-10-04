@@ -695,6 +695,33 @@ async def test_changed_competition_content_invalidates_the_cache(mock_db, ai_env
     }
 
 
+async def test_new_prompt_does_not_reuse_a_review_from_the_previous_version(
+    mock_db, ai_env, monkeypatch
+):
+    competition_id = ObjectId()
+    first = await seed(mock_db, competition_id=competition_id)
+    second = await seed(mock_db, competition_id=competition_id, account_id=ObjectId())
+    calls: list = []
+
+    monkeypatch.setattr(constants, "PROMPT_VERSION", "ai-review-v5")
+    await run(mock_db, handler(FLAGGED_OUTPUT, calls))
+    old = next(review for review in await reviews(mock_db) if review["submission_id"] == first["_id"])
+    assert old["prompt_version"] == "ai-review-v5"
+
+    monkeypatch.setattr(constants, "PROMPT_VERSION", "ai-review-v6")
+    await run(mock_db, handler(CLEAR_OUTPUT, calls))
+
+    stored = await reviews(mock_db)
+    assert len(calls) == 2
+    assert len(stored) == 2
+    assert next(review for review in stored if review["submission_id"] == first["_id"]) == old
+    new = next(review for review in stored if review["submission_id"] == second["_id"])
+    assert new["source"] == constants.SOURCE_PROVIDER
+    assert new["verdict"] == constants.VERDICT_CLEAR
+    assert new["prompt_version"] == "ai-review-v6"
+    assert new["cache_key"] != old["cache_key"]
+
+
 async def test_bypass_cache_reruns_the_provider_for_an_identical_submission(mock_db, ai_env):
     competition_id = ObjectId()
     await seed(mock_db, competition_id=competition_id)
@@ -753,6 +780,27 @@ async def test_two_competitions_with_opposite_policies_get_opposite_verdicts(moc
     assert any("Được phép dùng mô hình pretrained." in text for text in seen)
     assert all("from_pretrained" in text for text in seen)
     assert all(text.count("<COMPETITION_CONTENT>") == 1 for text in seen)
+
+
+async def test_scored_submission_sends_notebook_not_prediction_csv(mock_db, ai_env):
+    notebook = notebook_bytes(cells=[
+        {"cell_type": "code", "source": ["ID_COLUMN = 'id'\n", "PREDICTION_COLUMN = 'prediction'\n"]},
+        {"cell_type": "code", "source": ["# TODO: replace template\n"]},
+    ])
+    await seed(mock_db, notebook=notebook)
+    calls: list = []
+
+    await run(mock_db, handler(CLEAR_OUTPUT, calls))
+
+    user = calls[0]["messages"][1]["content"]
+    assert "ID_COLUMN = 'id'" in user
+    assert "PREDICTION_COLUMN = 'prediction'" in user
+    assert "TODO: replace template" in user
+    assert "<PARTICIPANT_NOTEBOOK>" in user
+    assert "CSV đã nộp" in calls[0]["messages"][0]["content"]
+    assert "primary_score" not in user
+    assert "ground_truth" not in user
+    assert "prediction.csv" not in user
 
 
 async def test_the_page_order_and_titles_reach_the_prompt(mock_db, ai_env):
