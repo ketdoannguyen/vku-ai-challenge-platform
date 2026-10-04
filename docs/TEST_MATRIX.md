@@ -1882,3 +1882,41 @@ Clone tạo bản nháp độc lập với đầy đủ đề/ảnh/đáp án/c�
 | Clone cuộc thi thật trên production | **chưa có** | Toàn bộ đợt nằm ở working tree, chưa deploy; cần một lượt E2E theo kế hoạch trước khi tin |
 | Process bị kill giữa lúc clone | **chưa kiểm** | Rollback không chạy khi process chết; có thể còn document/file mồ côi phải dọn tay theo log `clone=<id>` (giới hạn đã ghi trong ADR-050) |
 | Import AI giữa hai deployment khác khoá mã hoá | **không hỗ trợ** | Ciphertext chỉ dùng được trong cùng deployment (cùng `LLM_CONFIG_ENCRYPTION_KEY`); khác deployment phải nhập lại key |
+
+## 21. Sửa cách hiển thị kết quả khi đã khóa (ADR-052) - passing
+
+Cuộc thi `published` đã có bài `COMPLETED` vẫn sửa được **cách hiển thị** hợp đồng kết quả (nhãn, số thập phân, quyền xem metric) qua endpoint riêng; luật chấm, điểm đã lưu và bảng xếp hạng không đổi; cuộc thi `closed` giữ khóa toàn bộ. Các case chạy trên working tree ngày 2026-10-04.
+
+### Backend - API admin
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Sau bài `COMPLETED`: sửa label/decimals + whitelist `visible_metrics` được, revision +1, `verified` còn hiệu lực; điểm/metric/`scoring_ref` bài cũ và bảng xếp hạng admin **không đổi**; participant thấy đúng whitelist mới | passing | `test_scoring_v2_api.py::test_v2_result_display_is_editable_after_the_first_submission` |
+| Đổi tập khoá/thứ tự khoá, gửi trường ngoài allowlist (`primary_metric`), `expected_revision` cũ, cuộc thi `closed` → đều bị chặn đúng mã (422 `SCORING_LOCKED`/`VALIDATION_ERROR`, 409 `SCORING_REVISION_CONFLICT`), revision không đổi | passing | `test_scoring_v2_api.py::test_v2_result_display_rejects_rule_changes_and_locked_states` |
+| `draft` → 422 `SCORING_LOCKED`; cuộc thi v1 → 422 `SCORING_CONFIG_REQUIRED` | passing | `test_scoring_v2_api.py::test_v2_result_display_rejects_drafts_and_v1_competitions` |
+| Cuộc thi đóng giữa lúc đọc và ghi → 422 `SCORING_LOCKED`, revision không đổi (điều kiện `published` nằm ở chính lệnh ghi) | passing | `test_scoring_v2_api.py::test_v2_result_display_write_stops_when_competition_closes_mid_save` |
+
+### Frontend
+
+| Check | Status | Cách verify |
+|---|---|---|
+| Locked + published: label/decimals/checkbox quyền xem vẫn sửa được qua nút lưu riêng; nút lưu toàn cấu hình, schema, ground truth, chạy thử, radio metric chính và chiều xếp hạng vẫn khóa | passing | `AdminCompetitionDetailPage.test.tsx::locked: luật chấm khóa nhưng ba trường hiển thị vẫn sửa được qua nút lưu riêng` |
+| Nút lưu riêng gửi đúng `expected_revision` + ba nhóm trường hiển thị tới `/scoring/result-display`, **không** gọi PUT cấu hình đầy đủ, hiện thông điệp giữ nguyên điểm | passing | `AdminCompetitionDetailPage.test.tsx::lưu cách hiển thị khi đã khóa: gửi đúng ba nhóm trường, không đụng luật chấm` |
+| Enter trong ô hiển thị khi đã khóa là lượt lưu hiển thị, không phải lượt lưu toàn cấu hình | passing | `AdminCompetitionDetailPage.test.tsx::Enter trong ô hiển thị khi đã khóa là lượt lưu hiển thị, không phải lượt lưu toàn cấu hình` |
+| Cuộc thi đã đóng: cả cách hiển thị cũng khóa | passing | `AdminCompetitionDetailPage.test.tsx::cuộc thi đã đóng: cả cách hiển thị cũng khóa` |
+
+### Bằng chứng tự động (2026-10-04)
+
+| Lệnh | Kết quả |
+|---|---|
+| `cd backend && uv run pytest -q` | **859 passed** (205,98 s; hơn lượt 855 của ADR-051 bốn case result-display) |
+| `cd frontend && npm test` | **574 passed (35 files)** (hơn lượt 571 ba case result-display; một case khóa cũ được viết lại) |
+| `cd frontend && npm run build` | `tsc -b` + `vite build` sạch |
+| `cd frontend && npm run lint` | 0 error; warning còn lại đều có sẵn, không phát sinh ở tệp đã sửa |
+
+### Chưa kiểm
+
+| Check | Status | Ghi chú |
+|---|---|---|
+| Sửa hiển thị trên production | **chưa có** | Toàn bộ nằm ở working tree, chưa deploy |
+| Thao tác thật bằng browser trên stack dev (đổi nhãn/số thập phân/quyền xem rồi xem kết quả thí sinh và Excel) | **chưa chạy** | Đã kiểm bằng test tự động ở cả hai tầng; lượt diễn tập UI thật là bước riêng trước khi phát hành |

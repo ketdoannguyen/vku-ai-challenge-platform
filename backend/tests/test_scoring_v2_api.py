@@ -28,7 +28,9 @@ from tests.helpers import (
     login_participant,
     membership_document,
     publish_v2_competition,
+    put_result_display,
     put_scoring_v2,
+    ready_competition,
     run_scoring_test_v2,
     run_worker,
     submission_documents,
@@ -569,6 +571,163 @@ def test_v2_config_is_locked_after_the_first_submission(client, fake_runner):
         client, cid, expected_revision=_revision(client, cid)
     )
     assert ground_truth.status_code == 422
+
+
+def test_v2_result_display_is_editable_after_the_first_submission(client, fake_runner):
+    """Cuộc thi publish đã có điểm vẫn sửa được cách hiển thị; điểm, thứ hạng và bằng chứng giữ nguyên."""
+    competition = publish_v2_competition(client, slug="v2-display-cup")
+    cid = competition["id"]
+    queued = submit(client, cid, V2_SUBMISSION)
+    assert queued.status_code == 202
+    login_participant(client)
+    assert run_worker(client) == 1
+    assert attempt_status(client, cid, queued.json()["attempt_id"])["status"] == "COMPLETED"
+    login(client)
+
+    before = submission_documents(client)[0]
+    ranking_before = client.get(f"/api/admin/competitions/{cid}/leaderboard").json()
+    revision = _revision(client, cid)
+
+    display = [
+        {"key": "accuracy", "label": "Độ chính xác", "decimals": 2},
+        {"key": "n_items", "label": "Số mẫu", "decimals": 0},
+    ]
+    saved = put_result_display(
+        client, cid, expected_revision=revision, metrics=display, visible_metrics=["accuracy"]
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["scoring"]["revision"] == revision + 1
+    contract = body["scoring"]["output_contract"]
+    assert contract["metrics"] == display
+    # Metric chính và chiều xếp hạng bám theo luật chấm, không đi qua đường hiển thị.
+    assert contract["primary_metric"] == "accuracy"
+    assert contract["higher_is_better"] is True
+    assert contract["visible_metrics"] == ["accuracy"]
+    # Tập khóa không đổi nên bằng chứng chạy thử còn hiệu lực.
+    assert body["scoring"]["verified"] is True
+    assert body["locked"] is True
+
+    # Điểm đã chấm và thứ hạng không bị đụng tới.
+    after = submission_documents(client)[0]
+    assert after["metrics"] == before["metrics"]
+    assert after["primary_score"] == before["primary_score"]
+    assert after["scoring_ref"] == before["scoring_ref"]
+    assert client.get(f"/api/admin/competitions/{cid}/leaderboard").json() == ranking_before
+
+    # Thí sinh chỉ còn thấy metric trong whitelist mới.
+    login_participant(client)
+    view = client.get(f"/api/competitions/{competition['slug']}")
+    assert view.status_code == 200
+    public = view.json()["submission_config"]["result_contract"]
+    assert [metric["key"] for metric in public["metrics"]] == ["accuracy"]
+
+
+def test_v2_result_display_rejects_rule_changes_and_locked_states(client, fake_runner):
+    """Khóa metric, metric chính, chiều xếp hạng và schema không đi qua đường hiển thị."""
+    competition = publish_v2_competition(client, slug="v2-display-guard")
+    cid = competition["id"]
+    queued = submit(client, cid, V2_SUBMISSION)
+    assert queued.status_code == 202
+    login_participant(client)
+    assert run_worker(client) == 1
+    login(client)
+    revision = _revision(client, cid)
+    current = [
+        {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+        {"key": "n_items", "label": "Số mẫu", "decimals": 0},
+    ]
+
+    # Đổi tập khóa (đổi tên, bỏ bớt, đảo thứ tự) đều là đổi luật chấm → 422.
+    renamed = [
+        {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+        {"key": "n_rows", "label": "Số mẫu", "decimals": 0},
+    ]
+    for metrics in (renamed, [current[0]], list(reversed(current))):
+        blocked = put_result_display(client, cid, expected_revision=revision, metrics=metrics)
+        assert blocked.status_code == 422, blocked.text
+        assert blocked.json()["error"]["code"] == "SCORING_LOCKED"
+    assert _revision(client, cid) == revision
+
+    # Trường ngoài allowlist (metric chính, chiều xếp hạng, schema) không được nhận.
+    extra = client.put(
+        f"/api/admin/competitions/{cid}/scoring/result-display",
+        json={
+            "expected_revision": revision,
+            "metrics": current,
+            "primary_metric": "n_items",
+        },
+    )
+    assert extra.status_code == 422
+    assert extra.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    # Revision cũ → 409, không ghi gì.
+    stale = put_result_display(client, cid, expected_revision=revision - 1, metrics=current)
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "SCORING_REVISION_CONFLICT"
+    assert _revision(client, cid) == revision
+
+    # Cuộc thi đóng thì đường hiển thị cũng khóa.
+    assert client.post(f"/api/admin/competitions/{cid}/close").status_code == 200
+    closed = put_result_display(client, cid, expected_revision=revision, metrics=current)
+    assert closed.status_code == 422
+    assert closed.json()["error"]["code"] == "SCORING_LOCKED"
+
+
+def test_v2_result_display_rejects_drafts_and_v1_competitions(client):
+    """Đường hiển thị chỉ dành cho cuộc thi publish dùng bộ chấm v2 có hợp đồng kết quả."""
+    draft = _competition(client, slug="v2-display-draft")
+    metrics = [{"key": "accuracy", "label": "Accuracy", "decimals": 4}]
+    blocked = put_result_display(client, draft["id"], expected_revision=0, metrics=metrics)
+    assert blocked.status_code == 422
+    assert blocked.json()["error"]["code"] == "SCORING_LOCKED"
+
+    v1 = ready_competition(client, slug="v1-display-cup")
+    login(client)
+    v1_blocked = put_result_display(client, v1["id"], expected_revision=0, metrics=metrics)
+    assert v1_blocked.status_code == 422
+    assert v1_blocked.json()["error"]["code"] == "SCORING_CONFIG_REQUIRED"
+
+
+def test_v2_result_display_write_stops_when_competition_closes_mid_save(
+    client, fake_runner, monkeypatch
+):
+    """Cuộc thi bị đóng giữa lượt đọc và lượt ghi thì lượt ghi phải trượt, không lọt qua khóa."""
+    competition = publish_v2_competition(client, slug="v2-display-race")
+    cid = competition["id"]
+    queued = submit(client, cid, V2_SUBMISSION)
+    assert queued.status_code == 202
+    login_participant(client)
+    assert run_worker(client) == 1
+    login(client)
+    revision = _revision(client, cid)
+
+    from app.scoring import admin_router
+
+    original = admin_router._get_competition_or_404
+
+    async def read_then_close(db, competition_id):
+        # Bản đọc được vẫn nói published, nhưng DB đã closed trước khi endpoint kịp ghi.
+        document = await original(db, competition_id)
+        await db[COMPETITIONS_COLLECTION].update_one(
+            {"_id": document["_id"]}, {"$set": {"status": "closed"}}
+        )
+        return document
+
+    monkeypatch.setattr(admin_router, "_get_competition_or_404", read_then_close)
+    raced = put_result_display(
+        client,
+        cid,
+        expected_revision=revision,
+        metrics=[
+            {"key": "accuracy", "label": "Accuracy", "decimals": 4},
+            {"key": "n_items", "label": "Số mẫu", "decimals": 0},
+        ],
+    )
+    assert raced.status_code == 422
+    assert raced.json()["error"]["code"] == "SCORING_LOCKED"
+    # Không có gì được ghi: revision giữ nguyên.
+    assert _revision(client, cid) == revision
 
 
 def test_v2_participant_sees_schema_and_contract(client, fake_runner):
