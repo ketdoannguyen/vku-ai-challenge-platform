@@ -35,7 +35,13 @@ READ_CHUNK_BYTES = 64 * 1024
 # Mã lỗi mà entrypoint được phép gửi về; mã lạ bị quy về EVALUATOR_FAILED để hợp đồng lỗi không mở rộng
 # theo ý của code chấm.
 ENTRYPOINT_CODES = frozenset(
-    {"EVALUATOR_INVALID", "EVALUATOR_FAILED", "EVALUATOR_OUTPUT_MISMATCH", "EVALUATOR_TIMEOUT"}
+    {
+        "EVALUATOR_INVALID",
+        "EVALUATOR_FAILED",
+        "EVALUATOR_OUTPUT_MISMATCH",
+        "EVALUATOR_TIMEOUT",
+        "SUBMISSION_RULE_VIOLATION",
+    }
 )
 MAX_DETAIL_CHARS = 4_000
 KILL_TIMEOUT_SECONDS = 10

@@ -371,6 +371,17 @@ def test_v2_test_run_maps_evaluator_failures(client, fake_runner):
     assert failed.json()["error"]["code"] == "EVALUATOR_FAILED"
     assert failed.json()["error"]["detail"].startswith("Traceback")
 
+    fake_runner.error = EvaluatorError(
+        "SUBMISSION_RULE_VIOLATION", "CSV sai quy tắc.", detail="Private diagnostics"
+    )
+    rule = run_scoring_test_v2(client, cid, expected_revision=2)
+    assert rule.status_code == 422
+    assert rule.json()["error"] == {
+        "code": "SUBMISSION_RULE_VIOLATION",
+        "message": "CSV sai quy tắc.",
+        "detail": "Private diagnostics",
+    }
+
     fake_runner.error = EvaluatorError("EVALUATOR_UNAVAILABLE", "Máy chấm đang không sẵn sàng.")
     busy = run_scoring_test_v2(client, cid, expected_revision=2)
     assert busy.status_code == 503

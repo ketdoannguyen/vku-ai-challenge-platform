@@ -76,7 +76,8 @@ SOURCE_PIPELINE = "PIPELINE"
 # v3: prompt yêu cầu thêm một câu gợi ý ngắn cho thí sinh (`participant_summary`).
 # v4: prompt dặn model ngân sách token của chính nó, thay vì để nó viết tới lúc trần cứng cắt ngang.
 # v5: model trả `rule_ref` do backend sinh thay vì tự viết title/slug/rule text (ADR-045).
-PROMPT_VERSION = "ai-review-v5"
+# v6: chỉ gắn cờ vi phạm phương pháp có chứng cứ; phân biệt notebook và CSV đã nộp.
+PROMPT_VERSION = "ai-review-v6"
 NORMALIZATION_VERSION = "notebook-v2"
 CONTEXT_POLICY_VERSION = "context-v2"
 # Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
