@@ -372,7 +372,7 @@ source: "AUTO" | "MANUAL"
 requested_by: ObjectId | null
 requested_at, created_at, updated_at, started_at, completed_at: datetime
 latest_review_id: ObjectId | null
-last_error: {code, retryable, occurred_at} | null
+last_error: {code, message, occurred_at, phase?} | null   phase chỉ có khi httpx timeout; connect/read/write/pool/timeout
 projection_applied: bool
 ```
 
@@ -385,7 +385,7 @@ Một row cho mỗi bài, **reset theo `generation`** khi admin chạy lại, th
 
 Claim nguyên tử bằng `find_one_and_update` trên điều kiện `status=QUEUED AND run_after<=now`, ghi `lease_token`/`claimed_by`/`lease_expires_at`. **Mọi** lần ghi về sau đều kiểm lại `lease_token` + `generation` + `run_id`, nên một worker bị treo rồi tỉnh dậy không thể ghi đè kết quả của lượt mới hơn. Lỗi tạm thời ⇒ requeue với backoff mũ có jitter (`run_after`).
 
-`completed_at` là lúc job **kết thúc thật**: với lượt thành công nó bằng `completed_at` của audit row (`created_at + duration_ms` của lượt gọi provider), không phải lúc job được claim. Đây là mốc dùng để đo thời gian rút hàng đợi.
+`completed_at` là mốc chốt job: với lượt thành công nó bằng `completed_at` của audit row (`created_at + duration_ms` của lượt gọi provider); với lỗi timeout từ worker đang chạy, nó bằng mốc phát hiện lỗi, không phải lúc job được claim. `run_after` của retry được cộng backoff vào **mốc phát hiện lỗi**, không cộng vào mốc bắt đầu attempt. Mốc lỗi được suy ra từ mốc vào attempt cộng thời gian đã trôi đo bằng đồng hồ monotonic (kể cả khi `now` được truyền từ test). Dòng `last_error.phase` chỉ phân loại ngoại lệ HTTP (connect/read/write/pool, hoặc timeout khi không rõ subtype), không kết luận nguyên nhân của gateway/provider.
 
 ### 11.4 `ai_reviews` - audit append-only
 
@@ -430,9 +430,9 @@ reused_from_review_id: ObjectId | null
 bypass_cache, manual: bool
 attempts: int
 downgrade_codes: [str]                mã ở mức lượt, giữ để tương thích
-error: {code, message} | null          message đã che
+error: {code, message, occurred_at, phase?} | null   message đã che; phase chỉ khi httpx timeout
 usage: {prompt_tokens, completion_tokens, total_tokens} | null
-started_at, completed_at, duration_ms, created_at, updated_at
+started_at, completed_at, duration_ms: int | null, created_at, updated_at
 ```
 
 Indexes:
@@ -442,7 +442,7 @@ Indexes:
 
 `run_id` được lưu và là khoá nghiệp vụ để đối chiếu với job, nhưng ràng buộc duy nhất nằm ở `(submission_id, generation)` - đó mới là thứ phân biệt hai lượt chạy của cùng một bài.
 
-Ba mốc thời gian của một lượt thành công: `created_at` là lúc worker bắt đầu xử lý job, `duration_ms` là độ trễ **đo được** của riêng lượt gọi provider, và `completed_at` = `created_at + duration_ms`, tức lúc lượt gọi kết thúc. Job tương ứng trong `ai_review_jobs` chốt ở đúng `completed_at` đó. Vì vậy đọc `completed_at` là đã có mốc kết thúc thật - **không** cộng thêm `duration_ms` lần nữa. Lượt đọc cache (`source=CACHE`) có `duration_ms=0` vì không gọi provider; lượt lỗi (`_finish_error`) giữ `completed_at = created_at` vì không có độ trễ nào đo được.
+Ba mốc thời gian của một lượt thành công: `created_at` là lúc worker bắt đầu xử lý job, `duration_ms` là độ trễ **đo được** của riêng lượt gọi provider, và `completed_at` = `created_at + duration_ms`, tức lúc lượt gọi kết thúc. Job tương ứng trong `ai_review_jobs` chốt ở đúng `completed_at` đó. Vì vậy đọc `completed_at` là đã có mốc kết thúc - **không** cộng thêm `duration_ms` lần nữa. Lượt đọc cache (`source=CACHE`) có `duration_ms=0` vì không gọi provider. Lượt lỗi khi đọc notebook hoặc sau khi đã gọi provider: `created_at` là lúc vào attempt cuối, `completed_at`/`error.occurred_at` là mốc phát hiện lỗi, `duration_ms` đo **toàn bộ attempt cuối** bằng đồng hồ monotonic (bao gồm chuẩn bị notebook, gọi provider và kiểm output nếu đã tới các bước đó), không phải thời lượng HTTP call riêng được ghi trong log provider; `updated_at` là mốc lỗi. `started_at` vẫn có thể là mốc claim job từ queue, và `attempts` thể hiện tổng số lượt thử. Lượt lỗi được kết thúc trước nhánh đọc notebook hoặc lỗi lease được reconciler xử lý, để `duration_ms=null` thay vì giả định 0; khi chưa biết mốc khác thì `created_at=completed_at`. Row cũ `duration_ms=0` và thiếu `model`/`phase` vẫn đọc được, **không backfill** vì không thể khôi phục chính xác thời lượng hay subtype. Model/host chỉ được gắn khi đã resolve đích provider; `phase` là loại timeout của httpx, không chứng minh provider đã bắt đầu xử lý hay nguyên nhân chậm.
 
 **Không lưu**: API key, full Base URL (chỉ host), raw prompt, raw notebook/policy payload, raw provider response. `error.message` chỉ chứa thông điệp đã che; khi parse output model thất bại, message của Pydantic có thể chứa nguyên văn output nên log chỉ ghi `type(exc).__name__`.
 

@@ -213,6 +213,34 @@ async def test_an_output_cut_off_by_the_token_cap_is_its_own_error(endpoint):
     assert "Notebook vi phạm" not in exc.value.message
 
 
+@pytest.mark.parametrize(
+    ("timeout_type", "phase"),
+    [
+        (httpx.ConnectTimeout, "connect"),
+        (httpx.ReadTimeout, "read"),
+        (httpx.WriteTimeout, "write"),
+        (httpx.PoolTimeout, "pool"),
+        (httpx.TimeoutException, "timeout"),
+    ],
+)
+async def test_timeout_records_phase_without_leaking_content(endpoint, caplog, timeout_type, phase):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise timeout_type("private-response-body")
+
+    async with _client(handler) as client:
+        with pytest.raises(provider.ProviderError) as error:
+            await _call(client, endpoint)
+
+    assert error.value.code == constants.AI_CONNECTION_FAILED
+    assert error.value.message == "Hết thời gian chờ provider."
+    assert error.value.retryable is True
+    assert error.value.phase == phase
+    assert timeout_type.__name__ in caplog.text
+    assert "sk-test" not in caplog.text
+    assert "private-response-body" not in caplog.text
+    assert "system" not in caplog.text
+
+
 async def test_transport_failures_are_retryable_connection_errors(endpoint):
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("boom")

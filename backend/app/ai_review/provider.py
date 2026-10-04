@@ -10,6 +10,7 @@ output hỏng đều terminal, chỉ lỗi mạng/tải nhất thời mới đư
 """
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from uuid import uuid4
@@ -18,6 +19,8 @@ import httpx
 
 from app.ai_review import constants, url_policy
 from app.ai_review.url_policy import EndpointPolicy, NormalizedEndpoint
+
+logger = logging.getLogger(__name__)
 
 # Prompt thử kết nối: cố định, vô hại, không chứa notebook hay policy của bất kỳ cuộc thi nào.
 TEST_SYSTEM_PROMPT = (
@@ -37,11 +40,15 @@ _USAGE_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
 
 class ProviderError(Exception):
-    def __init__(self, code: str, message: str, *, retryable: bool) -> None:
+    def __init__(
+        self, code: str, message: str, *, retryable: bool,
+        phase: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
         self.retryable = retryable
+        self.phase = phase
 
 
 @dataclass(frozen=True)
@@ -112,12 +119,31 @@ async def chat_completions(
                 raise _status_error(response.status_code)
             body = await _read_capped(response, settings.ai_review_max_response_bytes)
     except httpx.TimeoutException as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        phase = type(exc).__name__
+        logger.warning(
+            "AI provider timeout host=%s phase=%s elapsed_ms=%d", endpoint.host, phase, elapsed_ms
+        )
         raise ProviderError(
-            constants.AI_CONNECTION_FAILED, "Hết thời gian chờ provider.", retryable=True
+            constants.AI_CONNECTION_FAILED,
+            "Hết thời gian chờ provider.",
+            retryable=True,
+            phase=(
+                phase.removesuffix("Timeout").lower()
+                if phase in ("ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout")
+                else "timeout"
+            ),
         ) from exc
     except httpx.TransportError as exc:
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        logger.warning(
+            "AI provider transport host=%s type=%s elapsed_ms=%d",
+            endpoint.host, type(exc).__name__, elapsed_ms,
+        )
         raise ProviderError(
-            constants.AI_CONNECTION_FAILED, "Không kết nối được tới provider.", retryable=True
+            constants.AI_CONNECTION_FAILED,
+            "Không kết nối được tới provider.",
+            retryable=True,
         ) from exc
 
     elapsed_ms = int((time.monotonic() - started) * 1000)

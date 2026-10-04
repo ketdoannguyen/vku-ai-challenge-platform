@@ -73,6 +73,26 @@ async def test_once_returns_immediately_when_there_is_nothing_to_do(mock_db, ai_
     assert await serve(mock_db, once=True) == 0
 
 
+async def test_running_worker_reports_finished_jobs_without_a_job_limit(
+    mock_db, ai_env, monkeypatch
+):
+    await seed(mock_db)
+    await seed(mock_db, account_id=ObjectId(), content_hash="second")
+    stop = _stop()
+    reported: list[str] = []
+    real_report = worker._report
+
+    def report(task, job):
+        reported.append(job["_id"])
+        real_report(task, job)
+        if len(reported) == 2:
+            stop.requested = True
+
+    monkeypatch.setattr(worker, "_report", report)
+    assert await asyncio.wait_for(serve(mock_db, stop=stop), timeout=5) == 2
+    assert len(reported) == len(set(reported)) == 2
+
+
 async def test_max_jobs_stops_the_loop_early(mock_db, ai_env):
     for _ in range(3):
         await seed(mock_db, account_id=ObjectId(), content_hash=str(ObjectId()))

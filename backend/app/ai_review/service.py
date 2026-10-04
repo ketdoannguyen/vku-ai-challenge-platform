@@ -12,6 +12,7 @@ Ba nguyên tắc xuyên suốt module:
 
 import hashlib
 import logging
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -217,6 +218,10 @@ def cache_key(*, competition_id, content_hash: str, notebook_sha256: str, provid
 async def process_job(db, job: dict, *, client, settings, now: datetime | None = None) -> str:
     """Chạy trọn một job đã claim; trả `OUTCOME_*` và không bao giờ ném lỗi ra ngoài vòng worker."""
     now = now or datetime.now(timezone.utc)
+    started_clock = time.monotonic()
+
+    def finished_at() -> datetime:
+        return now + timedelta(milliseconds=int((time.monotonic() - started_clock) * 1000))
 
     submission = await db[SUBMISSIONS_COLLECTION].find_one({"_id": job["submission_id"]})
     if submission is None:
@@ -279,10 +284,12 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
     except NotebookUnavailable as exc:
         if exc.retryable:
             return await _retry_or_fail(
-                db, job, now=now, code=exc.code, message=exc.message, snapshot=snapshot
+                db, job, now=finished_at(), code=exc.code, message=exc.message,
+                snapshot=snapshot, started_at=now,
             )
         return await _finish_error(
-            db, job, now=now, code=exc.code, message=exc.message, snapshot=snapshot
+            db, job, now=finished_at(), code=exc.code, message=exc.message,
+            snapshot=snapshot, started_at=now,
         )
 
     try:
@@ -375,28 +382,30 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             output, index=index, notebook=notebook
         )
     except ProviderError as exc:
+        failure_at = finished_at()
+        target = {"provider": active["provider"], "provider_host": endpoint.host, "model": model}
         if exc.retryable:
             return await _retry_or_fail(
-                db, job, now=now, code=exc.code, message=exc.message, snapshot=snapshot
+                db, job, now=failure_at, code=exc.code, message=exc.message, snapshot=snapshot,
+                started_at=now, phase=exc.phase, target=target,
             )
         return await _finish_error(
-            db, job, now=now, code=exc.code, message=exc.message, snapshot=snapshot
+            db, job, now=failure_at, code=exc.code, message=exc.message, snapshot=snapshot,
+            started_at=now, phase=exc.phase, target=target,
         )
     except Exception as exc:
         # Pydantic ValidationError, `ResponseInvalid`, hoặc JSON hỏng nằm ngoài `ProviderError`.
         # Chỉ ghi loại lỗi: message của Pydantic có thể chứa nguyên văn output của model.
         logger.warning("AI output không dùng được: %s", type(exc).__name__)
         return await _finish_error(
-            db, job, now=now, code=constants.AI_RESPONSE_INVALID,
-            message="Output model không dùng được.", snapshot=snapshot,
+            db, job, now=finished_at(), code=constants.AI_RESPONSE_INVALID,
+            message="Output model không dùng được.", snapshot=snapshot, started_at=now,
+            target={"provider": active["provider"], "provider_host": endpoint.host, "model": model},
         )
 
-    # `now` được ghim ở ĐẦU hàm, còn lượt gọi provider chạy xong sau đó `result.latency_ms` - độ trễ
-    # do chính client provider đo. Mốc kết thúc thật là điểm bắt đầu cộng độ trễ đó; ghi thẳng `now`
-    # sẽ báo "hoàn tất" sớm hơn thực tế đúng bằng một lượt review, và mọi phép đo rút hàng đợi dựng
-    # trên nó đều hụt đi một lượt. Chỉ nhích `now` cho lượt THÀNH CÔNG: lượt lỗi không có độ trễ đo
-    # được, nên chúng giữ nguyên mốc bắt đầu (xem `_finish_error`).
-    finished_at = now + timedelta(milliseconds=result.latency_ms)
+    # Giữ mốc thành công theo thời lượng provider đã đo; lỗi dùng đồng hồ monotonic của cả attempt
+    # để thời điểm retry/hoàn tất không bị lùi về lúc claim job.
+    completed_at = now + timedelta(milliseconds=result.latency_ms)
     review = await insert_review(
         db,
         _base_document(job, now=now, snapshot=snapshot)
@@ -420,11 +429,11 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             "usage": result.usage,
             "latency_ms": result.latency_ms,
             "started_at": job.get("started_at") or now,
-            "completed_at": finished_at,
+            "completed_at": completed_at,
             "duration_ms": result.latency_ms,
         },
     )
-    return await _settle(db, job, review, now=finished_at, outcome=OUTCOME_COMPLETED)
+    return await _settle(db, job, review, now=completed_at, outcome=OUTCOME_COMPLETED)
 
 
 async def find_cached_review(db, competition_id, key: str) -> dict | None:
@@ -735,30 +744,38 @@ async def _settle(db, job: dict, review: dict, *, now: datetime, outcome: str) -
     return outcome
 
 
-async def _retry_or_fail(db, job, *, now, code, message, snapshot) -> str:
-    error = _error(code, message, now)
+async def _retry_or_fail(db, job, *, now, code, message, snapshot,
+                         started_at=None, phase=None, target=None) -> str:
+    error = _error(code, message, now, phase=phase)
     if job["attempts"] < job["max_attempts"]:
         if await queue.requeue(db, job, now=now, error=error):
             return OUTCOME_RETRY
         return OUTCOME_FAILED
     return await _finish_error(
-        db, job, now=now, code=code, message=message, snapshot=snapshot, error=error
+        db, job, now=now, code=code, message=message, snapshot=snapshot, error=error,
+        started_at=started_at, target=target,
     )
 
 
-async def _finish_error(db, job, *, now, code, message, snapshot, error=None) -> str:
+async def _finish_error(db, job, *, now, code, message, snapshot, error=None,
+                        started_at=None, phase=None, target=None) -> str:
     """Sinh audit row ERROR rồi gắn projection: submission không bao giờ kẹt ở RUNNING."""
     review = await insert_review(
         db,
-        _base_document(job, now=now, snapshot=snapshot or {})
+        _base_document(job, now=started_at or now, snapshot=snapshot or {})
         | {
+            "updated_at": now,
             "status": constants.REVIEW_STATUS_FAILED,
             "verdict": constants.VERDICT_ERROR,
             "summary": constants.PARTICIPANT_ERROR_SUMMARY,
-            "error": error or _error(code, message, now),
-            "started_at": job.get("started_at") or now,
+            "error": error or _error(code, message, now, phase=phase),
+            "started_at": job.get("started_at") or started_at or now,
             "completed_at": now,
-            "duration_ms": 0,
+            "duration_ms": (
+                max(0, (now - started_at) // timedelta(milliseconds=1))
+                if started_at is not None else None
+            ),
+            **(target or {}),
         },
     )
     return await _settle(db, job, review, now=now, outcome=OUTCOME_FAILED)
@@ -818,5 +835,8 @@ def _base_document(job: dict, *, now: datetime, snapshot: dict) -> dict:
     }
 
 
-def _error(code: str, message: str, now: datetime) -> dict:
-    return {"code": code, "message": message, "occurred_at": now}
+def _error(code: str, message: str, now: datetime, *, phase: str | None = None) -> dict:
+    error = {"code": code, "message": message, "occurred_at": now}
+    if phase is not None:
+        error["phase"] = phase
+    return error
