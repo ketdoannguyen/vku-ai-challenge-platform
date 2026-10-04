@@ -218,11 +218,15 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(screen.getByText("0.7000")).toBeTruthy();
 
   const rows = screen.getAllByRole("row");
+  expect(Array.from(rows[0].querySelectorAll("th")).slice(3).map((th) => th.textContent)).toEqual([
+    "Điểm chính · F1", "Precision", "Recall",
+  ]);
   // Dòng mới nhất có đủ hai nút; dòng legacy chỉ còn nút CSV.
   expect(within(rows[1]).getAllByRole("button")).toHaveLength(3);
   expect(within(rows[1]).getByRole("button", { name: "Notebook" })).toBeTruthy();
   expect(within(rows[2]).getAllByRole("button")).toHaveLength(2);
   expect(within(rows[2]).queryByRole("button", { name: "Notebook" })).toBeNull();
+  expect(rows[2].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
 });
 
 /** Cuộc thi v2 khai báo metric riêng: nhãn cột và số thập phân phải lấy từ hợp đồng, không phải bộ ba cố định. */
@@ -235,8 +239,8 @@ const V2_COMPETITION: Competition = {
     higher_is_better: true,
     result_contract: {
       metrics: [
-        { key: "accuracy", label: "Độ chính xác", decimals: 2 },
         { key: "n_items", label: "Số mẫu", decimals: 0 },
+        { key: "accuracy", label: "Độ chính xác", decimals: 2 },
       ],
       primary_metric: "accuracy",
       higher_is_better: true,
@@ -268,17 +272,43 @@ test("cuộc thi v2 hiện metric, nhãn và số thập phân theo hợp đồn
   await screen.findByTitle("v2.csv");
 
   const rows = screen.getAllByRole("row");
-  // Cột theo đúng thứ tự hợp đồng; nhãn lấy từ hợp đồng thay vì F1/Precision/Recall.
-  expect(within(rows[0]).getByText("Độ chính xác")).toBeTruthy();
-  expect(within(rows[0]).getByText("Số mẫu")).toBeTruthy();
+  // Metric chính khai báo sau nhưng đứng đầu cụm cột, nhãn nêu rõ vai trò xếp hạng.
+  expect(Array.from(rows[0].querySelectorAll("th")).slice(3).map((th) => th.textContent)).toEqual([
+    "Điểm chính · Độ chính xác", "Số mẫu",
+  ]);
   expect(within(rows[0]).queryByText("F1")).toBeNull();
 
   const cells = Array.from(rows[1].querySelectorAll(".score-cell"));
   expect(cells.map((cell) => cell.textContent)).toEqual(["0.91", "1200"]);
-  // Metric chính giữ đánh dấu nổi bật, và số của nó chỉ hiện một lần vì không còn cột "Điểm chính" riêng.
+  // Số chính có khung riêng, số phụ không có; không thêm cột điểm trùng lặp.
   expect(cells[0].className).toContain("primary-score");
+  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("0.91");
   expect(cells[1].className).not.toContain("primary-score");
+  expect(cells[1].querySelector(".subm-primary-score-value")).toBeNull();
   expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.91");
+});
+
+test("bài cũ thiếu metric chính vẫn hiện dấu gạch trước metric phụ", async () => {
+  mockResponse({
+    submissions: [{
+      id: "s-partial",
+      competition_id: COMPETITION.id,
+      status: "completed",
+      metrics: { n_items: 1200 },
+      primary_score: null,
+      created_at: "2026-09-15T09:00:00Z",
+      artifacts: { prediction: null, notebook: null },
+    }],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(V2_COMPETITION);
+  await screen.findByText("1200");
+
+  const cells = Array.from(screen.getAllByRole("row")[1].querySelectorAll(".score-cell"));
+  expect(cells.map((cell) => cell.textContent)).toEqual(["-", "1200"]);
+  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
 });
 
 test("bản nháp v2 chưa khai báo metric: ẩn cụm chỉ số thay vì hiện null/undefined", async () => {

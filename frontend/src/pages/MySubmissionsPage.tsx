@@ -29,6 +29,10 @@ export function MySubmissionsPage() {
   const { competition } = useOutletContext<CompetitionContext>();
   // Cuộc thi v2 khai báo metric riêng, nên cột chỉ số lấy từ hợp đồng thay vì cố định f1/precision/recall.
   const contract = resultContract(competition.submission_config);
+  const primaryMetric = contract.metrics.find((metric) => metric.key === contract.primary_metric);
+  const displayMetrics = primaryMetric
+    ? [primaryMetric, ...contract.metrics.filter((metric) => metric.key !== contract.primary_metric)]
+    : contract.metrics;
   const [data, setData] = useState<SubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -216,8 +220,7 @@ export function MySubmissionsPage() {
 
   // Số thập phân của điểm tốt nhất phải theo metric chính trong hợp đồng; hợp đồng chưa chọn metric
   // chính thì giữ mức 4 của hợp đồng v1 để con số không đổi định dạng.
-  const bestScoreDecimals =
-    contract.metrics.find((metric) => metric.key === contract.primary_metric)?.decimals ?? 4;
+  const bestScoreDecimals = primaryMetric?.decimals ?? 4;
 
   return (
     <section className="subm-page">
@@ -321,7 +324,7 @@ export function MySubmissionsPage() {
         </>
       )}
 
-      {/* Bảng kết quả: số cột chỉ số và nhãn của chúng theo hợp đồng của cuộc thi. */}
+      {/* Bảng kết quả: metric chính đứng đầu cụm chỉ số, các metric phụ giữ thứ tự hợp đồng. */}
       <div
         className="subm-table-wrap table-wrap"
         aria-busy={busy}
@@ -338,13 +341,13 @@ export function MySubmissionsPage() {
               {showsAi && (
                 <th scope="col" className="subm-col-ai">AI sơ bộ</th>
               )}
-              {contract.metrics.map((metric) => (
+              {displayMetrics.map((metric) => (
                 <th
                   key={metric.key}
                   scope="col"
                   className={metric.key === contract.primary_metric ? "subm-col-primary" : "subm-col-num"}
                 >
-                  {metric.label}
+                  {metric.key === contract.primary_metric ? `Điểm chính · ${metric.label}` : metric.label}
                 </th>
               ))}
             </tr>
@@ -439,9 +442,8 @@ export function MySubmissionsPage() {
                       )}
                     </td>
                   )}
-                  {/* Điểm chính là giá trị của metric chính trong hợp đồng, nên không vẽ thêm cột
-                      "Điểm chính" để tránh hiện cùng một con số ở hai chỗ. */}
-                  {contract.metrics.map((metric) => (
+                  {/* Điểm chính chỉ hiện trong cột metric chính, không nhân đôi giá trị. */}
+                  {displayMetrics.map((metric) => (
                     <td
                       key={metric.key}
                       className={
@@ -450,7 +452,13 @@ export function MySubmissionsPage() {
                           : "subm-score-cell score-cell"
                       }
                     >
-                      {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                      {metric.key === contract.primary_metric ? (
+                        <span className="subm-primary-score-value">
+                          {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
+                        </span>
+                      ) : (
+                        formatMetric(submission.metrics?.[metric.key], metric.decimals)
+                      )}
                     </td>
                   ))}
                 </tr>
