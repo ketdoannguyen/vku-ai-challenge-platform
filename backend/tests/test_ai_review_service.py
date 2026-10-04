@@ -415,6 +415,72 @@ async def test_retryable_transport_errors_go_back_to_the_queue(mock_db, ai_env, 
     assert job["lease_token"] is None
 
 
+async def test_slow_timeout_retries_after_the_failure_not_the_start(mock_db, ai_env, monkeypatch):
+    submission = await seed(mock_db)
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(queue, "BACKOFF_BASE_SECONDS", 0.02)
+
+    def slow_timeout(request):
+        time.sleep(0.06)
+        raise httpx.ReadTimeout("slow")
+
+    _, outcome = await run(mock_db, slow_timeout, now=now)
+
+    assert outcome == service.OUTCOME_RETRY
+    job = await job_of(mock_db, submission["_id"])
+    assert job["last_error"]["occurred_at"] >= now.replace(tzinfo=None) + timedelta(milliseconds=40)
+    assert job["run_after"] >= job["last_error"]["occurred_at"] + timedelta(milliseconds=10)
+
+
+async def test_terminal_timeout_records_elapsed_time_and_failure_phase(mock_db, ai_env):
+    current = datetime.now(timezone.utc)
+    now = current.replace(microsecond=(current.microsecond // 1000) * 1000)
+    submission = await seed(mock_db, run_after=now)
+    await mock_db[queue.JOBS_COLLECTION].update_one(
+        {"submission_id": submission["_id"]}, {"$set": {"max_attempts": 1}}
+    )
+
+    def slow_timeout(request):
+        time.sleep(0.06)
+        raise httpx.ReadTimeout("private-response-body")
+
+    job, outcome = await run(mock_db, slow_timeout, now=now)
+
+    assert outcome == service.OUTCOME_FAILED
+    review = (await reviews(mock_db))[0]
+    assert review["created_at"] == now.replace(tzinfo=None)
+    assert review["duration_ms"] >= 40
+    assert review["completed_at"] - review["created_at"] == timedelta(
+        milliseconds=review["duration_ms"]
+    )
+    assert review["updated_at"] == review["completed_at"]
+    assert review["error"]["occurred_at"] == review["completed_at"]
+    assert review["error"]["phase"] == "read"
+    assert review["model"] == MODEL
+    assert review["provider_host"] == HOST
+    assert "private-response-body" not in json.dumps(review, default=str)
+    stored_job = await job_of(mock_db, job["submission_id"])
+    assert stored_job["completed_at"] == review["completed_at"]
+    assert stored_job["last_error"]["phase"] == "read"
+    assert "private-response-body" not in json.dumps(stored_job, default=str)
+
+
+async def test_error_duration_preserves_exact_milliseconds(mock_db, ai_env):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    await seed(mock_db, run_after=now)
+    job = await claim(mock_db, now=now)
+
+    await service._finish_error(
+        mock_db, job, now=now + timedelta(milliseconds=1001),
+        code=constants.AI_CONNECTION_FAILED, message="Lỗi giả lập.", snapshot={},
+        started_at=now,
+    )
+
+    review = (await reviews(mock_db))[0]
+    assert review["duration_ms"] == 1001
+    assert review["completed_at"] - review["created_at"] == timedelta(milliseconds=1001)
+
+
 async def test_a_transport_error_that_never_settles_ends_as_an_error_row(mock_db, ai_env):
     submission = await seed(mock_db)
     calls: list = []
@@ -437,6 +503,11 @@ async def test_a_transport_error_that_never_settles_ends_as_an_error_row(mock_db
     assert len(stored_reviews) == 1
     assert stored_reviews[0]["verdict"] == constants.VERDICT_ERROR
     assert stored_reviews[0]["attempts"] == 3
+    assert stored_reviews[0]["model"] == MODEL
+    assert stored_reviews[0]["provider_host"] == HOST
+    assert stored_reviews[0]["duration_ms"] is not None
+    assert stored_reviews[0]["completed_at"] >= stored_reviews[0]["created_at"]
+    assert stored_reviews[0]["error"]["occurred_at"] == stored_reviews[0]["completed_at"]
 
 
 @pytest.mark.parametrize(

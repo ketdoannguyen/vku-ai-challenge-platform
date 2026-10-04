@@ -86,7 +86,8 @@ async def serve(*, client: httpx.AsyncClient, db, settings, stop: Stop,
 
     try:
         while not stop.requested:
-            if max_jobs is not None and harvest() >= max_jobs:
+            harvest()
+            if max_jobs is not None and processed >= max_jobs:
                 break
             _touch(settings.ai_review_heartbeat_file)
 
