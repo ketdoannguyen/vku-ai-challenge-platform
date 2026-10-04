@@ -150,6 +150,10 @@ def test_parse_maps_entrypoint_failures_and_rejects_unknown_codes():
     assert known.value.code == "EVALUATOR_INVALID"
     assert known.value.message == "Source sai."
 
+    with pytest.raises(EvaluatorError) as rule:
+        _parse(_failed("SUBMISSION_RULE_VIOLATION", "CSV sai quy tắc."), b"")
+    assert rule.value.code == "SUBMISSION_RULE_VIOLATION"
+
     with pytest.raises(EvaluatorError) as unknown:
         _parse(_failed("EVALUATOR_TU_NGHI", "Lạ."), b"")
     assert unknown.value.code == "EVALUATOR_FAILED"

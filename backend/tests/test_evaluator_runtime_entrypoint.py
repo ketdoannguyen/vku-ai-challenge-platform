@@ -57,6 +57,32 @@ def test_entrypoint_tra_ket_qua_that_ra_khoi_stdout():
     assert _result(result) == {"status": "passed", "metrics": {"accuracy": 1.0, "n_items": 2.0}}
 
 
+def test_rule_violation_has_fixed_public_message_and_private_detail():
+    result, _ = _run(
+        "def evaluate(truth_path, submission_path):\n"
+        "    raise SubmissionRuleError('PRIVATE ANSWER: 42')\n"
+    )
+    payload = _result(result)
+    assert result.returncode == 0
+    assert payload["code"] == "SUBMISSION_RULE_VIOLATION"
+    assert "CSV không đáp ứng quy tắc" in payload["message"]
+    assert "PRIVATE ANSWER" not in payload["message"]
+    assert "PRIVATE ANSWER: 42" in payload["detail"]
+
+
+def test_other_errors_are_not_misclassified_as_submission_rules():
+    for source in (
+        "def evaluate(truth_path, submission_path):\n    raise ValueError('bad code')\n",
+        "raise ValueError('bad load')\n"
+        "def evaluate(truth_path, submission_path):\n    return {'accuracy': 1.0}\n",
+        "raise SubmissionRuleError('bad load')\n"
+        "def evaluate(truth_path, submission_path):\n    return {'accuracy': 1.0}\n",
+    ):
+        result, _ = _run(source)
+        assert result.returncode == 0
+        assert _result(result)["code"] == "EVALUATOR_FAILED"
+
+
 def test_code_cham_in_ra_khong_lam_hong_kenh_ket_qua():
     """`print()` của admin đi sang stderr; kênh kết quả chỉ có đúng dòng của entrypoint."""
     result, _ = _run(

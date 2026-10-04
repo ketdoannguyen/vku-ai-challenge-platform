@@ -31,6 +31,14 @@ ENTRYPOINT = "evaluate"
 GROUND_TRUTH_PATH = "/tmp/ground_truth.csv"
 SUBMISSION_PATH = "/tmp/submission.csv"
 DEADLINE_ENV = "VKU_DEADLINE_SECONDS"
+SUBMISSION_RULE_MESSAGE = (
+    "CSV không đáp ứng quy tắc nộp bài của cuộc thi. "
+    "Hãy đối chiếu với yêu cầu về file nộp và dữ liệu trong đề bài rồi nộp lại."
+)
+
+
+class SubmissionRuleError(Exception):
+    """Bộ chấm chủ động báo bài nộp vi phạm một quy tắc đã công khai."""
 
 
 def _emit(channel: int, payload: dict) -> None:
@@ -90,6 +98,7 @@ def _load_entrypoint(source_code: str):
     chính container này, còn source đã được API kiểm tra cú pháp từ lúc lưu.
     """
     module = types.ModuleType("evaluator")
+    module.__dict__["SubmissionRuleError"] = SubmissionRuleError
     exec(compile(source_code, "<evaluator>", "exec"), module.__dict__)  # noqa: S102 - mục đích của file
     function = getattr(module, ENTRYPOINT, None)
     if not callable(function):
@@ -123,7 +132,18 @@ def main() -> int:
         with open(SUBMISSION_PATH, "w", encoding="utf-8", newline="") as handle:
             handle.write(payload["submission_csv"])
         function = _load_entrypoint(payload["source_code"])
-        result = function(GROUND_TRUTH_PATH, SUBMISSION_PATH)
+        try:
+            result = function(GROUND_TRUTH_PATH, SUBMISSION_PATH)
+        except SubmissionRuleError:
+            _emit(
+                channel,
+                _failure(
+                    "SUBMISSION_RULE_VIOLATION",
+                    SUBMISSION_RULE_MESSAGE,
+                    traceback.format_exc(),
+                ),
+            )
+            return 0
     except BaseException:  # noqa: BLE001 - xem chú thích bên dưới
         # Bắt cả BaseException: code chấm gọi sys.exit() cũng phải trả về một lỗi có mã, và tiến trình
         # này sống đúng một lượt chấm nên không có gì phía sau cần được bảo vệ.
