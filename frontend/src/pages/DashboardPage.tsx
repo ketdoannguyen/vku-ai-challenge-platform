@@ -24,7 +24,9 @@ import {
 } from "../api/competitions";
 import { Loading } from "../components/ui";
 import { JoinControl } from "../components/JoinControl";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useOptionalAuth } from "../auth/AuthContext";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useDeadlineClock } from "../hooks/useCountdown";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCountdown } from "../lib/countdown";
@@ -501,23 +503,62 @@ export function DashboardPage() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [sort, setSort] = useState<CompetitionSort>("name");
   const [participation, setParticipation] = useState<ParticipationFilter>("all");
+  /** Thao tác tham gia/rời đang chờ hoặc modal đang mở: dừng tự làm mới để không ghi đè. */
+  const [engagedSlugs, setEngagedSlugs] = useState<ReadonlySet<string>>(() => new Set());
+  const markJoinEngaged = useCallback((slug: string, engaged: boolean) => {
+    setEngagedSlugs((current) => {
+      if (current.has(slug) === engaged) return current;
+      const next = new Set(current);
+      if (engaged) next.add(slug);
+      else next.delete(slug);
+      return next;
+    });
+  }, []);
+  /** Response cũ không được ghi đè dữ liệu mới hơn (join, làm mới thủ công, làm mới ngầm). */
+  const requestSequence = useRef(0);
   useDocumentTitle("Cuộc thi");
 
   const load = useCallback(async () => {
+    const sequence = ++requestSequence.current;
     setError(null);
     setLoading(true);
     try {
-      setData(await api.get<CompetitionsResponse>("/competitions"));
+      const response = await api.get<CompetitionsResponse>("/competitions");
+      if (sequence === requestSequence.current) setData(response);
     } catch (err) {
-      setError(err);
+      if (sequence === requestSequence.current) setError(err);
     } finally {
-      setLoading(false);
+      if (sequence === requestSequence.current) setLoading(false);
     }
   }, []);
+
+  /** Làm mới ngầm: không chạm loading/error của trang, lỗi ném cho hook tự xử lý. */
+  const silentLoad = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    const response = await api.get<CompetitionsResponse>("/competitions");
+    if (sequence === requestSequence.current) setData(response);
+  }, []);
+
+  const refreshStatus = useAutoRefresh(data !== null && !loading && engagedSlugs.size === 0, silentLoad, { intervalMs: 5_000 });
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const handleMembershipChange = useCallback((slug: string, membership: Membership) => {
+    // Vô hiệu hoá response đang bay (có thể mang membership trước khi join) trước khi vá state.
+    requestSequence.current += 1;
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            competitions: prev.competitions.map((item) =>
+              item.slug === slug ? { ...item, membership } : item,
+            ),
+          }
+        : prev,
+    );
+  }, []);
 
   const competitions = data?.competitions;
 
@@ -558,6 +599,7 @@ export function DashboardPage() {
 
   return (
     <div className="page dash-page">
+      <AutoRefreshNotice {...refreshStatus} />
       <header className="page-hero">
         <div className="page-hero-row">
           <span className="page-hero-icon" aria-hidden="true">
@@ -668,18 +710,8 @@ export function DashboardPage() {
                 competition={competition}
                 theme={getCardTheme(index)}
                 now={now}
-                onMembershipChange={(slug, membership) =>
-                  setData((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          competitions: prev.competitions.map((item) =>
-                            item.slug === slug ? { ...item, membership } : item,
-                          ),
-                        }
-                      : prev,
-                  )
-                }
+                onMembershipChange={handleMembershipChange}
+                onJoinEngaged={markJoinEngaged}
               />
             ))}
           </div>
@@ -711,6 +743,7 @@ function CompetitionCard({
   theme,
   now,
   onMembershipChange,
+  onJoinEngaged,
 }: {
   competition: Competition;
   /** Theme lấy theo vị trí trong lưới đang render - không lấy từ trạng thái cuộc thi. */
@@ -718,8 +751,14 @@ function CompetitionCard({
   /** Mốc giờ dùng chung của cả trang - mỗi thẻ không tự mở timer riêng. */
   now: number | null;
   onMembershipChange: (slug: string, membership: Membership) => void;
+  /** Báo trang khi thẻ đang tham gia/rời hoặc mở modal để tạm dừng tự làm mới. */
+  onJoinEngaged?: (slug: string, engaged: boolean) => void;
 }) {
   const c = competition;
+  const handleEngagedChange = useCallback(
+    (engaged: boolean) => onJoinEngaged?.(c.slug, engaged),
+    [c.slug, onJoinEngaged],
+  );
   const remaining =
     c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
   // Thẻ đã quá hạn không còn "Đang diễn ra" nữa, dù backend vẫn giữ status `published`.
@@ -794,6 +833,7 @@ function CompetitionCard({
           competition={c}
           showLeave={false}
           onMembershipChange={(membership) => onMembershipChange(c.slug, membership)}
+          onEngagedChange={handleEngagedChange}
         />
       </div>
     </article>

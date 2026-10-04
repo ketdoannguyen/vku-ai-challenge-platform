@@ -8,15 +8,26 @@
  *   thế. Row cũ thiếu field mới không có badge nào, và mã chẩn đoán không bao giờ lên UI.
  */
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { formatLocal } from "../api/competitions";
 import type { AiReviewDetail, AiReviewRecord } from "../api/aiReview";
 import type { AdminSubmissionItem } from "../api/results";
-import { MAX_POLLS, POLL_INTERVAL_MS } from "../hooks/usePendingPolling";
-import { flushTimers } from "../test/timers";
 import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { FOCUSABLE } from "./Modal";
+
+/** Nhịp tự làm mới ngầm của modal. */
+const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Chạy đồng hồ ảo kèm flush microtask. Hook cộng jitter ±10% vào nhịp, nên các test đọc mốc
+ * thời gian phải cố định `Math.random` về 0.5 (hệ số 1.0) để nhịp không trôi.
+ */
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
 
 const SUBMISSION_ID = "64a000000000000000000009";
 
@@ -982,25 +993,139 @@ test("tải notebook đi đúng endpoint của admin", async () => {
   );
 });
 
-test("lượt đang chờ được poll có trần, và dừng lại thì báo cho admin biết", async () => {
+test("lượt đang chờ được tự làm mới ngầm cho tới khi có kết quả", async () => {
   vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
   try {
-    const requests = mockApi(
-      () => json({ submission: DETAIL.submission }),
-      detailWith({
-        ai_review: { ...SUBMISSION.ai_review!, state: "QUEUED", verdict: null, latest_review_id: null },
-        history: [],
+    let queued = true;
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(String(input));
+        return json(
+          queued
+            ? detailWith({
+                ai_review: {
+                  ...SUBMISSION.ai_review!,
+                  state: "QUEUED",
+                  verdict: null,
+                  latest_review_id: null,
+                },
+                history: [],
+              })
+            : DETAIL,
+        );
       }),
     );
+
     renderModal();
-
-    await flushTimers(0);
+    await advance(0);
+    // Trạng thái chờ đọc được ngay, và chưa có kết quả nào để xem.
     expect(screen.getByRole("status")).toBeTruthy();
+    expect(screen.queryByText("Kết quả đánh giá")).toBeNull();
 
-    await flushTimers(POLL_INTERVAL_MS * (MAX_POLLS + 2));
-    // Ngân sách đếm theo lượt thật sự gọi: lượt tải đầu cộng MAX_POLLS lượt poll, rồi dừng.
-    expect(requests.filter((item) => item.method === "GET")).toHaveLength(MAX_POLLS + 1);
-    expect(screen.getByText(/Đã tạm dừng tự động làm mới/)).toBeTruthy();
+    queued = false;
+    await advance(AUTO_REFRESH_MS);
+    // Lượt ngầm thay nội dung tại chỗ: không có màn "Đang tải chi tiết..." nào chen vào.
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+    expect(screen.queryByText("Đang tải chi tiết kiểm tra AI...")).toBeNull();
+    expect(requests).toHaveLength(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("hộp xác nhận chạy lại đang mở thì modal nhường lượt làm mới ngầm", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    const requests = mockApi(() => json({ submission: DETAIL.submission }));
+    renderModal();
+    await advance(0);
+    expect(requests.filter((item) => item.method === "GET")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chạy lại AI" }));
+    expect(screen.getByRole("dialog", { name: "Chạy lại kiểm tra AI" })).toBeTruthy();
+
+    // Admin đang cân nhắc chạy lại: modal không chen thêm request đọc nào phía sau.
+    const during = requests.filter((item) => item.method === "GET").length;
+    await advance(AUTO_REFRESH_MS * 3);
+    expect(requests.filter((item) => item.method === "GET")).toHaveLength(during);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("mất quyền giữa chừng: 403 dừng tự làm mới và báo rõ", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    let forbidden = false;
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(String(input));
+        if (forbidden) {
+          return json({ error: { code: "FORBIDDEN", message: "Không có quyền." } }, 403);
+        }
+        return json(DETAIL);
+      }),
+    );
+
+    renderModal();
+    await advance(0);
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+
+    forbidden = true;
+    await advance(AUTO_REFRESH_MS);
+    expect(screen.getByText(/Đã dừng tự động làm mới/)).toBeTruthy();
+    // Kết quả cũ vẫn đọc được, nhưng vòng tự làm mới đã dừng hẳn thay vì quay mãi.
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+
+    const calls = requests.length;
+    await advance(AUTO_REFRESH_MS * 5);
+    expect(requests).toHaveLength(calls);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("lượt ngầm lỗi mạng giữ kết quả cũ và báo đang thử lại, sau đó tự phục hồi", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    let failing = false;
+    const requests: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(String(input));
+        if (failing) return json({ error: { code: "INTERNAL_ERROR", message: "Lỗi hệ thống." } }, 500);
+        return json(DETAIL);
+      }),
+    );
+
+    renderModal();
+    await advance(0);
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+
+    failing = true;
+    await advance(AUTO_REFRESH_MS);
+    // Kết quả cũ ở lại, có chỉ báo thử lại nhưng không thay toàn modal bằng màn lỗi.
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+    expect(screen.getByText(/Hệ thống đang tự thử lại/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Thử lại" })).toBeNull();
+
+    // Backoff sau lỗi đầu: 3000 * 2^1 = 6000ms (jitter đã cố định về hệ số 1.0).
+    await advance(5_999);
+    expect(requests).toHaveLength(2);
+    failing = false;
+    await advance(1);
+    expect(requests).toHaveLength(3);
+    expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+    expect(screen.queryByText(/Hệ thống đang tự thử lại/)).toBeNull();
   } finally {
     vi.useRealTimers();
   }

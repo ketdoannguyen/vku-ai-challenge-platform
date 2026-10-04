@@ -66,7 +66,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { Accept: "application/json", ...init?.headers },
   });
 
-  const body = await resp.json().catch(() => null);
+  const body = await resp.json().catch((error: unknown) => {
+    if (init?.signal?.aborted) throw init.signal.reason ?? error;
+    if (resp.ok && resp.status !== 204) throw error;
+    return null;
+  });
   if (!resp.ok) {
     const error = body?.error ?? { code: "UNKNOWN", message: `Lỗi HTTP ${resp.status}` };
     throw new ApiClientError(resp.status, error);
@@ -74,8 +78,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
+const GET_TIMEOUT_MS = 30_000;
+
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string) => request<T>(path, { signal: AbortSignal.timeout(GET_TIMEOUT_MS) }),
   post: <T>(path: string, json?: unknown) =>
     request<T>(path, {
       method: "POST",

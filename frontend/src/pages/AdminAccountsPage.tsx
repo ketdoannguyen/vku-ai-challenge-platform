@@ -6,6 +6,8 @@ import { api, ApiClientError } from "../api/client";
 import { useOptionalAuth, type Account } from "../auth/AuthContext";
 import { ConfirmModal, Modal } from "../components/Modal";
 import { ErrorBox, Loading } from "../components/ui";
+import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
+import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 /** `total` là số khớp từ khóa tìm kiếm; `stats` là tổng quan toàn hệ thống cho các thẻ KPI. */
@@ -36,6 +38,14 @@ interface AccountsQuery {
   offset: number;
 }
 
+/** Query params dùng chung cho lần tải thường và lần làm mới ngầm. */
+function accountsParams(q: AccountsQuery): URLSearchParams {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(q.offset) });
+  if (q.q) params.set("q", q.q);
+  if (q.status) params.set("status", q.status);
+  return params;
+}
+
 export function AdminAccountsPage() {
   const auth = useOptionalAuth();
   const currentAccountId = auth?.account?.id ?? null;
@@ -57,33 +67,35 @@ export function AdminAccountsPage() {
   const messageTimer = useRef<number | null>(null);
   useDocumentTitle("Quản lý tài khoản");
 
+  /** Áp dụng response vào bảng: lùi trang khi trang cuối rỗng, dọn lựa chọn đã biến mất. */
+  const applyResponse = useCallback((response: AccountsResponse) => {
+    hasData.current = true;
+    // Trang cuối có thể vừa rỗng đi sau khi vô hiệu hóa/xóa - lùi về trang còn dữ liệu.
+    if (response.accounts.length === 0 && response.offset > 0) {
+      const lastOffset = Math.max(0, Math.floor(Math.max(response.total - 1, 0) / PAGE_SIZE) * PAGE_SIZE);
+      if (lastOffset !== response.offset) {
+        setSelectedIds(new Set());
+        setQuery((current) => (current.offset === response.offset ? { ...current, offset: lastOffset } : current));
+        return;
+      }
+    }
+    setSelectedIds((current) => {
+      const visible = new Set(response.accounts.map((account) => account.id));
+      const remaining = new Set([...current].filter((id) => visible.has(id)));
+      return remaining.size === current.size ? current : remaining;
+    });
+    setData(response);
+  }, []);
+
   const load = useCallback(async (q: AccountsQuery, keepRows = false) => {
     const sequence = ++requestSequence.current;
     setError(null);
     if (keepRows) setRefreshing(true);
     else setLoading(true);
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(q.offset) });
-    if (q.q) params.set("q", q.q);
-    if (q.status) params.set("status", q.status);
     try {
-      const response = await api.get<AccountsResponse>(`/admin/accounts?${params.toString()}`);
+      const response = await api.get<AccountsResponse>(`/admin/accounts?${accountsParams(q).toString()}`);
       if (sequence !== requestSequence.current) return;
-      hasData.current = true;
-      // Trang cuối có thể vừa rỗng đi sau khi vô hiệu hóa/xóa - lùi về trang còn dữ liệu.
-      if (response.accounts.length === 0 && response.offset > 0) {
-        const lastOffset = Math.max(0, Math.floor(Math.max(response.total - 1, 0) / PAGE_SIZE) * PAGE_SIZE);
-        if (lastOffset !== response.offset) {
-          setSelectedIds(new Set());
-          setQuery((current) => (current.offset === response.offset ? { ...current, offset: lastOffset } : current));
-          return;
-        }
-      }
-      setSelectedIds((current) => {
-        const visible = new Set(response.accounts.map((account) => account.id));
-        const remaining = new Set([...current].filter((id) => visible.has(id)));
-        return remaining.size === current.size ? current : remaining;
-      });
-      setData(response);
+      applyResponse(response);
     } catch (err) {
       if (sequence === requestSequence.current) setError(err);
     } finally {
@@ -92,7 +104,33 @@ export function AdminAccountsPage() {
         setRefreshing(false);
       }
     }
+  }, [applyResponse]);
+
+  /** Làm mới ngầm: không chạm loading/error của trang, lỗi ném cho hook tự xử lý. */
+  const silentLoad = useCallback(async () => {
+    const sequence = ++requestSequence.current;
+    const response = await api.get<AccountsResponse>(`/admin/accounts?${accountsParams(query).toString()}`);
+    if (sequence !== requestSequence.current) return;
+    applyResponse(response);
+  }, [applyResponse, query]);
+
+  // Dòng đang mở modal/thao tác thì chưa làm mới: tránh thay bảng dưới chân hộp thoại đang mở.
+  const [engagedIds, setEngagedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const markRowEngaged = useCallback((id: string, engaged: boolean) => {
+    setEngagedIds((current) => {
+      if (current.has(id) === engaged) return current;
+      const next = new Set(current);
+      if (engaged) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }, []);
+
+  const refreshStatus = useAutoRefresh(
+    data !== null && !loading && !refreshing && !creating && bulkAction === null && engagedIds.size === 0,
+    silentLoad,
+    { intervalMs: 3_000 },
+  );
 
   const notify = useCallback((text: string) => {
     if (messageTimer.current !== null) window.clearTimeout(messageTimer.current);
@@ -266,6 +304,7 @@ export function AdminAccountsPage() {
         </div>
       )}
       {Boolean(error) && data && <ErrorBox error={error} />}
+      <AutoRefreshNotice {...refreshStatus} />
 
       {selected.length > 0 && (
         <div className="admin-accounts-bulk" role="group" aria-label="Thao tác với tài khoản đã chọn">
@@ -324,6 +363,7 @@ export function AdminAccountsPage() {
                     onToggleSelected={() => toggleSelected(account.id)}
                     onChanged={() => void load(query, true)}
                     onMessage={notify}
+                    onEngagedChange={markRowEngaged}
                   />
                 ))
               ) : (
@@ -539,6 +579,7 @@ function AccountRow({
   onToggleSelected,
   onChanged,
   onMessage,
+  onEngagedChange,
 }: {
   account: Account;
   isCurrent: boolean;
@@ -547,6 +588,8 @@ function AccountRow({
   onToggleSelected: () => void;
   onChanged: () => void;
   onMessage: (message: string) => void;
+  /** Báo dòng đang mở modal/gọi API để trang tạm dừng tự làm mới. */
+  onEngagedChange: (id: string, engaged: boolean) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [resetting, setResetting] = useState(false);
@@ -554,6 +597,12 @@ function AccountRow({
   const [approving, setApproving] = useState(false);
   const [confirmingActiveChange, setConfirmingActiveChange] = useState(false);
   const isPending = account.pending;
+
+  useEffect(() => {
+    const engaged = busy || resetting || deleting || approving || confirmingActiveChange;
+    onEngagedChange(account.id, engaged);
+    return () => onEngagedChange(account.id, false);
+  }, [account.id, approving, busy, confirmingActiveChange, deleting, onEngagedChange, resetting]);
 
   async function toggleActive() {
     setBusy(true);
