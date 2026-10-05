@@ -235,25 +235,205 @@ afterEach(() => {
    Ma trận trạng thái
    --------------------------------------------------------------------------- */
 
-test("cảnh báo dataset được hiển thị riêng khi verdict CLEAR", async () => {
-  mockApi(() => json({}), detailWith({
+/* ---------------------------------------------------------------------------
+   Nguồn dataset trong notebook
+   --------------------------------------------------------------------------- */
+
+type SourceSignalFixture = NonNullable<AiReviewRecord["source_signals"]>[number];
+
+function sourceSignal(overrides: Partial<SourceSignalFixture> = {}): SourceSignalFixture {
+  return {
+    cell: 3,
+    start_line: 4,
+    end_line: 4,
+    snippet: "4 requests.get('https://data.example.org/train.csv')",
+    reason: "Code tải dataset ngoài",
+    match: "EXTERNAL_SOURCE",
+    urls: [{ url: "https://data.example.org/train.csv", match: "EXTERNAL_SOURCE", resource_label: null }],
+    warning: true,
+    ...overrides,
+  };
+}
+
+/** Lượt canonical mang đúng các dấu hiệu nguồn được nêu; projection nói lượt này có cảnh báo. */
+function detailWithSignals(signals: SourceSignalFixture[], resourcesConfigured = 1): AiReviewDetail {
+  return detailWith({
     ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
-    history: [record({
-      id: "r2", generation: 2, source_signals: [{
-        cell: 3, start_line: 4, end_line: 4,
-        snippet: "4 requests.get('https://data.example.org/train.csv')",
-        reason: "Code tải dataset ngoài", match: "EXTERNAL_SOURCE",
-        urls: [{ url: "https://data.example.org/train.csv", match: "EXTERNAL_SOURCE", resource_label: null }],
-        warning: true,
-      }], resources_configured: 1,
-    })],
-  }));
+    history: [
+      record({
+        id: "r2",
+        generation: 2,
+        source_signals: signals,
+        resources_configured: resourcesConfigured,
+      }),
+    ],
+  });
+}
+
+test("cảnh báo dataset được hiển thị riêng khi verdict CLEAR", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()]));
   renderModal();
+
   await screen.findByText("Nguồn dataset trong notebook");
-  expect(screen.getByText("Cần BTC kiểm tra")).toBeTruthy();
+  expect(screen.getByText("Không khớp nguồn BTC")).toBeTruthy();
+  // Lời giải thích là kết quả đối chiếu của server, còn chữ của model phải mang nhãn riêng.
+  expect(screen.getByText(/ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp/)).toBeTruthy();
+  expect(screen.getByText("AI ghi nhận: Code tải dataset ngoài")).toBeTruthy();
   expect(screen.getByText("https://data.example.org/train.csv")).toBeTruthy();
+  expect(screen.getByText("Không khớp")).toBeTruthy();
   expect(screen.getByText(/không chứng minh notebook đã chạy/)).toBeTruthy();
   expect(screen.getByText("Không phát hiện")).toBeTruthy();
+});
+
+test("mỗi nguồn trong đoạn code có trạng thái riêng, kèm nhãn tài nguyên BTC khi khớp", async () => {
+  mockApi(() => json({}), detailWithSignals([
+    sourceSignal({
+      urls: [
+        {
+          url: "https://drive.google.com/file/d/FILE123/view",
+          match: "MATCHED_RESOURCE",
+          resource_label: "Dataset BTC",
+        },
+        { url: "https://data.example.org/train.csv", match: "EXTERNAL_SOURCE", resource_label: null },
+      ],
+    }),
+  ]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  // Trạng thái tổng hợp là mức cần xem xét cao nhất; từng nguồn vẫn giữ trạng thái của nó.
+  expect(screen.getByText("Không khớp nguồn BTC")).toBeTruthy();
+  expect(screen.getByText("Khớp BTC cấp")).toBeTruthy();
+  expect(screen.getByText("· Dataset BTC")).toBeTruthy();
+  expect(screen.getByText("Không khớp")).toBeTruthy();
+  // Đoạn code trộn nguồn khớp lẫn không khớp: lời giải thích tổng hợp không được phủ định
+  // "không có gì khớp" khi ngay dưới nó có URL khớp.
+  expect(screen.getByText(/ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp/)).toBeTruthy();
+  expect(screen.queryByText(/Không link\/ID nào/)).toBeNull();
+});
+
+test("chưa xác minh được thư mục thì nói rõ vì sao, và vẫn hiện điều AI ghi nhận", async () => {
+  mockApi(() => json({}), detailWithSignals([
+    sourceSignal({
+      reason: "Nghi ngờ tải tệp riêng trong thư mục BTC",
+      match: "FOLDER_MEMBERSHIP_UNVERIFIED",
+      urls: [{
+        url: "https://drive.google.com/file/d/FILE999/view",
+        match: "FOLDER_MEMBERSHIP_UNVERIFIED",
+        resource_label: null,
+      }],
+    }),
+  ]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(screen.getByText("Chưa xác minh thư mục")).toBeTruthy();
+  expect(screen.getByText(/không thể xác minh tệp riêng nằm trong thư mục đó/)).toBeTruthy();
+  expect(screen.getByText("Chưa rõ thư mục")).toBeTruthy();
+  expect(screen.getByText("AI ghi nhận: Nghi ngờ tải tệp riêng trong thư mục BTC")).toBeTruthy();
+});
+
+test("nguồn động không có URL tĩnh thì nói rõ và chỉ vào đoạn code", async () => {
+  mockApi(() => json({}), detailWithSignals([
+    sourceSignal({
+      reason: "URL dựng động từ biến",
+      match: "UNVERIFIED_SOURCE",
+      urls: [],
+      snippet: "4 requests.get(dataset_url)",
+    }),
+  ]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(screen.getByText("Chưa xác định nguồn")).toBeTruthy();
+  expect(screen.getByText(/không phải URL\/ID tĩnh/)).toBeTruthy();
+  expect(screen.getByText("Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.")).toBeTruthy();
+  expect(screen.getByText("4 requests.get(dataset_url)")).toBeTruthy();
+});
+
+test("Drive ID thay vì URL thì hiện dạng ID, không giả làm link", async () => {
+  mockApi(() => json({}), detailWithSignals([
+    sourceSignal({
+      match: "MATCHED_RESOURCE",
+      warning: false,
+      urls: [{ url: "id=FILE123", match: "MATCHED_RESOURCE", resource_label: "Dataset BTC" }],
+    }),
+  ]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(screen.getByText("ID: FILE123")).toBeTruthy();
+  expect(screen.queryByText("id=FILE123")).toBeNull();
+  expect(screen.getByText("Trùng nguồn BTC cấp")).toBeTruthy();
+});
+
+test("lượt không có tài nguyên BTC trong bản chụp thì nói đúng phạm vi, không đổ cho cấu hình hiện tại", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()], 0));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText("Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu."),
+  ).toBeTruthy();
+});
+
+test("danh sách chạm trần URL thì nói ra, không hứa đã liệt kê đủ", async () => {
+  const urls = Array.from({ length: 5 }, (_, index) => ({
+    url: `https://data.example.org/train-${index}.csv`,
+    match: "EXTERNAL_SOURCE" as const,
+    resource_label: null,
+  }));
+  mockApi(() => json({}), detailWithSignals([sourceSignal({ urls })]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText(
+      "Danh sách hiển thị tối đa 5 nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.",
+    ),
+  ).toBeTruthy();
+});
+
+test("record cũ không có dấu hiệu nguồn thì không dựng mục đối chiếu nào", async () => {
+  mockApi(() => json({ submission: DETAIL.submission }));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  expect(screen.queryByText("Nguồn dataset trong notebook")).toBeNull();
+});
+
+test("mục đối chiếu nguồn đứng trước danh sách finding trong thẻ kết quả", async () => {
+  mockApi(() => json({}), detailWith({
+    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
+    history: [{ ...CANONICAL_RUN, source_signals: [sourceSignal()], resources_configured: 1 }],
+  }));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const card = resultCard();
+  const heading = within(card).getByText("Nguồn dataset trong notebook");
+  // Danh sách finding của thẻ là con trực tiếp; danh sách URL của mục nguồn nằm sâu hơn.
+  const findings = Array.from(card.querySelectorAll(".ai-finding-list")).find(
+    (list) => list.parentElement === card,
+  );
+  expect(findings).toBeTruthy();
+  expect(heading.compareDocumentPosition(findings!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("lượt cũ trong lịch sử cũng hiện chi tiết từng nguồn", async () => {
+  mockApi(() => json({}), detailWith({
+    history: [
+      record({ id: "r1", generation: 1, source_signals: [sourceSignal()], resources_configured: 1 }),
+      CANONICAL_RUN,
+    ],
+  }));
+  renderModal();
+
+  await screen.findByText("Các lượt trước");
+  const history = screen.getByRole("dialog").querySelector<HTMLElement>(".ai-history")!;
+  expect(within(history).getByText("Nguồn dataset trong notebook")).toBeTruthy();
+  expect(within(history).getByText("Không khớp nguồn BTC")).toBeTruthy();
+  expect(within(history).getByText("AI ghi nhận: Code tải dataset ngoài")).toBeTruthy();
 });
 
 test("COMPLETED dùng record canonical: mỗi kết luận chỉ xuất hiện một lần", async () => {

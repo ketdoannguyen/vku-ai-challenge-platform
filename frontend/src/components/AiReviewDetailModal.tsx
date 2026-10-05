@@ -23,12 +23,15 @@ import {
   AI_VERDICT_TONE,
   FINDING_STATUS_LABEL,
   FINDING_VERIFICATION_LABEL,
+  SOURCE_MATCH_LABEL,
+  SOURCE_URL_MATCH_LABEL,
   fetchAiReviewDetail,
   findingVerification,
   rerunAiReview,
   type AiFinding,
   type AiReviewDetail,
   type AiReviewRecord,
+  type AiSourceMatch,
   type FindingStatus,
   type FindingVerification,
 } from "../api/aiReview";
@@ -64,6 +67,41 @@ const VERIFICATION_TONE: Record<FindingVerification, "neutral" | "warning"> = {
   UNRESOLVED: "warning",
   UNKNOWN: "neutral",
 };
+
+/**
+ * Tông màu của trạng thái đối chiếu nguồn. "Trùng nguồn" để trung tính cùng lý do với badge
+ * `VERIFIED`: khớp tài nguyên BTC là mặc định lành mạnh, không phải một kết luận.
+ */
+const SOURCE_MATCH_TONE: Record<AiSourceMatch, "neutral" | "warning"> = {
+  MATCHED_RESOURCE: "neutral",
+  FOLDER_MEMBERSHIP_UNVERIFIED: "warning",
+  EXTERNAL_SOURCE: "warning",
+  UNVERIFIED_SOURCE: "warning",
+};
+
+/**
+ * Lời giải thích cho từng trạng thái. Đây là kết quả so khớp của server, KHÔNG phải suy luận của
+ * model - chữ của model chỉ được hiện ở dòng "AI ghi nhận" phía dưới. "Không khớp" chỉ nói lên
+ * việc không trùng danh sách đã chụp, không phải kết luận nguồn đến từ ngoài cuộc thi.
+ */
+const SOURCE_MATCH_EXPLANATION: Record<AiSourceMatch, string> = {
+  MATCHED_RESOURCE:
+    "Link hoặc ID trong đoạn code trùng với tài nguyên BTC cấp trong bản thể lệ đã chụp tại thời điểm nộp.",
+  // Trạng thái tổng hợp là mức cần xem xét cao nhất, không phải "mọi nguồn": đoạn code có thể vừa
+  // khớp vừa không khớp, nên câu chữ phải nói "ít nhất một" thay vì phủ định toàn bộ.
+  EXTERNAL_SOURCE:
+    "Có ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp trong bản thể lệ đã chụp tại thời điểm nộp. Không trùng không đồng nghĩa nguồn đến từ ngoài cuộc thi.",
+  FOLDER_MEMBERSHIP_UNVERIFIED:
+    "Có nguồn Drive chưa trùng tài nguyên BTC cấp; vì tài nguyên BTC gồm thư mục Drive, chỉ từ notebook không thể xác minh tệp riêng nằm trong thư mục đó.",
+  UNVERIFIED_SOURCE:
+    "Có nguồn tải trong đoạn code không phải URL/ID tĩnh nên máy chủ không đối chiếu tự động được.",
+};
+
+/**
+ * Trần số nguồn backend trả về cho mỗi đoạn code (`MAX_SOURCE_URLS_PER_SIGNAL`). Chạm trần thì
+ * phải nói ra: danh sách hiển thị có thể chưa đầy đủ dù trạng thái tổng hợp xét mọi nguồn.
+ */
+const SOURCE_URLS_SHOWN = 5;
 
 const DISCLAIMER = "AI chỉ tham khảo, không ảnh hưởng điểm số. Ban Tổ chức quyết định cuối cùng.";
 
@@ -388,6 +426,8 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
         </p>
       )}
 
+      <SourceSignalsSection record={record} />
+
       {record.findings.length > 0 ? (
         <ul className="ai-finding-list">
           {record.findings.map((finding, index) => (
@@ -397,32 +437,62 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
       ) : (
         noFindingCopy && <p className="ai-finding-empty">{noFindingCopy}</p>
       )}
-
-      <SourceSignalsSection record={record} />
     </section>
   );
 }
 
+/**
+ * Đối chiếu nguồn dataset của một lượt: với mỗi đoạn code có lệnh tải dữ liệu, hiện trạng thái
+ * tổng hợp, lời giải thích của server, từng URL/ID ghi nhận được, và chữ của model tách riêng.
+ * Mục này độc lập với kết luận thể lệ (ADR-055): nó nói dấu hiệu trong code, không phải vi phạm,
+ * và "không khớp" không đồng nghĩa nguồn đến từ ngoài cuộc thi.
+ */
 function SourceSignalsSection({ record }: { record: AiReviewRecord }) {
   if (!record.source_signals?.length) return null;
   return (
     <section className="ai-source-signals">
       <h4>Nguồn dataset trong notebook</h4>
       <p>Đây là dấu hiệu trong code, không chứng minh notebook đã chạy và không phải kết luận vi phạm thể lệ.</p>
-      {record.resources_configured === 0 && <p>Cuộc thi chưa cấu hình link tài nguyên để đối chiếu.</p>}
+      {record.resources_configured === 0 && (
+        <p>Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu.</p>
+      )}
       <ul className="ai-finding-list">
         {record.source_signals.map((signal, index) => (
           <li className="ai-finding" key={`${record.id}-source-${index}`}>
-            <strong>{signal.warning ? "Cần BTC kiểm tra" : "Trùng nguồn BTC cấp"}</strong>
-            <p>{signal.match === "FOLDER_MEMBERSHIP_UNVERIFIED"
-              ? "Không thể xác minh tệp có thuộc thư mục BTC cấp chỉ từ notebook."
-              : signal.match === "UNVERIFIED_SOURCE"
-                ? "Không xác định được nguồn tải tĩnh; cần xem code và link thực tế."
-                : signal.reason}</p>
-            <p>Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}</p>
-            {signal.urls.map((item, urlIndex) => (
-              <p key={urlIndex}><code>{item.url}</code>{item.resource_label ? ` · ${item.resource_label}` : ""}</p>
-            ))}
+            <div className="ai-finding-head">
+              <span className={`status-badge ${SOURCE_MATCH_TONE[signal.match]}`}>
+                {SOURCE_MATCH_LABEL[signal.match]}
+              </span>
+              <span className="ai-source-locator">
+                Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}
+              </span>
+            </div>
+            <p className="ai-source-result">{SOURCE_MATCH_EXPLANATION[signal.match]}</p>
+            {signal.reason && <p className="ai-source-reason">AI ghi nhận: {signal.reason}</p>}
+            {signal.urls.length === 0 ? (
+              <p className="ai-source-note">
+                Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.
+              </p>
+            ) : (
+              <ul className="ai-source-links">
+                {signal.urls.map((item, urlIndex) => (
+                  <li key={urlIndex}>
+                    <span className={`status-badge ${SOURCE_MATCH_TONE[item.match]}`}>
+                      {SOURCE_URL_MATCH_LABEL[item.match]}
+                    </span>
+                    <code>{item.url.startsWith("id=") ? `ID: ${item.url.slice(3)}` : item.url}</code>
+                    {item.resource_label && (
+                      <span className="ai-source-resource">· {item.resource_label}</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {signal.urls.length >= SOURCE_URLS_SHOWN && (
+              <p className="ai-source-note">
+                Danh sách hiển thị tối đa {SOURCE_URLS_SHOWN} nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.
+              </p>
+            )}
             <pre>{signal.snippet}</pre>
           </li>
         ))}

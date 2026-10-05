@@ -168,14 +168,21 @@ export interface AiFinding {
   verification_codes?: string[];
 }
 
+/** Trạng thái đối chiếu nguồn do backend tính; dùng chung cho cả đoạn code lẫn từng URL/ID. */
+export type AiSourceMatch =
+  | "MATCHED_RESOURCE"
+  | "FOLDER_MEMBERSHIP_UNVERIFIED"
+  | "EXTERNAL_SOURCE"
+  | "UNVERIFIED_SOURCE";
+
 export interface AiSourceSignal {
   cell: number;
   start_line: number;
   end_line: number;
   snippet: string;
   reason: string;
-  match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE";
-  urls: { url: string; match: string; resource_label: string | null }[];
+  match: AiSourceMatch;
+  urls: { url: string; match: AiSourceMatch; resource_label: string | null }[];
   warning: boolean;
 }
 
@@ -308,6 +315,22 @@ export const FINDING_VERIFICATION_LABEL: Record<FindingVerification, string> = {
   RULE_ONLY: "Đã tìm thấy quy định, chưa xác minh bằng chứng",
   UNRESOLVED: "Không đối chiếu được quy định",
   UNKNOWN: "",
+};
+
+/** Nhãn trạng thái đối chiếu của cả đoạn code; tone màu thuộc về chỗ hiển thị. */
+export const SOURCE_MATCH_LABEL: Record<AiSourceMatch, string> = {
+  MATCHED_RESOURCE: "Trùng nguồn BTC cấp",
+  FOLDER_MEMBERSHIP_UNVERIFIED: "Chưa xác minh thư mục",
+  EXTERNAL_SOURCE: "Không khớp nguồn BTC",
+  UNVERIFIED_SOURCE: "Chưa xác định nguồn",
+};
+
+/** Nhãn ngắn cho từng URL/ID ghi nhận bên trong đoạn code. */
+export const SOURCE_URL_MATCH_LABEL: Record<AiSourceMatch, string> = {
+  MATCHED_RESOURCE: "Khớp BTC cấp",
+  FOLDER_MEMBERSHIP_UNVERIFIED: "Chưa rõ thư mục",
+  EXTERNAL_SOURCE: "Không khớp",
+  UNVERIFIED_SOURCE: "Chưa xác định",
 };
 
 export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: string }> = [
