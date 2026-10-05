@@ -7017,6 +7017,81 @@ button.resource-link:disabled {
   line-height: 1.5;
 }
 
+/* Đối chiếu nguồn dataset: cùng ngôn ngữ trình bày với finding nhưng là mục độc lập với kết luận
+   thể lệ - trạng thái tổng hợp của đoạn code, lời giải thích của server, rồi từng nguồn bên dưới. */
+.ai-source-signals {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+.ai-source-locator {
+  color: var(--text-muted);
+  font-size: var(--text-label);
+}
+
+.ai-source-result {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--text-body-sm);
+  line-height: 1.5;
+}
+
+.ai-source-reason {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.ai-source-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: var(--space-sm) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-source-links li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+/* URL có thể dài tới 2048 ký tự; cắt dòng thay vì đẩy tràn thẻ. */
+.ai-source-links code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-source-resource {
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+}
+
+/* Snippet do server trích: cùng khung với bằng chứng của finding, nhưng dòng code dài (URL dán
+   trong code) cuộn ngang trong khối thay vì kéo tràn cả modal. */
+.ai-source-signals pre {
+  max-width: 100%;
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-sm) var(--space-md);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.ai-source-note {
+  margin: var(--space-xs) 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
 /* Lịch sử: mỗi lượt cũ là một `<details>` đóng sẵn, dòng đóng chỉ giữ bốn dữ kiện. */
 .ai-history {
   margin-top: var(--space-lg);
