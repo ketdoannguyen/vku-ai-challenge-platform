@@ -131,8 +131,9 @@ Fields:
   - `note` (str | null) - lý do từ chối, participant đọc được; luôn `null` khi `accepted`
   - `reviewed_by` (ObjectId → accounts._id), `reviewed_at` (UTC, timezone-aware)
   - Ghi **cả object** trong một `$set` trên một document nên không bao giờ trộn metadata của hai lần xét duyệt; chỉ giữ quyết định **gần nhất**, không có event history. `reviewed_by`/`reviewed_at` không bao giờ đi ra endpoint participant.
-- `content_snapshot` (object | absent) - bản thể lệ **bất biến** đã chốt tại thời điểm nộp, chỉ có khi AI bật lúc submit (ADR-036): `{state: "CAPTURED" | "ERROR", revision_id, content_hash, error_code, captured_at}`. `ERROR` ghi lại sự thật là không chụp được (`CONTENT_EMPTY` | `CONTENT_SNAPSHOT_TOO_LARGE` | `CONTENT_CHANGED_DURING_CAPTURE` | `CONTENT_UNREADABLE`) chứ **không** chặn lượt nộp; bài không chụp được thì không chạy lại AI được và admin thấy banner giải thích.
-- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
+- `content_snapshot` (object | absent) - bản thể lệ và tài nguyên **bất biến** đã chốt tại thời điểm nộp, chỉ có khi AI bật lúc submit (ADR-036): `{state: "CAPTURED" | "ERROR", revision_id, content_hash, error_code, captured_at}`. `ERROR` ghi lại sự thật là không chụp được (`CONTENT_EMPTY` | `CONTENT_SNAPSHOT_TOO_LARGE` | `CONTENT_CHANGED_DURING_CAPTURE` | `CONTENT_UNREADABLE`) chứ **không** chặn lượt nộp; bài không chụp được thì không chạy lại AI được và admin thấy banner giải thích.
+- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, source_warning_count, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
+  - `source_warning_count` (int | null, ADR-055) - số dấu hiệu nguồn dataset cần BTC xem lại từ lượt hiện tại; chỉ admin đọc, `null` trong lúc chờ/chạy lại; không thay verdict.
   - `participant_summary` (str | null, ADR-040) - **gợi ý ngắn do model soạn nháp cho thí sinh**, tối đa 10 từ, chỉ admin đọc. Nó **không** đi ra endpoint participant: `participant_projection` vẫn thay summary bằng câu cố định theo verdict, và chữ duy nhất tới tay thí sinh vẫn là `review.note` do người duyệt gửi (ADR-035). `null` khi model không có gì để nói; `request_manual_review` **xoá** field này cùng lúc reset projection để gợi ý của lượt cũ không sống dậy sau khi chạy lại.
 - `artifacts.notebook.sha256` (str | absent ở record cũ) - SHA-256 của **bytes notebook gốc** lúc nộp, ghi ngay khi insert để cache/audit không phải đọc lại MinIO chỉ để định danh; worker vẫn băm lại bytes đã lưu khi xử lý và coi đó là nguồn sự thật.
 
@@ -328,6 +329,7 @@ pages: [
   {content_id, title, slug, order, visibility: "public"|"members",
    markdown: str, markdown_sha256: str, size_bytes: int}
 ]
+resources: [{label: str, url: str}]      link Google Drive BTC cấp tại thời điểm nộp (ADR-055)
 page_count: int
 total_bytes: int
 created_at: datetime
@@ -339,7 +341,7 @@ Indexes:
 
 Không có revision counter: `content_hash` + `_id` + `created_at` đã đủ làm identity/audit, và bỏ counter thì không có race giữa hai lần chụp đồng thời.
 
-Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, visibility, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata hoặc bytes đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ.
+Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, visibility, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata, bytes hoặc `resources` đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ. Revision trước ADR-055 thiếu `resources` được hiểu là `[]` khi AI chạy lại.
 
 Capture (tối đa 3 vòng) - chạy ngay trong request nộp bài, có trần thời gian:
 1. Đọc metadata content đã sắp thứ tự (snapshot A).
@@ -416,6 +418,10 @@ findings: [
    reason,
    evidence: [{cell, start_line, end_line, snippet}]}
 ]
+source_signals: [{cell, start_line, end_line, snippet, reason,
+                  match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE",
+                  urls: [{url, match, resource_label}], warning: bool}]   ADR-055; admin-only
+resources_configured: int               số link trong revision dùng đối chiếu
 notebook_sha256: str                   luôn bằng SHA-256 của bytes gốc đã gửi model
 notebook_normalized_sha256: str        SHA-256 của bản đã chuẩn hoá
 notebook_stats: {cells, code_cells, markdown_cells, lines, truncated, omitted_cells}
@@ -424,6 +430,7 @@ provider: "openai_compatible"
 provider_host, model
 prompt_version, normalization_version, context_policy_version
 canonicalization_version, rule_ref_version, verifier_version   ADR-045; row cũ thiếu ⇒ đọc ra null
+source_signal_version: str             ADR-055; row cũ thiếu ⇒ đọc ra null
 cache_key
 source: "PROVIDER" | "CACHE" | "PIPELINE"
 reused_from_review_id: ObjectId | null
@@ -450,4 +457,4 @@ Ba mốc thời gian của một lượt thành công: `created_at` là lúc wor
 
 Từ ADR-045, `source_content_title`/`source_content_slug`/`rule_text` của một finding **không** đến từ model nữa: model chỉ trả `rule_ref` (bắt buộc) và `rule_quote` (tuỳ chọn, chỉ là khoá tra cứu, **không bao giờ** được lưu làm văn bản quy định), backend resolve về `RuleBlock` trong revision rồi tự điền lại. `RuleIndex` được **dẫn xuất lúc worker đọc revision**, không lưu vào `competition_content_revisions`, nên `canonical_content_hash` và mọi document revision không đổi - không migration, không backfill. Bằng chứng được kiểm **độc lập** với việc resolve rule: một `rule_ref` sai vẫn giữ được các khoảng dòng hợp lệ và vẫn đếm ra phần bị loại.
 
-Cache key = `SHA256(competition_id + content_hash + notebook_sha256 + provider + host + model + max_notebook_chars + prompt_version + normalization_version + context_policy_version + canonicalization_version + rule_ref_version + verifier_version)`, tra trong **cùng cuộc thi**. `max_notebook_chars` nằm trong khoá vì nó **cắt bớt** nội dung: hạ trần thì notebook dài mất cell mà hash thô của artifact không đổi. Ba version cuối (ADR-045) không đổi nội dung gửi model nhưng đổi cách dựng marker, cách sinh `rule_ref` và cách hậu kiểm, tức là đổi ý nghĩa của kết quả đã lưu. Chỉ `CACHEABLE_VERDICTS` (CLEAR/FLAGGED/INCONCLUSIVE) được tái sử dụng - **ERROR không bao giờ được cache**. Cache hit vẫn sinh audit row mới với `source=CACHE` và `reused_from_review_id` trỏ về lượt gốc, nên lịch sử không bị nối tắt. Chạy tay luôn `bypass_cache=true`.
+Cache key = `SHA256(competition_id + content_hash + notebook_sha256 + provider + host + model + max_notebook_chars + prompt_version + normalization_version + context_policy_version + canonicalization_version + rule_ref_version + verifier_version + source_signal_version)`, tra trong **cùng cuộc thi**. `max_notebook_chars` nằm trong khoá vì nó **cắt bớt** nội dung: hạ trần thì notebook dài mất cell mà hash thô của artifact không đổi. Ba version cuối (ADR-045) không đổi nội dung gửi model nhưng đổi cách dựng marker, cách sinh `rule_ref` và cách hậu kiểm, tức là đổi ý nghĩa của kết quả đã lưu. Chỉ `CACHEABLE_VERDICTS` (CLEAR/FLAGGED/INCONCLUSIVE) được tái sử dụng - **ERROR không bao giờ được cache**. Cache hit vẫn sinh audit row mới với `source=CACHE` và `reused_from_review_id` trỏ về lượt gốc, nên lịch sử không bị nối tắt. Chạy tay luôn `bypass_cache=true`.

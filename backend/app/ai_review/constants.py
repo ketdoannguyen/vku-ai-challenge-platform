@@ -77,8 +77,10 @@ SOURCE_PIPELINE = "PIPELINE"
 # v4: prompt dặn model ngân sách token của chính nó, thay vì để nó viết tới lúc trần cứng cắt ngang.
 # v5: model trả `rule_ref` do backend sinh thay vì tự viết title/slug/rule text (ADR-045).
 # v6: chỉ gắn cờ vi phạm phương pháp có chứng cứ; phân biệt notebook và CSV đã nộp.
-PROMPT_VERSION = "ai-review-v6"
-NORMALIZATION_VERSION = "notebook-v2"
+# v7: nguồn dataset BTC là ngữ cảnh riêng và tín hiệu nguồn không phụ thuộc verdict.
+PROMPT_VERSION = "ai-review-v7"
+NORMALIZATION_VERSION = "notebook-v3"
+SOURCE_SIGNAL_VERSION = "dataset-source-v1"
 CONTEXT_POLICY_VERSION = "context-v2"
 # Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
 # nên phải bump version, và cache cũ tự động không còn dùng được.
@@ -91,6 +93,9 @@ VERIFIER_VERSION = "verifier-v2"
 # --- Giới hạn cấu trúc output ---------------------------------------------------------------
 # Trần cứng để output model không bao giờ phình to trong Mongo; vượt trần là output không hợp lệ.
 MAX_FINDINGS = 20
+MAX_SOURCE_SIGNALS = 10
+MAX_SOURCE_URLS_PER_SIGNAL = 5
+MAX_SOURCE_URL_CHARS = 2048
 MAX_EVIDENCE_PER_FINDING = 5
 MAX_SUMMARY_CHARS = 1_000
 # Trần kỹ thuật rộng cho câu gợi ý gửi thí sinh: prompt dặn khoảng 10 từ, nhưng một câu dài hơn

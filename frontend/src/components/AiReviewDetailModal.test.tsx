@@ -235,6 +235,27 @@ afterEach(() => {
    Ma trận trạng thái
    --------------------------------------------------------------------------- */
 
+test("cảnh báo dataset được hiển thị riêng khi verdict CLEAR", async () => {
+  mockApi(() => json({}), detailWith({
+    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
+    history: [record({
+      id: "r2", generation: 2, source_signals: [{
+        cell: 3, start_line: 4, end_line: 4,
+        snippet: "4 requests.get('https://data.example.org/train.csv')",
+        reason: "Code tải dataset ngoài", match: "EXTERNAL_SOURCE",
+        urls: [{ url: "https://data.example.org/train.csv", match: "EXTERNAL_SOURCE", resource_label: null }],
+        warning: true,
+      }], resources_configured: 1,
+    })],
+  }));
+  renderModal();
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(screen.getByText("Cần BTC kiểm tra")).toBeTruthy();
+  expect(screen.getByText("https://data.example.org/train.csv")).toBeTruthy();
+  expect(screen.getByText(/không chứng minh notebook đã chạy/)).toBeTruthy();
+  expect(screen.getByText("Không phát hiện")).toBeTruthy();
+});
+
 test("COMPLETED dùng record canonical: mỗi kết luận chỉ xuất hiện một lần", async () => {
   mockApi(() => json({ submission: DETAIL.submission }));
   renderModal();

@@ -20,6 +20,7 @@ from pymongo.errors import DuplicateKeyError
 from app.ai_review import constants
 from app.content import storage as content_storage
 from app.content.service import CONTENTS_COLLECTION
+from app.competitions.service import COMPETITIONS_COLLECTION, public_resources
 
 REVISIONS_COLLECTION = "competition_content_revisions"
 MAX_CAPTURE_ATTEMPTS = 3
@@ -55,6 +56,7 @@ class CapturedRevision:
     page_count: int
     total_bytes: int
     pages: list[PageSnapshot]
+    resources: list[dict]
     # Page bị bỏ qua vì chưa có Markdown; settings UI dùng để giải thích vì sao page không được kiểm.
     excluded: list[dict]
     # True khi revision đã tồn tại với đúng hash này - không phải tạo mới.
@@ -114,14 +116,21 @@ async def content_source_view(db, competition_id, *, settings) -> dict:
     }
 
 
+async def read_resources(db, competition_id) -> list[dict]:
+    competition = await db[COMPETITIONS_COLLECTION].find_one({"_id": competition_id})
+    return [dict(item) for item in public_resources(competition or {})]
+
+
 async def capture_revision(db, competition_id, *, settings) -> CapturedRevision:
     """Chụp revision bất biến; raise `SnapshotError` với mã lỗi ổn định khi không chụp được."""
     for _ in range(MAX_CAPTURE_ATTEMPTS):
         before = await read_content_metadata(db, competition_id)
+        resources = await read_resources(db, competition_id)
         captured = _capture_pages(before, settings)
         after = await read_content_metadata(db, competition_id)
-        if _metadata_signature(before) == _metadata_signature(after):
-            return await _persist(db, competition_id, captured)
+        after_resources = await read_resources(db, competition_id)
+        if _metadata_signature(before) == _metadata_signature(after) and resources == after_resources:
+            return await _persist(db, competition_id, captured, resources)
     raise SnapshotError(
         constants.SNAPSHOT_CONTENT_CHANGED,
         "Nội dung cuộc thi đang được sửa trong lúc chụp snapshot.",
@@ -205,9 +214,9 @@ def _excluded_view(content: dict, reason: str) -> dict:
     }
 
 
-def canonical_content_hash(pages: list[PageSnapshot]) -> str:
-    """Hash nội dung policy: JSON UTF-8, khoá và thứ tự cố định, không chứa timestamp."""
-    payload = [
+def canonical_content_hash(pages: list[PageSnapshot], resources: list[dict]) -> str:
+    """Hash nội dung policy và tài nguyên: JSON UTF-8, không chứa timestamp."""
+    page_payload = [
         {
             "content_id": str(page.content_id),
             "title": page.title,
@@ -219,12 +228,13 @@ def canonical_content_hash(pages: list[PageSnapshot]) -> str:
         }
         for page in pages
     ]
+    payload = {"pages": page_payload, "resources": resources}
     blob = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
-async def _persist(db, competition_id, captured: _CapturedPages) -> CapturedRevision:
-    content_hash = canonical_content_hash(captured.pages)
+async def _persist(db, competition_id, captured: _CapturedPages, resources: list[dict]) -> CapturedRevision:
+    content_hash = canonical_content_hash(captured.pages, resources)
     collection = db[REVISIONS_COLLECTION]
     existing = await collection.find_one(
         {"competition_id": competition_id, "content_hash": content_hash}
@@ -237,6 +247,7 @@ async def _persist(db, competition_id, captured: _CapturedPages) -> CapturedRevi
         "competition_id": competition_id,
         "content_hash": content_hash,
         "pages": [_page_document(page) for page in captured.pages],
+        "resources": resources,
         "page_count": len(captured.pages),
         "total_bytes": captured.total_bytes,
         "created_at": datetime.now(timezone.utc),
@@ -286,6 +297,7 @@ def _result(document: dict, captured: _CapturedPages, *, reused: bool) -> Captur
             )
             for page in document["pages"]
         ],
+        resources=document.get("resources") or [],
         excluded=captured.excluded,
         reused=reused,
     )

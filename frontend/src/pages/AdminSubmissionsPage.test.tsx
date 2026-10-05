@@ -1152,6 +1152,17 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
   );
 });
 
+test("cảnh báo nguồn dataset hiện riêng với kết luận CLEAR", async () => {
+  mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: {
+    ...AI_PROJECTION, verdict: "CLEAR", source_warning_count: 1,
+  } }])));
+  renderPage();
+  await screen.findByText("Đội 0");
+  const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
+  expect(within(cell).getByText("Không phát hiện")).toBeTruthy();
+  expect(within(cell).getByText("Nguồn dữ liệu cần kiểm tra")).toBeTruthy();
+});
+
 test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", async () => {
   mockApi(() =>
     jsonResponse(

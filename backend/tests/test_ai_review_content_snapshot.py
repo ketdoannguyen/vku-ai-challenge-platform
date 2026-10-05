@@ -164,6 +164,38 @@ async def test_content_that_never_settles_fails_after_three_attempts(
     assert calls["n"] == content_snapshot.MAX_CAPTURE_ATTEMPTS * 2
 
 
+async def test_resources_change_the_hash_but_not_old_revisions(mock_db, tmp_path):
+    await _seed(mock_db, tmp_path)
+    first = await _capture(mock_db, tmp_path)
+    resources = [{"label": "Dataset", "url": "https://drive.google.com/drive/folders/abc"}]
+    await mock_db[content_snapshot.COMPETITIONS_COLLECTION].insert_one(
+        {"_id": COMPETITION, "resources": resources}
+    )
+    second = await _capture(mock_db, tmp_path)
+    assert first.resources == []
+    assert second.resources == resources
+    assert second.content_hash != first.content_hash
+    assert (await content_snapshot.get_revision(mock_db, COMPETITION, first.revision_id))["resources"] == []
+    assert (await _capture(mock_db, tmp_path)).reused is True
+
+
+async def test_resources_changing_mid_capture_are_retried(mock_db, tmp_path, monkeypatch):
+    await _seed(mock_db, tmp_path)
+    real = content_snapshot.read_resources
+    calls = {"n": 0}
+
+    async def changing(db, competition_id):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            return [{"label": "Tạm", "url": "https://drive.google.com/file/d/temp"}]
+        return await real(db, competition_id)
+
+    monkeypatch.setattr(content_snapshot, "read_resources", changing)
+    revision = await _capture(mock_db, tmp_path)
+    assert calls["n"] == 4
+    assert revision.resources == []
+
+
 async def test_identical_content_reuses_the_same_revision(mock_db, tmp_path):
     await _seed(mock_db, tmp_path, slug="problem")
     first = await _capture(mock_db, tmp_path)

@@ -55,6 +55,15 @@ class ModelFinding(BaseModel):
     )
 
 
+class ModelSourceSignal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cell: int = Field(ge=1)
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    reason: _text(constants.MAX_REASON_CHARS)
+
+
 class ModelReviewOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -71,4 +80,7 @@ class ModelReviewOutput(BaseModel):
     ] = ""
     findings: list[ModelFinding] = Field(
         default_factory=list, max_length=constants.MAX_FINDINGS
+    )
+    source_signals: list[ModelSourceSignal] = Field(
+        default_factory=list, max_length=constants.MAX_SOURCE_SIGNALS
     )

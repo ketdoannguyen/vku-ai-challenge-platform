@@ -317,6 +317,15 @@ def test_admin_list_carries_the_compact_projection(client, competition):
     assert item["ai_review"]["state"] == constants.AI_STATE_COMPLETED
     assert item["ai_review"]["verdict"] == constants.VERDICT_CLEAR
     assert item["ai_review"]["run_id"]
+    assert item["ai_review"]["source_warning_count"] == 0
+
+
+def test_admin_pending_review_has_no_source_warning_count_yet(client, competition):
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submit_as_participant(client, competition["id"])
+
+    item = _admin_list(client, competition["id"])["submissions"][0]
+    assert item["ai_review"]["source_warning_count"] is None
 
 
 def test_every_ai_filter_value_is_independent_from_scoring_and_human_review(client, competition):
@@ -390,6 +399,7 @@ def test_the_detail_shows_the_history_without_raw_payload_or_object_key(client, 
         "canonicalization": constants.CANONICALIZATION_VERSION,
         "rule_ref": constants.RULE_REF_VERSION,
         "verifier": constants.VERIFIER_VERSION,
+        "source_signal": constants.SOURCE_SIGNAL_VERSION,
     }
     serialized = str(detail)
     for forbidden in ("object_key", API_KEY, "sk-live", "messages", "api_key_ciphertext"):
