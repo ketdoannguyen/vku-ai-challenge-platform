@@ -4,7 +4,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { AuthProvider } from "../auth/AuthContext";
+import { AuthProvider, useOptionalAuth } from "../auth/AuthContext";
 import { setDocumentHidden } from "../test/timers";
 import { DashboardPage } from "./DashboardPage";
 
@@ -252,18 +252,20 @@ function renderedCompetitionNames() {
     .map((article) => within(article).getByRole("heading", { level: 3 }).textContent);
 }
 
-test("mặc định sắp tên A–Z theo số tự nhiên", async () => {
+test("mặc định sắp theo bài của tôi: giảm dần, hòa rơi về tên A–Z kiểu số tự nhiên", async () => {
   mockApi({
     competitions: [
-      { ...PUBLISHED, id: "10", slug: "cup-10", name: "Cuộc thi 10" },
-      { ...PUBLISHED, id: "2", slug: "cup-2", name: "Cuộc thi 2" },
-      { ...PUBLISHED, id: "1", slug: "cup-1", name: "Cuộc thi 1" },
+      { ...PUBLISHED, id: "10", slug: "cup-10", name: "Cuộc thi 10", my_submission_count: 9 },
+      { ...PUBLISHED, id: "2", slug: "cup-2", name: "Cuộc thi 2", my_submission_count: 7 },
+      { ...PUBLISHED, id: "1", slug: "cup-1", name: "Cuộc thi 1", my_submission_count: 7 },
     ],
   });
   renderDashboard();
   await screen.findAllByRole("article");
 
-  expect(renderedCompetitionNames()).toEqual(["Cuộc thi 1", "Cuộc thi 2", "Cuộc thi 10"]);
+  // 9 > 7 = 7: cuộc thi 10 lên đầu dù tên đứng cuối A–Z; hai cuộc cùng 7 hòa thì theo tên
+  // kiểu số tự nhiên (1 trước 2).
+  expect(renderedCompetitionNames()).toEqual(["Cuộc thi 10", "Cuộc thi 1", "Cuộc thi 2"]);
 });
 
 test("dropdown sắp cuộc thi hot theo tổng lượt nộp và fallback A–Z", async () => {
@@ -420,7 +422,9 @@ test("lọc còn một kết quả: card tính lại theme theo vị trí mới"
 test("ô thống kê lấy từ dữ liệu thật, nằm trong vùng có tên", async () => {
   mockApi({ competitions: [PUBLISHED, JOINED, CLOSED] });
   renderDashboard();
-  const stats = await screen.findByRole("region", { name: "Thống kê cuộc thi" });
+  // Danh sách chỉ được gọi sau khi auth xác nhận phiên - chờ dữ liệu về rồi mới đọc số.
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const stats = screen.getByRole("region", { name: "Thống kê cuộc thi" });
 
   expect(within(stats).getByText("Đang diễn ra")).toBeTruthy();
   expect(within(stats).getByText("Đã kết thúc")).toBeTruthy();
@@ -567,8 +571,8 @@ function cardOf(name: string): HTMLElement {
   return screen.getByRole("heading", { name, level: 3 }).closest("article")!;
 }
 
-test("thẻ đã tham gia hiện hạng, điểm cao nhất và lượt nộp hôm nay", async () => {
-  mockApi({ competitions: [{ ...JOINED, my_stats: MY_STATS }] });
+test("thẻ đã tham gia hiện hạng, điểm cao nhất, lượt nộp hôm nay và tổng bài đã nộp", async () => {
+  mockApi({ competitions: [{ ...JOINED, my_stats: MY_STATS, my_submission_count: 4 }] });
   renderDashboard();
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
@@ -577,6 +581,8 @@ test("thẻ đã tham gia hiện hạng, điểm cao nhất và lượt nộp h�
   expect(within(card).getByText("#2/3")).toBeTruthy();
   expect(within(card).getByText("0.91")).toBeTruthy();
   expect(within(card).getByText("2 lượt")).toBeTruthy();
+  expect(within(card).getByText("Tổng bài đã nộp")).toBeTruthy();
+  expect(within(card).getByText("4 bài")).toBeTruthy();
 });
 
 test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
@@ -590,7 +596,7 @@ test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
   expect(within(card).getByText("0.92")).toBeTruthy();
 });
 
-test("chưa tham gia: hàng số liệu vẫn hiện với ba dấu '-'", async () => {
+test("chưa tham gia: hàng số liệu vẫn hiện với bốn dấu '-'", async () => {
   mockApi({ competitions: [PUBLISHED] });
   renderDashboard();
   await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
@@ -598,15 +604,26 @@ test("chưa tham gia: hàng số liệu vẫn hiện với ba dấu '-'", async 
 
   expect(within(card).getByText("Hạng hiện tại")).toBeTruthy();
   expect(within(card).getByText("Đã nộp hôm nay")).toBeTruthy();
-  expect(within(card).getAllByText("-")).toHaveLength(3);
+  expect(within(card).getAllByText("-")).toHaveLength(4);
 });
 
-test("khách: hàng số liệu hiện '-' vì backend không trả my_stats", async () => {
+test("khách: hàng số liệu hiện '-' vì backend không trả số liệu cá nhân", async () => {
   mockApi({ competitions: [PUBLISHED], account: null });
   renderDashboard();
   await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
   const card = cardOf("AI Challenge 2026");
 
+  expect(within(card).getAllByText("-")).toHaveLength(4);
+});
+
+test("non-member vẫn thấy tổng bài đã nộp của mình, hạng/điểm giữ '-'", async () => {
+  // Backend trả count cho mọi account đã đăng nhập; membership rỗng nên ba ô kia vẫn trống.
+  mockApi({ competitions: [{ ...PUBLISHED, my_submission_count: 5 }] });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
+  const card = cardOf("AI Challenge 2026");
+
+  expect(within(card).getByText("5 bài")).toBeTruthy();
   expect(within(card).getAllByText("-")).toHaveLength(3);
 });
 
@@ -620,7 +637,7 @@ test("thành viên chưa có bài hợp lệ: hạng và điểm '-', lượt h�
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getAllByText("-")).toHaveLength(2);
+  expect(within(card).getAllByText("-")).toHaveLength(3);
   expect(within(card).getByText("0 lượt")).toBeTruthy();
 });
 
@@ -638,11 +655,11 @@ test("bảng xếp hạng ẩn: hạng và điểm '-', vẫn hiện lượt đ�
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getAllByText("-")).toHaveLength(2);
+  expect(within(card).getAllByText("-")).toHaveLength(3);
   expect(within(card).getByText("1 lượt")).toBeTruthy();
 });
 
-test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp điền hạng/điểm/lượt", async () => {
+test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp điền hạng/điểm/lượt/tổng bài", async () => {
   vi.useFakeTimers();
   const competitions = [{ ...PUBLISHED, membership: { active: false, joined_at: null as string | null } }];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -653,6 +670,7 @@ test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp đ
         ...competitions[0],
         membership: { active: true, joined_at: "2026-10-01T00:00:00Z" },
         my_stats: { rank: 1, rank_total: 4, best_score: 0.5, used_today: 0 },
+        my_submission_count: 3,
       } as (typeof competitions)[number];
       return json({ competition_id: "1", membership: competitions[0].membership, joined_now: true });
     }
@@ -663,18 +681,492 @@ test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp đ
   renderDashboard();
   await advance();
   const card = cardOf("AI Challenge 2026");
-  expect(within(card).getAllByText("-")).toHaveLength(3);
+  expect(within(card).getAllByText("-")).toHaveLength(4);
 
   fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
   await advance();
   // Join xong nhưng số liệu chưa về: hiện "-" chứ không bịa hạng/điểm.
   expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
-  expect(within(card).getAllByText("-")).toHaveLength(3);
+  expect(within(card).getAllByText("-")).toHaveLength(4);
 
   await advance(6_000);
   expect(within(card).getByText("#1/4")).toBeTruthy();
   expect(within(card).getByText("0.50")).toBeTruthy();
   expect(within(card).getByText("0 lượt")).toBeTruthy();
+  expect(within(card).getByText("3 bài")).toBeTruthy();
   // Số liệu đến từ payload danh sách: không thẻ nào tự gọi bảng xếp hạng.
   expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/leaderboard"))).toBe(false);
+});
+
+test("sắp theo bài của tôi: giảm dần theo my_submission_count, hòa thì A–Z", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "alpha", name: "Alpha", my_submission_count: 3 },
+      { ...PUBLISHED, id: "b", slug: "beta", name: "Beta", my_submission_count: 9 },
+      { ...PUBLISHED, id: "c", slug: "charlie", name: "Charlie", my_submission_count: 9 },
+      // Response cũ thiếu field - coi như 0, không đẩy lên trước.
+      { ...PUBLISHED, id: "d", slug: "delta", name: "Delta" },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+  // Mặc định đã là kiểu này; đổi sang A–Z rồi chọn lại để chứng minh radio điều khiển thứ tự.
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  await user.click(screen.getByLabelText("Tên A–Z"));
+  expect(renderedCompetitionNames()).toEqual(["Alpha", "Beta", "Charlie", "Delta"]);
+
+  await user.click(screen.getByLabelText("Nhiều bài của tôi nhất"));
+
+  expect(renderedCompetitionNames()).toEqual(["Beta", "Charlie", "Alpha", "Delta"]);
+});
+
+test("ghim đứng đầu dưới mọi kiểu sắp xếp, kể cả cuộc thi đã kết thúc", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "alpha", name: "Alpha", submission_count: 1 },
+      { ...PUBLISHED, id: "b", slug: "beta", name: "Beta", submission_count: 9 },
+      { ...CLOSED, id: "c", slug: "charlie", name: "Charlie", pinned: true },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  // Mặc định A–Z: ghim đứng trước dù tên xếp sau.
+  expect(renderedCompetitionNames()).toEqual(["Charlie", "Alpha", "Beta"]);
+
+  // Trong nhóm chưa ghim vẫn đúng thứ tự của kiểu sort đang chọn.
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  await user.click(screen.getByLabelText("Nhiều lượt nộp nhất"));
+  expect(renderedCompetitionNames()).toEqual(["Charlie", "Beta", "Alpha"]);
+
+  // Cuộc thi closed đang ghim vẫn trên published chưa ghim - quy tắc cố ý, badge vẫn rõ.
+  await user.click(screen.getByLabelText("Sắp kết thúc"));
+  expect(renderedCompetitionNames()).toEqual(["Charlie", "Alpha", "Beta"]);
+});
+
+test("lọc và tìm kiếm thắng ghim: cuộc thi bị loại không quay lại vì đang ghim", async () => {
+  mockApi({
+    competitions: [
+      { ...PUBLISHED, id: "a", slug: "alpha", name: "Alpha", pinned: true },
+      { ...CLOSED, id: "b", slug: "beta", name: "Beta" },
+    ],
+  });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+  expect(renderedCompetitionNames()).toEqual(["Alpha", "Beta"]);
+
+  await user.click(screen.getByRole("button", { name: "Đã kết thúc" }));
+  expect(renderedCompetitionNames()).toEqual(["Beta"]);
+
+  await user.click(screen.getByRole("button", { name: "Tất cả" }));
+  await user.type(screen.getByLabelText("Tìm kiếm cuộc thi"), "Beta");
+  expect(renderedCompetitionNames()).toEqual(["Beta"]);
+});
+
+test("khách: radio 'Nhiều bài của tôi nhất' bị khóa kèm gợi ý, không có nút ghim", async () => {
+  mockApi({ competitions: [PUBLISHED, JOINED], account: null });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  expect(screen.queryByRole("button", { name: /ghim cuộc thi/i })).toBeNull();
+
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  expect((screen.getByLabelText("Nhiều bài của tôi nhất") as HTMLInputElement).disabled).toBe(true);
+  expect(screen.getByText("Đăng nhập để sắp xếp theo bài của bạn.")).toBeTruthy();
+  // Kiểu sắp xếp đang hiệu lực vẫn là A–Z, không kẹt ở lựa chọn bị khóa.
+  expect((screen.getByLabelText("Tên A–Z") as HTMLInputElement).checked).toBe(true);
+});
+
+/** fetch giả có tuyến ghim: PUT/DELETE trả `pinned` theo method, danh sách giữ nguyên. */
+function mockPinApi(competitions: unknown[], { failPin = false } = {}) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (url.endsWith("/pin")) {
+      if (failPin) {
+        return json({ error: { code: "INTERNAL_ERROR", message: "Không ghim được." } }, 500);
+      }
+      return json({ competition_id: "2", pinned: init?.method === "PUT" });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+test("ghim thành công: gọi PUT đúng slug, thẻ nhảy lên đầu và nhận màu theo vị trí mới", async () => {
+  const fetchMock = mockPinApi([PUBLISHED, JOINED]);
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+
+  const pin = within(cardOf("Joined Cup")).getByRole("button", { name: "Ghim cuộc thi Joined Cup" });
+  expect(pin.getAttribute("aria-pressed")).toBe("false");
+  await user.click(pin);
+
+  expect(renderedCompetitionNames()).toEqual(["Joined Cup", "AI Challenge 2026"]);
+  expect(renderedThemes(screen.getAllByRole("article"))).toEqual(["blue", "red"]);
+  const pinned = within(cardOf("Joined Cup")).getByRole("button", {
+    name: "Bỏ ghim cuộc thi Joined Cup",
+  });
+  expect(pinned.getAttribute("aria-pressed")).toBe("true");
+  // Thẻ đổi vị trí nhưng node được di chuyển nguyên vẹn - focus ở lại đúng nút vừa bấm.
+  expect(document.activeElement).toBe(pinned);
+  const pinCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/pin"));
+  expect(pinCall?.[1]?.method).toBe("PUT");
+});
+
+test("bỏ ghim: gọi DELETE và thẻ trở về đúng thứ tự A–Z", async () => {
+  const fetchMock = mockPinApi([{ ...JOINED, pinned: true }, PUBLISHED]);
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+  expect(renderedCompetitionNames()).toEqual(["Joined Cup", "AI Challenge 2026"]);
+
+  await user.click(
+    within(cardOf("Joined Cup")).getByRole("button", { name: "Bỏ ghim cuộc thi Joined Cup" }),
+  );
+
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+  const pinCall = fetchMock.mock.calls.find(([input]) => String(input).endsWith("/pin"));
+  expect(pinCall?.[1]?.method).toBe("DELETE");
+});
+
+test("ghim thất bại: giữ nguyên thứ tự cũ và báo lỗi ngay tại thẻ", async () => {
+  mockPinApi([PUBLISHED, JOINED], { failPin: true });
+  const user = userEvent.setup();
+  renderDashboard();
+  await screen.findAllByRole("article");
+
+  const card = cardOf("Joined Cup");
+  await user.click(within(card).getByRole("button", { name: "Ghim cuộc thi Joined Cup" }));
+
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+  const alert = await within(cardOf("Joined Cup")).findByRole("alert");
+  expect(alert.textContent).toContain("Không ghim được.");
+  expect(
+    within(cardOf("Joined Cup"))
+      .getByRole("button", { name: "Ghim cuộc thi Joined Cup" })
+      .getAttribute("aria-pressed"),
+  ).toBe("false");
+});
+
+test("trong lúc ghim: nút khóa, tự làm mới tạm dừng; xong thì polling chạy lại", async () => {
+  vi.useFakeTimers();
+  let resolvePin!: (response: Response) => void;
+  const competitions = [PUBLISHED, JOINED];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (url.endsWith("/pin")) {
+      return new Promise<Response>((resolve) => {
+        resolvePin = resolve;
+      });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const listGets = () =>
+    fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/competitions")).length;
+
+  renderDashboard();
+  await advance();
+  expect(listGets()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" }));
+  await advance();
+  expect(screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" })).toBeDisabled();
+
+  // PUT còn đang chờ: không lượt làm mới nào chen vào giữa.
+  await advance(20_000);
+  expect(listGets()).toBe(1);
+
+  resolvePin(json({ competition_id: "2", pinned: true }));
+  await advance();
+  expect(renderedCompetitionNames()[0]).toBe("Joined Cup");
+
+  // Ghim xong: polling chạy lại và lượt kế tiếp trả về trạng thái mới.
+  await advance(6_000);
+  expect(listGets()).toBe(2);
+});
+
+test("nhấn đúp nút ghim chỉ phát ra một request", async () => {
+  vi.useFakeTimers();
+  let resolvePin!: (response: Response) => void;
+  const competitions = [PUBLISHED, JOINED];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (url.endsWith("/pin")) {
+      return new Promise<Response>((resolve) => {
+        resolvePin = resolve;
+      });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const pinCalls = () => fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/pin")).length;
+
+  renderDashboard();
+  await advance();
+
+  const pin = screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" });
+  fireEvent.click(pin);
+  fireEvent.click(pin);
+  await advance();
+  expect(pinCalls()).toBe(1);
+
+  resolvePin(json({ competition_id: "2", pinned: true }));
+  await advance();
+});
+
+test("GET đang bay kết thúc sau PUT không đảo ngược trạng thái ghim", async () => {
+  vi.useFakeTimers();
+  let resolveList!: (response: Response) => void;
+  let listCalls = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (url.endsWith("/pin")) return json({ competition_id: "2", pinned: init?.method === "PUT" });
+    listCalls += 1;
+    if (listCalls === 1) return json({ competitions: [PUBLISHED, JOINED] });
+    // Lượt polling thứ hai cố tình treo lại để nhấn ghim xong mới trả về dữ liệu cũ.
+    return new Promise<Response>((resolve) => {
+      resolveList = resolve;
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderDashboard();
+  await advance();
+  await advance(5_000);
+  expect(listCalls).toBe(2);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" }));
+  await advance();
+  expect(renderedCompetitionNames()[0]).toBe("Joined Cup");
+
+  resolveList(json({ competitions: [PUBLISHED, JOINED] }));
+  await advance();
+  expect(renderedCompetitionNames()[0]).toBe("Joined Cup");
+  expect(screen.getByRole("button", { name: "Bỏ ghim cuộc thi Joined Cup" })).toBeTruthy();
+});
+
+test("ghim trong lúc modal tham gia đang mở không mở khóa tự làm mới", async () => {
+  vi.useFakeTimers();
+  const competitions = [
+    { ...PUBLISHED, id: "3", slug: "new-cup", name: "New Cup" },
+    { ...PUBLISHED, id: "4", slug: "code-cup", name: "Code Cup", join_mode: "code" },
+  ];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (url.endsWith("/pin")) return json({ competition_id: "3", pinned: init?.method === "PUT" });
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const listGets = () =>
+    fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/competitions")).length;
+
+  renderDashboard();
+  await advance();
+  expect(listGets()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Nhập mã tham gia" }));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Ghim cuộc thi New Cup" }));
+  await advance();
+  await advance(10_000);
+  // Modal vẫn mở nên polling vẫn tạm dừng, dù lượt ghim đã xong.
+  expect(listGets()).toBe(1);
+});
+
+/** Nút đổi phiên cho test danh tính - DashboardPage không có nút đăng nhập/đăng xuất. */
+function IdentityControls() {
+  const auth = useOptionalAuth();
+  if (!auth) return null;
+  return (
+    <>
+      <button type="button" onClick={() => void auth.logout()}>
+        Đăng xuất
+      </button>
+      <button type="button" onClick={() => void auth.login("b@vku.vn", "matkhau")}>
+        Đăng nhập B
+      </button>
+    </>
+  );
+}
+
+test("đổi danh tính A → guest → B: không render dữ liệu phiên trước, sort cá nhân về A–Z", async () => {
+  const accountA = { ...ACCOUNT, id: "9", name: "Thí sinh A" };
+  const accountB = { ...ACCOUNT, id: "10", email: "b@vku.vn", name: "Thí sinh B" };
+  let session: "A" | "guest" | "B" = "A";
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) {
+      if (session === "guest") {
+        return json({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, 401);
+      }
+      return json(session === "A" ? accountA : accountB);
+    }
+    if (url.endsWith("/auth/logout")) {
+      session = "guest";
+      return json({});
+    }
+    if (url.endsWith("/auth/login")) {
+      session = "B";
+      return json(accountB);
+    }
+    return json({
+      competitions: [
+        session === "A"
+          ? { ...PUBLISHED, my_submission_count: 7, pinned: true }
+          : session === "B"
+            ? { ...PUBLISHED, my_submission_count: 1 }
+            : PUBLISHED,
+      ],
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <AuthProvider>
+        <IdentityControls />
+        <DashboardPage />
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+
+  // Phiên A: số liệu và cờ ghim của A hiển thị; chọn luôn sort cá nhân.
+  await screen.findByText("7 bài");
+  expect(
+    screen.getByRole("button", { name: "Bỏ ghim cuộc thi AI Challenge 2026" }).getAttribute("aria-pressed"),
+  ).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  await user.click(screen.getByLabelText("Nhiều bài của tôi nhất"));
+  await user.keyboard("{Escape}");
+
+  await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
+  // Danh tính đổi: dữ liệu của A không được render thêm lần nào, nút ghim biến mất.
+  await waitFor(() => expect(screen.queryByText("7 bài")).toBeNull());
+  await waitFor(() =>
+    expect(within(cardOf("AI Challenge 2026")).getAllByText("-")).toHaveLength(4),
+  );
+  expect(screen.queryByRole("button", { name: /ghim cuộc thi/i })).toBeNull();
+
+  // Sort cá nhân không còn hiệu lực: hiển thị và áp dụng lại A–Z.
+  await user.click(screen.getByRole("button", { name: "Lọc và sắp xếp cuộc thi" }));
+  expect((screen.getByLabelText("Nhiều bài của tôi nhất") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText("Tên A–Z") as HTMLInputElement).checked).toBe(true);
+  await user.keyboard("{Escape}");
+
+  // Phiên B: chỉ số liệu của B, không hồi tưởng dữ liệu A.
+  await user.click(screen.getByRole("button", { name: "Đăng nhập B" }));
+  await screen.findByText("1 bài");
+  expect(screen.queryByText("7 bài")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Ghim cuộc thi AI Challenge 2026" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+});
+
+/** fetch giả cho hai test đổi phiên giữa chừng lượt ghim: A đăng nhập, logout thành khách,
+ *  PUT `/pin` và lượt nạp của khách đều treo để test tự quyết thứ tự kết thúc. */
+function mockPinLogoutApi() {
+  let session: "A" | "guest" = "A";
+  let resolvePin!: (response: Response) => void;
+  let resolveGuestList!: (response: Response) => void;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) {
+      if (session === "guest") {
+        return json({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, 401);
+      }
+      return json(ACCOUNT);
+    }
+    if (url.endsWith("/auth/logout")) {
+      session = "guest";
+      return json({});
+    }
+    if (url.endsWith("/pin")) {
+      return new Promise<Response>((resolve) => {
+        resolvePin = resolve;
+      });
+    }
+    if (session === "guest") {
+      return new Promise<Response>((resolve) => {
+        resolveGuestList = resolve;
+      });
+    }
+    return json({ competitions: [PUBLISHED, JOINED] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return {
+    resolvePin: (response: Response) => resolvePin(response),
+    resolveGuestList: (response: Response) => resolveGuestList(response),
+  };
+}
+
+function renderWithIdentityControls() {
+  return render(
+    <MemoryRouter>
+      <AuthProvider>
+        <IdentityControls />
+        <DashboardPage />
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+}
+
+test("đăng xuất trong lúc ghim đang chờ: kết quả ghim không vá vào dữ liệu phiên mới", async () => {
+  vi.useFakeTimers();
+  const pinApi = mockPinLogoutApi();
+  renderWithIdentityControls();
+  await advance();
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" }));
+  await advance();
+  fireEvent.click(screen.getByRole("button", { name: "Đăng xuất" }));
+  await advance();
+  // Danh tính đổi: dữ liệu A bị chặn render, trang chờ lượt nạp của khách thay vì hiện thẻ cũ.
+  expect(screen.getByRole("status")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /ghim cuộc thi/i })).toBeNull();
+
+  pinApi.resolveGuestList(json({ competitions: [PUBLISHED, JOINED] }));
+  await advance();
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+
+  // PUT của phiên A kết thúc muộn: không được ghim "Joined Cup" lên đầu danh sách của khách.
+  pinApi.resolvePin(json({ competition_id: "2", pinned: true }));
+  await advance();
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("đăng xuất trong lúc ghim đang chờ: lượt nạp của phiên mới không bị vô hiệu, trang thoát Loading", async () => {
+  vi.useFakeTimers();
+  const pinApi = mockPinLogoutApi();
+  renderWithIdentityControls();
+  await advance();
+
+  fireEvent.click(screen.getByRole("button", { name: "Ghim cuộc thi Joined Cup" }));
+  await advance();
+  fireEvent.click(screen.getByRole("button", { name: "Đăng xuất" }));
+  await advance();
+  expect(screen.getByRole("status")).toBeTruthy();
+
+  // PUT của phiên A kết thúc khi lượt nạp của khách còn đang bay: không được vô hiệu lượt nạp đó.
+  pinApi.resolvePin(json({ competition_id: "2", pinned: true }));
+  await advance();
+  pinApi.resolveGuestList(json({ competitions: [PUBLISHED, JOINED] }));
+  await advance();
+  expect(screen.queryByRole("status")).toBeNull();
+  expect(renderedCompetitionNames()).toEqual(["AI Challenge 2026", "Joined Cup"]);
 });

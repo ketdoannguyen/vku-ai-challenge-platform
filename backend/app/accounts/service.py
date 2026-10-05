@@ -12,6 +12,9 @@ from app.core.slugs import SLUG_MAX, slugify
 
 ACCOUNTS_COLLECTION = "accounts"
 
+# Ghim cuộc thi là sở thích riêng của account, chỉ đọc/ghi nội bộ - không bao giờ lộ qua public_account.
+PINNED_COMPETITIONS_FIELD = "pinned_competition_ids"
+
 # Slug bị đội khác giữ thì thêm "-" + 3 ký tự random; 5 lần là quá đủ để thoát va chạm.
 _SLUG_SUFFIX_LEN = 3
 _SLUG_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -109,6 +112,23 @@ async def create_account(
 
 async def find_account_by_email(db: AsyncIOMotorDatabase, email: str) -> dict | None:
     return await db[ACCOUNTS_COLLECTION].find_one({"email": email.strip().lower()})
+
+
+async def set_competition_pin(
+    db: AsyncIOMotorDatabase, account_id, competition_id, *, pinned: bool
+) -> None:
+    """Ghim/bỏ ghim một cuộc thi trên document account, nguyên tử.
+
+    `$addToSet`/`$pull` trên một document nên hai request song song không nhân đôi id và gọi lặp
+    vẫn hội tụ về một trạng thái. Account cũ thiếu field được `$addToSet` coi như mảng rỗng, không
+    cần migration; id ghim cũ của cuộc thi đã xóa nằm lại vô hại.
+    """
+    if pinned:
+        update = {"$addToSet": {PINNED_COMPETITIONS_FIELD: competition_id}}
+    else:
+        update = {"$pull": {PINNED_COMPETITIONS_FIELD: competition_id}}
+    update["$set"] = {"updated_at": datetime.now(timezone.utc)}
+    await db[ACCOUNTS_COLLECTION].update_one({"_id": account_id}, update)
 
 
 async def account_stats(db: AsyncIOMotorDatabase) -> dict[str, int]:

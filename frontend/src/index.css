@@ -2037,6 +2037,58 @@ select.input {
   color: var(--card-header-ink);
 }
 
+/* Badge trạng thái + nút ghim ở mép phải dải header. */
+.comp-card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* Nút ghim ăn mực theo cột (--card-header-ink) và đảo thành khối đặc khi đang ghim;
+   icon đầy/rỗng gánh trạng thái nên không phụ thuộc màu. */
+.comp-pin-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--card-header-ink);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-base) var(--ease-standard),
+    color var(--duration-base) var(--ease-standard);
+}
+
+/* Nền trắng mờ khi trỏ vào - loại nút đã ghim để không đè khối đặc của nó. */
+.comp-pin-button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.comp-pin-button[aria-pressed="true"] {
+  background: var(--card-header-ink);
+  color: #fff;
+}
+
+.comp-pin-button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+/* Lỗi ghim nằm ngay dưới header của chính thẻ đó - thanh mảnh, không phải hộp lỗi to. */
+.comp-pin-error {
+  margin: 0;
+  padding: 8px var(--space-md);
+  background: var(--danger-soft-30);
+  color: var(--danger);
+  font-size: var(--text-label);
+  line-height: var(--leading-label);
+  font-weight: 500;
+}
+
 .comp-card-chips {
   display: flex;
   flex-wrap: wrap;
@@ -2134,11 +2186,13 @@ select.input {
   gap: var(--space-sm);
 }
 
-/* Ba số liệu cá nhân ngay dưới ô cấu hình, ngăn cách bằng vạch mờ giữa hai hàng.
+/* Bốn số liệu cá nhân ngay dưới ô cấu hình, ngăn cách bằng vạch mờ giữa hai hàng.
+   Xếp 2×2 để giữ nhịp hai cột với ô cấu hình phía trên: thẻ trong lưới 2–3 cột chỉ
+   rộng ~370px, chia 4 cột thì nhãn "Đã nộp hôm nay" phải xuống dòng ở mọi desktop.
    `margin: ... 0 0` để đè margin-bottom 1em mặc định của `dl`, giữ đáy khung cân với đỉnh. */
 .comp-personal {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-xs) var(--space-sm);
   margin: var(--space-xs) 0 0;
   padding-top: var(--space-xs);
@@ -2638,6 +2692,19 @@ select.input {
 .dash-filter-group:disabled .dash-filter-option:hover {
   background: transparent;
   color: var(--text-muted);
+}
+
+/* Nhóm "Sắp xếp" không disable cả fieldset vì các lựa chọn khác vẫn dùng được, nên
+   lựa chọn bị khóa tự mang dấu hiệu mờ riêng thay vì ăn theo :disabled của fieldset. */
+.dash-filter-option.is-locked,
+.dash-filter-option.is-locked:hover {
+  background: transparent;
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.dash-filter-option.is-locked input[type="radio"] {
+  cursor: not-allowed;
 }
 
 .dash-filter-hint {

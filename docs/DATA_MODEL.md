@@ -20,6 +20,7 @@ Fields:
 - `active`: bool - khóa toàn nền tảng (disable hủy hiệu lực mọi session). Tài khoản tự đăng ký chờ duyệt cũng mang `active: false` (ADR-049) - hai trạng thái phân biệt được nhờ marker `pending_approval`.
 - `pending_approval`: bool (chỉ ghi khi `true`) - marker tài khoản tự đăng ký đang chờ admin duyệt (ADR-049). **Vắng mặt = đã duyệt** - đúng cho mọi tài khoản cũ và tài khoản do admin tạo, nên không có backfill. Duyệt = một update nguyên tử `$set active:true, updated_at` + `$unset pending_approval`; `PATCH {active}` bị chặn khi marker còn (điều kiện update loại pending), và `resolve_session`/login kiểm marker như phòng thủ hai lớp kể cả khi `active` bị bật nhầm. Không bao giờ lộ ra ngoài dưới dạng field thô - API chỉ trả `pending: bool` qua `public_account()`.
 - `slug` (str | absent ở account cũ) - dùng làm segment đường dẫn artifact trên MinIO (ADR-033). Sinh tự động từ `name` ở **lần nộp bài đầu tiên**, không nhập tay, không bao giờ sinh lại (đổi `name` không đổi slug). Trùng thì thêm `-` + 3 ký tự random. Không có trong representation nào trả về API.
+- `pinned_competition_ids` (array[ObjectId] | absent ở account cũ) - ghim cuộc thi theo tài khoản (ADR-057). Sở thích riêng của người dùng, **không** phải membership và không cấp quyền gì; account thiếu field được `$addToSet`/`$pull` coi như mảng rỗng nên không cần migration. Chỉ ghi qua `PUT`/`DELETE /api/competitions/{slug}/pin` bằng toán tử nguyên tử trên một document (không đọc-rồi-`$set`); **không bao giờ** lộ qua `public_account()` hay endpoint admin. Id ghim của cuộc thi đã xoá nằm lại vô hại - không hiển thị, và ObjectId mới không kế thừa ghim cũ.
 - `created_at`, `updated_at` (UTC, timezone-aware)
 
 Indexes:
@@ -165,6 +166,8 @@ Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_s
 `stats` của trang toàn cục là **derived**, không lưu DB và không có collection riêng: một aggregation `$facet` trên cùng query filter trả về `total`, số `competition_id` khác nhau, số `account_id` khác nhau và số document **được tính kết quả** (`status=completed` + `review.status != rejected`) - nên nhãn của thẻ này là "Được tính kết quả", không phải "Đã chấm điểm" (ADR-035). Route theo một cuộc thi vẫn dùng `count_documents` và không chạy aggregation này.
 
 Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record **được tính kết quả**, nhất quán với ADR-011 và ADR-035.
+
+`my_submission_count` trên danh sách cuộc thi cũng là **derived**, không lưu DB và không thêm index (ADR-057): số document của `(account_id, competition_id)` **không lọc** `status`/`review` - cùng định nghĩa với `total` trong `GET /submissions/me` và `submission_count` toàn hệ thống (ADR-032), tính bằng một nhánh `$facet` chung với `used_today` cho cả trang. Đây **không phải** số bài được tính kết quả của bảng xếp hạng (ADR-035) - hai con số khác nhau khi có bài bị từ chối hoặc record `failed` cũ, nên UI gọi nó là "Tổng bài đã nộp".
 
 ## 6b. scoring_attempts - implemented (ADR-048, hàng đợi chấm v2)
 
