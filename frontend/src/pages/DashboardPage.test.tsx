@@ -559,3 +559,122 @@ test("trong lúc join thì tạm dừng tự làm mới; join xong thì dữ li�
   expect(listGets()).toBe(2);
   expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
 });
+
+/** Số liệu cá nhân backend tính sẵn trong `my_stats` của response danh sách. */
+const MY_STATS = { rank: 2, rank_total: 3, best_score: 0.9123, used_today: 2 };
+
+function cardOf(name: string): HTMLElement {
+  return screen.getByRole("heading", { name, level: 3 }).closest("article")!;
+}
+
+test("thẻ đã tham gia hiện hạng, điểm cao nhất và lượt nộp hôm nay", async () => {
+  mockApi({ competitions: [{ ...JOINED, my_stats: MY_STATS }] });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getByText("Hạng hiện tại")).toBeTruthy();
+  expect(within(card).getByText("#2/3")).toBeTruthy();
+  expect(within(card).getByText("0.91")).toBeTruthy();
+  expect(within(card).getByText("2 lượt")).toBeTruthy();
+});
+
+test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
+  mockApi({
+    competitions: [{ ...JOINED, my_stats: { ...MY_STATS, best_score: 0.9167 } }],
+  });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getByText("0.92")).toBeTruthy();
+});
+
+test("chưa tham gia: hàng số liệu vẫn hiện với ba dấu '-'", async () => {
+  mockApi({ competitions: [PUBLISHED] });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
+  const card = cardOf("AI Challenge 2026");
+
+  expect(within(card).getByText("Hạng hiện tại")).toBeTruthy();
+  expect(within(card).getByText("Đã nộp hôm nay")).toBeTruthy();
+  expect(within(card).getAllByText("-")).toHaveLength(3);
+});
+
+test("khách: hàng số liệu hiện '-' vì backend không trả my_stats", async () => {
+  mockApi({ competitions: [PUBLISHED], account: null });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
+  const card = cardOf("AI Challenge 2026");
+
+  expect(within(card).getAllByText("-")).toHaveLength(3);
+});
+
+test("thành viên chưa có bài hợp lệ: hạng và điểm '-', lượt hôm nay là 0", async () => {
+  mockApi({
+    competitions: [
+      { ...JOINED, my_stats: { rank: null, rank_total: null, best_score: null, used_today: 0 } },
+    ],
+  });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getAllByText("-")).toHaveLength(2);
+  expect(within(card).getByText("0 lượt")).toBeTruthy();
+});
+
+test("bảng xếp hạng ẩn: hạng và điểm '-', vẫn hiện lượt đã nộp hôm nay", async () => {
+  mockApi({
+    competitions: [
+      {
+        ...JOINED,
+        leaderboard_visible: false,
+        my_stats: { rank: null, rank_total: null, best_score: null, used_today: 1 },
+      },
+    ],
+  });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getAllByText("-")).toHaveLength(2);
+  expect(within(card).getByText("1 lượt")).toBeTruthy();
+});
+
+test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp điền hạng/điểm/lượt", async () => {
+  vi.useFakeTimers();
+  const competitions = [{ ...PUBLISHED, membership: { active: false, joined_at: null as string | null } }];
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/auth/me")) return json(ACCOUNT);
+    if (init?.method === "POST" && url.endsWith("/join")) {
+      competitions[0] = {
+        ...competitions[0],
+        membership: { active: true, joined_at: "2026-10-01T00:00:00Z" },
+        my_stats: { rank: 1, rank_total: 4, best_score: 0.5, used_today: 0 },
+      } as (typeof competitions)[number];
+      return json({ competition_id: "1", membership: competitions[0].membership, joined_now: true });
+    }
+    return json({ competitions });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderDashboard();
+  await advance();
+  const card = cardOf("AI Challenge 2026");
+  expect(within(card).getAllByText("-")).toHaveLength(3);
+
+  fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
+  await advance();
+  // Join xong nhưng số liệu chưa về: hiện "-" chứ không bịa hạng/điểm.
+  expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
+  expect(within(card).getAllByText("-")).toHaveLength(3);
+
+  await advance(6_000);
+  expect(within(card).getByText("#1/4")).toBeTruthy();
+  expect(within(card).getByText("0.50")).toBeTruthy();
+  expect(within(card).getByText("0 lượt")).toBeTruthy();
+  // Số liệu đến từ payload danh sách: không thẻ nào tự gọi bảng xếp hạng.
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/leaderboard"))).toBe(false);
+});

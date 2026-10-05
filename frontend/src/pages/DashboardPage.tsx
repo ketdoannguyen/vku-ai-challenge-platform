@@ -22,6 +22,7 @@ import {
   primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
+import { formatMetric } from "../api/results";
 import { Loading } from "../components/ui";
 import { JoinControl } from "../components/JoinControl";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
@@ -763,6 +764,14 @@ function CompetitionCard({
     c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
   // Thẻ đã quá hạn không còn "Đang diễn ra" nữa, dù backend vẫn giữ status `published`.
   const shown = displayStatus(c.status, c.end_at);
+  // Chỉ đọc số liệu khi membership đang hoạt động; chưa tham gia hoặc chưa có dữ liệu hiện "-".
+  const stats = c.membership.active ? c.my_stats : undefined;
+  const rankText =
+    stats?.rank == null
+      ? "-"
+      : stats.rank_total == null
+        ? `#${stats.rank}`
+        : `#${stats.rank}/${stats.rank_total}`;
 
   return (
     // `data-theme` quyết định màu thẻ, `data-status` chỉ để tra cứu; `statusClass` chỉ
@@ -813,17 +822,36 @@ function CompetitionCard({
           </div>
         </dl>
 
-        <div className="comp-telemetry">
-          <div className="comp-telemetry-item">
-            <span className="comp-telemetry-label">Chỉ số đánh giá</span>
-            <span className="comp-telemetry-value">{primaryMetricLabel(c)}</span>
+        {/* Một khối nền xám chung cho ô cấu hình lẫn hàng số liệu cá nhân. */}
+        <div className="comp-stats">
+          <div className="comp-telemetry">
+            <div className="comp-telemetry-item">
+              <span className="comp-telemetry-label">Chỉ số đánh giá</span>
+              <span className="comp-telemetry-value">{primaryMetricLabel(c)}</span>
+            </div>
+            <div className="comp-telemetry-item">
+              <span className="comp-telemetry-label">Hạn mức nộp</span>
+              <span className="comp-telemetry-value">
+                {c.quota_per_day > 0 ? `${c.quota_per_day} lượt / ngày` : "Không nhận bài nộp"}
+              </span>
+            </div>
           </div>
-          <div className="comp-telemetry-item">
-            <span className="comp-telemetry-label">Hạn mức nộp</span>
-            <span className="comp-telemetry-value">
-              {c.quota_per_day > 0 ? `${c.quota_per_day} lượt / ngày` : "Không nhận bài nộp"}
-            </span>
-          </div>
+
+          <dl className="comp-personal">
+            <div className="comp-personal-item">
+              <dt className="comp-personal-label">Hạng hiện tại</dt>
+              <dd className="comp-personal-value">{rankText}</dd>
+            </div>
+            <div className="comp-personal-item">
+              <dt className="comp-personal-label">Điểm cao nhất</dt>
+              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. */}
+              <dd className="comp-personal-value">{formatMetric(stats?.best_score, 2)}</dd>
+            </div>
+            <div className="comp-personal-item">
+              <dt className="comp-personal-label">Đã nộp hôm nay</dt>
+              <dd className="comp-personal-value">{stats ? `${stats.used_today} lượt` : "-"}</dd>
+            </div>
+          </dl>
         </div>
       </div>
 
