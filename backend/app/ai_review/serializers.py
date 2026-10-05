@@ -55,6 +55,7 @@ def admin_projection(submission: dict) -> dict | None:
         "participant_summary": projection.get("participant_summary"),
         "generation": projection.get("generation"),
         "run_id": projection.get("run_id"),
+        "source_warning_count": projection.get("source_warning_count"),
         "latest_review_id": (
             str(projection["latest_review_id"]) if projection.get("latest_review_id") else None
         ),
@@ -77,6 +78,8 @@ def review_detail(review: dict) -> dict:
         "summary": review["summary"],
         "participant_summary": review.get("participant_summary"),
         "findings": review.get("findings") or [],
+        "source_signals": review.get("source_signals") or [],
+        "resources_configured": review.get("resources_configured", 0),
         "notebook_stats": review.get("notebook_stats") or {},
         "provider": review.get("provider"),
         "provider_host": review.get("provider_host"),
@@ -90,6 +93,7 @@ def review_detail(review: dict) -> dict:
             "canonicalization": review.get("canonicalization_version"),
             "rule_ref": review.get("rule_ref_version"),
             "verifier": review.get("verifier_version"),
+            "source_signal": review.get("source_signal_version"),
         },
         "source": review.get("source"),
         "reused_from_review_id": (

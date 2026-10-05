@@ -482,6 +482,9 @@ export function AdminSubmissionsPanel({
         ) : (
           <StatusBadge tone={tone} glyph="dash" label="Chưa đánh giá" />
         )}
+        {projection?.source_warning_count ? (
+          <StatusBadge tone="warning" glyph="alert" label="Nguồn dữ liệu cần kiểm tra" />
+        ) : null}
         <button
           type="button"
           className="btn btn-outline btn-sm"

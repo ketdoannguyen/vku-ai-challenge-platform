@@ -21,7 +21,7 @@ from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from app.accounts.service import ACCOUNTS_COLLECTION
-from app.ai_review import constants, content_snapshot, prompt, queue, serializers
+from app.ai_review import constants, content_snapshot, prompt, queue, serializers, sources
 from app.ai_review import settings as config
 from app.ai_review import url_policy
 from app.ai_review import verdict as verdict_module
@@ -125,6 +125,7 @@ def initial_projection(*, captured: bool, now: datetime) -> dict:
         "verdict": None if captured else constants.VERDICT_ERROR,
         "summary": None if captured else constants.PARTICIPANT_ERROR_SUMMARY,
         "participant_summary": None,
+        "source_warning_count": None,
         "generation": 1,
         "run_id": uuid4().hex,
         "latest_review_id": None,
@@ -210,6 +211,7 @@ def cache_key(*, competition_id, content_hash: str, notebook_sha256: str, provid
             constants.CANONICALIZATION_VERSION,
             constants.RULE_REF_VERSION,
             constants.VERIFIER_VERSION,
+            constants.SOURCE_SIGNAL_VERSION,
         ]
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
@@ -339,6 +341,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
                 "summary": cached["summary"],
                 "participant_summary": cached.get("participant_summary") or None,
                 "findings": cached.get("findings") or [],
+                "source_signals": cached.get("source_signals") or [],
+                "resources_configured": cached.get("resources_configured", 0),
                 "notebook_stats": snapshot_stats(notebook),
                 "provider": cached.get("provider"),
                 "provider_host": cached.get("provider_host"),
@@ -381,6 +385,9 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
         final_verdict, verified, downgrades = verdict_module.verify_review(
             output, index=index, notebook=notebook
         )
+        source_signals = sources.verify_source_signals(
+            output.source_signals, notebook=notebook, resources=revision.get("resources") or []
+        )
     except ProviderError as exc:
         failure_at = finished_at()
         target = {"provider": active["provider"], "provider_host": endpoint.host, "model": model}
@@ -417,6 +424,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             # Chuỗi rỗng từ model được quy về None: chỉ có một cách biểu diễn "không có gợi ý".
             "participant_summary": output.participant_summary or None,
             "findings": [asdict(finding) for finding in verified],
+            "source_signals": [asdict(signal) for signal in source_signals],
+            "resources_configured": len(revision.get("resources") or []),
             "notebook_stats": snapshot_stats(notebook),
             "provider": active["provider"],
             "provider_host": endpoint.host,
@@ -487,6 +496,9 @@ async def apply_projection(db, *, submission_id, generation: int, run_id: str, r
                 # `.get()` chứ không phải `[...]`: đường reconcile và nhánh trùng khoá đều chạm
                 # những audit row ghi trước khi field này tồn tại.
                 "ai_review.participant_summary": review.get("participant_summary") or None,
+                "ai_review.source_warning_count": sum(
+                    bool(signal.get("warning")) for signal in review.get("source_signals") or []
+                ),
                 "ai_review.latest_review_id": review["_id"],
                 "ai_review.updated_at": now,
             }
@@ -647,6 +659,7 @@ async def request_manual_review(db, submission: dict, *, competition: dict, sett
                 "ai_review.summary": None,
                 # Không xoá thì gợi ý của lượt cũ sống dậy và có thể bị dùng để từ chối bài.
                 "ai_review.participant_summary": None,
+                "ai_review.source_warning_count": None,
                 "ai_review.latest_review_id": None,
                 "ai_review.generation": (current or 0) + 1,
                 "ai_review.run_id": uuid4().hex,
@@ -827,6 +840,7 @@ def _base_document(job: dict, *, now: datetime, snapshot: dict) -> dict:
         "canonicalization_version": constants.CANONICALIZATION_VERSION,
         "rule_ref_version": constants.RULE_REF_VERSION,
         "verifier_version": constants.VERIFIER_VERSION,
+        "source_signal_version": constants.SOURCE_SIGNAL_VERSION,
         "source": job.get("source"),
         "manual": job.get("source") == constants.JOB_SOURCE_MANUAL,
         "attempts": job.get("attempts"),
