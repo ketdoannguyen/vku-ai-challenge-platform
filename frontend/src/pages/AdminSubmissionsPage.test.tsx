@@ -199,11 +199,44 @@ test("nút tải artifact gọi route admin toàn cục của đúng bài nộp"
   renderPage();
   await screen.findByText("Đội 0");
 
-  fireEvent.click(screen.getByRole("button", { name: "Notebook" }));
+  fireEvent.click(screen.getByRole("button", { name: "Tải Notebook" }));
 
   await waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(1));
   expect(downloads).toEqual(["/api/admin/submissions/s-0/notebook"]);
   anchorClick.mockRestore();
+});
+
+test("nút Xem CSV mở trình xem qua route admin toàn cục và đóng trả focus", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (isOptionsRequest(url)) return jsonResponse(COMPETITION_OPTIONS);
+      requests.push(url);
+      if (url.includes("/prediction")) {
+        return new Response("id,label\n1,cat\n", {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        });
+      }
+      return jsonResponse(page(0, 1));
+    }),
+  );
+
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const trigger = screen.getByRole("button", { name: "Xem CSV" });
+  trigger.focus();
+  fireEvent.click(trigger);
+
+  const dialog = await screen.findByRole("dialog");
+  expect(await within(dialog).findByRole("table")).toBeTruthy();
+  expect(requests).toContain("/api/admin/submissions/s-0/prediction");
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(trigger);
 });
 
 test("đổi bộ lọc cuộc thi và trạng thái áp dụng ngay, không còn nút Lọc", async () => {
@@ -826,8 +859,9 @@ test("trường Xét duyệt là badge có chữ; lý do, người duyệt và t
   );
   expect(fieldValue(failedItem, "Thao tác")).toHaveTextContent("—");
   expect(within(fieldValue(failedItem, "Thao tác")).queryByRole("button")).toBeNull();
-  // Gạch chỉ dành cho hai trường phụ thuộc trạng thái chấm; tệp của bài lỗi vẫn tải được.
-  expect(within(fieldValue(failedItem, "Tệp đã nộp")).getAllByRole("button")).toHaveLength(2);
+  // Gạch chỉ dành cho hai trường phụ thuộc trạng thái chấm; tệp của bài lỗi vẫn xem và tải
+  // được: mỗi tệp là một cặp nút xem/tải nên bài có hai tệp là bốn nút.
+  expect(within(fieldValue(failedItem, "Tệp đã nộp")).getAllByRole("button")).toHaveLength(4);
 });
 
 test("lọc theo trạng thái duyệt là trục riêng, không lẫn với trạng thái chấm", async () => {
@@ -1351,6 +1385,47 @@ test("modal đang mở thì bảng nhường lượt làm mới ngầm", async (
   expect(listCalls()).toBe(during);
 
   fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+  await advance(AUTO_REFRESH_MS);
+  expect(listCalls()).toBeGreaterThan(during);
+});
+
+test("trình xem tệp đang mở thì bảng nhường lượt làm mới ngầm", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (isOptionsRequest(url)) return jsonResponse(COMPETITION_OPTIONS);
+      requests.push(url);
+      if (url.includes("/prediction")) {
+        return new Response("id,label\n1,cat\n", {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        });
+      }
+      return jsonResponse(pageOf([AI_ROW], 1));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  const listCalls = () => requests.filter((url) => url.includes("/submissions?")).length;
+  expect(listCalls()).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Xem CSV" }));
+  await advance(0);
+  expect(screen.getByRole("dialog")).toBeTruthy();
+
+  // Admin đang đọc tệp của một bài: bảng phía sau không chen thêm request nào.
+  const during = listCalls();
+  await advance(AUTO_REFRESH_MS * 3);
+  expect(listCalls()).toBe(during);
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  await advance(0);
+  expect(screen.queryByRole("dialog")).toBeNull();
   await advance(AUTO_REFRESH_MS);
   expect(listCalls()).toBeGreaterThan(during);
 });

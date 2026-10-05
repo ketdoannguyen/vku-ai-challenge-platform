@@ -4,7 +4,7 @@ import pytest
 
 from app.ai_review.models import ModelSourceSignal
 from app.ai_review.notebook import normalize_notebook
-from app.ai_review.sources import drive_identity, verify_source_signals
+from app.ai_review.sources import ResourceMention, drive_identity, find_resource_mentions, verify_source_signals
 from tests.helpers import notebook_bytes
 
 
@@ -14,6 +14,14 @@ def review(code, resources=(), *, cell=1, start_line=1, end_line=1):
     ]), max_chars=100_000)
     signal = ModelSourceSignal(cell=cell, start_line=start_line, end_line=end_line, reason="Có lệnh tải dataset")
     return verify_source_signals([signal], notebook=notebook, resources=list(resources))
+
+
+def scan(cells, resources):
+    notebook = normalize_notebook(notebook_bytes(cells=[
+        {"cell_type": kind, "source": [f"{line}\n" for line in lines]}
+        for kind, lines in cells
+    ]), max_chars=100_000)
+    return find_resource_mentions(notebook, list(resources))
 
 
 @pytest.mark.parametrize("url", [
@@ -251,3 +259,57 @@ def test_no_model_supplied_url_is_trusted():
     signal = review(["requests.get('https://outside.example/data.csv')"])[0]
     assert signal.urls[0]["url"] == "https://outside.example/data.csv"
     assert "requests.get" in signal.snippet
+
+
+OFFICIAL_FILE = {"label": "Dataset BTC", "url": "https://drive.google.com/file/d/FILE1234567890abcdefghij/view"}
+
+
+def test_resource_scan_matches_url_variants_and_bare_id_of_configured_resources():
+    mentions = scan(
+        [
+            ("markdown", ["Tài nguyên: https://drive.google.com/file/d/FILE1234567890abcdefghij/view"]),
+            ("code", ["df = pd.read_csv('https://drive.google.com/uc?id=FILE1234567890abcdefghij')"]),
+            ("markdown", ["ghi chú"]),
+            ("code", ["!gdown --id FILE1234567890abcdefghij"]),
+        ],
+        [OFFICIAL_FILE],
+    )
+    assert mentions == [ResourceMention(label="Dataset BTC", cells=[2, 4])]
+
+
+def test_resource_scan_skips_markdown_cells_and_unconfigured_drive_links():
+    mentions = scan(
+        [
+            ("markdown", ["https://drive.google.com/file/d/FILE1234567890abcdefghij/view"]),
+            ("code", ["df = pd.read_csv('https://drive.google.com/uc?id=OTHER1234567890abcdefghij')"]),
+        ],
+        [OFFICIAL_FILE],
+    )
+    assert mentions == []
+
+
+def test_resource_scan_returns_empty_when_no_code_cell_mentions_a_resource():
+    assert scan([("code", ["print('hi')"])], [OFFICIAL_FILE]) == []
+
+
+def test_resource_scan_ignores_short_bare_id_substrings():
+    short = {"label": "Ngắn", "url": "https://drive.google.com/file/d/SHORTID/view"}
+    mentions = scan(
+        [
+            ("code", ["x = 'https://drive.google.com/file/d/SHORTID/view'"]),
+            ("code", ["print('SHORTID')"]),
+        ],
+        [short],
+    )
+    assert mentions == [ResourceMention(label="Ngắn", cells=[1])]
+
+
+def test_mounted_drive_literal_path_is_flagged_not_dropped():
+    code = [
+        "from google.colab import drive",
+        "drive.mount('/content/drive')",
+        "df = pd.read_csv('/content/drive/MyDrive/Fashion/train.csv')",
+    ]
+    signal = review(code, end_line=len(code))[0]
+    assert signal.match == "UNVERIFIED_SOURCE"
+    assert signal.warning is True

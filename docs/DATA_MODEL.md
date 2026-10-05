@@ -426,6 +426,7 @@ source_signals: [{cell, start_line, end_line, snippet, reason,
                   match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE",
                   urls: [{url, match, resource_label}], warning: bool}]   ADR-055; admin-only
 resources_configured: int               số link trong revision dùng đối chiếu
+resources_in_notebook: [{label, cells: [int]}]   ADR-059; quét CODE cell, admin-only; [] = quét rồi không thấy, vắng = row trước ADR-059
 notebook_sha256: str                   luôn bằng SHA-256 của bytes gốc đã gửi model
 notebook_normalized_sha256: str        SHA-256 của bản đã chuẩn hoá
 notebook_stats: {cells, code_cells, markdown_cells, lines, truncated, omitted_cells}

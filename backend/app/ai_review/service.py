@@ -343,6 +343,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
                 "findings": cached.get("findings") or [],
                 "source_signals": cached.get("source_signals") or [],
                 "resources_configured": cached.get("resources_configured", 0),
+                # Vắng mặt = row cũ trước ADR-059; giữ None, không được đọc thành "không có".
+                "resources_in_notebook": cached.get("resources_in_notebook"),
                 "notebook_stats": snapshot_stats(notebook),
                 "provider": cached.get("provider"),
                 "provider_host": cached.get("provider_host"),
@@ -388,6 +390,10 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
         source_signals = sources.verify_source_signals(
             output.source_signals, notebook=notebook, resources=revision.get("resources") or []
         )
+        resources_in_notebook = [
+            asdict(mention)
+            for mention in sources.find_resource_mentions(notebook, revision.get("resources") or [])
+        ]
     except ProviderError as exc:
         failure_at = finished_at()
         target = {"provider": active["provider"], "provider_host": endpoint.host, "model": model}
@@ -426,6 +432,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             "findings": [asdict(finding) for finding in verified],
             "source_signals": [asdict(signal) for signal in source_signals],
             "resources_configured": len(revision.get("resources") or []),
+            "resources_in_notebook": resources_in_notebook,
             "notebook_stats": snapshot_stats(notebook),
             "provider": active["provider"],
             "provider_host": endpoint.host,

@@ -208,9 +208,10 @@ test("hiển thị history newest-first với nút tải artifact, status và me
 
   renderPage();
 
-  expect(await screen.findByTitle("latest.csv")).toBeTruthy();
-  expect(screen.getByTitle("solution.ipynb")).toBeTruthy();
-  expect(screen.getByTitle("first.csv")).toBeTruthy();
+  // Tên tệp là tooltip của cả nút xem lẫn nút tải, nên mỗi tệp có hai phần tử mang title này.
+  expect(await screen.findAllByTitle("latest.csv")).toHaveLength(2);
+  expect(screen.getAllByTitle("solution.ipynb")).toHaveLength(2);
+  expect(screen.getAllByTitle("first.csv")).toHaveLength(2);
   expect(screen.getByText("Không thể chấm điểm bài nộp.")).toBeTruthy();
   // Hợp đồng v1 vẫn hiện đủ ba cột f1/precision/recall, mỗi số bốn chữ số theo hợp đồng.
   expect(screen.getAllByText("0.9000").length).toBeGreaterThan(0);
@@ -221,12 +222,50 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(Array.from(rows[0].querySelectorAll("th")).slice(3).map((th) => th.textContent)).toEqual([
     "Điểm chính · F1", "Precision", "Recall",
   ]);
-  // Dòng mới nhất có đủ hai nút; dòng legacy chỉ còn nút CSV.
-  expect(within(rows[1]).getAllByRole("button")).toHaveLength(3);
-  expect(within(rows[1]).getByRole("button", { name: "Notebook" })).toBeTruthy();
-  expect(within(rows[2]).getAllByRole("button")).toHaveLength(2);
-  expect(within(rows[2]).queryByRole("button", { name: "Notebook" })).toBeNull();
+  // Dòng mới nhất có đủ hai tệp: mỗi tệp một cặp nút xem/tải, cộng nút sao chép ID của dòng.
+  expect(within(rows[1]).getAllByRole("button")).toHaveLength(5);
+  expect(within(rows[1]).getByRole("button", { name: "Xem CSV" })).toBeTruthy();
+  expect(within(rows[1]).getByRole("button", { name: "Xem Notebook" })).toBeTruthy();
+  expect(within(rows[1]).getByRole("button", { name: "Tải Notebook" })).toBeTruthy();
+  // Dòng legacy chỉ còn tệp CSV: hai nút của nó, không có nút notebook nào.
+  expect(within(rows[2]).getAllByRole("button")).toHaveLength(3);
+  expect(within(rows[2]).queryByRole("button", { name: "Xem Notebook" })).toBeNull();
+  expect(within(rows[2]).queryByRole("button", { name: "Tải Notebook" })).toBeNull();
   expect(rows[2].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
+});
+
+test("Xem CSV mở trình xem qua route của chính cuộc thi và đóng trả focus", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url);
+      if (url.includes("/prediction")) {
+        return new Response("id,label\n1,cat\n", {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        });
+      }
+      return jsonResponse(submissionsPage(0, 1));
+    }),
+  );
+
+  renderPage();
+  await screen.findByText("#s-0");
+
+  const trigger = screen.getByRole("button", { name: "Xem CSV" });
+  trigger.focus();
+  fireEvent.click(trigger);
+
+  const dialog = await screen.findByRole("dialog");
+  expect(await within(dialog).findByRole("table")).toBeTruthy();
+  expect(requests).toContain(
+    `/api/competitions/${COMPETITION.id}/submissions/s-0/prediction`,
+  );
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(trigger);
 });
 
 /** Cuộc thi v2 khai báo metric riêng: nhãn cột và số thập phân phải lấy từ hợp đồng, không phải bộ ba cố định. */
@@ -269,7 +308,7 @@ test("cuộc thi v2 hiện metric, nhãn và số thập phân theo hợp đồn
     offset: 0,
   });
   renderPage(V2_COMPETITION);
-  await screen.findByTitle("v2.csv");
+  expect(await screen.findAllByTitle("v2.csv")).toHaveLength(2);
 
   const rows = screen.getAllByRole("row");
   // Metric chính khai báo sau nhưng đứng đầu cụm cột, nhãn nêu rõ vai trò xếp hạng.
@@ -592,7 +631,7 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
     offset: 0,
   });
   renderPage();
-  await screen.findByTitle("rejected.csv");
+  expect(await screen.findAllByTitle("rejected.csv")).toHaveLength(2);
 
   const rows = screen.getAllByRole("row");
   const rejectedRow = rows[1];
@@ -602,8 +641,9 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
   expect(within(rejectedRow).getByText(`Lý do: ${REJECTED_NOTE}`)).toBeTruthy();
   // Minh bạch: metrics và cả hai artifact vẫn còn; điểm chính là cột metric chính nên chỉ hiện một lần.
   expect(within(rejectedRow).getAllByText("0.9500")).toHaveLength(1);
-  expect(within(rejectedRow).getAllByRole("button")).toHaveLength(3);
-  expect(within(rejectedRow).getByRole("button", { name: "Notebook" })).toBeTruthy();
+  // Hai tệp, mỗi tệp một cặp nút xem/tải, cộng nút sao chép ID của dòng.
+  expect(within(rejectedRow).getAllByRole("button")).toHaveLength(5);
+  expect(within(rejectedRow).getByRole("button", { name: "Tải Notebook" })).toBeTruthy();
   expect(within(rejectedRow).queryByText("Tốt nhất")).toBeNull();
 
   // Bài hợp lệ thấp điểm hơn giữ badge "Tốt nhất" và là điểm tốt nhất trong trang.
@@ -659,7 +699,7 @@ test("điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn l
     offset: 0,
   });
   renderPage(lossCompetition);
-  await screen.findByTitle("lower-loss.csv");
+  expect(await screen.findAllByTitle("lower-loss.csv")).toHaveLength(2);
 
   const rows = screen.getAllByRole("row");
   expect(within(rows[2]).getByText("Tốt nhất")).toBeTruthy();
@@ -689,7 +729,7 @@ test("trang chỉ có bài bị từ chối thì không hiện điểm tốt nh�
     offset: 0,
   });
   renderPage();
-  await screen.findByTitle("only.csv");
+  expect(await screen.findAllByTitle("only.csv")).toHaveLength(2);
 
   expect(screen.queryByText("Điểm tốt nhất trong trang:")).toBeNull();
   expect(screen.queryByText("Tốt nhất")).toBeNull();
@@ -731,7 +771,7 @@ test("cột AI chỉ hiện kết luận an toàn, kèm câu nhắc và không l
     offset: 0,
   });
   renderPage();
-  await screen.findByTitle("cu.csv");
+  expect(await screen.findAllByTitle("cu.csv")).toHaveLength(2);
 
   const rows = screen.getAllByRole("row");
   expect(within(rows[0]).getByText("AI sơ bộ")).toBeTruthy();
@@ -770,7 +810,7 @@ test("chưa công khai kết luận AI cho thí sinh thì không có cột AI l�
     offset: 0,
   });
   renderPage();
-  await screen.findByTitle("only.csv");
+  expect(await screen.findAllByTitle("only.csv")).toHaveLength(2);
 
   expect(screen.queryByText("AI sơ bộ")).toBeNull();
   expect(screen.queryByText(AI_PARTICIPANT_DISCLAIMER)).toBeNull();
@@ -824,7 +864,7 @@ test("kết luận AI không đổi việc chọn bài tốt nhất: chỉ từ 
     offset: 0,
   });
   renderPage();
-  await screen.findByTitle("flagged.csv");
+  expect(await screen.findAllByTitle("flagged.csv")).toHaveLength(2);
 
   const rows = screen.getAllByRole("row");
   // Bài điểm cao có verdict xấu vẫn là bài tốt nhất: verdict AI không phải phán quyết.
@@ -966,4 +1006,44 @@ test("tab bị ẩn thì ngừng làm mới ngầm, quay lại thì cập nhật
   setDocumentHidden(false);
   await advance(0);
   expect(urls).toHaveLength(2);
+});
+
+test("trình xem tệp đang mở thì trang nhường lượt làm mới ngầm", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("/prediction")) {
+        return new Response("id,label\n1,cat\n", {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        });
+      }
+      return jsonResponse(submissionsPage(0, 1));
+    }),
+  );
+
+  renderPage();
+  await advance(0);
+  expect(screen.getByText("#s-0")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Xem CSV" }));
+  await advance(0);
+  expect(screen.getByRole("dialog")).toBeTruthy();
+
+  // Người dùng đang đọc tệp: trang không chen thêm lượt tải lịch sử nào phía sau.
+  const listCalls = () => urls.filter((url) => url.includes("/submissions/me?")).length;
+  const during = listCalls();
+  await advance(AUTO_REFRESH_MS * 3);
+  expect(listCalls()).toBe(during);
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  await advance(0);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await advance(AUTO_REFRESH_MS);
+  expect(listCalls()).toBeGreaterThan(during);
 });

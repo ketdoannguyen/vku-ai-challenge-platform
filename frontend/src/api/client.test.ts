@@ -72,7 +72,17 @@ describe("api.download", () => {
     expect(fetch).toHaveBeenCalledWith("/api/admin/competitions/1/export.xlsx", {
       credentials: "same-origin",
       headers: { Accept: "*/*" },
+      signal: undefined,
     });
+  });
+
+  it("truyền signal của trình xem, không tự đặt hạn cho lượt tải file", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(blobResponse()));
+
+    await api.download("/x", controller.signal);
+
+    expect(vi.mocked(fetch).mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
   it("giải mã filename* UTF-8 khi backend dùng dạng encoded", async () => {

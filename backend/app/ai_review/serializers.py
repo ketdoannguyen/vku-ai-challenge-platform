@@ -80,6 +80,7 @@ def review_detail(review: dict) -> dict:
         "findings": review.get("findings") or [],
         "source_signals": review.get("source_signals") or [],
         "resources_configured": review.get("resources_configured", 0),
+        "resources_in_notebook": review.get("resources_in_notebook"),
         "notebook_stats": review.get("notebook_stats") or {},
         "provider": review.get("provider"),
         "provider_host": review.get("provider_host"),

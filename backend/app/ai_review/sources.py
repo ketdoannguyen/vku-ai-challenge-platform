@@ -23,6 +23,10 @@ _ID_ARG = re.compile(r"\bid\s*=\s*(['\"])([A-Za-z0-9_-]+)\1")
 _CLI_ID = re.compile(r"--id(?:=|\s+)([A-Za-z0-9_-]+)")
 _DATASET_URL = re.compile(r"(?:\.(?:csv|tsv|parquet)(?:[?&#]|$)|/datasets?[/?.#])", re.IGNORECASE)
 _DATASET_HINT = re.compile(r"\b(?:data|dataset|train|test|validation)\b|(?:^|_)(?:data|dataset)(?:_|$)", re.IGNORECASE)
+# Đường dẫn literal dưới mount point Colab là đọc Drive, không phải tệp cục bộ vô danh.
+_MOUNTED_DRIVE_PATH = re.compile(r"^/content/drive(?:/|$)")
+# ID Drive thật dài 25-44 ký tự; ngưỡng 20 chặn substring trùng ngẫu nhiên khi quét ID thô.
+_MIN_BARE_ID_CHARS = 20
 _DRIVE = {"drive.google.com", "drive.usercontent.google.com"}
 _DOCS = {"docs.google.com"}
 
@@ -37,6 +41,12 @@ class SourceSignal:
     match: str
     urls: list[dict]
     warning: bool
+
+
+@dataclass(frozen=True)
+class ResourceMention:
+    label: str
+    cells: list[int]
 
 
 def drive_identity(url: str) -> tuple[str, str] | None:
@@ -226,9 +236,11 @@ def verify_source_signals(
                         urls.append({"url": f"id={identifier}", "match": status,
                                      "resource_label": official.get(resource)})
             if not found_source and not static_url:
-                # Literal địa phương không chứng minh nguồn; nguồn động chỉ cảnh báo nếu liên quan dataset.
+                # Literal địa phương không chứng minh nguồn; đường dẫn drive mount và nguồn động vẫn
+                # cảnh báo khi liên quan dataset.
                 if (is_reader and isinstance(args, ast.Call) and isinstance(source, ast.Constant)
-                        and isinstance(source.value, str) and "://" not in source.value):
+                        and isinstance(source.value, str) and "://" not in source.value
+                        and not _MOUNTED_DRIVE_PATH.match(source.value)):
                     continue
                 if is_reader or is_gdown or _DATASET_HINT.search(segment):
                     matches.add("UNVERIFIED_SOURCE")
@@ -249,3 +261,32 @@ def verify_source_signals(
             warning=overall != "MATCHED_RESOURCE",
         ))
     return verified
+
+
+def find_resource_mentions(notebook: NormalizedNotebook, resources: list[dict]) -> list[ResourceMention]:
+    """Quét text thô của từng CODE cell để nói tài nguyên BTC xuất hiện ở cell nào.
+
+    Chỉ CODE cell: markdown thường chép đề bài kèm link nên không tính. Khớp mọi dạng URL của cùng
+    file/folder qua `drive_identity`, hoặc ID thô đủ dài (gdown). Danh sách rỗng nghĩa là đã quét và
+    không cell CODE nào nhắc tới; notebook bị lược cell thì dữ kiện cũng chỉ soi phần model đã thấy.
+    """
+    mentions = []
+    for item in resources:
+        identity = drive_identity(item["url"])
+        if identity is None:
+            continue
+        cells = [
+            cell.number
+            for cell in notebook.cells
+            if cell.kind == CELL_CODE and _mentions_identity("\n".join(cell.lines), identity)
+        ]
+        if cells:
+            mentions.append(ResourceMention(label=item["label"], cells=cells))
+    return mentions
+
+
+def _mentions_identity(text: str, identity: tuple[str, str]) -> bool:
+    if any(drive_identity(url.rstrip(".,;:!?")) == identity for url in _URL.findall(text)):
+        return True
+    identifier = identity[1]
+    return len(identifier) >= _MIN_BARE_ID_CHARS and identifier in text
