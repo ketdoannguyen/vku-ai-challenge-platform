@@ -74,6 +74,20 @@ export interface Competition {
   submission_count?: number;
   /** Vắng mặt với guest, người chưa join, member bị vô hiệu hóa và cuộc thi đã đóng. */
   quota?: QuotaStatus;
+  /** Số liệu cá nhân trên thẻ danh sách; vắng mặt ngoài thành viên đang hoạt động. */
+  my_stats?: MyStats;
+}
+
+/** Số liệu cá nhân của thành viên đang hoạt động, chỉ có trên public list. */
+export interface MyStats {
+  /** Thứ hạng trên bảng xếp hạng; `null` khi chưa có bài hợp lệ hoặc bảng đang ẩn. */
+  rank: number | null;
+  /** Tổng số thí sinh có mặt trên bảng, cùng điều kiện `null` với `rank`. */
+  rank_total: number | null;
+  /** Điểm chính tốt nhất; `null` ngoài các trường hợp trên còn khi metric chính bị ẩn. */
+  best_score: number | null;
+  /** Số bài `completed` trong ngày UTC hiện tại - khớp `quota.used_today` trang chi tiết. */
+  used_today: number;
 }
 
 export interface JoinResponse {
