@@ -112,18 +112,23 @@ def _submission(
     created_at: datetime,
     *,
     review_status: str | None = None,
+    status: str = "completed",
 ) -> ObjectId:
-    """Bài `completed`; `review_status="rejected"` là bài bị admin từ chối nhưng vẫn tiêu quota."""
+    """Bài `completed`; `review_status="rejected"` là bài bị admin từ chối nhưng vẫn tiêu quota.
+
+    `status="failed"` dựng bản ghi cũ chấm hỏng: có trong lịch sử nhưng không có metrics.
+    """
     submission_id = ObjectId()
     document = {
         "_id": submission_id,
         "competition_id": competition_id,
         "account_id": account_id,
-        "status": "completed",
-        "metrics": {"f1": score, "precision": score, "recall": score},
-        "primary_score": score,
+        "status": status,
         "created_at": created_at,
     }
+    if status == "completed":
+        document["metrics"] = {"f1": score, "precision": score, "recall": score}
+        document["primary_score"] = score
     if review_status is not None:
         document["review"] = {"status": review_status}
     _run(client.app.state.mongo.db[SUBMISSIONS_COLLECTION].insert_one(document))
@@ -145,6 +150,101 @@ def test_guest_and_non_member_list_has_no_my_stats(client):
 
     client.post("/api/auth/logout")
     assert "my_stats" not in _list_item(client, "stats-open")
+
+
+def test_non_member_gets_zero_count_guest_gets_no_key(client):
+    """`my_submission_count` dành cho mọi account đã đăng nhập, `my_stats` vẫn chỉ cho thành viên."""
+    _create_competition(client, "stats-count-open")
+    _login_participant(client)
+    item = _list_item(client, "stats-count-open")
+    assert item["my_submission_count"] == 0
+    assert "my_stats" not in item
+
+    client.post("/api/auth/logout")
+    item = _list_item(client, "stats-count-open")
+    assert "my_submission_count" not in item
+    assert "my_stats" not in item
+
+
+def test_my_submission_count_includes_rejected_and_failed_records(client):
+    participant = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "stats-count-all")
+    _insert_membership(client, competition_id, participant["_id"])
+    base = _today_start() + timedelta(minutes=1)
+    _submission(client, competition_id, participant["_id"], 0.6, base)
+    _submission(
+        client,
+        competition_id,
+        participant["_id"],
+        0.9,
+        base + timedelta(minutes=5),
+        review_status="rejected",
+    )
+    _submission(
+        client,
+        competition_id,
+        participant["_id"],
+        0.0,
+        base + timedelta(minutes=10),
+        status="failed",
+    )
+
+    _login_participant(client)
+    item = _list_item(client, "stats-count-all")
+
+    # Tổng bài đã nộp tính mọi record lịch sử, cùng quy ước với `total` trong lịch sử nộp bài.
+    assert item["my_submission_count"] == 3
+    # Bài bị từ chối và bản ghi failed không chen vào thứ hạng; lượt hôm nay vẫn theo bài completed.
+    assert item["my_stats"]["best_score"] == 0.6
+    assert item["my_stats"]["used_today"] == 2
+
+
+def test_my_submission_count_survives_leaving_and_closing(client):
+    participant = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "stats-count-closed")
+    _insert_membership(client, competition_id, participant["_id"], active=False)
+    _submission(
+        client, competition_id, participant["_id"], 0.8, _today_start() + timedelta(minutes=1)
+    )
+
+    _login_admin(client)
+    assert client.post(f"/api/admin/competitions/{competition_id}/close").status_code == 200
+    _login_participant(client)
+    item = _list_item(client, "stats-count-closed")
+
+    # Thành viên đã rời không còn hạng/điểm nhưng lịch sử nộp bài vẫn được đếm, kể cả khi đã đóng.
+    assert item["status"] == "closed"
+    assert item["my_submission_count"] == 1
+    assert "my_stats" not in item
+
+
+def test_my_submission_count_with_history_but_no_membership(client):
+    participant = _account(client, "thi.sinh@vku.vn")
+    competition_id = _create_competition(client, "stats-count-no-member")
+    _submission(
+        client, competition_id, participant["_id"], 0.8, _today_start() + timedelta(minutes=1)
+    )
+
+    _login_participant(client)
+    item = _list_item(client, "stats-count-no-member")
+
+    assert item["my_submission_count"] == 1
+    assert "my_stats" not in item
+
+
+def test_my_submission_count_isolated_per_account_and_competition(client):
+    participant = _account(client, "thi.sinh@vku.vn")
+    other_id = _create_account(client, "Đội Khác", "stats-count-other@vku.vn")
+    cup_one = _create_competition(client, "stats-count-one")
+    _create_competition(client, "stats-count-two")
+    base = _today_start() + timedelta(minutes=1)
+    _submission(client, cup_one, participant["_id"], 0.8, base)
+    _submission(client, cup_one, participant["_id"], 0.7, base + timedelta(minutes=1))
+    _submission(client, cup_one, other_id, 0.9, base)
+
+    _login_participant(client)
+    assert _list_item(client, "stats-count-one")["my_submission_count"] == 2
+    assert _list_item(client, "stats-count-two")["my_submission_count"] == 0
 
 
 def test_active_member_without_submissions_gets_zeroed_stats(client):

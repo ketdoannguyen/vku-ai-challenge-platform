@@ -1201,7 +1201,8 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   renderPage();
 
   fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
-  expect(await screen.findByTitle("result.csv")).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Xem CSV" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Tải CSV" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: "Bảng xếp hạng" })).toBeTruthy();
   // Bảng xếp hạng vẫn cuộn ngang nên phải là vùng focus được bằng bàn phím.
   const leaderboard = screen.getByRole("region", { name: "Bảng xếp hạng của cuộc thi" });

@@ -125,9 +125,9 @@ export function CompetitionGuidePage() {
       <section className="ov-block">
         <h3 className="ov-block-title">Notebook khởi đầu</h3>
         <p className="ov-facts">
-          Notebook khung đã có sẵn phần khai báo thư viện, đọc và kiểm tra dữ liệu, cùng phần xuất
-          tệp kết quả. Thí sinh bổ sung phần tiền xử lý và huấn luyện mô hình của mình vào hai bước
-          được đánh dấu <code>TODO</code>.
+          Bắt buộc dùng link Google Drive chỉ đọc của BTC ở mục Tài nguyên → Bộ dữ liệu: dán vào
+          <code> DATASET_URL</code> để notebook tải và đọc dữ liệu. Điền tên cột và <code>TEST_FILE</code>
+          theo cuộc thi, rồi tự hoàn thiện hai bước <code>TODO</code> để xuất CSV.
         </p>
         <div className="ov-actions">
           <button

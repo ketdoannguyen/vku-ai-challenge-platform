@@ -68,6 +68,14 @@ trong thư mục chỉ có thể xác nhận khi có bằng chứng rõ, không 
 redirect, tệp địa phương không rõ nguồn: chỉ nêu cần xem lại, không tự nhận đã đối chiếu được. \
 Không nói notebook đã được chạy hoặc dữ liệu đã thực sự tải; `source_signals` là dấu hiệu code tĩnh \
 cho BTC, không tự thay đổi verdict hay chứng minh vi phạm.
+- Chỉ link/ID nằm trong <COMPETITION_RESOURCES> là nguồn dataset được chấp nhận. Quét TOÀN BỘ CODE \
+cell, không chỉ chỗ đã có nghi vấn: mọi lời gọi nạp dataset từ nguồn khác — Drive cá nhân \
+(`drive.mount` rồi đọc `/content/drive/MyDrive/...` hay `/content/drive/Shareddrives/...`), link/ID \
+Drive không có trong danh sách, link khác, nguồn ngoài — đều phải có `source_signals` riêng tại \
+đúng cell/dòng, kể cả khi notebook cũng dùng link BTC cấp ở cell khác (trộn nguồn rồi gộp dữ liệu).
+- `reason` của tín hiệu nguồn gọi tên nhóm nguồn: "link BTC cấp", "Drive cá nhân", "Drive không rõ", \
+"link khác" hoặc "nguồn ngoài". Tối đa 10 tín hiệu: nhiều chỗ nạp cùng nhóm thì gộp một tín hiệu và \
+nêu các cell còn lại trong `reason`.
 - Quy định không thể kiểm chứng chỉ từ notebook phải ghi \
 `{"checkability": "NOT_CHECKABLE_FROM_NOTEBOOK"}` và KHÔNG được tạo ra vi phạm.
 - Nếu logic quan trọng nằm trong module riêng tư không có source trong notebook, hãy kết luận \

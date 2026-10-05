@@ -69,6 +69,37 @@ async def test_dataset_warning_is_independent_of_clear_verdict_and_survives_cach
     assert (await reviews(mock_db))[-1]["source_signals"][0]["warning"] is True
 
 
+async def test_notebook_resource_scan_is_stored_and_reused_from_cache(mock_db, ai_env):
+    resources = [{"label": "Dataset BTC", "url": "https://drive.google.com/file/d/OFFICIAL/view"}]
+    notebook = notebook_bytes(cells=[
+        {"cell_type": "code", "source": ["df = pd.read_csv('https://data.example.org/train.csv')\n"]},
+        {"cell_type": "code", "source": ["df = pd.read_csv('https://drive.google.com/uc?id=OFFICIAL')\n"]},
+    ])
+    submission = await seed(mock_db, notebook=notebook, resources=resources)
+    output = {**CLEAR_OUTPUT, "source_signals": [
+        {"cell": 1, "start_line": 1, "end_line": 1, "reason": "Có lệnh tải dataset ngoài"}
+    ]}
+    _, outcome = await run(mock_db, handler(output))
+    assert outcome == service.OUTCOME_COMPLETED
+    review = (await reviews(mock_db))[0]
+    assert review["resources_in_notebook"] == [{"label": "Dataset BTC", "cells": [2]}]
+    assert service.serializers.review_detail(review)["resources_in_notebook"] == review["resources_in_notebook"]
+    # Dữ kiện quét là thông tin admin, không đi vào projection của thí sinh và không cộng cảnh báo.
+    assert "resources_in_notebook" not in service.serializers.participant_projection(
+        await submission_of(mock_db, submission["_id"]), True
+    )
+    assert (await submission_of(mock_db, submission["_id"]))["ai_review"]["source_warning_count"] == 1
+
+    await seed(mock_db, competition_id=submission["competition_id"],
+               account_id=submission["account_id"], notebook=notebook)
+    calls = []
+    await run(mock_db, handler(CLEAR_OUTPUT, calls))
+    assert calls == []
+    cached = (await reviews(mock_db))[-1]
+    assert cached["source"] == constants.SOURCE_CACHE
+    assert cached["resources_in_notebook"] == [{"label": "Dataset BTC", "cells": [2]}]
+
+
 async def test_a_clean_run_writes_a_completed_review_and_advances_the_projection(mock_db, ai_env):
     submission = await seed(mock_db)
     calls: list = []
@@ -1082,6 +1113,9 @@ async def test_the_cache_key_changes_with_every_component_that_reaches_the_model
         "CONTEXT_POLICY_VERSION",
         "CANONICALIZATION_VERSION",
         "RULE_REF_VERSION",
+        # Dữ kiện quét nguồn (ADR-059) cũng nằm trong audit row: đổi cách quét mà giữ khoá là trộn
+        # dữ kiện của hai phiên bản máy dưới cùng một lượt.
+        "SOURCE_SIGNAL_VERSION",
         # Verifier quyết định verdict cuối: đổi cách hậu kiểm mà không đổi khoá là phục vụ lại kết
         # luận của một verifier khác dưới danh nghĩa lượt chạy mới.
         "VERIFIER_VERSION",
