@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import {
   AI_PARTICIPANT_DISCLAIMER,
@@ -14,7 +14,12 @@ import {
   SUBMISSION_STATUS_LABEL,
   type SubmissionsResponse,
 } from "../api/results";
-import { ArtifactLinks } from "../components/ArtifactLinks";
+import {
+  ArtifactLinks,
+  LazyArtifactViewerModal,
+  type ArtifactKind,
+  type ArtifactViewerTarget,
+} from "../components/ArtifactLinks";
 import { ErrorBox, Loading } from "../components/ui";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
@@ -41,6 +46,8 @@ export function MySubmissionsPage() {
   const [query, setQuery] = useState({ offset: 0, attempt: 0 });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  /** Tệp đang mở trong trình xem; `null` là đóng. Trang chỉ có một trình xem cho cả bảng. */
+  const [viewer, setViewer] = useState<ArtifactViewerTarget | null>(null);
   const requestSequence = useRef(0);
   const hasData = useRef(false);
   /** Số lượt tải do người dùng chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
@@ -130,16 +137,21 @@ export function MySubmissionsPage() {
 
   const busy = loading || refreshing;
 
+  /** Mở tệp trong trình xem duy nhất của trang; nút ở dòng nào cũng gọi vào đây. */
+  function openViewer(kind: ArtifactKind, submissionId: string, filename: string) {
+    setViewer({ kind, submissionId, filename });
+  }
+
   /**
    * Lượt làm mới ngầm: không đụng trạng thái tải để bảng không nháy, và nhường khi
-   * người dùng đang bấm nút hoặc đang bôi đen nội dung.
+   * người dùng đang bấm nút, đang mở trình xem tệp, hoặc đang bôi đen nội dung.
    */
   const silentRefresh = useCallback(async () => {
-    if (manualLoads.current > 0) return false;
+    if (manualLoads.current > 0 || viewer) return false;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return false;
     await loadData(query.offset, true, true);
-  }, [loadData, query.offset]);
+  }, [loadData, query.offset, viewer]);
 
   // Trang đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
   const refreshStatus = useAutoRefresh(true, silentRefresh, {
@@ -396,6 +408,7 @@ export function MySubmissionsPage() {
                       basePath={`/competitions/${competition.id}/submissions`}
                       submissionId={submission.id}
                       artifacts={submission.artifacts}
+                      onView={openViewer}
                     />
                   </td>
                   <td>
@@ -504,6 +517,19 @@ export function MySubmissionsPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Một trình xem duy nhất cho cả bảng: dòng chỉ báo tệp cần mở qua `onView`, không dòng nào
+          tự dựng modal nên không thể mở nhiều trình xem cùng lúc. */}
+      {viewer && (
+        <Suspense fallback={<span role="status">Đang mở trình xem…</span>}>
+          <LazyArtifactViewerModal
+            path={`/competitions/${competition.id}/submissions/${viewer.submissionId}/${viewer.kind}`}
+            kind={viewer.kind}
+            filename={viewer.filename}
+            onClose={() => setViewer(null)}
+          />
+        </Suspense>
       )}
     </section>
   );

@@ -78,9 +78,11 @@ SOURCE_PIPELINE = "PIPELINE"
 # v5: model trả `rule_ref` do backend sinh thay vì tự viết title/slug/rule text (ADR-045).
 # v6: chỉ gắn cờ vi phạm phương pháp có chứng cứ; phân biệt notebook và CSV đã nộp.
 # v7: nguồn dataset BTC là ngữ cảnh riêng và tín hiệu nguồn không phụ thuộc verdict.
-PROMPT_VERSION = "ai-review-v7"
+# v8: chỉ tài nguyên BTC cấp là nguồn dataset hợp lệ; quét toàn notebook, mỗi nguồn khác một tín hiệu.
+PROMPT_VERSION = "ai-review-v8"
 NORMALIZATION_VERSION = "notebook-v3"
-SOURCE_SIGNAL_VERSION = "dataset-source-v1"
+# v2: thêm dữ kiện quét toàn notebook (`resources_in_notebook`); literal `/content/drive` không còn bị bỏ qua.
+SOURCE_SIGNAL_VERSION = "dataset-source-v2"
 CONTEXT_POLICY_VERSION = "context-v2"
 # Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
 # nên phải bump version, và cache cũ tự động không còn dùng được.

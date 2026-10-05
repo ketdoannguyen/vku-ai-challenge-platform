@@ -111,6 +111,9 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
   expect(within(required).getByText("Binary")).toBeTruthy();
   expect(within(required).getByText("1")).toBeTruthy();
 
+  expect(screen.getByText(/Bắt buộc dùng link Google Drive chỉ đọc của BTC/)).toBeTruthy();
+  expect(screen.getByText(/DATASET_URL/)).toBeTruthy();
+
   // Ví dụ CSV dùng đúng hai cột của cuộc thi và có nhiều dòng mẫu.
   const sample = screen.getByLabelText("Ví dụ nội dung tệp CSV dự đoán");
   expect(sample.textContent?.split("\n")).toEqual([
@@ -182,7 +185,7 @@ test("cuộc thi chưa cấu hình chấm điểm vẫn đọc được hướng
 });
 
 test("CTA tải notebook khung gọi endpoint công khai và báo lỗi bằng alert", async () => {
-  mockApi();
+  const { urls } = mockApi();
   renderGuide();
 
   const button = await screen.findByRole("button", { name: "Tải notebook khung (.ipynb)" });
@@ -191,6 +194,7 @@ test("CTA tải notebook khung gọi endpoint công khai và báo lỗi bằng a
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Notebook khung chưa được cài đặt trên máy chủ.",
   );
+  expect(urls).toContain("/api/starter-notebook");
   // Thất bại không được khoá nút: thí sinh còn thử lại được.
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Tải notebook khung (.ipynb)" })).not.toBeDisabled(),

@@ -13,7 +13,12 @@ import {
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition, CompetitionsResponse, Membership } from "../api/competitions";
+import type {
+  Competition,
+  CompetitionsResponse,
+  Membership,
+  PinResponse,
+} from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
@@ -33,7 +38,7 @@ import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import { formatCountdown } from "../lib/countdown";
 
 type StatusFilter = "all" | "published" | "closed";
-type CompetitionSort = "name" | "ending_soon" | "hottest";
+type CompetitionSort = "name" | "ending_soon" | "hottest" | "my_submissions";
 type ParticipationFilter = "all" | "joined" | "not_joined";
 
 const FILTERS: { id: StatusFilter; label: string }[] = [
@@ -46,6 +51,7 @@ const SORTS: { id: CompetitionSort; label: string }[] = [
   { id: "name", label: "Tên A–Z" },
   { id: "ending_soon", label: "Sắp kết thúc" },
   { id: "hottest", label: "Nhiều lượt nộp nhất" },
+  { id: "my_submissions", label: "Nhiều bài của tôi nhất" },
 ];
 
 const PARTICIPATION: { id: ParticipationFilter; label: string }[] = [
@@ -87,7 +93,19 @@ const COMPARATORS: Record<CompetitionSort, (a: Competition, b: Competition) => n
   },
   hottest: (a, b) =>
     (b.submission_count ?? 0) - (a.submission_count ?? 0) || compareByName(a, b),
+  /** Tổng bài của chính người đang xem; response cũ thiếu field coi như 0. */
+  my_submissions: (a, b) =>
+    (b.my_submission_count ?? 0) - (a.my_submission_count ?? 0) || compareByName(a, b),
 };
+
+/** Ghim luôn đứng trước, rồi mới tới kiểu sắp xếp đang chọn (lọc/tìm kiếm đã chạy trước đó). */
+function comparePinnedFirst(
+  a: Competition,
+  b: Competition,
+  comparator: (first: Competition, second: Competition) => number,
+): number {
+  return Number(b.pinned ?? false) - Number(a.pinned ?? false) || comparator(a, b);
+}
 
 /**
  * Màu thẻ theo VỊ TRÍ trong lưới đang render, không theo trạng thái cuộc thi:
@@ -184,6 +202,27 @@ function IconMail() {
       focusable="false"
     >
       <path d="M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm9 8L4.3 7h15.4L12 13z" />
+    </svg>
+  );
+}
+
+/** Đầy khi đang ghim, viền rỗng khi chưa - trạng thái đọc được cả khi không phân biệt màu. */
+function IconPin({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={14}
+      height={14}
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5z" />
+      <path d="M12 13v8" />
     </svg>
   );
 }
@@ -342,6 +381,7 @@ function IconEmptyState({ kind }: { kind: "search" | "trophy" }) {
 function CompetitionFilterDropdown({
   sort,
   onSortChange,
+  personalSortLocked,
   participation,
   onParticipationChange,
   participationLocked,
@@ -349,6 +389,8 @@ function CompetitionFilterDropdown({
 }: {
   sort: CompetitionSort;
   onSortChange: (value: CompetitionSort) => void;
+  /** Khách hoặc phiên chưa xác định: sort theo bài của tôi bị khóa kèm gợi ý đăng nhập. */
+  personalSortLocked: boolean;
   participation: ParticipationFilter;
   onParticipationChange: (value: ParticipationFilter) => void;
   /** Khách chưa đăng nhập: nhóm tham gia hiện nhưng khóa, vì mọi membership đều rỗng. */
@@ -454,19 +496,30 @@ function CompetitionFilterDropdown({
           >
             <fieldset className="dash-filter-group">
               <legend className="dash-filter-legend">Sắp xếp</legend>
-              {SORTS.map((option) => (
-                <label key={option.id} className="dash-filter-option" htmlFor={`${ids}-sort-${option.id}`}>
-                  <input
-                    type="radio"
-                    id={`${ids}-sort-${option.id}`}
-                    name={`${ids}-sort`}
-                    value={option.id}
-                    checked={sort === option.id}
-                    onChange={() => onSortChange(option.id)}
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+              {SORTS.map((option) => {
+                const locked = option.id === "my_submissions" && personalSortLocked;
+                return (
+                  <label
+                    key={option.id}
+                    className={locked ? "dash-filter-option is-locked" : "dash-filter-option"}
+                    htmlFor={`${ids}-sort-${option.id}`}
+                  >
+                    <input
+                      type="radio"
+                      id={`${ids}-sort-${option.id}`}
+                      name={`${ids}-sort`}
+                      value={option.id}
+                      checked={sort === option.id}
+                      disabled={locked}
+                      onChange={() => onSortChange(option.id)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                );
+              })}
+              {personalSortLocked && (
+                <p className="dash-filter-hint">Đăng nhập để sắp xếp theo bài của bạn.</p>
+              )}
             </fieldset>
 
             <fieldset className="dash-filter-group" disabled={participationLocked}>
@@ -495,17 +548,27 @@ function CompetitionFilterDropdown({
   );
 }
 
+/** Danh sách kèm danh tính phiên đã tạo ra nó - để không render số liệu của phiên trước. */
+interface LoadedCompetitions {
+  identity: string | null;
+  response: CompetitionsResponse;
+}
+
 export function DashboardPage() {
   const auth = useOptionalAuth();
-  const [data, setData] = useState<CompetitionsResponse | null>(null);
+  const [data, setData] = useState<LoadedCompetitions | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
-  const [sort, setSort] = useState<CompetitionSort>("name");
+  // Mặc định "Nhiều bài của tôi nhất"; khách/chưa xác định auth rơi về A–Z qua `effectiveSort`.
+  const [sort, setSort] = useState<CompetitionSort>("my_submissions");
   const [participation, setParticipation] = useState<ParticipationFilter>("all");
   /** Thao tác tham gia/rời đang chờ hoặc modal đang mở: dừng tự làm mới để không ghi đè. */
   const [engagedSlugs, setEngagedSlugs] = useState<ReadonlySet<string>>(() => new Set());
+  /** Lượt ghim đang chờ, tách khỏi `engagedSlugs`: join và ghim cùng slug không mở khóa nhầm nhau. */
+  const [pinPendingSlugs, setPinPendingSlugs] = useState<ReadonlySet<string>>(() => new Set());
+  const [pinErrors, setPinErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
   const markJoinEngaged = useCallback((slug: string, engaged: boolean) => {
     setEngagedSlugs((current) => {
       if (current.has(slug) === engaged) return current;
@@ -515,33 +578,52 @@ export function DashboardPage() {
       return next;
     });
   }, []);
-  /** Response cũ không được ghi đè dữ liệu mới hơn (join, làm mới thủ công, làm mới ngầm). */
+  /** Response cũ không được ghi đè dữ liệu mới hơn (join, ghim, làm mới thủ công, làm mới ngầm). */
   const requestSequence = useRef(0);
   useDocumentTitle("Cuộc thi");
 
+  // Danh tính phiên: `undefined` = /auth/me chưa xong nên chưa gọi API; `null` = khách.
+  // Ngoài AuthProvider (test dựng component lẻ) coi như khách để giữ hành vi cũ.
+  const account = auth === null ? null : auth.loading ? undefined : auth.account;
+  const identity = account?.id ?? null;
+  const canPersonalize = account != null;
+
+  /** Danh tính mới nhất cho callback bất đồng bộ: closure của `togglePin` có thể đã cũ sau logout/login. */
+  const identityRef = useRef(identity);
+  useEffect(() => {
+    identityRef.current = identity;
+  }, [identity]);
+
   const load = useCallback(async () => {
+    if (account === undefined) return;
     const sequence = ++requestSequence.current;
     setError(null);
     setLoading(true);
+    setPinErrors((prev) => (prev.size === 0 ? prev : new Map()));
     try {
       const response = await api.get<CompetitionsResponse>("/competitions");
-      if (sequence === requestSequence.current) setData(response);
+      if (sequence === requestSequence.current) setData({ identity, response });
     } catch (err) {
       if (sequence === requestSequence.current) setError(err);
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
-  }, []);
+  }, [account, identity]);
 
   /** Làm mới ngầm: không chạm loading/error của trang, lỗi ném cho hook tự xử lý. */
   const silentLoad = useCallback(async () => {
     const sequence = ++requestSequence.current;
     const response = await api.get<CompetitionsResponse>("/competitions");
-    if (sequence === requestSequence.current) setData(response);
-  }, []);
+    if (sequence === requestSequence.current) setData({ identity, response });
+  }, [identity]);
 
-  const refreshStatus = useAutoRefresh(data !== null && !loading && engagedSlugs.size === 0, silentLoad, { intervalMs: 5_000 });
+  const refreshStatus = useAutoRefresh(
+    data !== null && !loading && engagedSlugs.size === 0 && pinPendingSlugs.size === 0,
+    silentLoad,
+    { intervalMs: 5_000 },
+  );
 
+  // Chạy ở lần mount đầu và mỗi khi danh tính phiên đổi: dữ liệu phải thuộc đúng phiên hiện tại.
   useEffect(() => {
     void load();
   }, [load]);
@@ -553,15 +635,73 @@ export function DashboardPage() {
       prev
         ? {
             ...prev,
-            competitions: prev.competitions.map((item) =>
-              item.slug === slug ? { ...item, membership } : item,
-            ),
+            response: {
+              ...prev.response,
+              competitions: prev.response.competitions.map((item) =>
+                item.slug === slug ? { ...item, membership } : item,
+              ),
+            },
           }
         : prev,
     );
   }, []);
 
-  const competitions = data?.competitions;
+  /** Ghim/bỏ ghim: chặn response cũ ghi đè cả trước lẫn sau request, tạm dừng tự làm mới khi chờ. */
+  const togglePin = useCallback(
+    async (slug: string, nextPinned: boolean) => {
+      if (pinPendingSlugs.has(slug)) return;
+      const identityAtStart = identity;
+      // Response đang bay có thể mang cờ ghim trước thao tác - vô hiệu trước khi ghi.
+      requestSequence.current += 1;
+      setPinErrors((prev) => {
+        if (!prev.has(slug)) return prev;
+        const next = new Map(prev);
+        next.delete(slug);
+        return next;
+      });
+      setPinPendingSlugs((prev) => new Set(prev).add(slug));
+      try {
+        const result = nextPinned
+          ? await api.put<PinResponse>(`/competitions/${slug}/pin`)
+          : await api.del<PinResponse>(`/competitions/${slug}/pin`);
+        // Phiên đã đổi trong lúc chờ: kết quả thuộc tài khoản cũ nên bỏ cả vá state lẫn báo lỗi,
+        // và không tăng sequence kẻo vô hiệu luôn lượt nạp của phiên mới (trang kẹt ở Loading).
+        if (identityRef.current !== identityAtStart) return;
+        // GET khởi chạy trong lúc chờ có thể kết thúc sau PUT với trạng thái cũ - vô hiệu lần nữa.
+        requestSequence.current += 1;
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                response: {
+                  ...prev.response,
+                  competitions: prev.response.competitions.map((item) =>
+                    item.slug === slug ? { ...item, pinned: result.pinned } : item,
+                  ),
+                },
+              }
+            : prev,
+        );
+      } catch (err) {
+        if (identityRef.current !== identityAtStart) return;
+        requestSequence.current += 1;
+        setPinErrors((prev) =>
+          new Map(prev).set(slug, err instanceof Error ? err.message : "Lỗi không xác định"),
+        );
+      } finally {
+        setPinPendingSlugs((prev) => {
+          const next = new Set(prev);
+          next.delete(slug);
+          return next;
+        });
+      }
+    },
+    [identity, pinPendingSlugs],
+  );
+
+  const competitions = data?.response.competitions;
+  // Dữ liệu đang giữ thuộc phiên khác: chờ lượt nạp theo phiên hiện tại thay vì render nó.
+  const stale = data !== null && account !== undefined && data.identity !== identity;
 
   // Một clock duy nhất cho cả trang, nhịp theo deadline gần nhất trong các cuộc thi đang mở.
   const publishedDeadlines = useMemo(
@@ -576,6 +716,9 @@ export function DashboardPage() {
   // Ngoài AuthProvider (test dựng component lẻ) coi như không phải khách để giữ hành vi cũ.
   const isGuest = auth !== null && !auth.loading && auth.account === null;
 
+  // Sort theo bài của tôi cần account đã xác nhận; khách/chưa xác định thì hiệu lực là A–Z.
+  const effectiveSort = sort === "my_submissions" && !canPersonalize ? "name" : sort;
+
   const filtered = useMemo(() => {
     // Khách không có membership nào nên ép về "tất cả": state cũ không thể làm rỗng danh sách
     // khi phiên đăng nhập kết thúc giữa chừng.
@@ -587,9 +730,10 @@ export function DashboardPage() {
       if (participationFilter === "not_joined" && item.membership.active) return false;
       return needle === "" || item.name.toLocaleLowerCase("vi").includes(needle);
     });
-    // `sort` trả về mảng mới nên không đụng tới mảng của state.
-    return rows.sort(COMPARATORS[sort]);
-  }, [competitions, filter, isGuest, participation, query, sort]);
+    // `sort` trả về mảng mới nên không đụng tới mảng của state; ghim luôn đứng đầu mọi kiểu sort.
+    const comparator = COMPARATORS[effectiveSort];
+    return rows.sort((a, b) => comparePinnedFirst(a, b, comparator));
+  }, [competitions, effectiveSort, filter, isGuest, participation, query]);
 
   const activeCount = (competitions ?? []).filter((item) => item.status === "published").length;
   const closedCount = (competitions ?? []).filter((item) => item.status === "closed").length;
@@ -630,8 +774,9 @@ export function DashboardPage() {
               </dt>
               <dd className="dash-stat-value">{String(closedCount).padStart(2, "0")}</dd>
             </dl>
-            {/* Khách chưa có membership nào nên ô này luôn 00 - chỉ tổ rối. */}
-            {!isGuest && (
+            {/* Khách chưa có membership nào nên ô này luôn 00 - chỉ tổ rối. Dữ liệu phiên cũ
+                cũng không được hiện con số tham gia của người khác. */}
+            {!isGuest && !stale && (
               <dl className="dash-stat dash-stat-joined">
                 <dt className="dash-stat-label">
                   <IconUsers />
@@ -672,22 +817,24 @@ export function DashboardPage() {
               ))}
             </div>
             <CompetitionFilterDropdown
-              sort={sort}
-              onSortChange={setSort}
               // Truyền giá trị đang thực sự áp dụng, để nhóm bị khóa của khách không hiển thị
               // một lựa chọn khác với danh sách đang render.
+              sort={effectiveSort}
+              onSortChange={setSort}
+              personalSortLocked={!canPersonalize}
               participation={isGuest ? "all" : participation}
               onParticipationChange={setParticipation}
               participationLocked={isGuest}
-              activeCount={(sort === "name" ? 0 : 1) + (participation === "all" || isGuest ? 0 : 1)}
+              activeCount={
+                (effectiveSort === "name" ? 0 : 1) +
+                (participation === "all" || isGuest ? 0 : 1)
+              }
             />
           </div>
         </div>
       </header>
 
-      {loading ? (
-        <Loading />
-      ) : error ? (
+      {error ? (
         <div className="form-error dash-error" role="alert">
           <IconError />
           {/* Mã lỗi thô của API là chi tiết kỹ thuật - người dùng cuối chỉ cần câu mô tả. */}
@@ -698,6 +845,8 @@ export function DashboardPage() {
             Thử lại
           </button>
         </div>
+      ) : loading || stale ? (
+        <Loading />
       ) : filtered.length > 0 ? (
         <>
           <div className="dash-list-head">
@@ -711,6 +860,10 @@ export function DashboardPage() {
                 competition={competition}
                 theme={getCardTheme(index)}
                 now={now}
+                canPersonalize={canPersonalize}
+                pinPending={pinPendingSlugs.has(competition.slug)}
+                pinError={pinErrors.get(competition.slug)}
+                onTogglePin={togglePin}
                 onMembershipChange={handleMembershipChange}
                 onJoinEngaged={markJoinEngaged}
               />
@@ -743,6 +896,10 @@ function CompetitionCard({
   competition,
   theme,
   now,
+  canPersonalize,
+  pinPending,
+  pinError,
+  onTogglePin,
   onMembershipChange,
   onJoinEngaged,
 }: {
@@ -751,6 +908,13 @@ function CompetitionCard({
   theme: CardTheme;
   /** Mốc giờ dùng chung của cả trang - mỗi thẻ không tự mở timer riêng. */
   now: number | null;
+  /** Chỉ account đã xác nhận mới thấy nút ghim và số liệu cá nhân của chính mình. */
+  canPersonalize: boolean;
+  /** Lượt ghim của thẻ này đang chờ - khóa nút để double-click không phát ra hai request. */
+  pinPending: boolean;
+  /** Lỗi ghim gần nhất của thẻ; thành công hoặc lượt ghim mới sẽ xóa. */
+  pinError?: string;
+  onTogglePin: (slug: string, nextPinned: boolean) => void;
   onMembershipChange: (slug: string, membership: Membership) => void;
   /** Báo trang khi thẻ đang tham gia/rời hoặc mở modal để tạm dừng tự làm mới. */
   onJoinEngaged?: (slug: string, engaged: boolean) => void;
@@ -764,8 +928,9 @@ function CompetitionCard({
     c.status === "published" && now !== null ? formatCountdown(c.end_at, now) : null;
   // Thẻ đã quá hạn không còn "Đang diễn ra" nữa, dù backend vẫn giữ status `published`.
   const shown = displayStatus(c.status, c.end_at);
-  // Chỉ đọc số liệu khi membership đang hoạt động; chưa tham gia hoặc chưa có dữ liệu hiện "-".
-  const stats = c.membership.active ? c.my_stats : undefined;
+  const pinned = c.pinned ?? false;
+  // Chỉ đọc số liệu khi account đã xác nhận và membership đang hoạt động; còn lại hiện "-".
+  const stats = canPersonalize && c.membership.active ? c.my_stats : undefined;
   const rankText =
     stats?.rank == null
       ? "-"
@@ -782,11 +947,30 @@ function CompetitionCard({
         <h3 className="comp-card-title">
           <Link to={`/competitions/${c.slug}`}>{c.name}</Link>
         </h3>
-        <span className={`status-badge status-badge-lg ${statusClass(shown)}`}>
-          <span className="chip-dot" aria-hidden="true" />
-          {STATUS_LABEL[shown]}
-        </span>
+        <div className="comp-card-head-actions">
+          {canPersonalize && (
+            <button
+              type="button"
+              className="comp-pin-button"
+              aria-pressed={pinned}
+              aria-label={`${pinned ? "Bỏ ghim" : "Ghim"} cuộc thi ${c.name}`}
+              disabled={pinPending}
+              onClick={() => onTogglePin(c.slug, !pinned)}
+            >
+              <IconPin filled={pinned} />
+            </button>
+          )}
+          <span className={`status-badge status-badge-lg ${statusClass(shown)}`}>
+            <span className="chip-dot" aria-hidden="true" />
+            {STATUS_LABEL[shown]}
+          </span>
+        </div>
       </div>
+      {pinError && (
+        <p className="comp-pin-error" role="alert">
+          {pinError}
+        </p>
+      )}
 
       <div className="comp-card-body">
         <div className="comp-card-chips">
@@ -850,6 +1034,15 @@ function CompetitionCard({
             <div className="comp-personal-item">
               <dt className="comp-personal-label">Đã nộp hôm nay</dt>
               <dd className="comp-personal-value">{stats ? `${stats.used_today} lượt` : "-"}</dd>
+            </div>
+            <div className="comp-personal-item">
+              <dt className="comp-personal-label">Tổng bài đã nộp</dt>
+              {/* Mọi status/review, kể cả non-member - khớp `total` trong lịch sử nộp bài. */}
+              <dd className="comp-personal-value">
+                {canPersonalize && c.my_submission_count != null
+                  ? `${c.my_submission_count} bài`
+                  : "-"}
+              </dd>
             </div>
           </dl>
         </div>

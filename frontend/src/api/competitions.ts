@@ -76,6 +76,20 @@ export interface Competition {
   quota?: QuotaStatus;
   /** Số liệu cá nhân trên thẻ danh sách; vắng mặt ngoài thành viên đang hoạt động. */
   my_stats?: MyStats;
+  /** Ghim riêng của account đang đăng nhập; guest luôn false. Chỉ public list trả về. */
+  pinned?: boolean;
+  /**
+   * Tổng bài đã nộp của account hiện tại trong cuộc thi, mọi status/review - cùng định nghĩa
+   * với `total` trong lịch sử nộp bài, khác `submission_count` toàn hệ thống. Chỉ có khi đã
+   * đăng nhập (kể cả non-member); guest không nhận field này.
+   */
+  my_submission_count?: number;
+}
+
+/** Response của PUT/DELETE ghim: `pinned` là trạng thái SAU thao tác nên gọi lặp vẫn nhất quán. */
+export interface PinResponse {
+  competition_id: string;
+  pinned: boolean;
 }
 
 /** Số liệu cá nhân của thành viên đang hoạt động, chỉ có trên public list. */

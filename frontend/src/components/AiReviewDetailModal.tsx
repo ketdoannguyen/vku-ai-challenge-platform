@@ -16,7 +16,7 @@
  *   nhau, thẻ phải nói ra cả hai thay vì để người đọc đoán vì sao chúng lệch.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatLocal } from "../api/competitions";
 import {
   AI_VERDICT_LABEL,
@@ -40,6 +40,10 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { downloadArtifact } from "../lib/downloadArtifact";
 import { AutoRefreshNotice } from "./AutoRefreshNotice";
 import { ConfirmModal, Modal } from "./Modal";
+
+const ArtifactViewerContent = lazy(() =>
+  import("./ArtifactViewer").then((module) => ({ default: module.ArtifactViewerContent })),
+);
 import { ErrorBox, Loading } from "./ui";
 
 /** Nhịp tự làm mới ngầm khi modal còn mở. */
@@ -103,6 +107,17 @@ const SOURCE_MATCH_EXPLANATION: Record<AiSourceMatch, string> = {
  */
 const SOURCE_URLS_SHOWN = 5;
 
+/**
+ * Trần số cell hiển thị cho một tài nguyên BTC trong dữ kiện quét toàn notebook (ADR-059); dài hơn
+ * thì cắt và đánh dấu "…" để dòng không phình.
+ */
+const RESOURCE_CELLS_SHOWN = 10;
+
+function formatCells(cells: number[]): string {
+  const shown = cells.slice(0, RESOURCE_CELLS_SHOWN).join(", ");
+  return cells.length > RESOURCE_CELLS_SHOWN ? `${shown}, …` : shown;
+}
+
 const DISCLAIMER = "AI chỉ tham khảo, không ảnh hưởng điểm số. Ban Tổ chức quyết định cuối cùng.";
 
 /** Ngưỡng để khỏi hiện nút "Xem thêm" cho những câu vốn đã ngắn. Chỉ là heuristic, không phải
@@ -143,6 +158,9 @@ export function AiReviewDetailModal({
   const [confirmingRerun, setConfirmingRerun] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState("");
+  const [viewingNotebook, setViewingNotebook] = useState(false);
+  const backToReviewRef = useRef<HTMLButtonElement>(null);
+  const viewNotebookRef = useRef<HTMLButtonElement>(null);
   const requestSequence = useRef(0);
   /** Số lượt tải do admin chủ động đang chạy; lượt ngầm nhường để không tranh chấp. */
   const manualLoads = useRef(0);
@@ -191,11 +209,11 @@ export function AiReviewDetailModal({
    * nội dung, hoặc khi có lượt tải chủ động đang chạy.
    */
   const silentRefresh = useCallback(async () => {
-    if (busy || confirmingRerun || manualLoads.current > 0) return false;
+    if (busy || confirmingRerun || viewingNotebook || manualLoads.current > 0) return false;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return false;
     await load(true);
-  }, [load, busy, confirmingRerun]);
+  }, [load, busy, confirmingRerun, viewingNotebook]);
 
   // Modal còn mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
   const refreshStatus = useAutoRefresh(true, silentRefresh, {
@@ -249,6 +267,11 @@ export function AiReviewDetailModal({
     state === "COMPLETED" || state === "ERROR" ? canonical ?? settledLatest : settledLatest;
   const others = ordered.filter((record) => record.id !== featured?.id);
 
+  useEffect(() => {
+    if (viewingNotebook) backToReviewRef.current?.focus();
+    else viewNotebookRef.current?.focus();
+  }, [viewingNotebook]);
+
   const heading =
     state === "COMPLETED"
       ? "Kết quả đánh giá"
@@ -258,11 +281,24 @@ export function AiReviewDetailModal({
 
   return (
     <Modal
-      title={`Kiểm tra AI · ${submission.account.name}`}
-      onClose={onClose}
+      title={`${viewingNotebook ? "Xem notebook" : "Kiểm tra AI"} · ${submission.account.name}`}
+      onClose={() => (viewingNotebook ? setViewingNotebook(false) : onClose())}
       returnFocusRef={returnFocusRef}
     >
-      {loading ? (
+      {viewingNotebook ? (
+        <div className="artifact-viewer-in-review">
+          <button ref={backToReviewRef} className="btn btn-secondary btn-sm" type="button" onClick={() => setViewingNotebook(false)}>
+            ← Quay lại đánh giá
+          </button>
+          <Suspense fallback={<p role="status">Đang mở trình xem…</p>}>
+            <ArtifactViewerContent
+              path={`/admin/submissions/${submission.id}/notebook`}
+              kind="notebook"
+              filename={submission.artifacts.notebook?.filename ?? "notebook.ipynb"}
+            />
+          </Suspense>
+        </div>
+      ) : loading ? (
         <Loading label="Đang tải chi tiết kiểm tra AI..." />
       ) : error ? (
         <div className="admin-section-error">
@@ -274,6 +310,15 @@ export function AiReviewDetailModal({
       ) : (
         <div className="ai-detail">
           <div className="ai-actions">
+            <button
+              ref={viewNotebookRef}
+              className="btn btn-secondary ai-action"
+              type="button"
+              disabled={!submission.artifacts.notebook?.available}
+              onClick={() => setViewingNotebook(true)}
+            >
+              Xem notebook
+            </button>
             <button
               className="btn btn-secondary ai-action"
               type="button"
@@ -442,13 +487,18 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
 }
 
 /**
- * Đối chiếu nguồn dataset của một lượt: với mỗi đoạn code có lệnh tải dữ liệu, hiện trạng thái
- * tổng hợp, lời giải thích của server, từng URL/ID ghi nhận được, và chữ của model tách riêng.
+ * Đối chiếu nguồn dataset của một lượt: dữ kiện quét toàn notebook (tài nguyên BTC xuất hiện ở CODE
+ * cell nào, ADR-059), rồi với mỗi đoạn code có lệnh tải dữ liệu, hiện trạng thái tổng hợp, lời giải
+ * thích của server, từng URL/ID ghi nhận được, và chữ của model tách riêng.
  * Mục này độc lập với kết luận thể lệ (ADR-055): nó nói dấu hiệu trong code, không phải vi phạm,
  * và "không khớp" không đồng nghĩa nguồn đến từ ngoài cuộc thi.
  */
 function SourceSignalsSection({ record }: { record: AiReviewRecord }) {
-  if (!record.source_signals?.length) return null;
+  const signals = record.source_signals ?? [];
+  // `null`/`undefined` = row cũ chưa có dữ kiện quét; khác hẳn mảng rỗng nghĩa là "quét rồi, không thấy".
+  const mentions = record.resources_in_notebook ?? null;
+  const showScan = mentions !== null && (record.resources_configured ?? 0) > 0;
+  if (signals.length === 0 && !showScan) return null;
   return (
     <section className="ai-source-signals">
       <h4>Nguồn dataset trong notebook</h4>
@@ -456,47 +506,63 @@ function SourceSignalsSection({ record }: { record: AiReviewRecord }) {
       {record.resources_configured === 0 && (
         <p>Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu.</p>
       )}
-      <ul className="ai-finding-list">
-        {record.source_signals.map((signal, index) => (
-          <li className="ai-finding" key={`${record.id}-source-${index}`}>
-            <div className="ai-finding-head">
-              <span className={`status-badge ${SOURCE_MATCH_TONE[signal.match]}`}>
-                {SOURCE_MATCH_LABEL[signal.match]}
-              </span>
-              <span className="ai-source-locator">
-                Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}
-              </span>
-            </div>
-            <p className="ai-source-result">{SOURCE_MATCH_EXPLANATION[signal.match]}</p>
-            {signal.reason && <p className="ai-source-reason">AI ghi nhận: {signal.reason}</p>}
-            {signal.urls.length === 0 ? (
-              <p className="ai-source-note">
-                Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.
-              </p>
-            ) : (
-              <ul className="ai-source-links">
-                {signal.urls.map((item, urlIndex) => (
-                  <li key={urlIndex}>
-                    <span className={`status-badge ${SOURCE_MATCH_TONE[item.match]}`}>
-                      {SOURCE_URL_MATCH_LABEL[item.match]}
-                    </span>
-                    <code>{item.url.startsWith("id=") ? `ID: ${item.url.slice(3)}` : item.url}</code>
-                    {item.resource_label && (
-                      <span className="ai-source-resource">· {item.resource_label}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {signal.urls.length >= SOURCE_URLS_SHOWN && (
-              <p className="ai-source-note">
-                Danh sách hiển thị tối đa {SOURCE_URLS_SHOWN} nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.
-              </p>
-            )}
-            <pre>{signal.snippet}</pre>
-          </li>
+      {showScan &&
+        mentions.map((mention, index) => (
+          <p className="ai-source-result" key={`${record.id}-scan-${index}`}>
+            Link/ID tài nguyên BTC xuất hiện trong code cell: {mention.label} (cell{" "}
+            {formatCells(mention.cells)}).
+          </p>
         ))}
-      </ul>
+      {showScan && mentions.length === 0 && (
+        <p className="ai-source-note">
+          {record.notebook_stats?.truncated
+            ? "Không thấy link/ID tài nguyên BTC trong các code cell đã kiểm tra; notebook bị cắt nên chưa thể kết luận cho toàn bộ."
+            : "Không có link/ID tài nguyên BTC nào trong code cell của notebook."}
+        </p>
+      )}
+      {signals.length > 0 && (
+        <ul className="ai-finding-list">
+          {signals.map((signal, index) => (
+            <li className="ai-finding" key={`${record.id}-source-${index}`}>
+              <div className="ai-finding-head">
+                <span className={`status-badge ${SOURCE_MATCH_TONE[signal.match]}`}>
+                  {SOURCE_MATCH_LABEL[signal.match]}
+                </span>
+                <span className="ai-source-locator">
+                  Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}
+                </span>
+              </div>
+              <p className="ai-source-result">{SOURCE_MATCH_EXPLANATION[signal.match]}</p>
+              {signal.reason && <p className="ai-source-reason">AI ghi nhận: {signal.reason}</p>}
+              {signal.urls.length === 0 ? (
+                <p className="ai-source-note">
+                  Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.
+                </p>
+              ) : (
+                <ul className="ai-source-links">
+                  {signal.urls.map((item, urlIndex) => (
+                    <li key={urlIndex}>
+                      <span className={`status-badge ${SOURCE_MATCH_TONE[item.match]}`}>
+                        {SOURCE_URL_MATCH_LABEL[item.match]}
+                      </span>
+                      <code>{item.url.startsWith("id=") ? `ID: ${item.url.slice(3)}` : item.url}</code>
+                      {item.resource_label && (
+                        <span className="ai-source-resource">· {item.resource_label}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {signal.urls.length >= SOURCE_URLS_SHOWN && (
+                <p className="ai-source-note">
+                  Danh sách hiển thị tối đa {SOURCE_URLS_SHOWN} nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.
+                </p>
+              )}
+              <pre>{signal.snippet}</pre>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }
