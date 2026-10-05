@@ -167,7 +167,7 @@ Sắp xếp của trang toàn cục: `created_at` (default, desc) và `primary_s
 
 Sprint 06 không thêm field persistence. My Submissions, leaderboard, admin view và export đều là dữ liệu derived từ `submissions` + safe account fields. `total_submissions` chỉ đếm record **được tính kết quả**, nhất quán với ADR-011 và ADR-035.
 
-`my_submission_count` trên danh sách cuộc thi cũng là **derived**, không lưu DB và không thêm index (ADR-057): số document của `(account_id, competition_id)` **không lọc** `status`/`review` - cùng định nghĩa với `total` trong `GET /submissions/me` và `submission_count` toàn hệ thống (ADR-032), tính bằng một nhánh `$facet` chung với `used_today` cho cả trang. Đây **không phải** số bài được tính kết quả của bảng xếp hạng (ADR-035) - hai con số khác nhau khi có bài bị từ chối hoặc record `failed` cũ, nên UI gọi nó là "Tổng bài đã nộp".
+`my_submission_count` trên danh sách cuộc thi cũng là **derived**, không lưu DB và không thêm index (ADR-057): số document của `(account_id, competition_id)` **không lọc** `status`/`review` - cùng định nghĩa với `total` trong `GET /submissions/me` và `submission_count` toàn hệ thống (ADR-032), tính bằng một nhánh `$facet` chung với `used_today` cho cả trang. Đây **không phải** số bài được tính kết quả của bảng xếp hạng (ADR-035) - hai con số khác nhau khi có bài bị từ chối hoặc record `failed` cũ; từ 2026-10-05 UI không hiển thị nó thành ô số liệu trên thẻ nữa, field chỉ còn nuôi kiểu sắp xếp mặc định "Nhiều bài của tôi nhất" (ADR-057).
 
 ## 6b. scoring_attempts - implemented (ADR-048, hàng đợi chấm v2)
 

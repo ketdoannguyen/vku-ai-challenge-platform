@@ -571,8 +571,8 @@ function cardOf(name: string): HTMLElement {
   return screen.getByRole("heading", { name, level: 3 }).closest("article")!;
 }
 
-test("thẻ đã tham gia hiện hạng, điểm cao nhất, lượt nộp hôm nay và tổng bài đã nộp", async () => {
-  mockApi({ competitions: [{ ...JOINED, my_stats: MY_STATS, my_submission_count: 4 }] });
+test("thẻ đã tham gia hiện hạng, điểm cao nhất và lượt nộp hôm nay", async () => {
+  mockApi({ competitions: [{ ...JOINED, my_stats: MY_STATS }] });
   renderDashboard();
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
@@ -581,8 +581,6 @@ test("thẻ đã tham gia hiện hạng, điểm cao nhất, lượt nộp hôm 
   expect(within(card).getByText("#2/3")).toBeTruthy();
   expect(within(card).getByText("0.91")).toBeTruthy();
   expect(within(card).getByText("2 lượt")).toBeTruthy();
-  expect(within(card).getByText("Tổng bài đã nộp")).toBeTruthy();
-  expect(within(card).getByText("4 bài")).toBeTruthy();
 });
 
 test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
@@ -596,7 +594,7 @@ test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
   expect(within(card).getByText("0.92")).toBeTruthy();
 });
 
-test("chưa tham gia: hàng số liệu vẫn hiện với bốn dấu '-'", async () => {
+test("chưa tham gia: hàng số liệu vẫn hiện với ba dấu '-'", async () => {
   mockApi({ competitions: [PUBLISHED] });
   renderDashboard();
   await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
@@ -604,7 +602,7 @@ test("chưa tham gia: hàng số liệu vẫn hiện với bốn dấu '-'", asy
 
   expect(within(card).getByText("Hạng hiện tại")).toBeTruthy();
   expect(within(card).getByText("Đã nộp hôm nay")).toBeTruthy();
-  expect(within(card).getAllByText("-")).toHaveLength(4);
+  expect(within(card).getAllByText("-")).toHaveLength(3);
 });
 
 test("khách: hàng số liệu hiện '-' vì backend không trả số liệu cá nhân", async () => {
@@ -613,17 +611,6 @@ test("khách: hàng số liệu hiện '-' vì backend không trả số liệu 
   await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
   const card = cardOf("AI Challenge 2026");
 
-  expect(within(card).getAllByText("-")).toHaveLength(4);
-});
-
-test("non-member vẫn thấy tổng bài đã nộp của mình, hạng/điểm giữ '-'", async () => {
-  // Backend trả count cho mọi account đã đăng nhập; membership rỗng nên ba ô kia vẫn trống.
-  mockApi({ competitions: [{ ...PUBLISHED, my_submission_count: 5 }] });
-  renderDashboard();
-  await screen.findByRole("heading", { name: "AI Challenge 2026", level: 3 });
-  const card = cardOf("AI Challenge 2026");
-
-  expect(within(card).getByText("5 bài")).toBeTruthy();
   expect(within(card).getAllByText("-")).toHaveLength(3);
 });
 
@@ -637,7 +624,7 @@ test("thành viên chưa có bài hợp lệ: hạng và điểm '-', lượt h�
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getAllByText("-")).toHaveLength(3);
+  expect(within(card).getAllByText("-")).toHaveLength(2);
   expect(within(card).getByText("0 lượt")).toBeTruthy();
 });
 
@@ -655,11 +642,11 @@ test("bảng xếp hạng ẩn: hạng và điểm '-', vẫn hiện lượt đ�
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getAllByText("-")).toHaveLength(3);
+  expect(within(card).getAllByText("-")).toHaveLength(2);
   expect(within(card).getByText("1 lượt")).toBeTruthy();
 });
 
-test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp điền hạng/điểm/lượt/tổng bài", async () => {
+test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp điền hạng/điểm/lượt", async () => {
   vi.useFakeTimers();
   const competitions = [{ ...PUBLISHED, membership: { active: false, joined_at: null as string | null } }];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -670,7 +657,6 @@ test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp đ
         ...competitions[0],
         membership: { active: true, joined_at: "2026-10-01T00:00:00Z" },
         my_stats: { rank: 1, rank_total: 4, best_score: 0.5, used_today: 0 },
-        my_submission_count: 3,
       } as (typeof competitions)[number];
       return json({ competition_id: "1", membership: competitions[0].membership, joined_now: true });
     }
@@ -681,19 +667,18 @@ test("sau khi tham gia: số liệu tạm '-', lượt làm mới kế tiếp đ
   renderDashboard();
   await advance();
   const card = cardOf("AI Challenge 2026");
-  expect(within(card).getAllByText("-")).toHaveLength(4);
+  expect(within(card).getAllByText("-")).toHaveLength(3);
 
   fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
   await advance();
   // Join xong nhưng số liệu chưa về: hiện "-" chứ không bịa hạng/điểm.
   expect(screen.getByRole("link", { name: "Vào cuộc thi" })).toBeTruthy();
-  expect(within(card).getAllByText("-")).toHaveLength(4);
+  expect(within(card).getAllByText("-")).toHaveLength(3);
 
   await advance(6_000);
   expect(within(card).getByText("#1/4")).toBeTruthy();
   expect(within(card).getByText("0.50")).toBeTruthy();
   expect(within(card).getByText("0 lượt")).toBeTruthy();
-  expect(within(card).getByText("3 bài")).toBeTruthy();
   // Số liệu đến từ payload danh sách: không thẻ nào tự gọi bảng xếp hạng.
   expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/leaderboard"))).toBe(false);
 });
@@ -1005,6 +990,13 @@ function IdentityControls() {
 test("đổi danh tính A → guest → B: không render dữ liệu phiên trước, sort cá nhân về A–Z", async () => {
   const accountA = { ...ACCOUNT, id: "9", name: "Thí sinh A" };
   const accountB = { ...ACCOUNT, id: "10", email: "b@vku.vn", name: "Thí sinh B" };
+  // Số liệu cá nhân là dấu vết phiên: hạng của A/B khác nhau để test bắt được dữ liệu cũ rò rỉ.
+  const joinedPublished = {
+    ...PUBLISHED,
+    membership: { active: true, joined_at: "2026-10-01T00:00:00Z" },
+  };
+  const STATS_A = { rank: 2, rank_total: 3, best_score: 0.9123, used_today: 2 };
+  const STATS_B = { rank: 4, rank_total: 4, best_score: 0.5, used_today: 0 };
   let session: "A" | "guest" | "B" = "A";
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -1025,9 +1017,9 @@ test("đổi danh tính A → guest → B: không render dữ liệu phiên trư
     return json({
       competitions: [
         session === "A"
-          ? { ...PUBLISHED, my_submission_count: 7, pinned: true }
+          ? { ...joinedPublished, my_stats: STATS_A, pinned: true }
           : session === "B"
-            ? { ...PUBLISHED, my_submission_count: 1 }
+            ? { ...joinedPublished, my_stats: STATS_B }
             : PUBLISHED,
       ],
     });
@@ -1045,7 +1037,7 @@ test("đổi danh tính A → guest → B: không render dữ liệu phiên trư
   );
 
   // Phiên A: số liệu và cờ ghim của A hiển thị; chọn luôn sort cá nhân.
-  await screen.findByText("7 bài");
+  await screen.findByText("#2/3");
   expect(
     screen.getByRole("button", { name: "Bỏ ghim cuộc thi AI Challenge 2026" }).getAttribute("aria-pressed"),
   ).toBe("true");
@@ -1055,9 +1047,9 @@ test("đổi danh tính A → guest → B: không render dữ liệu phiên trư
 
   await user.click(screen.getByRole("button", { name: "Đăng xuất" }));
   // Danh tính đổi: dữ liệu của A không được render thêm lần nào, nút ghim biến mất.
-  await waitFor(() => expect(screen.queryByText("7 bài")).toBeNull());
+  await waitFor(() => expect(screen.queryByText("#2/3")).toBeNull());
   await waitFor(() =>
-    expect(within(cardOf("AI Challenge 2026")).getAllByText("-")).toHaveLength(4),
+    expect(within(cardOf("AI Challenge 2026")).getAllByText("-")).toHaveLength(3),
   );
   expect(screen.queryByRole("button", { name: /ghim cuộc thi/i })).toBeNull();
 
@@ -1069,8 +1061,8 @@ test("đổi danh tính A → guest → B: không render dữ liệu phiên trư
 
   // Phiên B: chỉ số liệu của B, không hồi tưởng dữ liệu A.
   await user.click(screen.getByRole("button", { name: "Đăng nhập B" }));
-  await screen.findByText("1 bài");
-  expect(screen.queryByText("7 bài")).toBeNull();
+  await screen.findByText("#4/4");
+  expect(screen.queryByText("#2/3")).toBeNull();
   expect(
     screen.getByRole("button", { name: "Ghim cuộc thi AI Challenge 2026" }).getAttribute("aria-pressed"),
   ).toBe("false");

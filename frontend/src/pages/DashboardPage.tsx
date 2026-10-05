@@ -1035,15 +1035,6 @@ function CompetitionCard({
               <dt className="comp-personal-label">Đã nộp hôm nay</dt>
               <dd className="comp-personal-value">{stats ? `${stats.used_today} lượt` : "-"}</dd>
             </div>
-            <div className="comp-personal-item">
-              <dt className="comp-personal-label">Tổng bài đã nộp</dt>
-              {/* Mọi status/review, kể cả non-member - khớp `total` trong lịch sử nộp bài. */}
-              <dd className="comp-personal-value">
-                {canPersonalize && c.my_submission_count != null
-                  ? `${c.my_submission_count} bài`
-                  : "-"}
-              </dd>
-            </div>
           </dl>
         </div>
       </div>
