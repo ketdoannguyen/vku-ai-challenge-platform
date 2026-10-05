@@ -20,6 +20,7 @@
  */
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -57,7 +58,12 @@ import {
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { AutoRefreshNotice } from "./AutoRefreshNotice";
-import { ArtifactLinks } from "./ArtifactLinks";
+import {
+  ArtifactLinks,
+  LazyArtifactViewerModal,
+  type ArtifactKind,
+  type ArtifactViewerTarget,
+} from "./ArtifactLinks";
 import { ConfirmModal } from "./Modal";
 import { SubmissionRejectModal } from "./SubmissionReviewModal";
 import { ErrorBox } from "./ui";
@@ -170,6 +176,8 @@ export function AdminSubmissionsPanel({
   const [rejecting, setRejecting] = useState<AdminSubmissionItem | null>(null);
   const [restoring, setRestoring] = useState<AdminSubmissionItem | null>(null);
   const [aiDetail, setAiDetail] = useState<AdminSubmissionItem | null>(null);
+  /** Tệp đang mở trong trình xem; `null` là đóng. Cả bảng dùng chung một trình xem. */
+  const [viewer, setViewer] = useState<ArtifactViewerTarget | null>(null);
   const [message, setMessage] = useState("");
   const requestSequence = useRef(0);
   const hasData = useRef(false);
@@ -352,16 +360,21 @@ export function AdminSubmissionsPanel({
 
   const busy = loading || refreshing;
 
+  /** Mở tệp trong trình xem duy nhất của bảng; nút ở dòng nào cũng gọi vào đây. */
+  function openViewer(kind: ArtifactKind, submissionId: string, filename: string) {
+    setViewer({ kind, submissionId, filename });
+  }
+
   /**
    * Lượt làm mới ngầm: nhường khi modal đang mở (admin đang đọc/xử lý một bài), khi có lượt
    * tải chủ động, hoặc khi admin đang bôi đen nội dung.
    */
   const silentRefresh = useCallback(async () => {
-    if (manualLoads.current > 0 || rejecting || restoring || aiDetail) return false;
+    if (manualLoads.current > 0 || rejecting || restoring || aiDetail || viewer) return false;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return false;
     await load(query, true, true);
-  }, [load, query, rejecting, restoring, aiDetail]);
+  }, [load, query, rejecting, restoring, aiDetail, viewer]);
 
   // Bảng đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
   const refreshStatus = useAutoRefresh(true, silentRefresh, {
@@ -822,6 +835,7 @@ export function AdminSubmissionsPanel({
                             basePath="/admin/submissions"
                             submissionId={submission.id}
                             artifacts={submission.artifacts}
+                            onView={openViewer}
                           />
                         </dd>
                       </div>
@@ -936,6 +950,19 @@ export function AdminSubmissionsPanel({
           onClose={() => setRestoring(null)}
           returnFocusRef={triggerRef}
         />
+      )}
+
+      {/* Một trình xem duy nhất cho cả bảng: dòng chỉ báo tệp cần mở qua `onView`, không dòng nào
+          tự dựng modal nên không thể mở nhiều trình xem cùng lúc. */}
+      {viewer && (
+        <Suspense fallback={<span role="status">Đang mở trình xem…</span>}>
+          <LazyArtifactViewerModal
+            path={`/admin/submissions/${viewer.submissionId}/${viewer.kind}`}
+            kind={viewer.kind}
+            filename={viewer.filename}
+            onClose={() => setViewer(null)}
+          />
+        </Suspense>
       )}
     </section>
   );

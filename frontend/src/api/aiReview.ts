@@ -186,6 +186,12 @@ export interface AiSourceSignal {
   warning: boolean;
 }
 
+/** Một tài nguyên BTC quét thấy trong CODE cell; `cells` là số cell 1-based, tăng dần. */
+export interface AiResourceMention {
+  label: string;
+  cells: number[];
+}
+
 export interface AiNotebookStats {
   cells: number;
   code_cells: number;
@@ -215,6 +221,11 @@ export interface AiReviewRecord {
   findings: AiFinding[];
   source_signals?: AiSourceSignal[];
   resources_configured?: number;
+  /**
+   * Kết quả quét toàn notebook (ADR-059): tài nguyên BTC xuất hiện ở CODE cell nào. `[]` nghĩa là
+   * đã quét và không thấy; row cũ thiếu field (`null`/`undefined`) nghĩa là không biết.
+   */
+  resources_in_notebook?: AiResourceMention[] | null;
   notebook_stats: AiNotebookStats;
   provider: string | null;
   provider_host: string | null;

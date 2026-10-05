@@ -170,7 +170,7 @@ interface Request {
   method: string;
 }
 
-/** Router hai lời gọi của modal: đọc chi tiết và chạy lại. */
+/** Router ba lời gọi của modal: đọc chi tiết, chạy lại, và tệp notebook cho trình xem. */
 function mockApi(
   handler: (url: string, init: RequestInit) => Response,
   detail: AiReviewDetail = DETAIL,
@@ -181,11 +181,20 @@ function mockApi(
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       requests.push({ url, method: init?.method ?? "GET" });
+      if (url.endsWith("/notebook")) return notebookResponse();
       if (url.endsWith("/rerun")) return handler(url, init ?? {});
       return json(detail);
     }),
   );
   return requests;
+}
+
+/** Notebook tối thiểu để trình xem đọc được; nội dung cell không phải thứ các test này kiểm. */
+function notebookResponse() {
+  return new Response(JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: {}, cells: [] }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
 function json(body: unknown, status = 200) {
@@ -195,12 +204,12 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function renderModal(props: { onChanged?: () => void } = {}) {
+function renderModal(props: { onChanged?: () => void; onClose?: () => void } = {}) {
   return render(
     <AiReviewDetailModal
       submission={SUBMISSION}
       onChanged={props.onChanged ?? (() => {})}
-      onClose={() => {}}
+      onClose={props.onClose ?? (() => {})}
     />,
   );
 }
@@ -256,7 +265,11 @@ function sourceSignal(overrides: Partial<SourceSignalFixture> = {}): SourceSigna
 }
 
 /** Lượt canonical mang đúng các dấu hiệu nguồn được nêu; projection nói lượt này có cảnh báo. */
-function detailWithSignals(signals: SourceSignalFixture[], resourcesConfigured = 1): AiReviewDetail {
+function detailWithSignals(
+  signals: SourceSignalFixture[],
+  resourcesConfigured = 1,
+  mentions?: AiReviewRecord["resources_in_notebook"],
+): AiReviewDetail {
   return detailWith({
     ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
     history: [
@@ -265,6 +278,7 @@ function detailWithSignals(signals: SourceSignalFixture[], resourcesConfigured =
         generation: 2,
         source_signals: signals,
         resources_configured: resourcesConfigured,
+        resources_in_notebook: mentions,
       }),
     ],
   });
@@ -400,6 +414,91 @@ test("record cũ không có dấu hiệu nguồn thì không dựng mục đối
 
   await screen.findByText("Kết quả đánh giá");
   expect(screen.queryByText("Nguồn dataset trong notebook")).toBeNull();
+});
+
+test("quét toàn notebook: tài nguyên BTC xuất hiện trong code cell được nêu kèm số cell", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()], 1, [
+    { label: "Dataset BTC", cells: [2, 5] },
+  ]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText("Link/ID tài nguyên BTC xuất hiện trong code cell: Dataset BTC (cell 2, 5)."),
+  ).toBeTruthy();
+});
+
+test("quét toàn notebook: vắng tài nguyên BTC trong code cell được nói rõ", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()], 1, []));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText("Không có link/ID tài nguyên BTC nào trong code cell của notebook."),
+  ).toBeTruthy();
+});
+
+test("notebook bị cắt: lượt hiện tại và lịch sử chỉ kết luận trên các cell đã kiểm tra", async () => {
+  const truncated = { ...CANONICAL_RUN.notebook_stats, truncated: true, omitted_cells: 4 };
+  mockApi(() => json({}), detailWith({
+    history: [
+      record({
+        id: "r1",
+        generation: 1,
+        resources_configured: 1,
+        resources_in_notebook: [],
+        notebook_stats: truncated,
+      }),
+      record({
+        id: "r2",
+        generation: 2,
+        resources_configured: 1,
+        resources_in_notebook: [],
+        notebook_stats: truncated,
+      }),
+    ],
+  }));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const qualified = /Không thấy link\/ID tài nguyên BTC trong các code cell đã kiểm tra/;
+  expect(within(resultCard()).getByText(qualified)).toBeTruthy();
+  const history = screen.getByRole("dialog").querySelector<HTMLElement>(".ai-history")!;
+  expect(within(history).getByText(qualified)).toBeTruthy();
+  expect(screen.queryByText("Không có link/ID tài nguyên BTC nào trong code cell của notebook.")).toBeNull();
+});
+
+test("row cũ không có dữ kiện quét thì không tự bịa dòng kết quả quét", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(screen.queryByText(/xuất hiện trong code cell/)).toBeNull();
+  expect(screen.queryByText(/Không có link\/ID tài nguyên BTC nào/)).toBeNull();
+});
+
+test("mục đối chiếu nguồn vẫn dựng khi có dữ kiện quét dù chưa có tín hiệu", async () => {
+  mockApi(() => json({}), detailWithSignals([], 1, [{ label: "Dataset BTC", cells: [3] }]));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText("Link/ID tài nguyên BTC xuất hiện trong code cell: Dataset BTC (cell 3)."),
+  ).toBeTruthy();
+  // Không có tín hiệu nào thì không có danh sách đoạn code để hiện.
+  const section = screen.getByText("Nguồn dataset trong notebook").closest("section")!;
+  expect(section.querySelector(".ai-finding-list")).toBeNull();
+});
+
+test("lượt không cấu hình tài nguyên thì không hiện dòng kết quả quét", async () => {
+  mockApi(() => json({}), detailWithSignals([sourceSignal()], 0, []));
+  renderModal();
+
+  await screen.findByText("Nguồn dataset trong notebook");
+  expect(
+    screen.getByText("Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Không có link\/ID tài nguyên BTC nào trong code cell/)).toBeNull();
 });
 
 test("mục đối chiếu nguồn đứng trước danh sách finding trong thẻ kết quả", async () => {
@@ -1098,7 +1197,7 @@ test("câu ngắn không có nút mở rộng", async () => {
    Bàn phím và focus
    --------------------------------------------------------------------------- */
 
-test("tab order trong modal: đóng, hai hành động, các nút mở rộng, rồi lịch sử", async () => {
+test("tab order trong modal: đóng, ba hành động, các nút mở rộng, rồi lịch sử", async () => {
   mockApi(() => json({ submission: DETAIL.submission }));
   renderModal();
 
@@ -1107,8 +1206,9 @@ test("tab order trong modal: đóng, hai hành động, các nút mở rộng, r
   const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
 
   expect(focusable[0]).toHaveAccessibleName("Đóng");
-  expect(focusable[1]).toHaveTextContent("Tải notebook");
-  expect(focusable[2]).toHaveTextContent("Chạy lại AI");
+  expect(focusable[1]).toHaveTextContent("Xem notebook");
+  expect(focusable[2]).toHaveTextContent("Tải notebook");
+  expect(focusable[3]).toHaveTextContent("Chạy lại AI");
   // `summary` phải nằm trong tập focusable, nếu không focus trap tính sai phần tử cuối và Tab
   // sẽ nhảy ra khỏi dialog ngay tại khối lịch sử.
   expect(focusable.at(-1)?.tagName).toBe("SUMMARY");
@@ -1192,6 +1292,82 @@ test("tải notebook đi đúng endpoint của admin", async () => {
       true,
     ),
   );
+});
+
+test("Xem notebook dùng lại chính modal đang mở: quay lại được mà không mở chồng modal", async () => {
+  const requests = mockApi(() => json({ submission: DETAIL.submission }));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  fireEvent.click(screen.getByRole("button", { name: "Xem notebook" }));
+
+  // Một modal duy nhất đổi tiêu đề sang trình xem; phần đánh giá rời DOM thay vì bị che
+  // dưới một dialog thứ hai.
+  const viewing = screen.getByRole("dialog", { name: "Xem notebook · Đội Một" });
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(within(viewing).queryByText("Kết quả đánh giá")).toBeNull();
+  expect(within(viewing).queryByRole("button", { name: "Chạy lại AI" })).toBeNull();
+  // Trình xem đọc đúng route notebook của admin.
+  await waitFor(() =>
+    expect(
+      requests.some((item) => item.url.endsWith(`/api/admin/submissions/${SUBMISSION_ID}/notebook`)),
+    ).toBe(true),
+  );
+
+  fireEvent.click(within(viewing).getByRole("button", { name: /Quay lại đánh giá/ }));
+
+  // Nội dung đánh giá trở lại trong cùng modal, không có dialog nào xếp chồng.
+  const review = screen.getByRole("dialog", { name: "Kiểm tra AI · Đội Một" });
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  expect(within(review).getByText("Kết quả đánh giá")).toBeTruthy();
+});
+
+test("đóng khi đang xem notebook thì lùi về đánh giá, thoát hẳn ở lần đóng sau", async () => {
+  mockApi(() => json({ submission: DETAIL.submission }));
+  const onClose = vi.fn();
+  renderModal({ onClose });
+
+  await screen.findByText("Kết quả đánh giá");
+  fireEvent.click(screen.getByRole("button", { name: "Xem notebook" }));
+  expect(screen.getByRole("dialog", { name: "Xem notebook · Đội Một" })).toBeTruthy();
+
+  // Đóng lần đầu chỉ lùi về đánh giá: admin chưa mất ngữ cảnh hậu kiểm vừa xem.
+  fireEvent.click(screen.getByRole("button", { name: "Đóng" }));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "Kiểm tra AI · Đội Một" })).toBeTruthy();
+  expect(screen.getByText("Kết quả đánh giá")).toBeTruthy();
+
+  // Lần đóng thứ hai mới thoát hẳn: nơi gọi nhận onClose để tự unmount modal.
+  fireEvent.keyDown(document, { key: "Escape" });
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+});
+
+test("trình xem notebook đang mở thì modal nhường lượt làm mới ngầm", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  try {
+    const requests = mockApi(() => json({ submission: DETAIL.submission }));
+    renderModal();
+    await advance(0);
+    const detailCalls = () =>
+      requests.filter((item) => item.method === "GET" && item.url.includes("/ai-review")).length;
+    expect(detailCalls()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Xem notebook" }));
+    await advance(0);
+    expect(screen.getByRole("dialog", { name: "Xem notebook · Đội Một" })).toBeTruthy();
+
+    // Admin đang đọc notebook: modal không chen thêm request đọc chi tiết nào phía sau.
+    const during = detailCalls();
+    await advance(AUTO_REFRESH_MS * 3);
+    expect(detailCalls()).toBe(during);
+
+    fireEvent.click(screen.getByRole("button", { name: /Quay lại đánh giá/ }));
+    await advance(AUTO_REFRESH_MS);
+    expect(detailCalls()).toBeGreaterThan(during);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("lượt đang chờ được tự làm mới ngầm cho tới khi có kết quả", async () => {

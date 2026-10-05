@@ -41,10 +41,11 @@ function filenameFromDisposition(header: string | null): string | null {
  * Tải file qua fetch thay vì để trình duyệt điều hướng anchor: response lỗi
  * (401/500) vẫn là JSON envelope nên phải bắt được trong SPA.
  */
-async function download(path: string): Promise<DownloadResult> {
+async function download(path: string, signal?: AbortSignal): Promise<DownloadResult> {
   const resp = await fetch(`/api${path}`, {
     credentials: "same-origin",
     headers: { Accept: "*/*" },
+    signal,
   });
 
   if (!resp.ok) {

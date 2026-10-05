@@ -144,6 +144,22 @@ def test_the_system_prompt_forbids_inventing_a_ref():
     assert "Chỉ những block có `[RULE_REF ...]` mới là quy định được phép kết luận." in system
 
 
+def test_the_prompt_accepts_only_configured_resources_and_scans_the_whole_notebook():
+    system = prompt.SYSTEM_PROMPT
+    assert "Chỉ link/ID nằm trong <COMPETITION_RESOURCES> là nguồn dataset được chấp nhận." in system
+    assert "Quét TOÀN BỘ CODE cell" in system
+    assert "kể cả khi notebook cũng dùng link BTC cấp ở cell khác" in system
+
+
+def test_the_prompt_names_source_groups_and_caps_signals():
+    system = prompt.SYSTEM_PROMPT
+    for group in ('"link BTC cấp"', '"Drive cá nhân"', '"Drive không rõ"', '"link khác"', '"nguồn ngoài"'):
+        assert group in system
+    assert "`drive.mount`" in system
+    assert "/content/drive/MyDrive/" in system
+    assert "Tối đa 10 tín hiệu" in system
+
+
 def test_the_injection_boundary_still_precedes_the_rules():
     system = prompt.SYSTEM_PROMPT
     assert "KHÔNG đáng tin" in system
