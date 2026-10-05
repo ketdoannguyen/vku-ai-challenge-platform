@@ -246,6 +246,56 @@ async def quota_status(
     }
 
 
+async def my_stats_by_competition(
+    db, competition_ids: list, account_id, now: datetime
+) -> dict:
+    """Số liệu cá nhân theo từng cuộc thi cho trang danh sách: một lượt `$facet` cho cả trang.
+
+    `eligible` đếm bài được tính kết quả (điều kiện xếp hạng của leaderboard) để biết có cần
+    đọc bảng xếp hạng không; `today` đếm bài `completed` trong ngày UTC, cùng quy ước với
+    `completed_today_count`/`quota_status` nên thẻ danh sách và quota trang chi tiết không lệch.
+    """
+    stats = {
+        competition_id: {"eligible_count": 0, "today": 0} for competition_id in competition_ids
+    }
+    if not competition_ids:
+        return stats
+    day_start, day_end = utc_day_bounds(now)
+    cursor = db[SUBMISSIONS_COLLECTION].aggregate(
+        [
+            {
+                "$match": {
+                    "competition_id": {"$in": competition_ids},
+                    "account_id": account_id,
+                }
+            },
+            {
+                "$facet": {
+                    "eligible": [
+                        {"$match": eligible_query({"status": "completed"})},
+                        {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+                    ],
+                    "today": [
+                        {
+                            "$match": {
+                                "status": "completed",
+                                "created_at": {"$gte": day_start, "$lt": day_end},
+                            }
+                        },
+                        {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+                    ],
+                }
+            },
+        ]
+    )
+    facets = (await cursor.to_list(length=1))[0]
+    for row in facets["eligible"]:
+        stats[row["_id"]]["eligible_count"] = row["total"]
+    for row in facets["today"]:
+        stats[row["_id"]]["today"] = row["total"]
+    return stats
+
+
 async def reserve_quota_slot(
     db, membership: dict, quota_per_day: int, now: datetime, *, attempt_id: str | None = None
 ) -> int | None:

@@ -66,6 +66,7 @@ Indexes:
 
 Derived field (không lưu DB):
 - `submission_count` - **không** là field của document. `GET /api/competitions` chạy một aggregation `$match competition_id` + `$group _id` trên `submissions` cho cả trang rồi gắn vào từng item (ADR-032). Đếm mọi document submission đã persist, không phụ thuộc `status` **lẫn `review`**, nên bài bị reject (không tạo document) không được tính, còn bài đã persist mà admin từ chối thì vẫn tính - nó vẫn là một lượt đã tiêu (ADR-035). Không migration, không index mới: index có prefix `competition_id` của `submissions` (§6) đã phục vụ `$match` này. Detail và endpoint admin không dùng lại field này - admin đã có `submission_count` từ `activity_counts`.
+- `my_stats` - **không** là field của document. `GET /api/competitions` gắn vào item **chỉ khi** người gọi là thành viên đang hoạt động: `{rank, rank_total, best_score, used_today}` (ADR-056). `used_today` đếm bài `completed` trong ngày UTC hiện tại, cùng quy ước `quota` (bài bị admin từ chối vẫn tiêu lượt, ADR-035; mốc ngày theo ADR-019) và tính bằng một aggregation `$facet` cho cả trang. `rank`/`rank_total`/`best_score` lấy từ `leaderboard_response(limit=1)` nên giữ nguyên tie-break, chiều metric và lọc metric ẩn (ADR-012); bảng bị ẩn thì không trả hạng/điểm và không đọc bảng. Không migration, không index mới: aggregation lọc theo `(competition_id, account_id)` đã dùng index sẵn có của `submissions` (§6).
 
 ## 4. competition_memberships - implemented (Sprint 04)
 
