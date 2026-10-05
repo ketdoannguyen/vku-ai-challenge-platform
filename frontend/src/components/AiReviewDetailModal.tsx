@@ -397,6 +397,36 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
       ) : (
         noFindingCopy && <p className="ai-finding-empty">{noFindingCopy}</p>
       )}
+
+      <SourceSignalsSection record={record} />
+    </section>
+  );
+}
+
+function SourceSignalsSection({ record }: { record: AiReviewRecord }) {
+  if (!record.source_signals?.length) return null;
+  return (
+    <section className="ai-source-signals">
+      <h4>Nguồn dataset trong notebook</h4>
+      <p>Đây là dấu hiệu trong code, không chứng minh notebook đã chạy và không phải kết luận vi phạm thể lệ.</p>
+      {record.resources_configured === 0 && <p>Cuộc thi chưa cấu hình link tài nguyên để đối chiếu.</p>}
+      <ul className="ai-finding-list">
+        {record.source_signals.map((signal, index) => (
+          <li className="ai-finding" key={`${record.id}-source-${index}`}>
+            <strong>{signal.warning ? "Cần BTC kiểm tra" : "Trùng nguồn BTC cấp"}</strong>
+            <p>{signal.match === "FOLDER_MEMBERSHIP_UNVERIFIED"
+              ? "Không thể xác minh tệp có thuộc thư mục BTC cấp chỉ từ notebook."
+              : signal.match === "UNVERIFIED_SOURCE"
+                ? "Không xác định được nguồn tải tĩnh; cần xem code và link thực tế."
+                : signal.reason}</p>
+            <p>Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}</p>
+            {signal.urls.map((item, urlIndex) => (
+              <p key={urlIndex}><code>{item.url}</code>{item.resource_label ? ` · ${item.resource_label}` : ""}</p>
+            ))}
+            <pre>{signal.snippet}</pre>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -451,6 +481,7 @@ function HistoryItem({ record }: { record: AiReviewRecord }) {
               ))}
             </ul>
           )}
+          <SourceSignalsSection record={record} />
         </div>
       </details>
     </li>

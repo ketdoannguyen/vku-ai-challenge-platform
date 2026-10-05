@@ -24,9 +24,8 @@ _KEPT_KINDS = {"code": CELL_CODE, "markdown": CELL_MARKDOWN}
 _OPEN_TAG = "<PARTICIPANT_NOTEBOOK>"
 _CLOSE_TAG = "</PARTICIPANT_NOTEBOOK>"
 
-# Tên ba khối có delimiter trong user message. `prompt.py` dùng đúng ba tên này trong văn bản system
-# prompt, nên đổi tên ở một nơi là phải đổi cả ở đây (regex dưới đây bám theo danh sách này).
-_BLOCK_TAGS = ("COMPETITION_CONTENT", "SUBMISSION_CONTEXT", "PARTICIPANT_NOTEBOOK")
+# Các khối có delimiter trong user message phải được vô hiệu hoá trong văn bản thí sinh.
+_BLOCK_TAGS = ("COMPETITION_CONTENT", "COMPETITION_RESOURCES", "SUBMISSION_CONTEXT", "PARTICIPANT_NOTEBOOK")
 _TAG_LIKE = re.compile(r"<\s*/?\s*(?:" + "|".join(_BLOCK_TAGS) + r")\s*>", re.IGNORECASE)
 _TAG_SAFE = str.maketrans({"<": "‹", ">": "›"})
 

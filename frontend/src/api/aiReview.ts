@@ -40,6 +40,7 @@ export interface AdminAiReview extends ParticipantAiReview {
    * Chỉ admin thấy: đây là bản nháp để admin sửa trước khi gửi, không phải thứ thí sinh đọc.
    */
   participant_summary: string | null;
+  source_warning_count?: number | null;
   generation: number | null;
   run_id: string | null;
   latest_review_id: string | null;
@@ -167,6 +168,17 @@ export interface AiFinding {
   verification_codes?: string[];
 }
 
+export interface AiSourceSignal {
+  cell: number;
+  start_line: number;
+  end_line: number;
+  snippet: string;
+  reason: string;
+  match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE";
+  urls: { url: string; match: string; resource_label: string | null }[];
+  warning: boolean;
+}
+
 export interface AiNotebookStats {
   cells: number;
   code_cells: number;
@@ -194,6 +206,8 @@ export interface AiReviewRecord {
   summary: string | null;
   participant_summary: string | null;
   findings: AiFinding[];
+  source_signals?: AiSourceSignal[];
+  resources_configured?: number;
   notebook_stats: AiNotebookStats;
   provider: string | null;
   provider_host: string | null;
@@ -206,6 +220,7 @@ export interface AiReviewRecord {
     canonicalization: string | null;
     rule_ref: string | null;
     verifier: string | null;
+    source_signal?: string | null;
   };
   source: "PROVIDER" | "CACHE" | "PIPELINE";
   reused_from_review_id: string | null;

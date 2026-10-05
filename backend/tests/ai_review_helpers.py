@@ -147,7 +147,8 @@ def failing(exc: Exception, calls: list | None = None):
 async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup",
                competition_id=None, account_id=None, notebook=None, raw_notebook=None,
                sha256=None, generation=1, run_id="run-1", enabled=True, bypass_cache=False,
-               snapshot_state=constants.SNAPSHOT_CAPTURED, revision=True, run_after=None):
+               snapshot_state=constants.SNAPSHOT_CAPTURED, revision=True, run_after=None,
+               resources=None):
     """Dựng đủ dữ liệu cho một lượt chạy và trả submission vừa tạo."""
     competition_id = competition_id or ObjectId()
     if await db[COMPETITIONS_COLLECTION].find_one({"_id": competition_id}) is None:
@@ -156,6 +157,7 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
                 "_id": competition_id,
                 "slug": slug,
                 "name": "AI Cup",
+                "resources": resources or [],
                 "ai_review_config": {
                     "enabled": enabled,
                     "auto_review": True,
@@ -185,6 +187,7 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
                     "_id": revision_id,
                     "competition_id": competition_id,
                     "content_hash": content_hash,
+                    "resources": resources or [],
                     "page_count": 1,
                     "total_bytes": len(encoded),
                     "pages": [

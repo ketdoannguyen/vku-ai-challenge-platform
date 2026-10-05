@@ -45,6 +45,30 @@ from tests.ai_review_helpers import (  # noqa: F401 - fixture tái xuất cho py
 from tests.helpers import notebook_bytes
 
 
+async def test_dataset_warning_is_independent_of_clear_verdict_and_survives_cache(mock_db, ai_env):
+    resources = [{"label": "Dataset", "url": "https://drive.google.com/file/d/OFFICIAL/view"}]
+    notebook = code_notebook("df = pd.read_csv('https://data.example.org/train.csv')")
+    submission = await seed(mock_db, notebook=notebook, resources=resources)
+    output = {**CLEAR_OUTPUT, "source_signals": [
+        {"cell": 1, "start_line": 1, "end_line": 1, "reason": "Có lệnh tải dataset ngoài"}
+    ]}
+    _, outcome = await run(mock_db, handler(output))
+    assert outcome == service.OUTCOME_COMPLETED
+    review = (await reviews(mock_db))[0]
+    assert review["verdict"] == constants.VERDICT_CLEAR
+    assert review["source_signals"][0]["match"] == "EXTERNAL_SOURCE"
+    assert (await submission_of(mock_db, submission["_id"]))["ai_review"]["source_warning_count"] == 1
+    assert "source_warning_count" not in service.serializers.participant_projection(
+        await submission_of(mock_db, submission["_id"]), True
+    )
+    await seed(mock_db, competition_id=submission["competition_id"],
+               account_id=submission["account_id"], notebook=notebook)
+    calls = []
+    await run(mock_db, handler(CLEAR_OUTPUT, calls))
+    assert calls == []
+    assert (await reviews(mock_db))[-1]["source_signals"][0]["warning"] is True
+
+
 async def test_a_clean_run_writes_a_completed_review_and_advances_the_projection(mock_db, ai_env):
     submission = await seed(mock_db)
     calls: list = []
