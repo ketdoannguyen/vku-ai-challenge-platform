@@ -307,7 +307,7 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
         resources: [
           { label: "Dataset huấn luyện", url: "https://drive.google.com/drive/folders/abc" },
           { label: "Sample submission", url: "https://docs.google.com/spreadsheets/d/xyz" },
-          { label: "Link lạ", url: "https://evil.example.com/dataset.zip" },
+          { label: "Link lạ", url: "http://evil.example.com/dataset.zip" },
         ],
       },
       status: 200,
@@ -327,14 +327,14 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
   expect(resources).toHaveAttribute("id", "competition-resources-title");
   // Đếm tài nguyên phải scope vào chính section này: mục lục nội dung dùng cùng class
   // `.content-card-count` và cũng đang hiện "2" nên query toàn cục sẽ khớp hai phần tử.
-  // Hai link Drive hợp lệ + notebook khung built-in.
+  // Hai link hợp lệ + notebook khung built-in.
   expect(within(resourceSection as HTMLElement).getByText("3")).toBeTruthy();
 
   const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
   expect(dataset.getAttribute("target")).toBe("_blank");
   expect(dataset.getAttribute("rel")).toBe("noopener noreferrer nofollow");
-  // Host ngoài Drive bị lọc trước khi render nên không tạo thành link sống.
+  // Link không phải https bị lọc trước khi render nên không tạo thành link sống.
   expect(screen.queryByText("Link lạ")).toBeNull();
   expect(document.querySelectorAll(".resource-link")).toHaveLength(3);
   // Notebook khung là thao tác tải tại chỗ nên phải là button, không phải link ra ngoài.

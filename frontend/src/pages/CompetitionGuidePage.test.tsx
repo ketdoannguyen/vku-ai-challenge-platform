@@ -113,7 +113,7 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
   expect(within(required).getByText("Binary")).toBeTruthy();
   expect(within(required).getByText("1")).toBeTruthy();
 
-  expect(screen.getByText(/Bắt buộc dùng link Google Drive chỉ đọc của BTC/)).toBeTruthy();
+  expect(screen.getByText(/Bắt buộc dùng link tài nguyên chỉ đọc của BTC/)).toBeTruthy();
   expect(screen.getByText(/DATASET_URL/)).toBeTruthy();
 
   // Ví dụ CSV dùng đúng hai cột của cuộc thi và có nhiều dòng mẫu.

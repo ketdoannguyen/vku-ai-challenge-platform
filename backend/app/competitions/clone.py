@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from app.ai_review import settings as ai_settings
 from app.ai_review import url_policy
 from app.competitions import service as competitions
+from app.competitions import tracks as competition_tracks
 from app.content import service as contents
 from app.content import storage as files
 from app.core.config import get_settings
@@ -28,12 +29,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class GroundTruthSource:
+    """Một bộ ground truth đã đọc và kiểm toàn vẹn trước khi ghi bản sao."""
+
+    data: bytes
+    metadata: dict
+    sha256: str
+
+
+@dataclass
 class SourceSnapshot:
     scoring: dict | None
     evaluator_source: str | None
-    ground_truth: bytes | None
-    ground_truth_metadata: dict | None
-    ground_truth_sha256: str | None
+    # Khoá None là cuộc thi single; public/private là hai nhánh ground truth của cuộc thi dual.
+    ground_truths: dict[str | None, GroundTruthSource]
     pages: list[tuple[dict, bytes | None]]
     assets: list[tuple[str, bytes]]
     ai_config: dict | None
@@ -44,6 +53,64 @@ def _invalid() -> Exception:
     return api_error(409, "CLONE_SOURCE_INVALID", "Dữ liệu cuộc thi nguồn bị thiếu hoặc hỏng; không thể clone đầy đủ.")
 
 
+def _ground_truth_tracks(source: dict) -> list[str | None]:
+    if competition_tracks.is_dual(source):
+        return list(competition_tracks.TRACKS)
+    return [None]
+
+
+def _read_ground_truth(
+    source: dict, track: str | None, *, scoring: dict | None, config, root: Path
+) -> GroundTruthSource:
+    """Đọc và kiểm một bộ ground truth: path/tên file phải thuộc đúng cuộc thi, đúng nhánh."""
+    metadata = competition_tracks.track_ground_truth(source, track)
+    if not isinstance(metadata, dict):
+        raise ValueError("Ground truth metadata invalid")
+    path = scoring_files.ground_truth_path(source, track)
+    if path.parent != root / "private":
+        raise ValueError("Ground truth path belongs to another competition")
+    if track is None:
+        allowed_names = {"ground_truth.csv"}
+        if config is not None and metadata.get("sha256"):
+            allowed_names.add(f"ground_truth-{metadata['sha256'][:16]}.csv")
+        if path.name not in allowed_names:
+            raise ValueError("Ground truth path belongs to another competition")
+    else:
+        sha_stored = metadata.get("sha256")
+        if not sha_stored:
+            raise ValueError("Ground truth metadata invalid")
+        if path.name != f"ground_truth-{track}-{sha_stored[:16]}.csv":
+            raise ValueError("Ground truth path belongs to another competition")
+
+    data = scoring_files.read_ground_truth(source, track)
+    sha = revisions.sha256_bytes(data)
+    if metadata.get("sha256") and metadata["sha256"] != sha:
+        raise ValueError("Ground truth hash mismatch")
+    if config is not None:
+        result = csv_validation.load_ground_truth(data, config.input_schema.ground_truth)
+        columns = next(csv.reader(io.StringIO(data.decode("utf-8-sig"))))
+        stored_columns = metadata.get("columns")
+        if (
+            not isinstance(stored_columns, list)
+            or not stored_columns
+            or any(not isinstance(column, str) for column in stored_columns)
+            or not set(stored_columns).issubset(columns)
+            or len(stored_columns) != len(set(stored_columns))
+        ):
+            raise ValueError("Ground truth metadata mismatch")
+    else:
+        if scoring is None:
+            raise ValueError("Ground truth has no scoring schema")
+        result = scoring_service.load_ground_truth(
+            data, scoring_service.ScoringConfig(**scoring)
+        )
+        if metadata.get("columns") != list(result.columns):
+            raise ValueError("Ground truth metadata mismatch")
+    if metadata.get("row_count") != result.row_count:
+        raise ValueError("Ground truth metadata mismatch")
+    return GroundTruthSource(data=data, metadata=dict(metadata), sha256=sha)
+
+
 async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
     """Read and validate everything before allocating a clone slug or writing any data."""
     settings = get_settings()
@@ -51,9 +118,7 @@ async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
     data_root = Path(settings.data_dir).resolve()
     scoring = source.get("scoring_config")
     evaluator_source = None
-    ground_truth = None
-    ground_truth_metadata = None
-    ground_truth_sha256 = None
+    config = None
     try:
         if scoring is not None and not isinstance(scoring, dict):
             raise ValueError("Scoring configuration invalid")
@@ -81,52 +146,13 @@ async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
             scoring_service.validate_config(parsed)
             scoring = parsed.model_dump()
 
-        if source.get("ground_truth") is not None:
-            metadata = source["ground_truth"]
-            if not isinstance(metadata, dict):
-                raise ValueError("Ground truth metadata invalid")
-            path = scoring_files.ground_truth_path(source)
-            if path.parent != root / "private" or (
-                path.name != "ground_truth.csv"
-                and not (
-                    models.is_v2(source)
-                    and metadata.get("sha256")
-                    and path.name == f"ground_truth-{metadata['sha256'][:16]}.csv"
-                )
-            ):
-                raise ValueError("Ground truth path belongs to another competition")
-            ground_truth = scoring_files.read_ground_truth(source)
-            sha = revisions.sha256_bytes(ground_truth)
-            if metadata.get("sha256") and metadata["sha256"] != sha:
-                raise ValueError("Ground truth hash mismatch")
-            if models.is_v2(source):
-                result = csv_validation.load_ground_truth(
-                    ground_truth, config.input_schema.ground_truth
-                )
-            else:
-                if scoring is None:
-                    raise ValueError("Ground truth has no scoring schema")
-                result = scoring_service.load_ground_truth(
-                    ground_truth, scoring_service.ScoringConfig(**scoring)
-                )
-                columns = list(result.columns)
-            if metadata.get("row_count") != result.row_count:
-                raise ValueError("Ground truth metadata mismatch")
-            if models.is_v2(source):
-                columns = next(csv.reader(io.StringIO(ground_truth.decode("utf-8-sig"))))
-                stored_columns = metadata.get("columns")
-                if (
-                    not isinstance(stored_columns, list)
-                    or not stored_columns
-                    or any(not isinstance(column, str) for column in stored_columns)
-                    or not set(stored_columns).issubset(columns)
-                    or len(stored_columns) != len(set(stored_columns))
-                ):
-                    raise ValueError("Ground truth metadata mismatch")
-            elif metadata.get("columns") != columns:
-                raise ValueError("Ground truth metadata mismatch")
-            ground_truth_metadata = dict(metadata)
-            ground_truth_sha256 = sha
+        ground_truths: dict[str | None, GroundTruthSource] = {}
+        for track in _ground_truth_tracks(source):
+            if competition_tracks.track_ground_truth(source, track) is None:
+                continue
+            ground_truths[track] = _read_ground_truth(
+                source, track, scoring=scoring, config=config, root=root
+            )
 
         pages = []
         for page in await contents.list_contents(db, source["_id"]):
@@ -172,8 +198,8 @@ async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
         raise _invalid() from None
 
     return SourceSnapshot(
-        scoring, evaluator_source, ground_truth, ground_truth_metadata,
-        ground_truth_sha256, pages, assets, ai_config, normalization_request,
+        scoring, evaluator_source, ground_truths, pages, assets, ai_config,
+        normalization_request,
     )
 
 
@@ -194,18 +220,21 @@ async def populate(db, clone: dict, data: SourceSnapshot) -> dict:
                     ),
                 }
             updates["scoring_config"] = scoring
-        if data.ground_truth is not None:
-            if data.scoring and data.scoring.get("version") == 2:
+        for track, ground_truth in data.ground_truths.items():
+            if track is not None or (data.scoring and data.scoring.get("version") == 2):
+                # Dual giữ tên file gắn nhánh như bản gốc; v2 cũng đặt tên theo hash nội dung.
                 path = scoring_files.write_ground_truth(
-                    clone, data.ground_truth, sha256=data.ground_truth_sha256
+                    clone, ground_truth.data, sha256=ground_truth.sha256, track=track
                 )
             else:
                 path_obj = scoring_files.ground_truth_path(clone)
-                files.write_atomic(path_obj, data.ground_truth)
+                files.write_atomic(path_obj, ground_truth.data)
                 path = path_obj.relative_to(data_root).as_posix()
-            updates["ground_truth"] = {**data.ground_truth_metadata, "path": path}
-            if data.scoring and data.scoring.get("version") == 2:
-                updates["ground_truth"]["sha256"] = data.ground_truth_sha256
+            metadata = {**ground_truth.metadata, "path": path}
+            if track is None:
+                updates["ground_truth"] = metadata
+            else:
+                updates[f"tracks.{track}.ground_truth"] = metadata
         if data.ai_config is not None:
             updates[ai_settings.CONFIG_FIELD] = data.ai_config
 

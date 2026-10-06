@@ -22,10 +22,14 @@ import type {
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
+  TRACKS,
+  TRACK_LABEL,
   displayStatus,
   formatLocal,
+  isDual,
   normalizationOf,
   statusClass,
+  type MyStats,
 } from "../api/competitions";
 import { formatMetric } from "../api/results";
 import { Loading } from "../components/ui";
@@ -892,6 +896,23 @@ export function DashboardPage() {
   );
 }
 
+/** Hạng của một bộ số liệu: `#12/340`, `#12` khi chưa biết tổng, `-` khi chưa có hạng. */
+function rankLabel(stats: MyStats | undefined): string {
+  if (stats?.rank == null) return "-";
+  return stats.rank_total == null ? `#${stats.rank}` : `#${stats.rank}/${stats.rank_total}`;
+}
+
+/**
+ * Số liệu cá nhân của một nhánh trên thẻ: hạng · điểm · lượt hôm nay. Nhánh Private chưa công bố
+ * chỉ có số lượt là thật, hạng và điểm để "-" - không lấy số của nhánh Public lấp vào vị trí
+ * chính thức. Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng.
+ */
+function trackStatsText(stats: MyStats | undefined, normEnabled: boolean): string {
+  if (!stats) return "-";
+  const score = formatMetric(normEnabled ? stats.best_normalized_score : stats.best_score, 2);
+  return `${rankLabel(stats)} · ${score} · ${stats.used_today} lượt hôm nay`;
+}
+
 function CompetitionCard({
   competition,
   theme,
@@ -930,14 +951,13 @@ function CompetitionCard({
   const shown = displayStatus(c.status, c.end_at);
   const pinned = c.pinned ?? false;
   // Chỉ đọc số liệu khi account đã xác nhận và membership đang hoạt động; còn lại hiện "-".
-  const stats = canPersonalize && c.membership.active ? c.my_stats : undefined;
+  const personalized = canPersonalize && c.membership.active;
+  const stats = personalized ? c.my_stats : undefined;
+  // Dual không có số gộp: mỗi nhánh một dòng, nhãn nằm ngay trên số của chính nhánh đó.
+  const dual = isDual(c);
+  const statsByTrack = personalized ? c.my_stats_by_track : undefined;
   const norm = normalizationOf(c);
-  const rankText =
-    stats?.rank == null
-      ? "-"
-      : stats.rank_total == null
-        ? `#${stats.rank}`
-        : `#${stats.rank}/${stats.rank_total}`;
+  const rankText = rankLabel(stats);
 
   return (
     // `data-theme` quyết định màu thẻ, `data-status` chỉ để tra cứu; `statusClass` chỉ
@@ -1017,29 +1037,48 @@ function CompetitionCard({
             <div className="comp-telemetry-item">
               <span className="comp-telemetry-label">Hạn mức nộp</span>
               <span className="comp-telemetry-value">
-                {c.quota_per_day > 0 ? `${c.quota_per_day} lượt / ngày` : "Không nhận bài nộp"}
+                {dual
+                  ? "Theo từng nhánh"
+                  : c.quota_per_day != null && c.quota_per_day > 0
+                    ? `${c.quota_per_day} lượt / ngày`
+                    : "Không nhận bài nộp"}
               </span>
             </div>
           </div>
 
-          <dl className="comp-personal">
-            <div className="comp-personal-item">
-              <dt className="comp-personal-label">Hạng hiện tại</dt>
-              <dd className="comp-personal-value">{rankText}</dd>
-            </div>
-            <div className="comp-personal-item">
-              <dt className="comp-personal-label">{norm.enabled ? "Điểm norm" : "Điểm cao nhất"}</dt>
-              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. Cuộc thi
-                  bật norm lấy norm hiện tại từ BXH; norm bị ẩn thì để "-", không rơi về raw. */}
-              <dd className="comp-personal-value">
-                {formatMetric(norm.enabled ? stats?.best_normalized_score : stats?.best_score, 2)}
-              </dd>
-            </div>
-            <div className="comp-personal-item">
-              <dt className="comp-personal-label">Đã nộp hôm nay</dt>
-              <dd className="comp-personal-value">{stats ? `${stats.used_today} lượt` : "-"}</dd>
-            </div>
-          </dl>
+          {dual ? (
+            <dl className="comp-personal comp-personal-tracks">
+              {TRACKS.map((item) => (
+                <div className="comp-personal-track" key={item}>
+                  <dt className="comp-personal-label">
+                    {TRACK_LABEL[item]}
+                  </dt>
+                  <dd className="comp-personal-value">
+                    {trackStatsText(statsByTrack?.[item], norm.enabled)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <dl className="comp-personal">
+              <div className="comp-personal-item">
+                <dt className="comp-personal-label">Hạng hiện tại</dt>
+                <dd className="comp-personal-value">{rankText}</dd>
+              </div>
+              <div className="comp-personal-item">
+                <dt className="comp-personal-label">{norm.enabled ? "Điểm norm" : "Điểm cao nhất"}</dt>
+                {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. Cuộc thi
+                    bật norm lấy norm hiện tại từ BXH; norm bị ẩn thì để "-", không rơi về raw. */}
+                <dd className="comp-personal-value">
+                  {formatMetric(norm.enabled ? stats?.best_normalized_score : stats?.best_score, 2)}
+                </dd>
+              </div>
+              <div className="comp-personal-item">
+                <dt className="comp-personal-label">Đã nộp hôm nay</dt>
+                <dd className="comp-personal-value">{stats ? `${stats.used_today} lượt` : "-"}</dd>
+              </div>
+            </dl>
+          )}
         </div>
       </div>
 

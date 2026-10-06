@@ -146,9 +146,9 @@ def _counting_ranked_entries(monkeypatch) -> dict:
     original = service.ranked_board
     counter = {"count": 0}
 
-    async def counted(db, competition):
+    async def counted(db, competition, *, track=None):
         counter["count"] += 1
-        return await original(db, competition)
+        return await original(db, competition, track=track)
 
     monkeypatch.setattr(service, "ranked_board", counted)
     return counter

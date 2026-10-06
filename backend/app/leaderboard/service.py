@@ -7,8 +7,10 @@ import weakref
 from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 
 from app.accounts.service import ACCOUNTS_COLLECTION
+from app.competitions import tracks as competition_tracks
 from app.core.datetimes import iso_z
 from app.scoring import contracts, normalization
 from app.submissions.service import SUBMISSIONS_COLLECTION, eligible_query
@@ -43,15 +45,20 @@ def _rank_direction(competition: dict) -> int:
     return 1 if ranking and not ranking[1] else -1
 
 
-async def ranked_board(db, competition: dict) -> RankedBoard:
+async def ranked_board(db, competition: dict, *, track: str | None = None) -> RankedBoard:
     """Bài đại diện của mỗi account, xếp theo norm khi cuộc thi bật chuẩn hóa, ngược lại theo raw.
 
     Nhánh chuẩn hóa tính norm cho **mọi** bài eligible rồi mới chọn bài đại diện: đội toàn 0 phải
-    đứng theo bài 0 nộp sớm nhất, không phải theo bài raw tốt nhất của đội.
+    đứng theo bài 0 nộp sớm nhất, không phải theo bài raw tốt nhất của đội. `track` giới hạn bảng
+    vào đúng một nhánh của cuộc thi dual; single không truyền track.
     """
     # Participant, admin và file export dùng chung một tập eligible nên ba đường không thể lệch nhau.
     rule = normalization.active_rule(competition)
-    query = eligible_query({"competition_id": competition["_id"], "status": "completed"})
+    scope = {"competition_id": competition["_id"], "status": "completed"}
+    if track is not None:
+        # Bảng của dual chỉ gồm bài của đúng nhánh: hai population không bao giờ trộn.
+        scope["track"] = track
+    query = eligible_query(scope)
     cursor = db[SUBMISSIONS_COLLECTION].find(query)
     if rule is None:
         submissions = [
@@ -190,13 +197,15 @@ class _RankedBoardCache:
         self._epoch = 0
         self._inflight: dict[tuple, tuple[int, asyncio.Future]] = {}
 
-    async def get(self, db, competition: dict, loader) -> RankedBoard:
+    async def get(self, db, competition: dict, loader, *, track: str | None = None) -> RankedBoard:
         # `MongoContext.db` trả một wrapper mới mỗi lần đọc nên id(db) không ổn định; client và tên
         # database mới là danh tính thật của nguồn dữ liệu.
         key = (
             id(db.client),
             db.name,
             competition["_id"],
+            # Hai nhánh của cuộc thi dual là hai population riêng: chung khoá là trộn bảng.
+            track,
             _rank_direction(competition),
             # Đổi baseline/nguồn là đổi luật xếp hạng: bảng cũ phải trượt khỏi cache ngay cả khi
             # entry còn trong TTL.
@@ -270,12 +279,14 @@ class _RankedBoardCache:
 _ranked_board_cache = _RankedBoardCache()
 
 
-async def cached_ranked_board(db, competition: dict) -> RankedBoard:
+async def cached_ranked_board(db, competition: dict, *, track: str | None = None) -> RankedBoard:
     """Bản cache ngắn hạn của `ranked_board` cho hai đường leaderboard và thẻ cuộc thi.
 
     Export không đi qua đây: file tải về phải khớp dữ liệu tại đúng thời điểm admin bấm.
     """
-    return await _ranked_board_cache.get(db, competition, ranked_board)
+    return await _ranked_board_cache.get(
+        db, competition, partial(ranked_board, track=track), track=track
+    )
 
 
 def invalidate_competition(competition_id) -> None:
@@ -304,14 +315,20 @@ def leaderboard_response(
     competition: dict,
     board: RankedBoard,
     *,
+    track: str | None = None,
     current_account_id=None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Trang participant: `rank` giữ nguyên thứ hạng toàn cục; `me` tìm trên full list rồi mới cắt trang."""
+    """Trang participant: `rank` giữ nguyên thứ hạng toàn cục; `me` tìm trên full list rồi mới cắt trang.
+
+    `track` là nhánh bảng đang phục vụ; người gọi phải tự chặn nhánh chưa công bố trước khi dựng
+    payload - response này không có nhánh nào để che thêm.
+    """
     contract = contracts.participant_contract(competition)
-    # Đọc quyền xem một lần cho cả trang: mọi entry và metadata phải theo cùng một quyết định.
-    normalization_visible = normalization.participant_visible(competition)
+    # Đọc quyền xem một lần cho cả trang: mọi entry và metadata phải theo cùng một quyết định, và
+    # quyết định đó là của đúng nhánh bảng đang phục vụ.
+    normalization_visible = competition_tracks.can_view_norm(competition, track)[0]
     entries = board.entries
     page = entries[offset : offset + limit]
     me = next(
@@ -338,6 +355,9 @@ def leaderboard_response(
             else None
         ),
     }
+    if track is not None:
+        # Thí sinh phải biết bảng đang xem thuộc nhánh nào; single giữ hình dạng cũ.
+        payload["track"] = track
     if board.normalization_metadata is not None:
         payload["normalization"] = (
             board.normalization_metadata if normalization_visible else None

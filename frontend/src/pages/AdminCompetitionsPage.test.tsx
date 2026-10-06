@@ -264,7 +264,7 @@ async function openCreateForm() {
   fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
 }
 
-test("form tài nguyên: chặn link ngoài Drive và gửi payload resources khi hợp lệ", async () => {
+test("form tài nguyên: chặn link không phải https và gửi payload resources khi hợp lệ", async () => {
   const posted: unknown[] = [];
   mockFetch((_url, init) => {
     if (init?.method === "POST") {
@@ -284,21 +284,21 @@ test("form tài nguyên: chặn link ngoài Drive và gửi payload resources kh
   fireEvent.click(screen.getByRole("button", { name: "+ Thêm tài nguyên" }));
   fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), { target: { value: "Dataset" } });
   fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
-    target: { value: "https://evil.example.com/dataset.zip" },
+    target: { value: "http://evil.example.com/dataset.zip" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+    "Link tài nguyên phải là URL https hợp lệ.",
   );
   expect(posted).toHaveLength(0);
 
   fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
-    target: { value: "https://drive.google.com/drive/folders/abc" },
+    target: { value: "https://bucket.s3.amazonaws.com/btc/dataset.zip" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
   await waitFor(() => expect(posted).toHaveLength(1));
   expect(posted[0]).toMatchObject({
-    resources: [{ label: "Dataset", url: "https://drive.google.com/drive/folders/abc" }],
+    resources: [{ label: "Dataset", url: "https://bucket.s3.amazonaws.com/btc/dataset.zip" }],
   });
 });
 

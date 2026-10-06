@@ -161,8 +161,6 @@ def test_resources_reject_unsafe_urls(client):
     _login(client)
     cases = [
         {"label": "http", "url": "http://drive.google.com/x"},
-        {"label": "host lạ", "url": "https://evil.example/x"},
-        {"label": "giả drive", "url": "https://drive.google.com.evil.example/x"},
         {"label": "credentials", "url": "https://user:pass@drive.google.com/x"},
         {"label": "javascript", "url": "javascript:alert(1)"},
         {"label": "quá dài", "url": "https://drive.google.com/" + "a" * 2048},
@@ -174,6 +172,19 @@ def test_resources_reject_unsafe_urls(client):
         )
         assert resp.status_code == 422, item
         assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_resources_accept_external_links(client):
+    """BTC không chỉ dùng Google Drive/Docs: mọi link https đều nhận (S3, máy chủ riêng...)."""
+    _login(client)
+    resources = [
+        {"label": "Dataset S3", "url": "https://bucket.s3.amazonaws.com/btc/dataset.zip"},
+        {"label": "Presigned", "url": "https://cdn.example.com/btc/test.csv?X-Amz-Signature=abc"},
+        {"label": "Drive riêng của BTC", "url": "https://drive.google.com/drive/folders/abc"},
+    ]
+    resp = client.post("/api/admin/competitions", json=_body(resources=resources))
+    assert resp.status_code == 201
+    assert resp.json()["resources"] == resources
 
 
 def test_resources_reject_bad_label_and_too_many_items(client):

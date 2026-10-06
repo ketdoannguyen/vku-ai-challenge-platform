@@ -45,7 +45,9 @@ import { api } from "../api/client";
 import {
   formatLocal,
   normalizationOf,
+  TRACK_LABEL,
   type NormalizationConfig,
+  type Track,
 } from "../api/competitions";
 import {
   ADMIN_SORT_FIELDS,
@@ -91,14 +93,11 @@ const STATUS_OPTIONS = [
   { value: "failed", label: "Lỗi chấm điểm" },
 ];
 
-/**
- * Trục duyệt tách khỏi trục chấm điểm: nhánh "accepted" gồm cả bài chưa từng bị xét duyệt, nên
- * nhãn nói đúng phạm vi lọc thay vì ngụ ý BTC đã duyệt từng bài.
- */
+/** Nhánh duyệt gồm cả bài chưa có quyết định vì những bài đó được duyệt mặc định. */
 const REVIEW_OPTIONS = [
   { value: "", label: "Mọi trạng thái duyệt" },
-  { value: "accepted", label: "Chưa bị từ chối" },
-  { value: "rejected", label: "Không chấp nhận" },
+  { value: "accepted", label: "Duyệt" },
+  { value: "rejected", label: "Không duyệt" },
 ];
 
 /**
@@ -127,6 +126,8 @@ interface Filters {
   review: string;
   /** Trục thứ ba, độc lập: bộ lọc AI không bao giờ gộp vào `status` hay `review`. */
   ai_review: AiReviewFilter;
+  /** Dual: "" = cả hai nhánh; cuộc thi một nhánh không dựng ô lọc này. */
+  track: string;
 }
 
 const NO_FILTERS: Filters = {
@@ -135,6 +136,7 @@ const NO_FILTERS: Filters = {
   status: "",
   review: "",
   ai_review: "all",
+  track: "",
 };
 
 /** Bộ lọc + sắp xếp + trang đang xem; đổi bất kỳ phần nào cũng gọi lại server. */
@@ -163,11 +165,17 @@ export function AdminSubmissionsPanel({
   competitionId,
   resultContract,
   normalization,
+  tracks,
   title,
   listLabel,
 }: {
   /** Có cuộc thi thì danh sách khóa vào cuộc thi đó: ẩn bộ lọc, trường cuộc thi và thẻ thống kê. */
   competitionId?: string;
+  /**
+   * Cuộc thi dual: hai nhánh để dựng ô lọc và badge theo dòng. Vắng mặt là cuộc thi một nhánh,
+   * danh sách không có khái niệm nhánh.
+   */
+  tracks?: readonly Track[] | null;
   /**
    * Hợp đồng metric của cuộc thi đang khóa. Endpoint theo cuộc thi không trả hợp đồng nên trang
    * gọi phải truyền vào; bảng toàn cục không truyền vì mỗi dòng thuộc một cuộc thi khác nhau.
@@ -241,6 +249,7 @@ export function AdminSubmissionsPanel({
       if (next.q) params.set("q", next.q);
       if (next.status) params.set("status", next.status);
       if (next.review) params.set("review", next.review);
+      if (next.track) params.set("track", next.track);
       params.set("ai_review", next.ai_review);
       try {
         const response = await api.get<AdminSubmissionsResponse>(
@@ -400,6 +409,7 @@ export function AdminSubmissionsPanel({
       query.status ||
       query.review ||
       query.ai_review !== "all" ||
+      query.track ||
       search.trim(),
   );
   const shownFrom = data ? data.offset + 1 : 0;
@@ -470,20 +480,16 @@ export function AdminSubmissionsPanel({
   }
 
   /**
-   * Trạng thái duyệt của một dòng. Record chưa chấm được điểm (`failed`/`rejected` legacy) không
-   * bao giờ xét duyệt được nên hiển thị gạch, tránh bị đọc thành "hợp lệ".
-   *
-   * Lý do, người duyệt và thời điểm đi hết vào tooltip: lý do có thể dài tới 1000 ký tự nên nếu
-   * để trong thẻ thì mọi hàng bị từ chối sẽ cao gấp ba lần các hàng còn lại.
+   * Bài đã chấm và chưa bị từ chối được duyệt mặc định; bài lỗi chấm không có kết quả duyệt.
+   * Lý do, người duyệt và thời điểm của quyết định thực đi hết vào tooltip.
    */
   function reviewCell(submission: AdminSubmissionItem) {
     const tone = reviewTone(submission);
     if (submission.status !== "completed") {
-      return <StatusBadge tone={tone} glyph="dash" label="Không xét duyệt được" />;
+      return <span className="cell-secondary">—</span>;
     }
     if (!submission.review) {
-      // Chưa có quyết định của BTC, không phải "hợp lệ": nhãn cũ bị đọc thành phán quyết đã duyệt.
-      return <StatusBadge tone={tone} glyph="check" label="Chưa có quyết định BTC" />;
+      return <StatusBadge tone={tone} glyph="check" label="Duyệt" />;
     }
     const rejected = submission.review.status === "rejected";
     return (
@@ -650,6 +656,21 @@ export function AdminSubmissionsPanel({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        {tracks && tracks.length > 0 && (
+          <select
+            className="input"
+            aria-label="Lọc theo nhánh"
+            value={query.track}
+            onChange={(event) => changeFilters({ track: event.target.value })}
+          >
+            <option value="">Cả hai nhánh</option>
+            {tracks.map((track) => (
+              <option key={track} value={track}>
+                {TRACK_LABEL[track]}
+              </option>
+            ))}
+          </select>
+        )}
         <select
           className="input"
           aria-label="Lọc theo trạng thái chấm"
@@ -798,6 +819,16 @@ export function AdminSubmissionsPanel({
                           <span>{formatLocal(submission.created_at)}</span>
                         </dd>
                       </div>
+                      {/* Chỉ cuộc thi dual mới có nhánh; một nhánh thì trường này không tồn tại. */}
+                      {submission.track && (
+                        <div className="subm-field">
+                          <dt>Nhánh</dt>
+                          <dd>
+                            <BlockIcon tone="gold">{FLAG_PATHS}</BlockIcon>
+                            <strong>{TRACK_LABEL[submission.track]}</strong>
+                          </dd>
+                        </div>
+                      )}
                       {!competitionId && (
                         <div className="subm-field subm-field-grow">
                           <dt>Cuộc thi</dt>
@@ -885,10 +916,11 @@ export function AdminSubmissionsPanel({
                     </dl>
 
                     {/* Ba trục phán quyết đứng liền nhau và theo đúng thứ tự đọc: chấm xong chưa
-                        (Trạng thái) → máy nói gì (AI sơ bộ) → người chốt gì (Xét duyệt). Mỗi trục là
-                        một badge tự tô theo kết luận của chính nó; vạch nhấn lề trái thẻ vẫn giữ
-                        mức nặng nhất trong ba, nên thẻ có tín hiệu tổng và từng trục có tín hiệu
-                        riêng, không chỗ nào phải suy ra từ chỗ khác. */}
+                        (Trạng thái) → máy nói gì (AI sơ bộ, gồm cả kết luận thể lệ lẫn đánh giá
+                        nguồn) → kết quả duyệt. Mỗi trục là một badge tự tô theo kết
+                        luận của chính nó; vạch nhấn lề trái thẻ vẫn giữ mức nặng nhất trong các
+                        trục, nên thẻ có tín hiệu tổng và từng trục có tín hiệu riêng, không chỗ nào
+                        phải suy ra từ chỗ khác. */}
                     <dl className="subm-card-tier subm-card-tier-detail">
                       <div className="subm-field">
                         <dt>Tệp đã nộp</dt>
@@ -910,7 +942,7 @@ export function AdminSubmissionsPanel({
                         <dd>{aiCell(submission)}</dd>
                       </div>
                       <div className="subm-field">
-                        <dt>Xét duyệt</dt>
+                        <dt>Duyệt</dt>
                         <dd>{reviewCell(submission)}</dd>
                       </div>
                       <div className="subm-field">
@@ -1168,14 +1200,10 @@ const SOURCE_STATUS_GLYPH: Record<AiSourceStatus, Glyph> = {
   NOT_EVALUATED: "dash",
 };
 
-/**
- * Tone của trạng thái nguồn. "Phù hợp" để `info` chứ không `success`: đây là nhận định của AI,
- * không phải xác nhận của BTC. Còn lại là mức cần xem lại hoặc thiếu dữ kiện; không tô đỏ vì
- * dấu hiệu nguồn không phải vi phạm đã được kết luận.
- */
+/** Màu biểu thị dấu hiệu do AI phát hiện; không thay thế quyết định của BTC. */
 const SOURCE_STATUS_TONE: Record<AiSourceStatus, IconTone> = {
-  ALIGNED: "info",
-  EXTERNAL: "warning",
+  ALIGNED: "success",
+  EXTERNAL: "danger",
   UNCLEAR: "warning",
   NOT_EVALUATED: "muted",
 };
@@ -1204,12 +1232,26 @@ function aiTone(submission: AdminSubmissionItem): IconTone {
 }
 
 /**
- * Mức nặng nhất trong ba trục: đỏ > vàng > xanh. Cố ý không lấy trục "chính": một bài bị AI gắn
- * cờ nhưng người chưa xét duyệt vẫn cần được nhìn thấy. Suy thẳng từ ba tone chứ không tự đặt lại
- * thang mức, nếu không vạch nhấn và icon sẽ lệch nhau ở lần đổi thang sau.
+ * Tone của trục nguồn, chỉ có nghĩa khi lượt AI đã có kết luận: lượt lỗi không mang đánh giá nguồn
+ * nào, và row cũ thiếu dữ kiện để muted - thiếu dữ kiện không được tô như một kết luận.
+ */
+function sourceTone(submission: AdminSubmissionItem): IconTone {
+  const projection = submission.ai_review;
+  if (!projection?.verdict || projection.verdict === "ERROR") return "muted";
+  return projection.source_status ? SOURCE_STATUS_TONE[projection.source_status] : "muted";
+}
+
+/**
+ * Vạch thẻ lấy mức nặng nhất từ chấm điểm, AI thể lệ, nguồn và duyệt: đỏ > vàng > xanh.
+ * Dấu hiệu nguồn ngoài phải đỏ kể cả khi AI thể lệ không phát hiện gì.
  */
 function cardTone(submission: AdminSubmissionItem): CardTone {
-  const tones = [statusTone(submission), aiTone(submission), reviewTone(submission)];
+  const tones = [
+    statusTone(submission),
+    aiTone(submission),
+    sourceTone(submission),
+    reviewTone(submission),
+  ];
   if (tones.includes("danger")) return "danger";
   if (tones.includes("warning")) return "warning";
   return "success";
@@ -1430,6 +1472,13 @@ const CALENDAR_PATHS = (
 );
 
 const STAR_PATHS = <path d="m12 3.6 2.6 5.3 5.8.9-4.2 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8L3.6 9.8l5.8-.9Z" />;
+
+const FLAG_PATHS = (
+  <>
+    <path d="M6 21V4" />
+    <path d="M6 5h11l-2.4 3.5L17 12H6" />
+  </>
+);
 
 const CHART_PATHS = (
   <>

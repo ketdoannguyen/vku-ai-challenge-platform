@@ -24,33 +24,30 @@ _DRIVE = {"drive.google.com", "drive.usercontent.google.com"}
 _DOCS = {"docs.google.com"}
 
 
-@dataclass(frozen=True)
-class ResourceMention:
-    label: str
-    cells: list[int]
+def resource_identity(url: str) -> tuple[str, str] | None:
+    """Định danh tài nguyên để đối chiếu URL trong notebook với danh sách BTC cấp.
 
-
-@dataclass(frozen=True)
-class SourceAssessment:
-    """Kết quả hậu kiểm: đề xuất của model, trạng thái sau kiểm cấu trúc, và dấu vết đầy đủ."""
-
-    model_status: str | None
-    status: str
-    reason: str
-    evidence: list[dict]
-    rejected_evidence: list[dict]
-    validation_codes: list[str]
-
-
-def drive_identity(url: str) -> tuple[str, str] | None:
-    """Nhận diện các URL Drive tĩnh thường dùng; host phải khớp chính xác."""
+    Link Drive/Docs trả về (file|folder, ID) để mọi dạng URL của cùng một file/folder là một định
+    danh. Mọi link http(s) khác - S3, nguồn ngoài - trả về (url, host + path) đã chuẩn hoá; query
+    và fragment bị bỏ vì URL ký sẵn (presigned) đổi tham số theo từng lượt tải nhưng vẫn trỏ vào
+    đúng một object. Dạng Drive lạ (thiếu ID hợp lệ) rơi về định danh URL thường, không bị coi là
+    không đối chiếu được.
+    """
     try:
         parsed = urlparse(url)
         host = (parsed.hostname or "").lower()
     except ValueError:
         return None
-    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
+    if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or not host:
         return None
+    identity = _drive_identity(parsed, host)
+    if identity is not None:
+        return identity
+    return ("url", f"{host}{parsed.path.rstrip('/')}")
+
+
+def _drive_identity(parsed, host: str) -> tuple[str, str] | None:
+    """Nhận diện các URL Drive/Docs tĩnh thường dùng; host phải khớp chính xác."""
     parts = [part for part in parsed.path.split("/") if part]
     if host in _DOCS:
         if len(parts) > 3 and parts[1] == "u" and parts[2].isdigit():
@@ -79,6 +76,24 @@ def drive_identity(url: str) -> tuple[str, str] | None:
     return (kind, identifier) if _ID.fullmatch(identifier) else None
 
 
+@dataclass(frozen=True)
+class ResourceMention:
+    label: str
+    cells: list[int]
+
+
+@dataclass(frozen=True)
+class SourceAssessment:
+    """Kết quả hậu kiểm: đề xuất của model, trạng thái sau kiểm cấu trúc, và dấu vết đầy đủ."""
+
+    model_status: str | None
+    status: str
+    reason: str
+    evidence: list[dict]
+    rejected_evidence: list[dict]
+    validation_codes: list[str]
+
+
 def verify_source_assessment(
     assessment: ModelSourceAssessment | None,
     *,
@@ -101,7 +116,7 @@ def verify_source_assessment(
     official = {
         identity
         for item in resources
-        if (identity := drive_identity(item["url"])) is not None
+        if (identity := resource_identity(item["url"])) is not None
     }
     if not official:
         return SourceAssessment(
@@ -176,12 +191,13 @@ def find_resource_mentions(notebook: NormalizedNotebook, resources: list[dict]) 
     """Quét text thô của từng CODE cell để nói tài nguyên BTC xuất hiện ở cell nào.
 
     Chỉ CODE cell: markdown thường chép đề bài kèm link nên không tính. Khớp mọi dạng URL của cùng
-    file/folder qua `drive_identity`, hoặc ID thô đủ dài (gdown). Danh sách rỗng nghĩa là đã quét và
-    không cell CODE nào nhắc tới; notebook bị lược cell thì dữ kiện cũng chỉ soi phần model đã thấy.
+    tài nguyên qua `resource_identity` (link Drive qua ID, link ngoài qua host + path), hoặc ID
+    Drive thô đủ dài (gdown). Danh sách rỗng nghĩa là đã quét và không cell CODE nào nhắc tới;
+    notebook bị lược cell thì dữ kiện cũng chỉ soi phần model đã thấy.
     """
     mentions = []
     for item in resources:
-        identity = drive_identity(item["url"])
+        identity = resource_identity(item["url"])
         if identity is None:
             continue
         cells = [
@@ -195,7 +211,11 @@ def find_resource_mentions(notebook: NormalizedNotebook, resources: list[dict]) 
 
 
 def _mentions_identity(text: str, identity: tuple[str, str]) -> bool:
-    if any(drive_identity(url.rstrip(".,;:!?")) == identity for url in _URL.findall(text)):
+    if any(resource_identity(url.rstrip(".,;:!?")) == identity for url in _URL.findall(text)):
         return True
-    identifier = identity[1]
+    kind, identifier = identity
+    # ID thô không có dạng URL chỉ có ở gdown (`--id <ID>`); host + path của link thường trùng
+    # substring với URL khác (tiền tố) nên không quét thô cho kind "url".
+    if kind == "url":
+        return False
     return len(identifier) >= _MIN_BARE_ID_CHARS and identifier in text

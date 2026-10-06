@@ -1,9 +1,24 @@
-import { useState, type FormEvent, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api } from "../api/client";
-import type { AdminCompetition, CompetitionResource } from "../api/competitions";
+import type {
+  AdminCompetition,
+  CompetitionMode,
+  CompetitionResource,
+  PublishCondition,
+  ResultPolicy,
+  Track,
+} from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
+  MODE_LABEL,
+  PUBLISH_CONDITION_LABEL,
+  RESULT_POLICY_LABEL,
+  TRACKS,
+  TRACK_LABEL,
+  TRACK_WINDOW_LABEL,
+  formatLocal,
+  isDual,
   isoToLocalInput,
   localInputToIso,
   primaryMetricLabel,
@@ -173,6 +188,26 @@ function IconMailCheck({ className }: { className?: string }) {
   );
 }
 
+function IconSingleTrack({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <path d="M4 12h16" />
+      <circle cx="12" cy="12" r="2.75" />
+    </Icon>
+  );
+}
+
+function IconBranch({ className }: { className?: string }) {
+  return (
+    <Icon className={className}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M6 8.5v1.5a2 2 0 0 0 2 2h1M18 8.5v1.5a2 2 0 0 1-2 2h-1M12 13v2.5" />
+    </Icon>
+  );
+}
+
 type SectionTone = "blue" | "red" | "yellow";
 
 /** Icon và tone trang trí cho từng chế độ tham gia - không đọc trạng thái nghiệp vụ nào khác. */
@@ -186,6 +221,23 @@ const JOIN_MODE_ICON: Record<AdminCompetition["join_mode"], ReactNode> = {
   open: <IconUsersRound />,
   code: <IconKeyRound />,
   invite_only: <IconMailCheck />,
+};
+
+/** Mô tả một dòng của từng hình thức, đúng copy trong kế hoạch §11.1. */
+const MODE_HINT: Record<CompetitionMode, string> = {
+  single: "một luồng nộp bài",
+  public_private: "hai luồng trong cùng một cuộc thi",
+};
+
+/** Tone trang trí cho hai hình thức - không đọc trạng thái nghiệp vụ nào. */
+const MODE_TONE: Record<CompetitionMode, SectionTone> = {
+  single: "blue",
+  public_private: "yellow",
+};
+
+const MODE_ICON: Record<CompetitionMode, ReactNode> = {
+  single: <IconSingleTrack />,
+  public_private: <IconBranch />,
 };
 
 /**
@@ -365,17 +417,139 @@ const NO_SOURCE_METRIC = "Chưa cấu hình";
 
 /**
  * Mô tả nguồn điểm chuẩn hóa theo hợp đồng đang cấu hình. Nháp v2 chưa khai báo metric thì nói rõ
- * lấy từ tab Chấm điểm, không mặc định F1.
+ * lấy từ tab Chấm điểm, không mặc định F1. Cuộc thi dual dùng chung một cấu hình/baseline nhưng
+ * mỗi nhánh lấy mẫu số riêng từ bài hợp lệ của nhánh đó - hai population độc lập.
  */
 function normalizationSourceHint(competition?: AdminCompetition): string {
+  const dualNote =
+    competition && isDual(competition)
+      ? " Cấu hình dùng chung cho cả hai nhánh, nhưng mỗi nhánh có mặt bằng riêng từ bài hợp lệ của nhánh đó."
+      : "";
   const label = competition ? primaryMetricLabel(competition) : null;
   if (!competition || !label || label === NO_SOURCE_METRIC) {
-    return "Điểm xếp hạng là norm 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.";
+    return `Điểm xếp hạng là norm 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.${dualNote}`;
   }
   const direction = resultContract(competition.submission_config).higher_is_better
     ? "cao hơn là tốt hơn"
     : "thấp hơn là tốt hơn";
-  return `Điểm xếp hạng là norm 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.`;
+  return `Điểm xếp hạng là norm 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.${dualNote}`;
+}
+
+/** Lịch và quota của một nhánh trong form tạo cuộc thi dual. */
+interface TrackForm {
+  startAt: string;
+  endAt: string;
+  quota: string;
+}
+
+/**
+ * Timeline hai hàng của cuộc thi dual: hai thanh nằm trên cùng thang thời gian nên khoảng giao
+ * nhau tự hiện ra - không cần checkbox "song song" nào. Mỗi hàng kèm khoảng ngày dạng chữ để
+ * thông tin không phụ thuộc vị trí/màu của thanh. Chỉ vẽ khi cả bốn mốc đã hợp lệ.
+ */
+function TrackTimeline({
+  windows,
+}: {
+  windows: Record<Track, { startAt: string; endAt: string }>;
+}) {
+  const bars = TRACKS.map((track) => ({
+    track,
+    start: new Date(windows[track].startAt).getTime(),
+    end: new Date(windows[track].endAt).getTime(),
+  }));
+  if (
+    bars.some(
+      ({ start, end }) => !Number.isFinite(start) || !Number.isFinite(end) || end <= start,
+    )
+  ) {
+    return null;
+  }
+  const origin = Math.min(...bars.map(({ start }) => start));
+  const span = Math.max(...bars.map(({ end }) => end)) - origin;
+  return (
+    <div className="ac-track-timeline">
+      {bars.map(({ track, start, end }) => (
+        <div className="ac-track-timeline-row" key={track}>
+          <span className="ac-track-timeline-label">
+            {TRACK_LABEL[track]}
+                      </span>
+          <span className="ac-track-timeline-range">
+            {formatLocal(windows[track].startAt)} → {formatLocal(windows[track].endAt)}
+          </span>
+          <span className="ac-track-timeline-track">
+            <span
+              className="ac-track-timeline-bar"
+              data-track={track}
+              style={{
+                left: `${((start - origin) / span) * 100}%`,
+                width: `${((end - start) / span) * 100}%`,
+              }}
+            />
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Danh sách tài nguyên dạng hàng nhập, dùng chung cho tài nguyên cấp cuộc thi và tài nguyên
+ * từng nhánh của cuộc thi dual. `namePrefix` phân biệt nhóm trong aria-label.
+ */
+function ResourceRows({
+  rows,
+  onChange,
+  namePrefix = "",
+}: {
+  rows: CompetitionResource[];
+  onChange: (rows: CompetitionResource[]) => void;
+  namePrefix?: string;
+}) {
+  const prefix = namePrefix ? `${namePrefix} ` : "";
+  const patchRow = (index: number, patch: Partial<CompetitionResource>) =>
+    onChange(rows.map((row, position) => (position === index ? { ...row, ...patch } : row)));
+  return (
+    <>
+      {rows.length === 0 ? (
+        <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
+      ) : (
+        rows.map((row, index) => (
+          <div className="ac-resource-row" key={index}>
+            <input
+              className="ac-form-control"
+              value={row.label}
+              onChange={(event) => patchRow(index, { label: event.target.value })}
+              placeholder="Tên tài nguyên"
+              aria-label={`Tên tài nguyên ${prefix}${index + 1}`}
+            />
+            <input
+              className="ac-form-control ac-form-mono"
+              value={row.url}
+              onChange={(event) => patchRow(index, { url: event.target.value })}
+              placeholder="https://..."
+              aria-label={`Link tài nguyên ${prefix}${index + 1}`}
+            />
+            <button
+              type="button"
+              className="ac-resource-remove"
+              onClick={() => onChange(rows.filter((_, position) => position !== index))}
+              aria-label={`Xóa tài nguyên ${prefix}${index + 1}`}
+            >
+              ×
+            </button>
+          </div>
+        ))
+      )}
+      <button
+        type="button"
+        className="ac-form-button ac-resource-add"
+        onClick={() => onChange([...rows, { label: "", url: "" }])}
+        disabled={rows.length >= MAX_COMPETITION_RESOURCES}
+      >
+        + Thêm tài nguyên
+      </button>
+    </>
+  );
 }
 
 /** Dùng chung create/edit. Create: nhập mọi field. Edit: slug/status khóa (backend enforce). */
@@ -400,11 +574,26 @@ export function CompetitionFormModal({
   const [description, setDescription] = useState(
     competition?.short_description ?? "",
   );
+  // Hình thức chốt lúc tạo: PATCH không nhận `mode`, và đổi hình thức sẽ diễn giải lại dữ liệu
+  // đã có (đáp án, bài nộp) nên form sửa chỉ hiển thị lại kèm giải thích.
+  const [mode, setMode] = useState<CompetitionMode>(competition?.mode ?? "single");
+  const dual = mode === "public_private";
   const [startAt, setStartAt] = useState(
     competition ? isoToLocalInput(competition.start_at) : "",
   );
   const [endAt, setEndAt] = useState(
     competition ? isoToLocalInput(competition.end_at) : "",
+  );
+  // Lịch nhánh chỉ nhập ở form tạo; cuộc thi dual sửa lịch qua "Gia hạn / Mở lại" ở trang chi tiết.
+  const [trackForms, setTrackForms] = useState<Record<Track, TrackForm>>({
+    public: { startAt: "", endAt: "", quota: "5" },
+    private: { startAt: "", endAt: "", quota: "5" },
+  });
+  const [resultPolicy, setResultPolicy] = useState<ResultPolicy>(
+    competition?.tracks?.private?.result_policy ?? "manual",
+  );
+  const [publishCondition, setPublishCondition] = useState<PublishCondition>(
+    competition?.tracks?.private?.publish_condition ?? "admin_decides",
   );
   const [joinMode, setJoinMode] = useState<AdminCompetition["join_mode"]>(
     competition?.join_mode ?? "open",
@@ -423,13 +612,18 @@ export function CompetitionFormModal({
       ? String(competition.normalization.baseline)
       : "",
   );
-  const [resources, setResources] = useState<CompetitionResource[]>(
+  const [sharedResources, setSharedResources] = useState<CompetitionResource[]>(
     competition?.resources ?? [],
   );
+  const [publicResources, setPublicResources] = useState<CompetitionResource[]>([]);
+  const [privateResources, setPrivateResources] = useState<CompetitionResource[]>([]);
   const [dateError, setDateError] = useState("");
+  const [trackError, setTrackError] = useState("");
   const [normError, setNormError] = useState("");
   const [resourceError, setResourceError] = useState("");
   const [error, setError] = useState("");
+  const [summary, setSummary] = useState<string[]>([]);
+  const summaryRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
   const title = isEdit
     ? `Sửa cuộc thi - ${competition.slug}`
@@ -437,59 +631,142 @@ export function CompetitionFormModal({
   // Cấu hình norm chỉ sửa được khi cuộc thi còn nháp; bản clone là nháp mới nên sửa được như thường.
   const normLocked = isEdit && competition.status !== "draft";
 
-  function updateResource(index: number, patch: Partial<CompetitionResource>) {
-    setResources((rows) =>
-      rows.map((row, position) => (position === index ? { ...row, ...patch } : row)),
-    );
+  function updateTrackForm(track: Track, patch: Partial<TrackForm>) {
+    setTrackForms((forms) => {
+      const next: Record<Track, TrackForm> = { ...forms };
+      next[track] = { ...forms[track], ...patch };
+      return next;
+    });
   }
+
+  /** Chặn submit tại chỗ: lỗi hiện inline và một bản tóm tắt được focus để không bỏ sót mục nào. */
+  function fail(message: string, setInlineError: (value: string) => void) {
+    setInlineError(message);
+    setSummary([message]);
+  }
+
+  useEffect(() => {
+    if (summary.length > 0) summaryRef.current?.focus();
+  }, [summary]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setDateError("");
+    setTrackError("");
     setNormError("");
     setResourceError("");
     setError("");
+    setSummary([]);
 
-    const start = new Date(startAt);
-    const end = new Date(endAt);
-    if (end <= start) {
-      setDateError("Thời gian kết thúc phải sau thời gian bắt đầu.");
-      return;
+    const dualCreate = !isEdit && dual;
+    if (dualCreate) {
+      for (const track of TRACKS) {
+        const window = trackForms[track];
+        if (new Date(window.endAt) <= new Date(window.startAt)) {
+          fail(
+            `Nhánh ${TRACK_LABEL[track]}: thời gian bắt đầu phải trước thời gian kết thúc.`,
+            setTrackError,
+          );
+          return;
+        }
+      }
+    } else if (!dual) {
+      const start = new Date(startAt);
+      const end = new Date(endAt);
+      if (end <= start) {
+        fail("Thời gian kết thúc phải sau thời gian bắt đầu.", setDateError);
+        return;
+      }
     }
 
     const cleanedNormalization = cleanNormalization(normEnabled, baseline);
     if (!cleanedNormalization.ok) {
-      setNormError(cleanedNormalization.message);
+      fail(cleanedNormalization.message, setNormError);
       return;
     }
 
-    let resourcesPayload: CompetitionResource[] | undefined;
+    let sharedPayload: CompetitionResource[] | undefined;
+    let publicPayload: CompetitionResource[] | undefined;
+    let privatePayload: CompetitionResource[] | undefined;
     if (!isEdit) {
-      const cleanedResources = cleanCompetitionResources(resources);
-      if (!cleanedResources.ok) {
-        setResourceError(cleanedResources.message);
+      const shared = cleanCompetitionResources(sharedResources);
+      if (!shared.ok) {
+        fail(dual ? `Tài nguyên dùng chung: ${shared.message}` : shared.message, setResourceError);
         return;
       }
-      resourcesPayload = cleanedResources.resources;
+      sharedPayload = shared.resources;
+      if (dual) {
+        const publicGroup = cleanCompetitionResources(publicResources);
+        if (!publicGroup.ok) {
+          fail(`Tài nguyên Public: ${publicGroup.message}`, setResourceError);
+          return;
+        }
+        publicPayload = publicGroup.resources;
+        const privateGroup = cleanCompetitionResources(privateResources);
+        if (!privateGroup.ok) {
+          fail(`Tài nguyên Private: ${privateGroup.message}`, setResourceError);
+          return;
+        }
+        privatePayload = privateGroup.resources;
+      }
     }
 
     setBusy(true);
     // Cố ý không gửi primary_metric: cách chấm của cuộc thi v2 do bộ chấm Python và
     // result_contract khai báo ở tab "Chấm điểm" quyết định, field này chỉ còn là dấu vết dữ liệu v1.
-    const payload = {
-      name,
-      slug: slug.trim().toLowerCase(),
-      short_description: description,
-      start_at: localInputToIso(startAt),
-      end_at: localInputToIso(endAt),
-      join_mode: joinMode,
-      quota_per_day: Number(quota),
-      leaderboard_visible: leaderboardVisible,
-      resources: resourcesPayload,
-      // Cuộc thi đã publish/closed bị backend khóa cấu hình norm: bỏ hẳn field để không làm
-      // hỏng các chỉnh sửa khác (JSON.stringify bỏ qua giá trị undefined).
-      normalization: normLocked ? undefined : cleanedNormalization.normalization,
-    };
+    const payload = dualCreate
+      ? {
+          name,
+          slug: slug.trim().toLowerCase(),
+          short_description: description,
+          mode: "public_private",
+          join_mode: joinMode,
+          leaderboard_visible: leaderboardVisible,
+          resources: sharedPayload,
+          normalization: cleanedNormalization.normalization,
+          public_track: {
+            start_at: localInputToIso(trackForms.public.startAt),
+            end_at: localInputToIso(trackForms.public.endAt),
+            quota_per_day: Number(trackForms.public.quota),
+            resources: publicPayload,
+          },
+          private_track: {
+            start_at: localInputToIso(trackForms.private.startAt),
+            end_at: localInputToIso(trackForms.private.endAt),
+            quota_per_day: Number(trackForms.private.quota),
+            resources: privatePayload,
+            result_policy: resultPolicy,
+            // Nhánh hiện ngay không còn cổng điều kiện để chờ: gửi mặc định thay vì giữ giá trị
+            // của lựa chọn đang bị ẩn khỏi form.
+            publish_condition:
+              resultPolicy === "manual" ? publishCondition : "admin_decides",
+          },
+        }
+      : dual
+        ? {
+            // Cuộc thi hai nhánh: lịch, quota và tài nguyên nhánh thuộc endpoint riêng ở trang
+            // chi tiết (kèm revision + lý do); gửi kèm ở đây sẽ bị backend từ chối.
+            name,
+            slug: slug.trim().toLowerCase(),
+            short_description: description,
+            join_mode: joinMode,
+            leaderboard_visible: leaderboardVisible,
+            normalization: normLocked ? undefined : cleanedNormalization.normalization,
+          }
+        : {
+            name,
+            slug: slug.trim().toLowerCase(),
+            short_description: description,
+            start_at: localInputToIso(startAt),
+            end_at: localInputToIso(endAt),
+            join_mode: joinMode,
+            quota_per_day: Number(quota),
+            leaderboard_visible: leaderboardVisible,
+            resources: sharedPayload,
+            // Cuộc thi đã publish/closed bị backend khóa cấu hình norm: bỏ hẳn field để không làm
+            // hỏng các chỉnh sửa khác (JSON.stringify bỏ qua giá trị undefined).
+            normalization: normLocked ? undefined : cleanedNormalization.normalization,
+          };
 
     try {
       // Cả hai endpoint admin đều trả detail kèm readiness, không chỉ public projection.
@@ -516,8 +793,70 @@ export function CompetitionFormModal({
         <div className="ac-form-eyebrow">CẤU HÌNH CUỘC THI / COMPETITION SETUP</div>
 
         <div className="ac-form-body">
+          {summary.length > 0 && (
+            <div
+              className="ac-form-error-summary"
+              role="group"
+              aria-labelledby="ac-form-error-summary-title"
+              tabIndex={-1}
+              ref={summaryRef}
+            >
+              <h3 className="ac-form-error-summary-title" id="ac-form-error-summary-title">
+                Cần kiểm tra lại
+              </h3>
+              <ul>
+                {summary.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <FormSection
             index="01"
+            title="Hình thức đánh giá"
+            tone="yellow"
+            icon={<IconBranch />}
+          >
+            <fieldset className="ac-join-fieldset" disabled={isEdit}>
+              <legend className="ac-required sr-only">Hình thức đánh giá</legend>
+              <div className="ac-join-options ac-mode-options">
+                {(Object.keys(MODE_LABEL) as CompetitionMode[]).map((candidate) => (
+                  <label
+                    key={candidate}
+                    className={mode === candidate ? "selected" : ""}
+                    data-tone={MODE_TONE[candidate]}
+                  >
+                    <input
+                      type="radio"
+                      name="comp-mode"
+                      value={candidate}
+                      checked={mode === candidate}
+                      onChange={() => setMode(candidate)}
+                    />
+                    <span className="ac-join-icon" aria-hidden="true">
+                      {MODE_ICON[candidate]}
+                    </span>
+                    <span>
+                      <strong>{MODE_LABEL[candidate]}</strong>
+                      <small>{MODE_HINT[candidate]}</small>
+                    </span>
+                    {mode === candidate && <IconCheck className="ac-join-check" />}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {isEdit && (
+              <p className="ac-resource-hint">
+                Hình thức đánh giá được chốt lúc tạo cuộc thi và không đổi được: đổi hình thức sẽ
+                diễn giải lại toàn bộ dữ liệu đã có (đáp án, bài nộp). Muốn đổi, hãy tạo cuộc thi
+                mới.
+              </p>
+            )}
+          </FormSection>
+
+          <FormSection
+            index="02"
             title="Thông tin cơ bản"
             tone="blue"
             icon={<IconInfo />}
@@ -579,46 +918,226 @@ export function CompetitionFormModal({
             </div>
           </FormSection>
 
-          <FormSection index="02" title="Thời gian" tone="red" icon={<IconCalendar />}>
-            <div className="ac-date-group">
-              <div className="ac-form-grid">
-                <div className="ac-form-field">
-                  <label className="ac-required" htmlFor="comp-start">
-                    Bắt đầu
-                  </label>
-                  <input
-                    id="comp-start"
-                    className="ac-form-control ac-form-mono"
-                    type="datetime-local"
-                    value={startAt}
-                    onChange={(event) => setStartAt(event.target.value)}
-                    required
-                  />
-                </div>
-                <div className="ac-form-field">
-                  <label className="ac-required" htmlFor="comp-end">
-                    Kết thúc
-                  </label>
-                  <input
-                    id="comp-end"
-                    className="ac-form-control ac-form-mono"
-                    type="datetime-local"
-                    value={endAt}
-                    onChange={(event) => setEndAt(event.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-              {dateError && (
-                <div className="ac-date-error" role="alert">
-                  {dateError}
-                </div>
-              )}
-            </div>
-          </FormSection>
-
           <FormSection
             index="03"
+            title={dual ? "Lịch hai nhánh" : "Thời gian"}
+            tone="red"
+            icon={<IconCalendar />}
+          >
+            {dual ? (
+              isEdit ? (
+                <div className="ac-date-group">
+                  <div className="ac-track-summary">
+                    {TRACKS.map((track) => {
+                      const view = competition?.tracks?.[track];
+                      if (!view) return null;
+                      return (
+                        <div className="ac-track-summary-row" key={track}>
+                          <strong>
+                            {TRACK_LABEL[track]}
+                                                      </strong>
+                          <span>
+                            {formatLocal(view.start_at)} → {formatLocal(view.end_at)}
+                          </span>
+                          <span>{view.quota_per_day} lượt/ngày</span>
+                          <span>{TRACK_WINDOW_LABEL[view.window_state]}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="ac-resource-hint">
+                    Lịch nhánh đổi qua “Gia hạn” hoặc “Mở lại” ở trang chi tiết để mỗi lượt đổi đều
+                    kèm lý do và chống ghi đè; form này không sửa lịch cấp cuộc thi của cuộc thi hai
+                    nhánh.
+                  </p>
+                </div>
+              ) : (
+                <div className="ac-date-group">
+                  <div className="ac-track-grid">
+                    <div className="ac-track-grid-head" aria-hidden="true">
+                      <span />
+                      <span>PUBLIC</span>
+                      <span>PRIVATE</span>
+                    </div>
+                    <div className="ac-track-grid-row">
+                      <span className="ac-track-grid-label">Mở nhận bài</span>
+                      {TRACKS.map((track) => (
+                        <input
+                          key={track}
+                          id={`comp-${track}-start`}
+                          className="ac-form-control ac-form-mono"
+                          type="datetime-local"
+                          value={trackForms[track].startAt}
+                          onChange={(event) =>
+                            updateTrackForm(track, { startAt: event.target.value })
+                          }
+                          aria-label={`${TRACK_LABEL[track]} mở nhận bài`}
+                          required
+                        />
+                      ))}
+                    </div>
+                    <div className="ac-track-grid-row">
+                      <span className="ac-track-grid-label">Đóng nhận bài</span>
+                      {TRACKS.map((track) => (
+                        <input
+                          key={track}
+                          id={`comp-${track}-end`}
+                          className="ac-form-control ac-form-mono"
+                          type="datetime-local"
+                          value={trackForms[track].endAt}
+                          onChange={(event) =>
+                            updateTrackForm(track, { endAt: event.target.value })
+                          }
+                          aria-label={`${TRACK_LABEL[track]} đóng nhận bài`}
+                          required
+                        />
+                      ))}
+                    </div>
+                    <div className="ac-track-grid-row">
+                      <span className="ac-track-grid-label">Lượt mỗi ngày</span>
+                      {TRACKS.map((track) => (
+                        <input
+                          key={track}
+                          id={`comp-${track}-quota`}
+                          className="ac-form-control ac-form-mono"
+                          type="number"
+                          min={0}
+                          max={1000}
+                          value={trackForms[track].quota}
+                          onChange={(event) =>
+                            updateTrackForm(track, { quota: event.target.value })
+                          }
+                          aria-label={`${TRACK_LABEL[track]} lượt mỗi ngày`}
+                          required
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {trackError && (
+                    <div className="ac-date-error" role="alert">
+                      {trackError}
+                    </div>
+                  )}
+                  <TrackTimeline windows={trackForms} />
+                </div>
+              )
+            ) : (
+              <div className="ac-date-group">
+                <div className="ac-form-grid">
+                  <div className="ac-form-field">
+                    <label className="ac-required" htmlFor="comp-start">
+                      Bắt đầu
+                    </label>
+                    <input
+                      id="comp-start"
+                      className="ac-form-control ac-form-mono"
+                      type="datetime-local"
+                      value={startAt}
+                      onChange={(event) => setStartAt(event.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="ac-form-field">
+                    <label className="ac-required" htmlFor="comp-end">
+                      Kết thúc
+                    </label>
+                    <input
+                      id="comp-end"
+                      className="ac-form-control ac-form-mono"
+                      type="datetime-local"
+                      value={endAt}
+                      onChange={(event) => setEndAt(event.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                {dateError && (
+                  <div className="ac-date-error" role="alert">
+                    {dateError}
+                  </div>
+                )}
+              </div>
+            )}
+          </FormSection>
+
+          {dual && (
+            <FormSection
+              index="04"
+              title="Kết quả Private"
+              tone="blue"
+              icon={<IconTrophy />}
+            >
+              {isEdit ? (
+                <>
+                  <div className="ac-track-summary">
+                    <div className="ac-track-summary-row">
+                      <strong>Chính sách</strong>
+                      <span>{RESULT_POLICY_LABEL[resultPolicy]}</span>
+                      {resultPolicy === "manual" && (
+                        <span>Điều kiện: {PUBLISH_CONDITION_LABEL[publishCondition]}</span>
+                      )}
+                    </div>
+                  </div>
+                  <p className="ac-resource-hint">
+                    Chính sách và thời điểm công bố đổi ở mục “Công bố Private” trong trang chi tiết,
+                    nơi mỗi lượt đổi đều kèm lý do và chống ghi đè.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <fieldset className="ac-join-fieldset">
+                    <legend className="ac-required sr-only">Kết quả Private</legend>
+                    <div className="ac-policy-options">
+                      {(Object.keys(RESULT_POLICY_LABEL) as ResultPolicy[]).map((policy) => (
+                        <label
+                          key={policy}
+                          className={resultPolicy === policy ? "selected" : ""}
+                        >
+                          <input
+                            type="radio"
+                            name="comp-policy"
+                            value={policy}
+                            checked={resultPolicy === policy}
+                            onChange={() => setResultPolicy(policy)}
+                          />
+                          <span>{RESULT_POLICY_LABEL[policy]}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                  {resultPolicy === "manual" ? (
+                    <div className="ac-form-field">
+                      <label htmlFor="comp-condition">Điều kiện công bố</label>
+                      <select
+                        id="comp-condition"
+                        className="input"
+                        value={publishCondition}
+                        onChange={(event) =>
+                          setPublishCondition(event.target.value as PublishCondition)
+                        }
+                      >
+                        {(Object.keys(PUBLISH_CONDITION_LABEL) as PublishCondition[]).map(
+                          (condition) => (
+                            <option key={condition} value={condition}>
+                              {PUBLISH_CONDITION_LABEL[condition]}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </div>
+                  ) : (
+                    <p className="ac-resource-hint">
+                      Điểm Private hiện ngay khi chấm xong và không thể trở lại bí mật; nếu cuộc thi
+                      đã publish, dấu mốc công bố được ghi ngay tại thời điểm đổi chính sách.
+                    </p>
+                  )}
+                </>
+              )}
+            </FormSection>
+          )}
+
+          <FormSection
+            index={dual ? "05" : "04"}
             title="Cách tham gia"
             tone="yellow"
             icon={<IconUserPlus />}
@@ -658,31 +1177,33 @@ export function CompetitionFormModal({
           </FormSection>
 
           <FormSection
-            index="04"
+            index={dual ? "06" : "05"}
             title="Chấm điểm & giới hạn"
             tone="blue"
             icon={<IconGauge />}
           >
-            <div className="ac-form-grid">
-              <div className="ac-form-field">
-                <label className="ac-required" htmlFor="comp-quota">
-                  Giới hạn nộp bài (lượt/ngày)
-                </label>
-                <div className="ac-quota-input">
-                  <input
-                    id="comp-quota"
-                    className="ac-form-control ac-form-mono"
-                    type="number"
-                    min={0}
-                    max={1000}
-                    value={quota}
-                    onChange={(event) => setQuota(event.target.value)}
-                    required
-                  />
-                  <span aria-hidden="true">lượt / ngày</span>
+            {!dual && (
+              <div className="ac-form-grid">
+                <div className="ac-form-field">
+                  <label className="ac-required" htmlFor="comp-quota">
+                    Giới hạn nộp bài (lượt/ngày)
+                  </label>
+                  <div className="ac-quota-input">
+                    <input
+                      id="comp-quota"
+                      className="ac-form-control ac-form-mono"
+                      type="number"
+                      min={0}
+                      max={1000}
+                      value={quota}
+                      onChange={(event) => setQuota(event.target.value)}
+                      required
+                    />
+                    <span aria-hidden="true">lượt / ngày</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             <div className="ac-leaderboard-field">
               <label htmlFor="comp-leaderboard">
@@ -757,7 +1278,7 @@ export function CompetitionFormModal({
 
           {!isEdit && (
             <FormSection
-              index="05"
+              index={dual ? "07" : "06"}
               title="Tài nguyên tải về"
               tone="yellow"
               icon={<IconFolder />}
@@ -765,51 +1286,30 @@ export function CompetitionFormModal({
               <fieldset className="ac-resource-fieldset">
                 <legend className="sr-only">Tài nguyên tải về</legend>
                 <p className="ac-resource-hint">
-                  Chỉ nhận link Google Drive hoặc Google Docs - hệ thống không lưu file dataset.
-                  Nhớ đặt quyền chia sẻ “Bất kỳ ai có liên kết” để thí sinh mở được.
+                  Nhận mọi link https (Google Drive, Google Docs, S3, máy chủ riêng...) - hệ thống
+                  không lưu file dataset. Nhớ đặt quyền truy cập để thí sinh mở được.
                 </p>
 
-                {resources.length === 0 ? (
-                  <p className="ac-resource-empty">Chưa có tài nguyên nào.</p>
+                {dual ? (
+                  <>
+                    <h4 className="ac-resource-group-title">Dùng chung cho cả hai nhánh</h4>
+                    <ResourceRows rows={sharedResources} onChange={setSharedResources} />
+                    <h4 className="ac-resource-group-title">Nhánh Public</h4>
+                    <ResourceRows
+                      rows={publicResources}
+                      onChange={setPublicResources}
+                      namePrefix="Public"
+                    />
+                    <h4 className="ac-resource-group-title">Nhánh Private</h4>
+                    <ResourceRows
+                      rows={privateResources}
+                      onChange={setPrivateResources}
+                      namePrefix="Private"
+                    />
+                  </>
                 ) : (
-                  resources.map((row, index) => (
-                    <div className="ac-resource-row" key={index}>
-                      <input
-                        className="ac-form-control"
-                        value={row.label}
-                        onChange={(event) => updateResource(index, { label: event.target.value })}
-                        placeholder="Tên tài nguyên"
-                        aria-label={`Tên tài nguyên ${index + 1}`}
-                      />
-                      <input
-                        className="ac-form-control ac-form-mono"
-                        value={row.url}
-                        onChange={(event) => updateResource(index, { url: event.target.value })}
-                        placeholder="https://drive.google.com/..."
-                        aria-label={`Link tài nguyên ${index + 1}`}
-                      />
-                      <button
-                        type="button"
-                        className="ac-resource-remove"
-                        onClick={() =>
-                          setResources((rows) => rows.filter((_, position) => position !== index))
-                        }
-                        aria-label={`Xóa tài nguyên ${index + 1}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))
+                  <ResourceRows rows={sharedResources} onChange={setSharedResources} />
                 )}
-
-                <button
-                  type="button"
-                  className="ac-form-button ac-resource-add"
-                  onClick={() => setResources((rows) => [...rows, { label: "", url: "" }])}
-                  disabled={resources.length >= MAX_COMPETITION_RESOURCES}
-                >
-                  + Thêm tài nguyên
-                </button>
 
                 {resourceError && (
                   <div className="ac-date-error" role="alert">

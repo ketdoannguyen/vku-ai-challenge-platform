@@ -30,6 +30,11 @@ STATUS_COMPLETED = "COMPLETED"
 STATUS_FAILED = "FAILED"
 STATUS_EXPIRED = "EXPIRED"
 
+# Lượt chấm v2 vào hàng đợi chờ worker; lượt dual-v1 chấm ngay trong request. Bản ghi cũ không có
+# field này giữ semantics queue, nên chỉ ghi giá trị mới thay vì đọc kèm mặc định ở mọi chỗ.
+EXECUTION_QUEUE = "queue"
+EXECUTION_INLINE = "inline"
+
 # Còn giữ một chỗ trong hàng đợi: đang nhận file hoặc đang chờ tới lượt.
 HOLDING_SLOT_STATUSES = (STATUS_STAGING, STATUS_QUEUED)
 # Không thuộc về worker nào: chưa ai claim, hoặc đã trả lại cho reconciler đối soát.
@@ -104,17 +109,24 @@ async def get(db, attempt_id) -> dict | None:
     return await db[ATTEMPTS_COLLECTION].find_one({"_id": attempt_id})
 
 
-async def list_active(db, competition_id, account_id, *, limit: int = 10) -> list[dict]:
-    """Các lượt chưa kết thúc của một account - để trang nộp bài tự khôi phục sau khi mở lại."""
+async def list_active(
+    db, competition_id, account_id, *, limit: int = 10, track: str | None = None
+) -> list[dict]:
+    """Các lượt chưa kết thúc của một account - để trang nộp bài tự khôi phục sau khi mở lại.
+
+    `track` giới hạn về một nhánh: trang nộp bài dual mở với một nhánh cụ thể nên không được
+    nhận nhầm lượt đang chờ của nhánh kia.
+    """
+    filter_ = {
+        "competition_id": competition_id,
+        "account_id": account_id,
+        "status": {"$in": list(ACTIVE_STATUSES)},
+    }
+    if track is not None:
+        filter_["track"] = track
     cursor = (
         db[ATTEMPTS_COLLECTION]
-        .find(
-            {
-                "competition_id": competition_id,
-                "account_id": account_id,
-                "status": {"$in": list(ACTIVE_STATUSES)},
-            }
-        )
+        .find(filter_)
         .sort([("created_at", -1), ("_id", -1)])
         .limit(limit)
     )
@@ -122,18 +134,22 @@ async def list_active(db, competition_id, account_id, *, limit: int = 10) -> lis
 
 
 async def queue_position(db, attempt: dict) -> int:
-    """Số thứ tự trong hàng đợi, 1 là lượt được chấm kế tiếp."""
+    """Số thứ tự trong hàng đợi, 1 là lượt được chấm kế tiếp.
+
+    Chỉ đếm lượt đang giữ chỗ hàng đợi: lượt inline cũng mang trạng thái STAGING nhưng không đi
+    qua hàng đợi, nên không được chen vào số thứ tự của người khác.
+    """
     ahead = await db[ATTEMPTS_COLLECTION].count_documents(
         {
             "status": {"$in": list(HOLDING_SLOT_STATUSES)},
+            "queue_slot": {"$exists": True},
             "created_at": {"$lt": attempt["created_at"]},
         }
     )
     return ahead + 1
 
 
-async def admit(
-    db,
+def _attempt_base(
     *,
     attempt_id: ObjectId,
     competition_id,
@@ -141,19 +157,12 @@ async def admit(
     membership_id,
     idempotency_key: str,
     payload_sha256: str,
-    staging_prefix: str,
+    staging_prefix: str | None,
     deadline_at: datetime,
     now: datetime,
-    capacity: int,
+    track: str | None,
+    execution_kind: str,
 ) -> dict:
-    """Tạo lượt nộp mới ở trạng thái STAGING và giữ một chỗ trong hàng đợi.
-
-    Chỗ được giữ bằng chính document của lượt: thử lần lượt các số 0..capacity-1, số nào đã có người
-    giữ thì nhảy sang số kế. Hết dải nghĩa là hàng đợi đầy - `QueueFull`.
-
-    Người gọi phải giữ suất quota TRƯỚC khi gọi hàm này, nên lượt được tạo ra với `quota_charged`
-    bật sẵn; chỉ `clear_quota_claim` mới tắt lại sau khi suất đã được hoàn.
-    """
     base = {
         "_id": attempt_id,
         "competition_id": competition_id,
@@ -162,8 +171,12 @@ async def admit(
         "idempotency_key": idempotency_key,
         "payload_sha256": payload_sha256,
         "status": STATUS_STAGING,
-        # Kho tạm của lượt nằm trong document để bước dọn không cần biết cuộc thi nào.
+        "execution_kind": execution_kind,
+        # Kho tạm của lượt nằm trong document để bước dọn không cần biết cuộc thi nào. Lượt inline
+        # chưa từng cất file vào kho tạm nên không có prefix.
         "staging_prefix": staging_prefix,
+        # Nhánh của lượt: worker chấm bằng đúng GT của nhánh này. Single không có field.
+        "admission": None,
         "deadline_at": deadline_at,
         "created_at": now,
         "updated_at": now,
@@ -176,6 +189,47 @@ async def admit(
         "lease_token": None,
         "lease_expires_at": None,
     }
+    if track is not None:
+        base["track"] = track
+    return base
+
+
+async def admit(
+    db,
+    *,
+    attempt_id: ObjectId,
+    competition_id,
+    account_id,
+    membership_id,
+    idempotency_key: str,
+    payload_sha256: str,
+    staging_prefix: str | None,
+    deadline_at: datetime,
+    now: datetime,
+    capacity: int,
+    track: str | None = None,
+) -> dict:
+    """Tạo lượt nộp mới ở trạng thái STAGING và giữ một chỗ trong hàng đợi.
+
+    Chỗ được giữ bằng chính document của lượt: thử lần lượt các số 0..capacity-1, số nào đã có người
+    giữ thì nhảy sang số kế. Hết dải nghĩa là hàng đợi đầy - `QueueFull`.
+
+    Người gọi phải giữ suất quota TRƯỚC khi gọi hàm này, nên lượt được tạo ra với `quota_charged`
+    bật sẵn; chỉ `clear_quota_claim` mới tắt lại sau khi suất đã được hoàn.
+    """
+    base = _attempt_base(
+        attempt_id=attempt_id,
+        competition_id=competition_id,
+        account_id=account_id,
+        membership_id=membership_id,
+        idempotency_key=idempotency_key,
+        payload_sha256=payload_sha256,
+        staging_prefix=staging_prefix,
+        deadline_at=deadline_at,
+        now=now,
+        track=track,
+        execution_kind=EXECUTION_QUEUE,
+    )
     for slot in range(capacity):
         document = {**base, "queue_slot": slot}
         try:
@@ -188,6 +242,88 @@ async def admit(
             continue
         return document
     raise QueueFull()
+
+
+async def admit_inline(
+    db,
+    *,
+    attempt_id: ObjectId,
+    competition_id,
+    account_id,
+    membership_id,
+    idempotency_key: str,
+    payload_sha256: str,
+    deadline_at: datetime,
+    now: datetime,
+    track: str,
+) -> dict:
+    """Tạo lượt dual-v1 chấm ngay trong request; không chiếm chỗ của hàng đợi v2.
+
+    Cùng unique index idempotency với đường queue nên một lần nhấn Nút chỉ có một lượt trên cả
+    hai đường; tranh chấp chỗ không tồn tại vì lượt inline không giữ `queue_slot`.
+    """
+    document = _attempt_base(
+        attempt_id=attempt_id,
+        competition_id=competition_id,
+        account_id=account_id,
+        membership_id=membership_id,
+        idempotency_key=idempotency_key,
+        payload_sha256=payload_sha256,
+        staging_prefix=None,
+        deadline_at=deadline_at,
+        now=now,
+        track=track,
+        execution_kind=EXECUTION_INLINE,
+    )
+    try:
+        await db[ATTEMPTS_COLLECTION].insert_one(document)
+    except DuplicateKeyError:
+        existing = await find_by_key(db, competition_id, account_id, idempotency_key)
+        if existing is not None:
+            raise AttemptExists(existing)
+        raise
+    return document
+
+
+async def begin_inline(db, attempt: dict, *, now: datetime, lease_seconds: int) -> dict | None:
+    """Nhận lượt inline cho request đang chấm nó; None nghĩa là lượt đã bị đóng từ nơi khác.
+
+    Lượt inline không đi qua hàng đợi nên không ai tranh claim; lượt ghi này để một intent đã bị
+    reconciler đóng không thể được chấm tiếp, và để request chết giữa chừng vẫn còn lease cho nhịp
+    đối soát nhận ra.
+    """
+    return await db[ATTEMPTS_COLLECTION].find_one_and_update(
+        {
+            "_id": attempt["_id"],
+            "status": STATUS_STAGING,
+            "execution_kind": EXECUTION_INLINE,
+        },
+        {
+            "$set": {
+                "status": STATUS_RUNNING,
+                "claimed_by": EXECUTION_INLINE,
+                "lease_token": secrets.token_hex(16),
+                "lease_expires_at": now + timedelta(seconds=lease_seconds),
+                "started_at": now,
+                "updated_at": now,
+            }
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+
+async def set_admission(db, attempt: dict, *, admission: dict, now: datetime) -> bool:
+    """Ghim snapshot của cổng admission vào intent; chỉ intent còn STAGING mới nhận được.
+
+    Sau lượt ghi này intent là "đã admission": worker và đường inline chỉ được chấm khi field có
+    mặt. Reconciler đóng một intent STAGING quá hạn mà chưa kịp ghim thì lượt ghi này trượt, nên
+    một lượt đã bị đóng không bao giờ được chấm tiếp.
+    """
+    result = await db[ATTEMPTS_COLLECTION].update_one(
+        {"_id": attempt["_id"], "status": STATUS_STAGING},
+        {"$set": {"admission": admission, "updated_at": now}},
+    )
+    return result.modified_count == 1
 
 
 async def mark_queued(db, attempt: dict, *, now: datetime) -> bool:

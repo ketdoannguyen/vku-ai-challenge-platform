@@ -84,16 +84,21 @@ const V2_DRAFT_COMPETITION: CompetitionDetail = {
 /** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
 const reportAccessLost = vi.fn();
 
-function renderPage(competition: CompetitionDetail = COMPETITION) {
-  return render(
+/** Cây trang đủ để `rerender` đổi metadata như shell thật làm khi poll. */
+function tree(competition: CompetitionDetail) {
+  return (
     <MemoryRouter initialEntries={["/competitions/results-cup/leaderboard"]}>
       <Routes>
         <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/leaderboard" element={<LeaderboardPage />} />
         </Route>
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderPage(competition: CompetitionDetail = COMPETITION) {
+  return render(tree(competition));
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -201,7 +206,8 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
     "Recall",
     "Đạt lúc",
   ]);
-  expect(within(current).getByText("0.9800")).toHaveClass("primary-score");
+  // Điểm chính của metric chính được nhấn ngay trong ô, không chỉ bằng màu chữ.
+  expect(within(current).getByText("0.9800").closest("td")).toHaveClass("primary-score");
   expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
@@ -230,7 +236,9 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
     }),
   );
 
-  renderPage();
+  // Metadata của cuộc thi phải bật chuẩn hóa: cột norm là quyết định theo state hiện tại,
+  // không phải cứ payload có metadata norm là render.
+  renderPage({ ...COMPETITION, normalization: { enabled: true, baseline: 0.5, version: 1 } });
 
   expect(await screen.findByText("Đội Sớm")).toBeTruthy();
   // Cột norm đứng trước các metric của hợp đồng và nêu rõ thang 0–50.
@@ -245,22 +253,29 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
   ]);
 
   const top = screen.getByText("Đội Sớm").closest("tr") as HTMLElement;
-  // Điểm xếp hạng là norm 2 chữ số; cột F1 của cùng dòng không còn được nhấn là điểm chính.
-  expect(within(top).getByText("50.00")).toHaveClass("primary-score");
-  expect(within(top).getByText("0.9900")).not.toHaveClass("primary-score");
+  // Hai ô điểm của dòng cùng được nhấn: norm quyết định hạng, điểm gốc của metric chính đối chiếu.
+  expect(within(top).getByText("50.00").closest("td")).toHaveClass("primary-score", "lb-norm-score");
+  expect(within(top).getByText("0.9900").closest("td")).toHaveClass("primary-score", "lb-raw-score");
 
-  // Quy tắc tie-break nói bằng ngôn ngữ norm, kèm mẫu số và thời điểm dựng bảng.
-  expect(
-    screen.getByText(/Bằng norm: bài hợp lệ đạt điểm đó được nộp sớm hơn đứng trước/),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(/Baseline F1 0\.5000 · Điểm gốc tốt nhất hiện tại 0\.9000 · Bảng dựng lúc/),
-  ).toBeTruthy();
+  // Quy tắc đọc gọn: công thức norm, rồi từng số liệu mẫu số tách thành ô riêng.
+  expect(screen.getByText(/Tính theo điểm norm score · 50 ×/)).toBeTruthy();
+  expect(screen.getByText(/\(điểm gốc − baseline\) \/ \(điểm tốt nhất − baseline\)/)).toBeTruthy();
+  const normFacts = document.querySelector(".lb-norm-facts") as HTMLElement;
+  expect(within(normFacts).getByText(/Baseline · F1/)).toBeTruthy();
+  expect(within(normFacts).getByText("0.5000")).toBeTruthy();
+  expect(within(normFacts).getByText("Điểm gốc tốt nhất")).toBeTruthy();
+  expect(within(normFacts).getByText("0.9000")).toBeTruthy();
+  // Ô giới hạn thay cho mốc dựng bảng cũ: ba số liệu mẫu số là baseline, điểm tốt nhất, thang điểm.
+  expect(within(normFacts).getByText("Giới hạn điểm")).toBeTruthy();
+  expect(within(normFacts).getByText("0–50")).toBeTruthy();
+  expect(normFacts.querySelectorAll("[data-tone]")).toHaveLength(3);
 
-  // Dải cá nhân dùng norm hiện tại từ bảng, không phải điểm gốc.
+  // Dải cá nhân dùng norm hiện tại từ bảng, kèm điểm gốc đối chiếu; không chỉ điểm gốc.
   const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
   expect(within(meStrip).getByText("Điểm norm")).toBeTruthy();
   expect(within(meStrip).getByText("12.50")).toBeTruthy();
+  expect(within(meStrip).getByText(/Điểm gốc · F1/)).toBeTruthy();
+  expect(within(meStrip).getByText("0.9800")).toBeTruthy();
 });
 
 test("norm bị ẩn (metadata null): giữ nguyên giao diện điểm gốc", async () => {
@@ -290,6 +305,95 @@ test("norm bị ẩn (metadata null): giữ nguyên giao diện điểm gốc", 
   const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
   expect(within(meStrip).getByText("Điểm chính")).toBeTruthy();
   expect(within(meStrip).getByText("0.9900")).toBeTruthy();
+});
+
+test("norm bị ẩn theo capability dù payload còn metadata: không render cột, nêu đúng lý do", async () => {
+  mockResponse(
+    page({
+      total: 1,
+      // Response đã tải từ lúc còn quyền: metadata norm vẫn nằm trong state cũ.
+      normalization: NORM_BOARD,
+      entries: [entry(1, "Đội Sớm", { normalized_score: 50 })],
+      me: entry(1, "Đội Sớm", { is_current_user: true, normalized_score: 50 }),
+    }),
+  );
+
+  // Metadata hiện tại đã ẩn metric nguồn (điều kiện M): số norm cũ không được coi là còn xem được.
+  renderPage({
+    ...COMPETITION,
+    normalization: { enabled: true, baseline: 0.5, version: 1 },
+    primary_metric_label: null,
+  });
+
+  expect(await screen.findByText("Đội Sớm")).toBeTruthy();
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+  // Không rò mẫu số hay điểm norm khi quyền xem đã bị thu hồi.
+  expect(screen.queryByText("50.00")).toBeNull();
+  expect(screen.queryByText(/Baseline/)).toBeNull();
+  expect(screen.getByText("Điểm chuẩn hóa bị ẩn theo cấu hình hiển thị điểm")).toBeTruthy();
+  const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(within(meStrip).getByText("Điểm chính")).toBeTruthy();
+});
+
+test("master BXH tắt giữa chừng: bỏ dòng đang giữ, bật lại phải tải mới", async () => {
+  let calls = 0;
+  let releaseBack: (() => void) | undefined;
+  const backGate = new Promise<void>((resolve) => {
+    releaseBack = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => {
+      calls += 1;
+      // Lượt tải sau khi bật lại bị giữ để chứng minh trang không hiện lại dữ liệu cũ trong lúc chờ.
+      if (calls > 1) await backGate;
+      return jsonResponse(
+        page({
+          total: 1,
+          normalization: NORM_BOARD,
+          entries: [entry(1, calls > 1 ? "Người mới" : "Người 1", { normalized_score: 30 })],
+        }),
+      );
+    }),
+  );
+
+  const visible = { ...COMPETITION, normalization: { enabled: true, baseline: 0.5, version: 1 } };
+  const { rerender } = renderPage(visible);
+  expect(await screen.findByText("Người 1")).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Điểm norm (0–50)" })).toBeTruthy();
+
+  // Shell poll thấy master vừa tắt: dòng và cột norm đang giữ bị bỏ ngay, không chờ request nào.
+  rerender(tree({ ...visible, leaderboard_visible: false }));
+  expect(screen.getByText("Bảng xếp hạng hiện chưa được công bố.")).toBeTruthy();
+  expect(screen.queryByText("Người 1")).toBeNull();
+
+  // Bật lại: lượt tải mới chưa về thì dữ liệu cũ không được sống dậy.
+  rerender(tree(visible));
+  expect(screen.queryByText("Người 1")).toBeNull();
+  await act(async () => releaseBack?.());
+  expect(await screen.findByText("Người mới")).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Điểm norm (0–50)" })).toBeTruthy();
+});
+
+test("master BXH tắt khi request đang bay: response trễ bị bỏ", async () => {
+  const { release } = mockPagedFetch({ gateOffset: 25 });
+  const { rerender } = renderPage();
+  expect(await screen.findByText("Người 1")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+  rerender(tree({ ...COMPETITION, leaderboard_visible: false }));
+  await act(async () => release());
+
+  // Response của trang 2 về sau khi bảng đã bị tắt: không được ghi ngược lên màn hình.
+  expect(screen.queryByText("Người 26")).toBeNull();
+  expect(screen.getByText("Bảng xếp hạng hiện chưa được công bố.")).toBeTruthy();
 });
 
 test("leaderboard hidden hiển thị thông báo và không gọi API", async () => {
@@ -560,8 +664,8 @@ test("cuộc thi v2 hiển thị cột theo hợp đồng, đúng số thập ph
     "Đạt lúc",
   ]);
   const row = screen.getByText("Đội Loss").closest("tr") as HTMLElement;
-  // Ba chữ số theo khai báo của admin, không phải bốn mặc định.
-  expect(within(row).getByText("0.123")).toHaveClass("primary-score");
+  // Ba chữ số theo khai báo của admin, không phải bốn mặc định; nhấn đặt ở ô chứa giá trị.
+  expect(within(row).getByText("0.123").closest("td")).toHaveClass("primary-score");
   // Thẻ hạng của người xem dùng cùng số thập phân của metric chính.
   const strip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
   expect(strip).toHaveTextContent("0.123");

@@ -312,7 +312,7 @@ test("mỗi bài nộp là một thẻ hai tầng, đúng thứ tự trường c
     "Tệp đã nộp",
     "Trạng thái",
     "AI sơ bộ",
-    "Xét duyệt",
+    "Duyệt",
     "Thao tác",
   ]);
 
@@ -513,7 +513,7 @@ test("bảng toàn cục: norm của từng dòng tra theo metadata cuộc thi, 
   expect(
     fieldValue(normItem, "Điểm gốc").querySelector(".subm-result-primary-score"),
   ).toHaveTextContent("0.9000");
-  const snapshot = fieldValue(normItem, "Norm tạm lúc ghi nhận kết quả");
+  const snapshot = fieldValue(normItem, "Norm score tạm");
   expect(snapshot.querySelector(".subm-result-primary-score")).toHaveTextContent("37.50");
   expect(snapshot.querySelector(".subm-score")?.getAttribute("title")).toBe(
     "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
@@ -525,7 +525,7 @@ test("bảng toàn cục: norm của từng dòng tra theo metadata cuộc thi, 
     fieldValue(plainItem, "Điểm chính").querySelector(".subm-result-primary-score"),
   ).toHaveTextContent("0.9000");
   expect(Array.from(plainItem.querySelectorAll("dt")).map((dt) => dt.textContent)).not.toContain(
-    "Norm tạm lúc ghi nhận kết quả",
+    "Norm score tạm",
   );
 });
 
@@ -883,7 +883,7 @@ function statusTip(item: HTMLElement, label: string): HTMLElement {
   return tip as HTMLElement;
 }
 
-test("trường Xét duyệt là badge có chữ; lý do, người duyệt và thời điểm nằm trong tooltip", async () => {
+test("trường Duyệt chỉ có hai kết quả; quyết định thực giữ chi tiết trong tooltip", async () => {
   mockApi(() =>
     jsonResponse({
       ...page(0, 3),
@@ -900,36 +900,30 @@ test("trường Xét duyệt là badge có chữ; lý do, người duyệt và t
   await within(region).findByText("Đội bị từ chối");
 
   const rejectedItem = itemOf("Đội bị từ chối");
-  const rejectedReview = statusBadge(rejectedItem, "Xét duyệt");
-  expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
+  const rejectedReview = statusBadge(rejectedItem, "Duyệt");
+  expect(rejectedReview).toHaveAttribute("aria-label", "Không duyệt");
   // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
   // và thời điểm vào tooltip, cách nhau bằng xuống dòng. Nhãn kết luận đã hiện ngay trên badge
   // nên tooltip không lặp lại nó nữa.
-  const rejectedTip = statusTip(rejectedItem, "Xét duyệt").textContent ?? "";
+  const rejectedTip = statusTip(rejectedItem, "Duyệt").textContent ?? "";
   expect(rejectedTip).toContain(REJECTED_REVIEW.note);
   expect(rejectedTip).toContain("Admin A");
-  expect(rejectedTip).not.toContain("Không chấp nhận");
+  expect(rejectedTip).not.toContain("Không duyệt");
   expect(
     within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
   ).toBeTruthy();
 
-  // Chưa từng bị xét duyệt không phải "hợp lệ": badge phải nói rõ chưa có quyết định, nếu không
-  // BTC đọc nhầm thành một phán quyết đã duyệt. Thao tác thì vẫn chỉ có từ chối.
+  // Bài chưa từng bị xét duyệt vẫn được duyệt mặc định; thao tác còn lại là từ chối.
   const validItem = itemOf("Đội hợp lệ");
-  expect(statusBadge(validItem, "Xét duyệt")).toHaveAttribute(
-    "aria-label",
-    "Chưa có quyết định BTC",
-  );
+  expect(statusBadge(validItem, "Duyệt")).toHaveAttribute("aria-label", "Duyệt");
   expect(
     within(fieldValue(validItem, "Thao tác")).getByRole("button", { name: "Không chấp nhận" }),
   ).toBeTruthy();
 
-  // Bài lỗi chấm điểm không bao giờ xét duyệt được: hai trường đều là gạch, không có thao tác.
+  // Bài lỗi chấm điểm không có kết quả duyệt hay thao tác.
   const failedItem = itemOf("Đội lỗi chấm");
-  expect(statusBadge(failedItem, "Xét duyệt")).toHaveAttribute(
-    "aria-label",
-    "Không xét duyệt được",
-  );
+  expect(fieldValue(failedItem, "Duyệt")).toHaveTextContent("—");
+  expect(fieldValue(failedItem, "Duyệt").querySelector(".subm-badge")).toBeNull();
   expect(fieldValue(failedItem, "Thao tác")).toHaveTextContent("—");
   expect(within(fieldValue(failedItem, "Thao tác")).queryByRole("button")).toBeNull();
   // Gạch chỉ dành cho hai trường phụ thuộc trạng thái chấm; tệp của bài lỗi vẫn xem và tải
@@ -948,6 +942,8 @@ test("lọc theo trạng thái duyệt là trục riêng, không lẫn với tr�
   renderPage();
   await screen.findByText("Đội 0");
   expect(lastParams(urls).has("review")).toBe(false);
+  expect(within(screen.getByLabelText("Lọc theo trạng thái duyệt")).getAllByRole("option")
+    .map((option) => option.textContent)).toEqual(["Mọi trạng thái duyệt", "Duyệt", "Không duyệt"]);
 
   fireEvent.change(screen.getByLabelText("Lọc theo trạng thái duyệt"), {
     target: { value: "rejected" },
@@ -1082,6 +1078,59 @@ test("gợi ý của model chỉ được điền sẵn khi verdict là FLAGGED"
   expect(within(dialog).getByRole("button", { name: "Không chấp nhận" })).toBeDisabled();
 });
 
+test("nguồn chưa xác minh thì ô lý do được điền sẵn câu yêu cầu tải dữ liệu từ link tài nguyên của BTC", async () => {
+  // Nguồn chưa xác minh là đủ để nhắc thí sinh, kể cả khi AI không thấy vi phạm thể lệ: câu này
+  // là chữ cố định của hệ thống, không phải bản nháp của model.
+  const unclearRow: GlobalSubmissionItem = {
+    ...AI_ROW,
+    ai_review: { ...AI_PROJECTION, verdict: "CLEAR", source_status: "UNCLEAR" },
+  };
+  mockApi(() => jsonResponse(pageOf([unclearRow])));
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  expect(within(dialog).getByLabelText("Lý do không chấp nhận")).toHaveValue(RESOURCE_REQUIREMENT);
+  // Không phải bản nháp của model nên dòng nhắc không được nói "AI soạn nháp".
+  expect(within(dialog).queryByText(/AI soạn nháp/)).toBeNull();
+  expect(within(dialog).getByText(/câu yêu cầu tải dữ liệu từ link tài nguyên của BTC/)).toBeTruthy();
+});
+
+test("nguồn chưa đánh giá được không kích hoạt câu nhắc, vì nó không nói gì về nguồn của bài", async () => {
+  // NOT_EVALUATED thường là "máy chủ không có tài nguyên BTC để đối chiếu" - nhắc thí sinh dùng
+  // link tài nguyên BTC lúc ấy là sai đối tượng.
+  const notEvaluatedRow: GlobalSubmissionItem = {
+    ...AI_ROW,
+    ai_review: { ...AI_PROJECTION, verdict: "CLEAR", source_status: "NOT_EVALUATED" },
+  };
+  mockApi(() => jsonResponse(pageOf([notEvaluatedRow])));
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  expect(within(dialog).getByLabelText("Lý do không chấp nhận")).toHaveValue("");
+  expect(within(dialog).queryByText(/AI soạn nháp/)).toBeNull();
+});
+
+test("vừa bị AI gắn cờ vừa có vấn đề nguồn thì hai câu nối nhau thành một lý do", async () => {
+  const bothRow: GlobalSubmissionItem = {
+    ...AI_ROW,
+    ai_review: { ...AI_PROJECTION, verdict: "FLAGGED", source_status: "EXTERNAL" },
+  };
+  mockApi(() => jsonResponse(pageOf([bothRow])));
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Không chấp nhận" }));
+  const dialog = await screen.findByRole("dialog", { name: "Không chấp nhận bài nộp" });
+  expect(within(dialog).getByLabelText("Lý do không chấp nhận")).toHaveValue(
+    `${AI_HINT}\n\n${RESOURCE_REQUIREMENT}`,
+  );
+  expect(within(dialog).getByText(/AI soạn nháp/)).toBeTruthy();
+});
+
 test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   const { requests } = mockApi((_url, init) =>
     init.method === "PATCH"
@@ -1094,7 +1143,7 @@ test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   renderPage();
 
   const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
-  await within(region).findByText("Không chấp nhận");
+  await within(region).findByText("Không duyệt");
 
   fireEvent.click(within(region).getByRole("button", { name: "Khôi phục" }));
   const dialog = await screen.findByRole("dialog", { name: "Khôi phục bài nộp" });
@@ -1134,6 +1183,9 @@ test("Hủy và Escape đều không gửi PATCH và trả focus về nút vừa
 
 /** Bản nháp model soạn cho thí sinh - chỉ admin thấy, và chỉ được điền sẵn khi verdict là FLAGGED. */
 const AI_HINT = "Dùng dữ liệu ngoài cuộc thi; chỉ dùng dữ liệu BTC cấp.";
+
+/** Câu yêu cầu cố định của hệ thống, điền sẵn khi nguồn có dấu hiệu ngoài cuộc thi hoặc chưa xác minh. */
+const RESOURCE_REQUIREMENT = "Code phải tải dữ liệu từ link tài nguyên của BTC.";
 
 /** Projection AI đứng riêng khỏi `AI_ROW` để bài khác đổi được kết luận mà giữ nguyên phần còn lại. */
 const AI_PROJECTION: AdminAiReview = {
@@ -1253,7 +1305,7 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
     .toBeTruthy();
 
   // AI sơ bộ đứng cạnh xét duyệt của người, nhưng là hai trường riêng biệt.
-  expect(statusBadge(legacyItem, "Xét duyệt")).not.toHaveAttribute(
+  expect(statusBadge(legacyItem, "Duyệt")).not.toHaveAttribute(
     "aria-label",
     "Chưa đánh giá",
   );
@@ -1267,7 +1319,10 @@ test("trạng thái nguồn là trục riêng, không bị kết luận CLEAR ch
   await screen.findByText("Đội 0");
   const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
   expect(within(cell).getByText("Không phát hiện")).toBeTruthy();
-  expect(within(cell).getByText("AI: Có dấu hiệu dùng nguồn ngoài")).toBeTruthy();
+  const sourceBadge = within(cell).getByRole("img", { name: "Nguồn: Nghi nguồn ngoài" });
+  expect(sourceBadge.className).toContain("subm-badge-danger");
+  // Dấu hiệu nguồn ngoài tô đỏ cả vạch thẻ dù AI thể lệ không phát hiện.
+  expect(itemOf("Đội 0").className).toContain("subm-card-danger");
 });
 
 test("lượt cũ thiếu trạng thái nguồn không được im lặng như đã sạch", async () => {
@@ -1306,7 +1361,7 @@ test("lượt AI lỗi không có trạng thái nguồn nào để hiện", asyn
   expect(within(cell).queryByText(/^Nguồn:/)).toBeNull();
 });
 
-test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", async () => {
+test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong các trục, kể cả trục nguồn", async () => {
   mockApi(() =>
     jsonResponse(
       pageOf([
@@ -1314,6 +1369,17 @@ test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", a
         // AI không kết luận được: cảnh báo, chưa phải vi phạm.
         row("s-unsure", "Đội AI chưa kết luận", {
           ai_review: { ...AI_PROJECTION, verdict: "INCONCLUSIVE" },
+        }),
+        // AI không thấy vi phạm thể lệ nhưng nguồn chưa xác minh: vẫn là bài cần BTC xem lại.
+        row("s-unverified", "Đội nguồn chưa xác minh", {
+          ai_review: { ...AI_PROJECTION, verdict: "CLEAR", source_status: "UNCLEAR" },
+        }),
+        row("s-external", "Đội nguồn ngoài", {
+          ai_review: { ...AI_PROJECTION, verdict: "CLEAR", source_status: "EXTERNAL" },
+        }),
+        // Nguồn phù hợp là mặc định lành mạnh: không tự nâng mức của một lượt sạch.
+        row("s-aligned", "Đội nguồn phù hợp", {
+          ai_review: { ...AI_PROJECTION, verdict: "CLEAR", source_status: "ALIGNED" },
         }),
         row("s-flagged", "Đội bị AI gắn cờ", { ai_review: AI_ROW.ai_review }),
         row("s-rejected", "Đội bị từ chối", { review: REJECTED_REVIEW }),
@@ -1329,6 +1395,16 @@ test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", a
 
   // Chưa kết luận được là vàng, dù trạng thái chấm và xét duyệt đều sạch.
   expect(itemOf("Đội AI chưa kết luận").className).toContain("subm-card-warning");
+
+  // Chưa xác minh là vàng; nghi nguồn ngoài luôn đỏ kể cả khi AI thể lệ không phát hiện.
+  expect(itemOf("Đội nguồn chưa xác minh").className).toContain("subm-card-warning");
+  expect(itemOf("Đội nguồn ngoài").className).toContain("subm-card-danger");
+
+  // Nguồn phù hợp và kết luận sạch đều xanh.
+  const aligned = itemOf("Đội nguồn phù hợp");
+  expect(aligned.className).toContain("subm-card-success");
+  expect(within(fieldValue(aligned, "AI sơ bộ")).getByRole("img", { name: "Nguồn: Phù hợp BTC" }).className)
+    .toContain("subm-badge-success");
 
   // Gắn cờ đã là đỏ, dù chưa ai từ chối.
   expect(itemOf("Đội bị AI gắn cờ").className).toContain("subm-card-danger");
@@ -1352,7 +1428,7 @@ test("mỗi trục phán quyết mang tông của chính nó, còn vạch thẻ 
   const flagged = itemOf("Đội bị AI gắn cờ");
   // Trục chấm và trục duyệt của bài này đều sạch...
   expect(statusBadge(flagged, "Trạng thái").className).toContain("subm-badge-success");
-  expect(statusBadge(flagged, "Xét duyệt").className).toContain("subm-badge-success");
+  expect(statusBadge(flagged, "Duyệt").className).toContain("subm-badge-success");
   // ...chỉ trục AI là đỏ, và đó là chỗ duy nhất nói "bài này có vấn đề".
   expect(statusBadge(flagged, "AI sơ bộ").className).toContain("subm-badge-danger");
   // Vạch nhấn của thẻ lấy mức nặng nhất trong ba nên đỏ theo trục AI, không xanh theo hai trục kia.
@@ -1389,7 +1465,7 @@ test("ba bộ lọc nguồn mới nằm cùng trục AI và gửi đúng giá tr
   const filter = screen.getByLabelText("Lọc theo kết luận AI");
   const labels = within(filter).getAllByRole("option").map((option) => option.textContent);
   for (const label of [
-    "AI: Có dấu hiệu dùng nguồn ngoài",
+    "Nguồn: Nghi nguồn ngoài",
     "Nguồn: Chưa xác minh",
     "Nguồn: Chưa đánh giá được",
   ]) {

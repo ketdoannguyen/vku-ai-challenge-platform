@@ -12,6 +12,7 @@ from pymongo import ReturnDocument
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.ai_review import constants as ai_constants
 from app.ai_review import serializers as ai_serializers
+from app.competitions import tracks as competition_tracks
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.content import storage
 from app.core.config import get_settings
@@ -19,6 +20,7 @@ from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.scoring import contracts, normalization
 from app.scoring.models import OutputContract
+from app.scoring_attempts import store as attempts_store
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 
@@ -32,6 +34,8 @@ QUOTA_USED_FIELD = "quota_used"
 # Dấu "lượt nộp nào đang giữ suất này" -> khoá ngày đã giữ. Chỉ đường nộp v2 dùng: v1 hoàn lượt ngay
 # trong request nên không cần nhớ gì.
 QUOTA_CLAIMS_FIELD = "quota_claims"
+# Dual: mỗi nhánh tiêu một suất độc lập nên có bucket riêng cùng cấu trúc trên cùng membership.
+TRACK_QUOTAS_FIELD = "track_quotas"
 _PUBLIC_ERROR_MESSAGES = {
     "SCORING_FAILED": "Không thể chấm điểm bài nộp.",
     "SUBMISSION_REJECTED": "Bài nộp không hợp lệ.",
@@ -244,23 +248,27 @@ async def delete_submissions_matching(db, query: dict) -> int:
     return len(records)
 
 
-async def completed_today_count(db, competition_id, account_id, now: datetime) -> int:
+async def completed_today_count(
+    db, competition_id, account_id, now: datetime, *, track: str | None = None
+) -> int:
+    """Số bài `completed` trong ngày UTC, đếm theo đúng nhánh khi có `track`."""
     day_start, day_end = utc_day_bounds(now)
-    return await db[SUBMISSIONS_COLLECTION].count_documents(
-        {
-            "competition_id": competition_id,
-            "account_id": account_id,
-            "status": "completed",
-            "created_at": {"$gte": day_start, "$lt": day_end},
-        }
-    )
+    query = {
+        "competition_id": competition_id,
+        "account_id": account_id,
+        "status": "completed",
+        "created_at": {"$gte": day_start, "$lt": day_end},
+    }
+    if track is not None:
+        query["track"] = track
+    return await db[SUBMISSIONS_COLLECTION].count_documents(query)
 
 
 async def quota_status(
-    db, competition_id, account_id, quota_per_day: int, now: datetime
+    db, competition_id, account_id, quota_per_day: int, now: datetime, *, track: str | None = None
 ) -> dict:
     """Quota của một account trong ngày UTC hiện tại, kèm mốc reset để UI hiển thị giờ local."""
-    used = await completed_today_count(db, competition_id, account_id, now)
+    used = await completed_today_count(db, competition_id, account_id, now, track=track)
     _, day_end = utc_day_bounds(now)
     return {
         "per_day": quota_per_day,
@@ -270,20 +278,23 @@ async def quota_status(
     }
 
 
+EMPTY_COUNTS = {"total": 0, "eligible_count": 0, "today": 0}
+
+
 async def my_stats_by_competition(
     db, competition_ids: list, account_id, now: datetime
 ) -> dict:
-    """Số liệu cá nhân theo từng cuộc thi cho trang danh sách: một lượt `$facet` cho cả trang.
+    """Số liệu cá nhân theo từng cuộc thi và từng nhánh cho trang danh sách: một `$facet` cả trang.
 
     `total` đếm mọi record đã lưu (bất kể `status`/`review`) - cùng định nghĩa với `total` trong
     lịch sử nộp bài; `eligible` đếm bài được tính kết quả (điều kiện xếp hạng của leaderboard) để
     biết có cần đọc bảng xếp hạng không; `today` đếm bài `completed` trong ngày UTC, cùng quy ước
     với `completed_today_count`/`quota_status` nên thẻ danh sách và quota trang chi tiết không lệch.
+
+    Kết quả là `{competition_id: {track: counts}}` - bài single gom dưới khoá `None`, bài dual gom
+    theo đúng nhánh để thẻ dual không trộn hai population thành một con số.
     """
-    stats = {
-        competition_id: {"total": 0, "eligible_count": 0, "today": 0}
-        for competition_id in competition_ids
-    }
+    stats: dict = {competition_id: {} for competition_id in competition_ids}
     if not competition_ids:
         return stats
     day_start, day_end = utc_day_bounds(now)
@@ -297,10 +308,28 @@ async def my_stats_by_competition(
             },
             {
                 "$facet": {
-                    "total": [{"$group": {"_id": "$competition_id", "total": {"$sum": 1}}}],
+                    "total": [
+                        {
+                            "$group": {
+                                "_id": {
+                                    "competition_id": "$competition_id",
+                                    "track": "$track",
+                                },
+                                "total": {"$sum": 1},
+                            }
+                        }
+                    ],
                     "eligible": [
                         {"$match": eligible_query({"status": "completed"})},
-                        {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+                        {
+                            "$group": {
+                                "_id": {
+                                    "competition_id": "$competition_id",
+                                    "track": "$track",
+                                },
+                                "total": {"$sum": 1},
+                            }
+                        },
                     ],
                     "today": [
                         {
@@ -309,29 +338,45 @@ async def my_stats_by_competition(
                                 "created_at": {"$gte": day_start, "$lt": day_end},
                             }
                         },
-                        {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
+                        {
+                            "$group": {
+                                "_id": {
+                                    "competition_id": "$competition_id",
+                                    "track": "$track",
+                                },
+                                "total": {"$sum": 1},
+                            }
+                        },
                     ],
                 }
             },
         ]
     )
     facets = (await cursor.to_list(length=1))[0]
-    for row in facets["total"]:
-        stats[row["_id"]]["total"] = row["total"]
-    for row in facets["eligible"]:
-        stats[row["_id"]]["eligible_count"] = row["total"]
-    for row in facets["today"]:
-        stats[row["_id"]]["today"] = row["total"]
+    for key, field in (
+        ("total", "total"),
+        ("eligible", "eligible_count"),
+        ("today", "today"),
+    ):
+        for row in facets[key]:
+            by_track = stats[row["_id"]["competition_id"]]
+            # Bản ghi single không có `track`; Mongo thật trả khoá null còn mongomock bỏ hẳn khoá.
+            counts = by_track.setdefault(row["_id"].get("track"), dict(EMPTY_COUNTS))
+            counts[field] = row["total"]
     return stats
 
 
-async def normalization_snapshot(db, competition: dict, *, raw, now: datetime) -> dict | None:
+async def normalization_snapshot(
+    db, competition: dict, *, track: str | None = None, raw, now: datetime
+) -> dict | None:
     """Ảnh chụp norm tạm tại đúng lúc bài nộp được ghi nhận; `None` khi cuộc thi không bật norm.
 
-    Mặt bằng đọc trực tiếp từ các bài eligible - cố ý không đi qua cache BXH: cache có thể đang
-    giữ bản trước một bài vừa ghi, và mẫu số cũ sẽ chốt sai điểm tạm. Raw của chính bài đang ghi
-    được đưa vào mặt bằng; nếu không, bài đầu tiên vượt baseline sẽ không bao giờ đạt 50. Bản ghi
-    hỏng trong DB bị loại khỏi mặt bằng theo đúng chính sách của BXH, không quy về 0.
+    Mặt bằng đọc trực tiếp từ các bài eligible của **đúng nhánh** - cùng bộ lọc với BXH, cố ý
+    không đi qua cache: cache có thể đang giữ bản trước một bài vừa ghi, và mẫu số cũ sẽ chốt sai
+    điểm tạm. Raw của chính bài đang ghi được đưa vào mặt bằng; nếu không, bài đầu tiên vượt
+    baseline sẽ không bao giờ đạt 50. Bản ghi hỏng trong DB bị loại khỏi mặt bằng theo đúng chính
+    sách của BXH, không quy về 0. `track=None` là cuộc thi single; dual luôn nhận nhánh do server
+    resolve nên hai nhánh không bao giờ dùng chung mẫu số.
     """
     rule = normalization.active_rule(competition)
     if rule is None:
@@ -340,23 +385,54 @@ async def normalization_snapshot(db, competition: dict, *, raw, now: datetime) -
         raise normalization.NormalizationError(
             "Điểm gốc không phải số hữu hạn nên không dựng được snapshot chuẩn hóa."
         )
-    query = eligible_query({"competition_id": competition["_id"], "status": "completed"})
-    cursor = db[SUBMISSIONS_COLLECTION].find(query, {"primary_score": 1})
+    scope = {"competition_id": competition["_id"], "status": "completed"}
+    if track is not None:
+        scope["track"] = track
+    cursor = db[SUBMISSIONS_COLLECTION].find(eligible_query(scope), {"primary_score": 1})
     scores = [submission.get("primary_score") async for submission in cursor]
     usable = [value for value in scores if normalization.is_valid_score(value)]
     reference = normalization.reference_best([*usable, raw], rule.higher_is_better)
     return normalization.snapshot_payload(rule, raw=raw, reference=reference, calculated_at=now)
 
 
+def quota_fields(track: str | None) -> tuple[str, str, str]:
+    """Ba field bộ đếm quota trên membership của một nhánh: ngày, đã dùng, dấu giữ chỗ.
+
+    Single giữ nguyên field cấp cao để bản ghi cũ không cần migration; dual tách bucket theo
+    nhánh vì hai nhánh tiêu hai suất độc lập.
+    """
+    if track is None:
+        return QUOTA_DAY_FIELD, QUOTA_USED_FIELD, QUOTA_CLAIMS_FIELD
+    base = f"{TRACK_QUOTAS_FIELD}.{track}"
+    return f"{base}.day", f"{base}.used", f"{base}.claims"
+
+
+def _field_value(document: dict | None, path: str):
+    """Đọc giá trị theo đường dẫn `a.b.c`; thiếu nhánh trả None thay vì vỡ."""
+    value = document
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
 async def reserve_quota_slot(
-    db, membership: dict, quota_per_day: int, now: datetime, *, attempt_id: str | None = None
+    db,
+    membership: dict,
+    quota_per_day: int,
+    now: datetime,
+    *,
+    track: str | None = None,
+    attempt_id: str | None = None,
 ) -> int | None:
     """Giữ chỗ một lượt nộp trong ngày UTC, nguyên tử; trả số lượt đã dùng sau khi giữ.
 
     Đếm-rồi-kiểm tra để hai request song song cùng lọt qua giới hạn (đã tái hiện: quota còn 2 mà
     6 request đồng thời đều được chấm). Bộ đếm nằm trên document membership - unique theo cặp
-    cuộc thi/account - và `$inc` kèm điều kiện `quota_used < quota_per_day` là một thao tác
-    nguyên tử trên một document, nên số lượt dùng không thể vượt `quota_per_day`.
+    cuộc thi/account - và `$inc` kèm điều kiện `used < quota_per_day` là một thao tác nguyên tử
+    trên một document, nên số lượt dùng không thể vượt `quota_per_day`. Dual giữ chỗ trên bucket
+    của đúng nhánh đang nộp, không đụng suất của nhánh kia.
 
     `attempt_id` đóng dấu lượt nào đang giữ suất này: đường nộp v2 giữ suất lâu hơn một request
     (chờ chấm, ghi bài, đối soát), nên phải biết hoàn cho đúng lượt và không hoàn hai lần.
@@ -366,24 +442,25 @@ async def reserve_quota_slot(
     """
     collection = db[MEMBERSHIPS_COLLECTION]
     day_key = utc_day_key(now)
-    await _seed_quota_day(db, membership, day_key, now)
-    update: dict = {"$inc": {QUOTA_USED_FIELD: 1}}
+    day_field, used_field, claims_field = quota_fields(track)
+    await _seed_quota_day(db, membership, day_key, now, track=track)
+    update: dict = {"$inc": {used_field: 1}}
     if attempt_id is not None:
-        update["$set"] = {f"{QUOTA_CLAIMS_FIELD}.{attempt_id}": day_key}
+        update["$set"] = {f"{claims_field}.{attempt_id}": day_key}
     updated = await collection.find_one_and_update(
         {
             "_id": membership["_id"],
-            QUOTA_DAY_FIELD: day_key,
-            QUOTA_USED_FIELD: {"$lt": quota_per_day},
+            day_field: day_key,
+            used_field: {"$lt": quota_per_day},
         },
         update,
         return_document=ReturnDocument.AFTER,
     )
-    return updated[QUOTA_USED_FIELD] if updated else None
+    return _field_value(updated, used_field) if updated else None
 
 
 async def release_quota_slot(
-    db, membership: dict, now: datetime, *, attempt_id: str | None = None
+    db, membership: dict, now: datetime, *, track: str | None = None, attempt_id: str | None = None
 ) -> None:
     """Trả lại lượt đã giữ khi bài nộp không được ghi; không bao giờ để bộ đếm âm.
 
@@ -392,36 +469,40 @@ async def release_quota_slot(
     hai lần. Dấu mang khoá ngày nên một lượt của ngày cũ cũng không hoàn được vào ngày mới.
     """
     day_key = utc_day_key(now)
-    query = {"_id": membership["_id"], QUOTA_USED_FIELD: {"$gt": 0}}
-    update: dict = {"$inc": {QUOTA_USED_FIELD: -1}}
+    day_field, used_field, claims_field = quota_fields(track)
+    query = {"_id": membership["_id"], used_field: {"$gt": 0}}
+    update: dict = {"$inc": {used_field: -1}}
     if attempt_id is None:
-        query[QUOTA_DAY_FIELD] = day_key
+        query[day_field] = day_key
     else:
-        query[f"{QUOTA_CLAIMS_FIELD}.{attempt_id}"] = day_key
-        update["$unset"] = {f"{QUOTA_CLAIMS_FIELD}.{attempt_id}": ""}
+        query[f"{claims_field}.{attempt_id}"] = day_key
+        update["$unset"] = {f"{claims_field}.{attempt_id}": ""}
     await db[MEMBERSHIPS_COLLECTION].update_one(query, update)
 
 
-async def _seed_quota_day(db, membership: dict, day_key: str, now: datetime) -> None:
-    """Mở ngày mới cho bộ đếm, lấy số lượt đã dùng thật làm mốc.
+async def _seed_quota_day(
+    db, membership: dict, day_key: str, now: datetime, *, track: str | None = None
+) -> None:
+    """Mở ngày mới cho bộ đếm của một nhánh, lấy số lượt đã dùng thật làm mốc.
 
     Membership tạo trước khi có bộ đếm (hoặc bài nộp trong ngày tạo bằng đường khác) vẫn được
-    tính đúng: mốc seed là số bài `completed` trong ngày. Chỉ update khi document còn ở ngày cũ
-    nên nhiều request đồng thời cùng seed cũng chỉ ghi một lần, cùng một giá trị.
+    tính đúng: mốc seed là số bài `completed` trong ngày, đếm theo đúng nhánh. Chỉ update khi
+    document còn ở ngày cũ nên nhiều request đồng thời cùng seed cũng chỉ ghi một lần.
     """
-    if membership.get(QUOTA_DAY_FIELD) == day_key:
+    day_field, used_field, claims_field = quota_fields(track)
+    if _field_value(membership, day_field) == day_key:
         return
     used = await completed_today_count(
-        db, membership["competition_id"], membership["account_id"], now
+        db, membership["competition_id"], membership["account_id"], now, track=track
     )
     await db[MEMBERSHIPS_COLLECTION].update_one(
-        {"_id": membership["_id"], QUOTA_DAY_FIELD: {"$ne": day_key}},
+        {"_id": membership["_id"], day_field: {"$ne": day_key}},
         {
             "$set": {
-                QUOTA_DAY_FIELD: day_key,
-                QUOTA_USED_FIELD: used,
+                day_field: day_key,
+                used_field: used,
                 # Dấu của ngày cũ hết giá trị khi ngày đổi: giữ lại chỉ làm map phình ra.
-                QUOTA_CLAIMS_FIELD: {},
+                claims_field: {},
             }
         },
     )
@@ -484,15 +565,39 @@ def artifact_metadata(submission: dict) -> dict:
     return result
 
 
+def _visibility_flags(competition: dict, submission: dict) -> tuple[bool, dict]:
+    """`(bài có đang bị che, cờ công bố cho DTO)` của một bài nộp dưới mắt thí sinh.
+
+    Nhánh đọc từ chính document bài nộp chứ không từ tham số người gọi: bài dual luôn mang `track`
+    của nó nên không có đường nào quên truyền scope rồi vô tình trả điểm. Bài dual thiếu `track`
+    là dữ liệu hỏng - che còn hơn lộ. Single không bao giờ có cờ để hình dạng DTO cũ giữ nguyên.
+    """
+    if not competition_tracks.is_dual(competition):
+        return False, {}
+    track = submission.get("track")
+    if track is not None and competition_tracks.results_visible(competition, track):
+        return False, {"result_visibility": "visible"}
+    return True, {
+        "result_visibility": "hidden",
+        "visibility_reason": competition_tracks.REASON_PRIVATE_UNPUBLISHED,
+    }
+
+
 def public_submission(
     submission: dict,
     quota_remaining: int,
     *,
+    competition: dict,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
-    normalization_visible: bool = False,
 ) -> dict:
-    """`contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric."""
+    """`contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric.
+
+    `competition` là trạng thái công bố tại lúc trả response: bài Private chưa release không mang
+    điểm, metric hay snapshot chuẩn hóa - trạng thái chấm và file của thí sinh vẫn còn nguyên.
+    Quyền xem snapshot do chính bài nộp quyết định qua nhánh của nó, không nhận từ người gọi.
+    """
+    hidden, flags = _visibility_flags(competition, submission)
     result = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -504,11 +609,22 @@ def public_submission(
         "artifacts": artifact_metadata(submission),
         "quota_remaining": quota_remaining,
     }
+    if submission.get("track") is not None:
+        result["track"] = submission["track"]
     if contract is not None:
         contracts.apply_metric_visibility(result, contract)
+    if hidden:
+        result["metrics"] = {}
+        result["primary_score"] = None
+    result.update(flags)
     result.update(
         _snapshot_projection(
-            submission, contract=contract, normalization_visible=normalization_visible
+            submission,
+            contract=contract,
+            # Snapshot chuẩn hóa suy ra từ điểm nên đi cùng số phận với điểm, rồi thêm cổng norm
+            # của đúng nhánh bài nộp.
+            normalization_visible=not hidden
+            and competition_tracks.can_view_norm(competition, submission.get("track"))[0],
         )
     )
     projection = ai_serializers.participant_projection(submission, ai_visible)
@@ -538,15 +654,22 @@ def _snapshot_projection(
 def submission_history_item(
     submission: dict,
     *,
+    competition: dict | None = None,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
-    normalization_visible: bool = False,
 ) -> dict:
     """Return participant-safe history data without account or storage details.
 
     `contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric. Snapshot norm
-    tạm là dữ liệu dẫn xuất: chỉ trả theo quyền xem hiện tại, không lấy từ cờ lúc nộp.
+    tạm là dữ liệu dẫn xuất: chỉ trả theo quyền xem hiện tại của đúng nhánh bài nộp, không lấy
+    từ cờ lúc nộp. Che kết quả Private chưa công bố chỉ áp cho đường thí sinh; đường admin không
+    truyền `competition` và xem đủ qua quyền admin thật.
     """
+    hidden, flags = (
+        _visibility_flags(competition, submission)
+        if competition is not None and contract is not None
+        else (False, {})
+    )
     item = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -557,6 +680,8 @@ def submission_history_item(
         "created_at": iso_z(submission["created_at"]),
         "artifacts": artifact_metadata(submission),
     }
+    if submission.get("track") is not None:
+        item["track"] = submission["track"]
     if submission.get("error_code") or submission.get("error_message"):
         error_code = submission.get("error_code")
         if error_code not in _PUBLIC_ERROR_MESSAGES:
@@ -577,9 +702,19 @@ def submission_history_item(
         }
     if contract is not None:
         contracts.apply_metric_visibility(item, contract)
+    if hidden:
+        item["metrics"] = {}
+        item["primary_score"] = None
+    item.update(flags)
     item.update(
         _snapshot_projection(
-            submission, contract=contract, normalization_visible=normalization_visible
+            submission,
+            contract=contract,
+            normalization_visible=(
+                competition is not None
+                and not hidden
+                and competition_tracks.can_view_norm(competition, submission.get("track"))[0]
+            ),
         )
     )
     projection = ai_serializers.participant_projection(submission, ai_visible)
@@ -593,11 +728,11 @@ async def list_account_submissions(
     competition_id,
     account_id,
     *,
+    competition: dict,
     limit: int,
     offset: int,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
-    normalization_visible: bool = False,
 ) -> tuple[list[dict], int]:
     query = {"competition_id": competition_id, "account_id": account_id}
     collection = db[SUBMISSIONS_COLLECTION]
@@ -606,9 +741,9 @@ async def list_account_submissions(
     return [
         submission_history_item(
             item,
+            competition=competition,
             ai_visible=ai_visible,
             contract=contract,
-            normalization_visible=normalization_visible,
         )
         async for item in cursor
     ], total
@@ -783,4 +918,53 @@ async def submission_stats(db, query: dict) -> dict:
         "competitions": _facet_count(facets["competitions"]),
         "teams": _facet_count(facets["teams"]),
         "completed": _facet_count(facets["completed"]),
+    }
+
+
+async def scope_stats(db, competition_id, *, track: str | None) -> dict:
+    """Số lượt chấm theo trạng thái của đúng một phạm vi nhánh.
+
+    Trang công bố kết quả Private cần biết còn gì đang chạy trước khi admin bấm công bố. Đếm từ
+    `scoring_attempts` chứ không từ submissions: lượt hỏng hoặc quá hạn không tạo record
+    submission nào, và `in_flight` đúng bằng tập trạng thái mà cổng công bố chặt kiểm. `failed`
+    gộp cả lượt quá hạn - với admin, cả hai đều là lượt nhận rồi mà không có điểm.
+    """
+    scope: dict = {"competition_id": competition_id}
+    if track is not None:
+        scope["track"] = track
+    cursor = db[attempts_store.ATTEMPTS_COLLECTION].aggregate(
+        [
+            {"$match": scope},
+            {
+                "$facet": {
+                    "total": [{"$count": "value"}],
+                    "completed": [
+                        {"$match": {"status": attempts_store.STATUS_COMPLETED}},
+                        {"$count": "value"},
+                    ],
+                    "failed": [
+                        {
+                            "$match": {
+                                "status": {
+                                    "$in": [
+                                        attempts_store.STATUS_FAILED,
+                                        attempts_store.STATUS_EXPIRED,
+                                    ]
+                                }
+                            }
+                        },
+                        {"$count": "value"},
+                    ],
+                    "in_flight": [
+                        {"$match": {"status": {"$in": list(attempts_store.ACTIVE_STATUSES)}}},
+                        {"$count": "value"},
+                    ],
+                }
+            },
+        ]
+    )
+    facets = (await cursor.to_list(length=1))[0]
+    return {
+        key: _facet_count(facets[key])
+        for key in ("total", "completed", "failed", "in_flight")
     }

@@ -14,8 +14,12 @@ import type {
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
+  TRACK_LABEL,
+  TRACKS,
   displayStatus,
   formatLocal,
+  isDual,
+  normalizationOf,
   statusClass,
 } from "../api/competitions";
 import { fetchContents, type ContentSummary } from "../api/contents";
@@ -460,6 +464,8 @@ export function CompetitionDetailPage() {
   const countdownLabel = c.status === "published" ? remaining : null;
   // Quá `end_at` thì hiển thị như đã kết thúc, khớp với việc backend đã chặn nộp bài.
   const shown = displayStatus(c.status, c.end_at);
+  // Dual: lịch và hạn mức nằm ở từng nhánh - masthead ghi rõ cả hai nhánh thay vì một giá trị gộp.
+  const dualTracks = isDual(c) && c.tracks ? c.tracks : null;
   const currentPath = pathname.replace(/\/+$/, "");
   const basePath = `/competitions/${slug}`.replace(/\/+$/, "");
   const isOverview = currentPath === basePath || currentPath.startsWith(`${basePath}/content`);
@@ -525,9 +531,21 @@ export function CompetitionDetailPage() {
               </Icon>
               Thời gian thi đấu
             </dt>
-            <dd className="comp-fact-value">
-              {formatLocal(c.start_at)} - {formatLocal(c.end_at)}
-            </dd>
+            {dualTracks ? (
+              <dd className="comp-fact-value comp-fact-lines">
+                {TRACKS.map((track) => (
+                  <span key={track} className="comp-fact-line">
+                    <span className="comp-fact-line-track">{TRACK_LABEL[track]}</span>{" "}
+                    {formatLocal(dualTracks[track].start_at)} -{" "}
+                    {formatLocal(dualTracks[track].end_at)}
+                  </span>
+                ))}
+              </dd>
+            ) : (
+              <dd className="comp-fact-value">
+                {formatLocal(c.start_at)} - {formatLocal(c.end_at)}
+              </dd>
+            )}
           </div>
           <div className="comp-fact">
             <dt>
@@ -537,7 +555,12 @@ export function CompetitionDetailPage() {
               </Icon>
               Chỉ số chính
             </dt>
-            <dd className="comp-fact-value">{c.primary_metric_label ?? "Chưa cấu hình"}</dd>
+            {/* Cuộc thi chuẩn hóa: xếp hạng theo norm score, chỉ số gốc xuống ngoặc. */}
+            <dd className="comp-fact-value">
+              {normalizationOf(c).enabled
+                ? `Norm score${c.primary_metric_label ? ` (${c.primary_metric_label})` : ""}`
+                : c.primary_metric_label ?? "Chưa cấu hình"}
+            </dd>
           </div>
           <div className="comp-fact">
             <dt>
@@ -548,9 +571,22 @@ export function CompetitionDetailPage() {
               </Icon>
               Giới hạn nộp bài
             </dt>
-            <dd className="comp-fact-value">
-              {c.quota_per_day > 0 ? `${c.quota_per_day} lượt/ngày` : "Không nhận bài nộp"}
-            </dd>
+            {dualTracks ? (
+              <dd className="comp-fact-value comp-fact-lines">
+                {TRACKS.map((track) => (
+                  <span key={track} className="comp-fact-line">
+                    <span className="comp-fact-line-track">{TRACK_LABEL[track]}</span>{" "}
+                    {dualTracks[track].quota_per_day > 0
+                      ? `${dualTracks[track].quota_per_day} lượt/ngày`
+                      : "Không nhận bài nộp"}
+                  </span>
+                ))}
+              </dd>
+            ) : (
+              <dd className="comp-fact-value">
+                {(c.quota_per_day ?? 0) > 0 ? `${c.quota_per_day} lượt/ngày` : "Không nhận bài nộp"}
+              </dd>
+            )}
           </div>
         </dl>
       </header>

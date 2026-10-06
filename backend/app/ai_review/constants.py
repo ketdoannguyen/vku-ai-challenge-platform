@@ -105,11 +105,14 @@ SOURCE_PIPELINE = "PIPELINE"
 # v10: sau đánh giá model thật - đường dẫn/ID trùng tài nguyên BTC qua Drive cá nhân vẫn là nguồn BTC
 # (template không bị báo ngoài); ID không rõ quan hệ và Drive cá nhân không ID là UNCLEAR, không tự
 # kết luận ngoài; output phải kết thúc ngay tại `}` (model thật hay nối thẻ đóng/ngoặc thừa).
-PROMPT_VERSION = "ai-review-v10"
+# v11: tài nguyên BTC có thể là link ngoài (S3, nguồn khác) chứ không chỉ Drive/Docs; ví dụ truy cập
+# qua dạng khác của cùng nguồn (presigned URL, `s3://`) nằm cùng chỗ với ví dụ Drive đã mount.
+PROMPT_VERSION = "ai-review-v11"
 NORMALIZATION_VERSION = "notebook-v3"
 # v2: thêm dữ kiện quét toàn notebook (`resources_in_notebook`); literal `/content/drive` không còn bị bỏ qua.
 # v3: đánh giá nguồn toàn notebook có hậu kiểm (`source_assessment`); hậu kiểm chỉ còn kiểm cấu trúc.
-SOURCE_SIGNAL_VERSION = "dataset-source-v3"
+# v4: định danh tài nguyên nhận mọi link https (host + path, bỏ query), không chỉ Drive/Docs.
+SOURCE_SIGNAL_VERSION = "dataset-source-v4"
 CONTEXT_POLICY_VERSION = "context-v2"
 # Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
 # nên phải bump version, và cache cũ tự động không còn dùng được.

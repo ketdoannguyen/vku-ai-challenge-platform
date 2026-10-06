@@ -10,18 +10,46 @@ import { Modal } from "./Modal";
 const MAX_NOTE_LENGTH = 1000;
 
 /**
- * Gợi ý của model cho lượt kiểm tra gần nhất, dùng làm bản nháp cho ô lý do.
+ * Câu yêu cầu cố định, gắn vào lý do khi nguồn dữ liệu có dấu hiệu ngoài cuộc thi hoặc chưa xác
+ * minh được. Đây là chữ của hệ thống chứ không phải của model, cố định để admin không phải gõ lại
+ * mỗi lần từ chối.
+ */
+const BTC_RESOURCE_REQUIREMENT = "Code phải tải dữ liệu từ link tài nguyên của BTC.";
+
+interface Prefill {
+  text: string;
+  /** Bản nháp của model có mặt trong `text`. */
+  aiDraft: boolean;
+  /** Câu yêu cầu cố định có mặt trong `text`. */
+  resourceRequirement: boolean;
+}
+
+/**
+ * Dựng sẵn nội dung ô lý do từ dữ liệu của lượt kiểm tra gần nhất.
  *
- * Chỉ điền sẵn khi verdict là FLAGGED: đó là lượt đã có ít nhất một vi phạm được server kiểm
- * chứng. Một verdict bị hạ cấp xuống INCONCLUSIVE nghĩa là máy chủ vừa bác bỏ chính cáo buộc đó,
- * nên điền sẵn lúc ấy là tự động hoá một lời buộc tội chưa được xác minh.
+ * Gợi ý của model chỉ điền sẵn khi verdict là FLAGGED: đó là lượt đã có ít nhất một vi phạm được
+ * server kiểm chứng. Một verdict bị hạ cấp xuống INCONCLUSIVE nghĩa là máy chủ vừa bác bỏ chính
+ * cáo buộc đó, nên điền sẵn lúc ấy là tự động hoá một lời buộc tội chưa được xác minh.
+ *
+ * Câu yêu cầu tải dữ liệu từ link tài nguyên của BTC thì độc lập với verdict: nguồn có dấu hiệu
+ * dùng nguồn ngoài hoặc chưa xác minh được là đủ để nhắc thí sinh, kể cả khi AI không thấy vi phạm
+ * thể lệ. `NOT_EVALUATED` không kích hoạt câu này - nó thường nghĩa là cuộc thi không có tài
+ * nguyên BTC để đối chiếu, nên nhắc thí sinh dùng link tài nguyên BTC lúc ấy là sai đối tượng. Hai
+ * phần nối với nhau thành một lý do duy nhất.
  *
  * Chữ được lưu và gửi đi vẫn là chữ admin đọc lại và sửa trong ô này - không phải bản của model.
  */
-function prefillNote(submission: AdminSubmissionItem): string {
+function prefillNote(submission: AdminSubmissionItem): Prefill {
   const review = submission.ai_review;
-  if (review?.verdict !== "FLAGGED") return "";
-  return review.participant_summary?.trim() ?? "";
+  const aiDraft =
+    review?.verdict === "FLAGGED" ? (review.participant_summary?.trim() ?? "") : "";
+  const source = review?.source_status ?? null;
+  const resourceRequirement = source === "EXTERNAL" || source === "UNCLEAR";
+  return {
+    text: [aiDraft, resourceRequirement ? BTC_RESOURCE_REQUIREMENT : ""].filter(Boolean).join("\n\n"),
+    aiDraft: aiDraft !== "",
+    resourceRequirement,
+  };
 }
 
 export function SubmissionRejectModal({
@@ -35,11 +63,12 @@ export function SubmissionRejectModal({
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
-  const [note, setNote] = useState(() => prefillNote(submission));
+  const prefill = prefillNote(submission);
+  const [note, setNote] = useState(prefill.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const trimmed = note.trim();
-  const suggested = prefillNote(submission) !== "";
+  const suggested = prefill.text !== "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -71,8 +100,12 @@ export function SubmissionRejectModal({
         </p>
         {suggested && (
           <p className="text-muted" id="review-note-suggestion">
-            Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất. Hãy đọc lại và sửa trước khi
-            gửi: thí sinh chỉ nhận đúng chữ bạn để lại trong ô này.
+            {prefill.aiDraft && prefill.resourceRequirement
+              ? "Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất, nối thêm câu yêu cầu tải dữ liệu từ link tài nguyên của BTC."
+              : prefill.aiDraft
+                ? "Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất."
+                : "Lý do dưới đây được điền sẵn câu yêu cầu tải dữ liệu từ link tài nguyên của BTC vì nguồn dữ liệu chưa xác minh hoặc có dấu hiệu dùng nguồn ngoài."}{" "}
+            Hãy đọc lại và sửa trước khi gửi: thí sinh chỉ nhận đúng chữ bạn để lại trong ô này.
           </p>
         )}
         <div className="form-field account-form-wide">

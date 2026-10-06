@@ -1,6 +1,8 @@
 """Notebook khung dùng chung: tải công khai, đúng header và là notebook v4 hợp lệ."""
 
+import io
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -106,6 +108,9 @@ def test_download_cell_reads_only_fresh_drive_file(client, tmp_path, monkeypatch
     def wrong_method(*args, **kwargs):
         pytest.fail("Notebook dùng sai phương thức tải Drive.")
 
+    def wrong_retrieve(*args, **kwargs):
+        pytest.fail("Link Google Drive phải đi qua gdown, không dùng urlretrieve.")
+
     class PandasStub:
         @staticmethod
         def read_csv(path):
@@ -120,6 +125,7 @@ def test_download_cell_reads_only_fresh_drive_file(client, tmp_path, monkeypatch
         "TEST_FILE": "test.csv",
         "Path": Path,
         "gdown": gdown,
+        "urlretrieve": wrong_retrieve,
         "pd": PandasStub,
     }
     exec(code, namespace)
@@ -127,6 +133,91 @@ def test_download_cell_reads_only_fresh_drive_file(client, tmp_path, monkeypatch
     assert calls[0][1] == (url,)
     assert calls[0][2]["output"].startswith("dataset_btc")
     assert calls[0][0] == download_method
+
+
+def _download_namespace(url, *, pd, urlretrieve, **extra):
+    return {
+        "DATASET_URL": url,
+        "TEST_FILE": "test.csv",
+        "Path": Path,
+        "urlretrieve": urlretrieve,
+        "pd": pd,
+        **extra,
+    }
+
+
+def test_download_cell_fetches_a_plain_link_and_reads_the_fresh_file(client, tmp_path, monkeypatch):
+    """Link ngoài Drive (S3, máy chủ riêng): tải trực tiếp bằng urlretrieve, không cần gdown."""
+    monkeypatch.chdir(tmp_path)
+    code = "".join(client.get(URL).json()["cells"][3]["source"])
+    url = "https://bucket.s3.amazonaws.com/btc/test.csv?X-Amz-Signature=abc"
+    calls = []
+    test_path = Path("dataset_btc") / "test.csv"
+
+    def urlretrieve(link, filename):
+        calls.append((link, filename))
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        Path(filename).write_text("id,feature\n1,2\n")
+
+    class PandasStub:
+        @staticmethod
+        def read_csv(path):
+            assert Path(path) == test_path
+            assert calls  # Không thể đọc CSV cục bộ nếu chưa tải từ link BTC.
+            return SimpleNamespace(shape=(1, 2), head=lambda: None)
+
+    exec(code, _download_namespace(url, pd=PandasStub, urlretrieve=urlretrieve))
+    assert calls == [(url, str(test_path))]
+
+
+def test_download_cell_extracts_a_zip_and_finds_the_test_file_inside(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    code = "".join(client.get(URL).json()["cells"][3]["source"])
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("btc/sub/test.csv", "id,feature\n1,2\n")
+        archive.writestr("btc/train.csv", "id,feature\n9,9\n")
+    payload = archive_bytes.getvalue()
+    test_path = Path("dataset_btc") / "btc" / "sub" / "test.csv"
+
+    def urlretrieve(link, filename):
+        Path(filename).write_bytes(payload)
+
+    class PandasStub:
+        @staticmethod
+        def read_csv(path):
+            assert Path(path) == test_path
+            return SimpleNamespace(shape=(1, 2), head=lambda: None)
+
+    exec(
+        code,
+        _download_namespace(
+            "https://bucket.s3.amazonaws.com/btc/dataset.zip?X-Amz-Signature=abc",
+            pd=PandasStub,
+            urlretrieve=urlretrieve,
+            zipfile=zipfile,
+        ),
+    )
+    assert test_path.exists()
+    assert not (Path("dataset_btc") / "dataset.zip").exists()  # Archive bị xoá sau khi giải nén.
+
+
+def test_download_cell_requires_the_test_file_name_from_a_plain_link(client, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    code = "".join(client.get(URL).json()["cells"][3]["source"])
+
+    def urlretrieve(link, filename):
+        Path(filename).write_text("id,feature\n1,2\n")
+
+    with pytest.raises(AssertionError, match="cần đúng một tệp test.csv"):
+        exec(
+            code,
+            _download_namespace(
+                "https://bucket.s3.amazonaws.com/btc/khac.csv",
+                pd=SimpleNamespace(read_csv=lambda path: None),
+                urlretrieve=urlretrieve,
+            ),
+        )
 
 
 def test_scaffold_drops_reproducibility_checklist_and_error_table(client):
