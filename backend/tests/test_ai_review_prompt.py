@@ -177,7 +177,7 @@ def test_the_prompt_lists_what_must_fall_to_unclear():
         assert phrase in system
 
 
-def test_the_prompt_treats_btc_ids_read_through_personal_drive_as_btc_source():
+def test_the_prompt_treats_btc_resources_read_through_other_forms_as_btc_source():
     system = prompt.SYSTEM_PROMPT
     assert "Đường dẫn hay lệnh dùng link/ID TRÙNG tài nguyên trong <COMPETITION_RESOURCES> vẫn là nguồn BTC" in system
     # Nhiều tài nguyên BTC: gọi một link vẫn là ALIGNED.
@@ -185,9 +185,13 @@ def test_the_prompt_treats_btc_ids_read_through_personal_drive_as_btc_source():
     # mount/đường dẫn lạ không tự là bằng chứng nguồn ngoài; EXTERNAL cần nguồn nêu đích danh.
     assert "tự nó KHÔNG phải bằng chứng nguồn ngoài" in system
     assert "với bằng chứng nêu đích danh nguồn ngoài" in system
-    # ID không có trong danh sách không chứng minh nguồn ngoài: file có thể nằm trong folder BTC.
-    assert "file có thể nằm trong folder BTC cấp (danh sách không liệt kê từng file)" in system
+    # ID không có trong danh sách không chứng minh nguồn ngoài: file có thể nằm trong nguồn BTC.
+    assert "file có thể nằm trong nguồn BTC cấp (danh sách không liệt kê từng file)" in system
     assert "trường hợp đó là UNCLEAR, không tự kết luận ngoài" in system
+    # v11: tài nguyên BTC có thể là link ngoài (S3, nguồn khác) - truy cập cùng object qua dạng khác
+    # (presigned URL, `s3://`) vẫn là nguồn BTC; thao tác nạp không nêu link/ID cụ thể không tự là EXTERNAL.
+    assert "URL ký sẵn (presigned) hay URI `s3://` của cùng object" in system
+    assert "thao tác nạp không nêu link/ID cụ thể" in system
 
 
 def test_the_prompt_requires_output_to_end_at_the_closing_brace():

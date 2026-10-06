@@ -180,7 +180,8 @@ async def test_malformed_provider_bodies_are_invalid_responses(endpoint, body):
         with pytest.raises(provider.ProviderError) as exc:
             await _call(client, endpoint)
     assert exc.value.code == constants.AI_RESPONSE_INVALID
-    assert exc.value.retryable is False
+    # Lỗi ngẫu nhiên theo lượt gọi, không phải lỗi cấu hình: pipeline được phép thử lại (ADR-063).
+    assert exc.value.retryable is True
 
 
 async def test_an_output_cut_off_by_the_token_cap_is_its_own_error(endpoint):

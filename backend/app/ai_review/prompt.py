@@ -69,16 +69,18 @@ dùng dữ liệu BTC.
 được định nghĩa, rồi dữ liệu được tải/đọc/sử dụng. Link định nghĩa ở cell trước và biến được dùng \
 ở cell sau, hay dữ liệu đi qua biến hoặc đường dẫn trung gian, không phải lý do để hạ thấp. Đường \
 dẫn hay lệnh dùng link/ID TRÙNG tài nguyên trong <COMPETITION_RESOURCES> vẫn là nguồn BTC kể cả \
-khi đọc qua Drive cá nhân đã mount (`/content/drive/MyDrive/<ID>/...` hay \
-`/content/drive/Shareddrives/<ID>/...`) - đó là cách đọc folder BTC sau `drive.mount`. Cuộc thi có \
-nhiều tài nguyên BTC: dùng MỘT trong số đó là đủ.
+khi tài nguyên được truy cập qua dạng khác của cùng nguồn: folder Drive BTC đọc qua Drive cá nhân \
+đã mount (`/content/drive/MyDrive/<ID>/...` hay `/content/drive/Shareddrives/<ID>/...` sau \
+`drive.mount`) là cách đọc folder BTC, và URL ký sẵn (presigned) hay URI `s3://` của cùng object \
+trên link S3 BTC cũng vậy. Cuộc thi có nhiều tài nguyên BTC: dùng MỘT trong số đó là đủ.
 - `status` = EXTERNAL khi code nạp/sử dụng dataset từ nguồn không được cấp, với bằng chứng nêu \
 đích danh nguồn ngoài: tải từ domain/URL ngoài (kaggle, huggingface, archive), `load_dataset` của \
 dataset ngoài, hoặc nguồn ngoài khác được nêu đích danh. Dẫn đúng chỗ code DÙNG nguồn đó, không \
 chỉ chỗ nhắc URL, kể cả khi notebook cũng dùng nguồn BTC ở cell khác (trộn nguồn rồi gộp dữ \
-liệu). Chỉ `drive.mount`, hay đường dẫn/link/ID không trùng tài nguyên BTC nào, tự nó KHÔNG phải \
-bằng chứng nguồn ngoài: file có thể nằm trong folder BTC cấp (danh sách không liệt kê từng file) - \
-trường hợp đó là UNCLEAR, không tự kết luận ngoài.
+liệu). Chỉ `drive.mount` hay một thao tác nạp không nêu link/ID cụ thể, hoặc đường dẫn/link/ID \
+không trùng tài nguyên BTC nào, tự nó KHÔNG phải bằng chứng nguồn ngoài: file có thể nằm trong \
+nguồn BTC cấp (danh sách không liệt kê từng file) - trường hợp đó là UNCLEAR, không tự kết luận \
+ngoài.
 - `status` = UNCLEAR khi chưa nối được nguồn gốc: tệp đã upload sẵn (ZIP/CSV) không thể hiện được \
 tải từ đâu; tệp cục bộ không rõ nguồn gốc; đọc từ Drive cá nhân/Shareddrives mà không dùng link/ID \
 trùng tài nguyên BTC; link/ID không trùng tài nguyên BTC nhưng chưa rõ có thuộc folder BTC hay \

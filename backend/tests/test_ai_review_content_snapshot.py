@@ -208,16 +208,51 @@ async def test_resources_changing_mid_capture_are_retried(mock_db, tmp_path, mon
     real = content_snapshot.read_resources
     calls = {"n": 0}
 
-    async def changing(db, competition_id):
+    async def changing(db, competition_id, *, track=None):
         calls["n"] += 1
         if calls["n"] == 2:
             return [{"label": "Tạm", "url": "https://drive.google.com/file/d/temp"}]
-        return await real(db, competition_id)
+        return await real(db, competition_id, track=track)
 
     monkeypatch.setattr(content_snapshot, "read_resources", changing)
     revision = await _capture(mock_db, tmp_path)
     assert calls["n"] == 4
     assert revision.resources == []
+
+
+async def test_each_track_captures_its_own_effective_resources(mock_db, tmp_path):
+    """Cùng thể lệ nhưng tài nguyên khác nhau là hai ngữ cảnh khác nhau: hash phải tách hai revision.
+
+    Bài Private dùng tài nguyên riêng của Private; nếu snapshot chỉ chụp danh sách chung thì lượt
+    AI của bài Private sẽ đối chiếu nhầm và có thể kết luận sai về nguồn dữ liệu.
+    """
+    await _seed(mock_db, tmp_path)
+    shared = {"label": "Chung", "url": "https://drive.google.com/file/d/shared/view"}
+    private_only = {"label": "Riêng Private", "url": "https://drive.google.com/file/d/private/view"}
+    await mock_db[content_snapshot.COMPETITIONS_COLLECTION].insert_one(
+        {
+            "_id": COMPETITION,
+            "mode": "public_private",
+            "resources": [shared],
+            "tracks": {"public": {"resources": []}, "private": {"resources": [private_only]}},
+        }
+    )
+
+    public = await content_snapshot.capture_revision(
+        mock_db, COMPETITION, track="public", settings=get_settings()
+    )
+    private = await content_snapshot.capture_revision(
+        mock_db, COMPETITION, track="private", settings=get_settings()
+    )
+    assert public.resources == [shared]
+    assert private.resources == [shared, private_only]
+    assert public.content_hash != private.content_hash
+    assert await mock_db[content_snapshot.REVISIONS_COLLECTION].count_documents({}) == 2
+    # Bài sau của cùng một nhánh vẫn dùng lại đúng revision của nhánh đó.
+    again = await content_snapshot.capture_revision(
+        mock_db, COMPETITION, track="private", settings=get_settings()
+    )
+    assert again.revision_id == private.revision_id and again.reused is True
 
 
 async def test_identical_content_reuses_the_same_revision(mock_db, tmp_path):

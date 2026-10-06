@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { CompetitionDetail } from "../api/competitions";
+import type { CompetitionDetail, ParticipantTrackView } from "../api/competitions";
 import { flushTimers } from "../test/timers";
 import { SubmissionPage } from "./SubmissionPage";
 
@@ -36,10 +36,13 @@ const COMPETITION: CompetitionDetail = {
 /** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
 const reportAccessLost = vi.fn();
 
-function renderPage(competition: CompetitionDetail = COMPETITION) {
+function renderPage(
+  competition: CompetitionDetail = COMPETITION,
+  entry = "/competitions/submit-cup/submit",
+) {
   const refreshCompetition = vi.fn(async () => {});
   const view = render(
-    <MemoryRouter initialEntries={["/competitions/submit-cup/submit"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route
           element={
@@ -312,7 +315,7 @@ test("cuộc thi bật norm: norm tạm là điểm nổi bật, metric gốc xu
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
   const normCard = document.querySelector<HTMLElement>('[data-metric="normalization"]');
   expect(normCard).toHaveClass("primary");
-  expect(within(normCard as HTMLElement).getByText("Norm tạm lúc ghi nhận kết quả")).toBeTruthy();
+  expect(within(normCard as HTMLElement).getByText("Norm score tạm")).toBeTruthy();
   expect(within(normCard as HTMLElement).getByText("37.50")).toBeTruthy();
 
   // Điểm gốc và các metric vẫn xem được, nhưng không còn được nhấn là điểm chính.
@@ -323,6 +326,145 @@ test("cuộc thi bật norm: norm tạm là điểm nổi bật, metric gốc xu
   // Chú thích nói rõ đây là ảnh chụp tạm kèm đường sang bảng xếp hạng để đối chiếu norm hiện tại.
   expect(screen.getByText(/Con số tạm tính lúc/)).toBeTruthy();
   expect(screen.getByRole("link", { name: "Xem bảng xếp hạng để đối chiếu" })).toBeTruthy();
+});
+
+test("quyền xem norm bị thu hồi giữa chừng: snapshot trong payload bị bỏ và nói đúng lý do", async () => {
+  // Payload chấm vẫn mang snapshot (backend lọc theo quyền lúc trả), nhưng metadata hiện tại đã
+  // tắt BXH: con số cũ trong state không được render lại như thể còn xem được.
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        normalization_snapshot: { score: 37.5, calculated_at: "2026-09-15T08:00:00Z" },
+      },
+    }),
+  );
+
+  renderPage({
+    ...COMPETITION,
+    normalization: { enabled: true, baseline: 0.4, version: 1 },
+    leaderboard_visible: false,
+  });
+  submitOnce();
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+
+  expect(document.querySelector('[data-metric="normalization"]')).toBeNull();
+  expect(screen.queryByText("Norm score tạm")).toBeNull();
+  expect(screen.queryByText(/Con số tạm tính lúc/)).toBeNull();
+  expect(screen.getByText("BXH đang được BTC ẩn; điểm chuẩn hóa chưa được hiển thị")).toBeTruthy();
+  // Norm xuống khỏi màn hình thì metric nguồn trở lại là chỉ số chính.
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  expect(f1Card).toHaveClass("primary");
+  expect(within(f1Card as HTMLElement).getByText("Chỉ số chính")).toBeTruthy();
+});
+
+/** Cuộc thi dual: capability norm của nhánh do backend quyết, FE chỉ đọc lại. */
+function dualCompetition(
+  capability: Pick<ParticipantTrackView, "normalization_visible" | "normalization_hidden_reason">,
+): CompetitionDetail {
+  const track: ParticipantTrackView = {
+    start_at: "2026-01-01T00:00:00Z",
+    end_at: "2027-01-01T00:00:00Z",
+    quota_per_day: 5,
+    window_state: "open",
+    results_released: true,
+    resources: [],
+    can_submit: true,
+    blocked_reason: null,
+    submission_ready: true,
+    ...capability,
+  };
+  return { ...COMPETITION, mode: "public_private", tracks: { public: track, private: track } };
+}
+
+test("dual: nhánh bị che norm thì snapshot cũ của nhánh đó không được render", async () => {
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        normalization_snapshot: { score: 44, calculated_at: "2026-09-15T08:00:00Z" },
+      },
+    }),
+  );
+
+  renderPage(
+    dualCompetition({
+      normalization_visible: false,
+      normalization_hidden_reason: "source_metric_hidden",
+    }),
+    "/competitions/submit-cup/submit?track=private",
+  );
+  selectCsv();
+  selectNotebook();
+  fireEvent.click(screen.getByRole("button", { name: "Nộp nhánh Private và chấm điểm" }));
+  expect(await screen.findByText("Kết quả chấm điểm · Nhánh Private")).toBeTruthy();
+
+  // Capability của nhánh là nguồn duy nhất: payload còn snapshot nhưng vẫn bị bỏ.
+  expect(document.querySelector('[data-metric="normalization"]')).toBeNull();
+  expect(screen.getByText("Điểm chuẩn hóa bị ẩn theo cấu hình hiển thị điểm")).toBeTruthy();
+});
+
+test("cuộc thi v1: kết quả trả ngay trong request vẫn hiện panel chấm điểm", async () => {
+  // v1 chấm trong tiến trình: POST trả thẳng bài nộp đã xong (201) chứ không phải lượt hàng đợi,
+  // nên không có `attempt_id` để hỏi trạng thái - trang phải nhận ra và render kết quả luôn.
+  const sent: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return init?.method === "POST" ? json(SCORED, 201) : json({ attempts: [] }, 200);
+    }),
+  );
+  const { refreshCompetition } = renderPage();
+
+  submitOnce();
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  expect(within(f1Card as HTMLElement).getByText("0.5000")).toBeTruthy();
+  expect(screen.getByText(/Còn 4 lượt nộp hôm nay/)).toBeTruthy();
+  // Hạn mức ở header được tính lại sau khi nộp, giống đường v2.
+  await waitFor(() => expect(refreshCompetition).toHaveBeenCalledTimes(1));
+  // Không có lượt nào để theo dõi: chỉ một request POST, không hỏi trạng thái.
+  expect(sent).toEqual(["POST /api/competitions/64a000000000000000000001/submissions"]);
+
+  // "Nộp bài khác" đưa về form trống: tệp của lượt vừa rồi không được giữ lại.
+  fireEvent.click(screen.getByRole("button", { name: "Nộp bài khác" }));
+  expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
+});
+
+test("dual: bài Private chưa công bố hiện lời giải thích chờ công bố thay vì chỉ ô trống", async () => {
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        metrics: {},
+        primary_score: null,
+        result_visibility: "hidden",
+      },
+    }),
+  );
+
+  renderPage(
+    dualCompetition({
+      normalization_visible: false,
+      normalization_hidden_reason: "private_unpublished",
+    }),
+    "/competitions/submit-cup/submit?track=private",
+  );
+  selectCsv();
+  selectNotebook();
+  fireEvent.click(screen.getByRole("button", { name: "Nộp nhánh Private và chấm điểm" }));
+  expect(await screen.findByText("Kết quả chấm điểm · Nhánh Private")).toBeTruthy();
+
+  // Các ô điểm để trống kèm lý do rõ ràng, không bỏ im lặng.
+  expect(screen.getByText(/Đã chấm xong — chờ công bố/)).toBeTruthy();
+  expect(screen.getByText(/Thời điểm công bố do BTC quyết định/)).toBeTruthy();
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  expect(within(f1Card as HTMLElement).getByText("-")).toBeTruthy();
+  expect(screen.queryByText(/0\.5/)).toBeNull();
 });
 
 test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp thành công", async () => {

@@ -250,13 +250,6 @@ def board_metadata(rule: Rule, *, reference: float | None, calculated_at: dateti
     }
 
 
-def participant_visible(competition: dict) -> bool:
-    """Dữ liệu dẫn xuất (norm/snapshot/reference_best) chỉ hiện khi BXH công khai VÀ metric nguồn không bị ẩn."""
-    if not competition.get("leaderboard_visible", False):
-        return False
-    return contracts.participant_contract(competition).primary_metric is not None
-
-
 def cache_identity(competition: dict) -> tuple:
     """Thành phần key cache BXH theo cấu hình norm; đổi baseline/phiên bản phải làm cache cũ vô hiệu."""
     rule = active_rule(competition)

@@ -544,8 +544,11 @@ test("mục đối chiếu nguồn đứng trước danh sách finding trong th�
   await screen.findByText("Kết quả đánh giá");
   const card = resultCard();
   const heading = within(card).getByText("Nguồn dataset trong notebook");
+  // Tiêu đề phán quyết nổi hơn các mục phụ để admin quét thấy ngay.
+  const rulesHeading = within(card).getByText("AI đối chiếu thể lệ");
+  expect(rulesHeading.className).toContain("ai-section-heading-strong");
   // Danh sách tín hiệu nguồn nằm trong khối nguồn; danh sách finding là khối riêng đứng sau.
-  const findings = within(card).getByText("AI đối chiếu thể lệ").nextElementSibling as HTMLElement;
+  const findings = rulesHeading.nextElementSibling as HTMLElement;
   expect(findings.classList.contains("ai-finding-list")).toBe(true);
   expect(heading.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
@@ -572,12 +575,11 @@ test("đánh giá nguồn của lượt mới hiện trạng thái, lý do và b
 
   await screen.findByText("Kết quả đánh giá");
   const card = resultCard();
-  expect(within(card).getByText("AI đánh giá nguồn")).toBeTruthy();
-  expect(within(card).getByText("AI: Có dấu hiệu dùng nguồn ngoài")).toBeTruthy();
-  // Ranh giới trách nhiệm của hệ thống: đọc code tĩnh, không xác nhận notebook đã chạy.
-  expect(
-    within(card).getByText(/không xác nhận notebook đã chạy hoặc dữ liệu thực tế đã tải/),
-  ).toBeTruthy();
+  // Tiêu đề phán quyết nổi hơn các mục phụ để admin quét thấy ngay.
+  expect(within(card).getByText("AI đánh giá nguồn").className).toContain(
+    "ai-section-heading-strong",
+  );
+  expect(within(card).getByText("Nguồn: Nghi nguồn ngoài").className).toContain("danger");
   expect(within(card).getByText("AI ghi nhận: Notebook tải dữ liệu từ nguồn ngoài.")).toBeTruthy();
   expect(within(card).getByText("Dòng 4–4 · Cell 3")).toBeTruthy();
   expect(within(card).getByText("4 df = pd.read_csv('https://data.example.org/train.csv')")).toBeTruthy();
@@ -586,7 +588,16 @@ test("đánh giá nguồn của lượt mới hiện trạng thái, lý do và b
   expect(within(card).queryByText("Không khớp nguồn BTC")).toBeNull();
 });
 
-test("ALIGNED bị hạ thành UNCLEAR thì nói rõ vì sao bằng chứng chưa đủ", async () => {
+test("ALIGNED hiển thị xanh lá; hạ thành UNCLEAR thì nói rõ vì sao bằng chứng chưa đủ", async () => {
+  mockApi(() => json({}), detailWithAssessment(sourceAssessment({
+    model_status: "ALIGNED",
+    status: "ALIGNED",
+  })));
+  const { unmount } = renderModal();
+  await screen.findByText("Kết quả đánh giá");
+  expect(within(resultCard()).getByText("Nguồn: Phù hợp BTC").className).toContain("success");
+  unmount();
+
   mockApi(() => json({}), detailWithAssessment(sourceAssessment({
     model_status: "ALIGNED",
     status: "UNCLEAR",
@@ -601,7 +612,7 @@ test("ALIGNED bị hạ thành UNCLEAR thì nói rõ vì sao bằng chứng chư
   expect(within(card).getByText("Nguồn: Chưa xác minh")).toBeTruthy();
   // Câu hạ cấp nói đủ hai vế và dịch mã thành câu, không đổ mã thô ra UI.
   expect(within(card).getByText(
-    "AI đề xuất “AI: Phù hợp nguồn BTC”; bằng chứng chưa đủ vì vị trí trích dẫn không có trong notebook; một phần trích dẫn không dùng được.",
+    "AI đề xuất “Nguồn: Phù hợp BTC”; bằng chứng chưa đủ vì vị trí trích dẫn không có trong notebook; một phần trích dẫn không dùng được.",
   )).toBeTruthy();
   // Vị trí bị loại vẫn hiện cho BTC tra cứu, kèm lý do đã dịch.
   expect(within(card).getByText("Cell 9 · Dòng 1–2")).toBeTruthy();
@@ -626,7 +637,7 @@ test("đánh giá bị hạ vì thiếu dữ kiện thì nói rõ chưa dùng đ
   const card = resultCard();
   expect(within(card).getByText("Nguồn: Chưa đánh giá được")).toBeTruthy();
   expect(within(card).getByText(
-    "AI đề xuất “AI: Phù hợp nguồn BTC”; chưa dùng được vì cuộc thi không có tài nguyên BTC để đối chiếu.",
+    "AI đề xuất “Nguồn: Phù hợp BTC”; chưa dùng được vì cuộc thi không có tài nguyên BTC để đối chiếu.",
   )).toBeTruthy();
   expect(within(card).getByText("AI không kèm trích dẫn nào cho đánh giá này.")).toBeTruthy();
   expect(card.querySelectorAll("figure.ai-evidence")).toHaveLength(0);

@@ -172,7 +172,16 @@ async def reconcile(db, *, settings, now: datetime) -> dict:
         stats["expired"] += 1
 
     for attempt in await store.abandoned(db, now=now, limit=limit):
-        if _out_of_time(as_utc(attempt["deadline_at"]), settings, now):
+        if await _submission_stored(db, attempt):
+            # Bài đã ghi xong trước khi worker chết: hoàn tất lượt thay vì chấm lại hoặc hoàn suất -
+            # đóng lượt ở đây sẽ cho không một bài đã tính điểm.
+            await store.complete(db, attempt, now=now)
+            stats["resolved"] += 1
+        elif attempt.get("execution_kind") == store.EXECUTION_INLINE:
+            # Lượt inline không có ai chấm lại: request chết giữa chừng là lượt hỏng, hoàn suất.
+            await service.expire(db, attempt, now=now)
+            stats["expired"] += 1
+        elif _out_of_time(as_utc(attempt["deadline_at"]), settings, now):
             await service.expire(db, attempt, now=now)
             stats["expired"] += 1
         elif await store.requeue(db, attempt, now=now):
@@ -271,12 +280,17 @@ async def _close(
     return ("EXPIRED" if expired else "FAILED") if closed else "LOST"
 
 
-async def _resolve(db, attempt: dict, *, settings, now: datetime) -> str:
-    """Kết thúc một lượt RESOLVING bằng sự thật: bài đã ghi, chưa ghi, hay hết giờ."""
+async def _submission_stored(db, attempt: dict) -> bool:
+    """Bài nộp của lượt đã được ghi chưa - `_id` của lượt cũng là `_id` của bài."""
     stored = await db[submissions_service.SUBMISSIONS_COLLECTION].find_one(
         {"_id": attempt["_id"]}, {"_id": 1}
     )
-    if stored is not None:
+    return stored is not None
+
+
+async def _resolve(db, attempt: dict, *, settings, now: datetime) -> str:
+    """Kết thúc một lượt RESOLVING bằng sự thật: bài đã ghi, chưa ghi, hay hết giờ."""
+    if await _submission_stored(db, attempt):
         await store.complete(db, attempt, now=now)
         return "COMPLETED"
     if not attempt.get("result"):
@@ -317,7 +331,14 @@ async def _context(db, attempt: dict, *, now: datetime) -> _Context:
     competition = await db[COMPETITIONS_COLLECTION].find_one({"_id": attempt["competition_id"]})
     if competition is None or competition["status"] != "published":
         raise _Rejected("SUBMISSION_CLOSED", "Cuộc thi hiện không nhận bài nộp.")
-    if now > as_utc(competition["end_at"]):
+    if attempt.get("track") is not None:
+        # Dual: lượt đã admission hợp lệ được chấm cả sau khi nhánh hết hạn - cửa sổ đã ghim trong
+        # intent. Lệnh đóng quản trị thì không: generation lệch nghĩa là lượt đã bị hủy và không
+        # được sống lại khi cuộc thi mở lại.
+        admission = attempt.get("admission") or {}
+        if int(admission.get("stop_generation", 0)) != int(competition.get("stop_generation", 0)):
+            raise _Rejected(service.CANCELLED_CODE, service.CANCELLED_MESSAGE)
+    elif now > as_utc(competition["end_at"]):
         raise _Rejected("SUBMISSION_DEADLINE_PASSED", "Đã hết hạn nộp bài.")
     membership = await get_membership(db, competition["_id"], attempt["account_id"])
     if membership is None or not membership.get("active", True):
@@ -365,6 +386,7 @@ async def _score(
             context.competition,
             context.config,
             data,
+            track=attempt.get("track"),
             client_timeout=min(remaining, settings.evaluator_client_timeout_seconds),
         )
     except ScoringValidationError as exc:
@@ -434,8 +456,15 @@ async def _commit(
     }
     if scored.scoring_ref is not None:
         document["scoring_ref"] = scored.scoring_ref
+    if attempt.get("track") is not None:
+        # Nhánh và cửa sổ đã ghim lúc admission: bài dual giữ được mốc nhận bài của chính nó kể cả
+        # khi admin gia hạn sau đó.
+        admission = attempt.get("admission") or {}
+        document["track"] = attempt["track"]
+        document["admitted_at"] = admission.get("admitted_at")
+        document["admitted_end_at"] = admission.get("admitted_end_at")
     snapshot, projection = await ai_service.plan_submission_state(
-        db, context.competition, settings=settings, now=now
+        db, context.competition, settings=settings, now=now, track=attempt.get("track")
     )
     if snapshot is not None:
         document["content_snapshot"] = snapshot
@@ -449,7 +478,11 @@ async def _commit(
         # Snapshot norm tạm dựng ngay trước khi ghi, chỉ ở nhánh chưa có bài: lượt đối soát bắt gặp
         # bài đã ghi sẽ không bao giờ tính lại, nên snapshot đã lưu giữ nguyên vĩnh viễn.
         norm_snapshot = await submissions_service.normalization_snapshot(
-            db, context.competition, raw=scored.primary_score, now=now
+            db,
+            context.competition,
+            track=attempt.get("track"),
+            raw=scored.primary_score,
+            now=now,
         )
         if norm_snapshot is not None:
             document["normalization_snapshot"] = norm_snapshot

@@ -136,20 +136,23 @@ def initial_projection(*, captured: bool, now: datetime) -> dict:
 
 
 async def plan_submission_state(
-    db, competition: dict, *, settings, now: datetime
+    db, competition: dict, *, settings, now: datetime, track: str | None = None
 ) -> tuple[dict | None, dict | None]:
     """Chốt ảnh chụp policy và desired state AI cho một bài nộp; không bao giờ chặn việc nộp bài.
 
     Không chụp được nội dung chỉ làm lượt AI kết thúc ở ERROR: bài vẫn được chấm, vẫn xếp hạng và
     vẫn qua được vòng duyệt của BTC y như khi tính năng AI không tồn tại. Trả `(None, None)` khi
     cuộc thi không bật AI - hai field này không được xuất hiện trên document.
+
+    `track` chọn danh sách tài nguyên hiệu lực của bài dual: thể lệ dùng chung nhưng tài nguyên
+    riêng từng nhánh, nên bài Private phải được đối chiếu với đúng tài nguyên Private đã cấp.
     """
     stored = config.stored_config(competition)
     if not stored["enabled"]:
         return None, None
     try:
         revision = await content_snapshot.capture_revision(
-            db, competition["_id"], settings=settings
+            db, competition["_id"], track=track, settings=settings
         )
     except content_snapshot.SnapshotError as exc:
         logger.warning(
@@ -411,8 +414,10 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
     except Exception as exc:
         # Pydantic ValidationError, `ResponseInvalid`, hoặc JSON hỏng nằm ngoài `ProviderError`.
         # Chỉ ghi loại lỗi: message của Pydantic có thể chứa nguyên văn output của model.
+        # Output hỏng là lỗi ngẫu nhiên theo lượt gọi, không phải lỗi dữ liệu: đi cùng đường retry
+        # có trần với lỗi mạng (`max_attempts` lượt chạy), chỉ hết lượt mới chốt audit row ERROR.
         logger.warning("AI output không dùng được: %s", type(exc).__name__)
-        return await _finish_error(
+        return await _retry_or_fail(
             db, job, now=finished_at(), code=constants.AI_RESPONSE_INVALID,
             message="Output model không dùng được.", snapshot=snapshot, started_at=now,
             target={"provider": active["provider"], "provider_host": endpoint.host, "model": model},

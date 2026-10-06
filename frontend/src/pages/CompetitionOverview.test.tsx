@@ -7,7 +7,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { formatLocal, type CompetitionDetail } from "../api/competitions";
+import { formatLocal, type CompetitionDetail, type ParticipantTrackView } from "../api/competitions";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
 import { CompetitionDetailPage } from "./CompetitionDetailPage";
 
@@ -44,6 +44,39 @@ const CONTENTS = {
     { id: "a", slug: "problem", title: "Đề bài", order: 20, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
     { id: "b", slug: "rules", title: "Rules", order: 10, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
   ],
+};
+
+/** Nhánh cho cuộc thi dual: chỉ khai báo phần masthead và thẻ nhánh đọc tới. */
+function trackView(overrides: Partial<ParticipantTrackView> = {}): ParticipantTrackView {
+  return {
+    start_at: "2026-10-02T00:00:00Z",
+    end_at: "2026-10-10T18:07:00Z",
+    quota_per_day: 10,
+    window_state: "open",
+    results_released: true,
+    resources: [],
+    can_submit: true,
+    blocked_reason: null,
+    submission_ready: true,
+    ...overrides,
+  };
+}
+
+const PUBLIC_VIEW = trackView();
+
+const PRIVATE_VIEW = trackView({
+  end_at: "2026-10-13T18:07:00Z",
+  quota_per_day: 3,
+  results_released: false,
+});
+
+const DUAL_NORMED: CompetitionDetail = {
+  ...BASE,
+  mode: "public_private",
+  // Quota cấp cuộc thi không tồn tại ở dual - số lượt nằm trong từng nhánh.
+  quota_per_day: null,
+  normalization: { enabled: true, baseline: 0.4, version: 1 },
+  tracks: { public: PUBLIC_VIEW, private: PRIVATE_VIEW },
 };
 
 function apiMock(handler: (url: string, call: number) => { body: unknown; status: number }) {
@@ -122,6 +155,60 @@ test("Tổng quan nêu thể lệ và quy cách bài nộp bằng dữ liệu th
   expect(screen.getByText("Cột ID.")).toBeTruthy();
   expect(screen.getByText("Binary")).toBeTruthy();
   expect(screen.getByText("CSV 50 MiB, notebook 20 MiB.")).toBeTruthy();
+  // Chưa bật chuẩn hóa thì không được nói gì về norm.
+  expect(screen.queryByText("Xếp hạng.")).toBeNull();
+  // Masthead cuộc thi một nhánh giữ giá trị gộp: một khoảng thời gian, một hạn mức.
+  expect(
+    screen.getByText(`${formatLocal(BASE.start_at)} - ${formatLocal(BASE.end_at)}`),
+  ).toBeTruthy();
+  expect(screen.getByText("7 lượt/ngày")).toBeTruthy();
+});
+
+test("cuộc thi bật chuẩn hóa: Tổng quan nói rõ xếp hạng theo norm score", async () => {
+  const normed: CompetitionDetail = {
+    ...BASE,
+    normalization: { enabled: true, baseline: 0.4, version: 1 },
+  };
+  apiMock((url) =>
+    url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: normed, status: 200 },
+  );
+  renderAt("/competitions/ai-challenge-2026");
+
+  await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
+  expect(screen.getByText("Xếp hạng.")).toBeTruthy();
+  expect(
+    screen.getByText(/Điểm xếp hạng là norm score \(thang 0–50\) quy đổi từ điểm gốc F1/),
+  ).toBeTruthy();
+  // Masthead đổi chỉ số chính sang norm score, chỉ số gốc xuống ngoặc.
+  expect(screen.getByText("Norm score (F1)")).toBeTruthy();
+});
+
+test("dual bật chuẩn hóa: masthead ghi chỉ số norm và lịch/hạn mức của cả hai nhánh", async () => {
+  apiMock((url) =>
+    url.includes("/contents")
+      ? { body: CONTENTS, status: 200 }
+      : { body: DUAL_NORMED, status: 200 },
+  );
+  renderAt("/competitions/ai-challenge-2026");
+
+  await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
+  expect(screen.getByText("Norm score (F1)")).toBeTruthy();
+  // Dual: mỗi nhánh một dòng nhỏ thay cho giá trị gộp "Theo từng nhánh".
+  expect(screen.queryByText("Theo từng nhánh")).toBeNull();
+  const facts = document.querySelector(".comp-facts") as HTMLElement;
+  const lines = facts.querySelectorAll(".comp-fact-line");
+  expect(lines).toHaveLength(4);
+  expect(lines[0]).toHaveTextContent(
+    `Public ${formatLocal(PUBLIC_VIEW.start_at)} - ${formatLocal(PUBLIC_VIEW.end_at)}`,
+  );
+  expect(lines[1]).toHaveTextContent(
+    `Private ${formatLocal(PRIVATE_VIEW.start_at)} - ${formatLocal(PRIVATE_VIEW.end_at)}`,
+  );
+  expect(lines[2]).toHaveTextContent("Public 10 lượt/ngày");
+  expect(lines[3]).toHaveTextContent("Private 3 lượt/ngày");
+  // Câu dẫn cũ ở masthead và ở khối "Hai nhánh thi đấu" đã bị bỏ.
+  expect(screen.queryByText("Hai nhánh: Public và Private")).toBeNull();
+  expect(screen.queryByText(/Cuộc thi có hai nhánh/)).toBeNull();
 });
 
 test("cấu hình chưa thiết lập hiển thị “Chưa cấu hình”, không lộ null/undefined", async () => {

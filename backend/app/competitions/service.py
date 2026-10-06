@@ -13,6 +13,14 @@ from urllib.parse import urlparse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
+from app.competitions import tracks as competition_tracks
+from app.competitions.tracks import (
+    MODE_DUAL,
+    MODE_SINGLE,
+    PRIVATE,
+    PUBLIC,
+    TRACKS,
+)
 from app.content import storage
 from app.core.config import get_settings
 from app.core.datetimes import as_utc, iso_z
@@ -31,11 +39,10 @@ METRICS = ("f1", "precision", "recall")
 _SLUG_MAX = SLUG_MAX
 _QUOTA_MAX = 1000
 
-# Tài nguyên cuộc thi chỉ là link ngoài (Google Drive) - nền tảng không host dataset/binary.
+# Tài nguyên cuộc thi chỉ là link ngoài (Drive, S3 hay nguồn khác) - nền tảng không host dataset/binary.
 RESOURCES_MAX = 10
 _RESOURCE_LABEL_MAX = 120
 _RESOURCE_URL_MAX = 2048
-_RESOURCE_HOSTS = ("drive.google.com", "docs.google.com")
 
 # Edit rule theo status (ADR-009): draft sửa mọi field config;
 # published không đổi primary_metric (ảnh hưởng leaderboard đã có); closed read-only.
@@ -48,18 +55,33 @@ class CompetitionResource(BaseModel):
     url: str
 
 
+class CompetitionTrackCreate(BaseModel):
+    """Cấu hình riêng của một nhánh lúc tạo cuộc thi; phần chung vẫn ở `CompetitionCreate`."""
+
+    start_at: datetime
+    end_at: datetime
+    quota_per_day: int = 5
+    resources: list[CompetitionResource] = Field(default_factory=list)
+    result_policy: str = competition_tracks.RESULT_POLICY_DEFAULT
+    publish_condition: str = competition_tracks.PUBLISH_CONDITION_DEFAULT
+
+
 class CompetitionCreate(BaseModel):
     slug: str
     name: str
     short_description: str = ""
-    start_at: datetime
-    end_at: datetime
+    # `mode` vắng nghĩa là single; dual dùng lịch của từng nhánh nên bỏ trống start/end cấp cuộc thi.
+    mode: str = MODE_SINGLE
+    start_at: datetime | None = None
+    end_at: datetime | None = None
     join_mode: str = "open"
     primary_metric: str = "f1"
     quota_per_day: int = 5
     leaderboard_visible: bool = True
     resources: list[CompetitionResource] = Field(default_factory=list)
     normalization: NormalizationRequest | None = None
+    public_track: CompetitionTrackCreate | None = None
+    private_track: CompetitionTrackCreate | None = None
 
 
 class CompetitionUpdate(BaseModel):
@@ -73,6 +95,93 @@ class CompetitionUpdate(BaseModel):
     leaderboard_visible: bool | None = None
     resources: list[CompetitionResource] | None = None
     normalization: NormalizationRequest | None = None
+
+
+class TrackScheduleIn(BaseModel):
+    """Lịch mới của một nhánh; quota bỏ trống nghĩa là giữ nguyên."""
+
+    start_at: datetime
+    end_at: datetime
+    quota_per_day: int | None = None
+
+
+class TrackScheduleRequest(TrackScheduleIn):
+    """Gia hạn/chỉnh lịch một nhánh. `expected_revision` chặn hai admin ghi đè nhau."""
+
+    expected_revision: int
+    reason: str
+
+
+class PrivatePolicyRequest(BaseModel):
+    """Chính sách công bố kết quả Private trước lần công bố đầu tiên."""
+
+    result_policy: str | None = None
+    publish_condition: str | None = None
+    expected_revision: int
+    reason: str
+    # Chuyển sang "hiện ngay" là mở kết quả vĩnh viễn: phải xác nhận tường minh, không suy ra từ lựa chọn khác.
+    confirm_reveal: bool = False
+
+
+class PublishResultsRequest(BaseModel):
+    """Công bố kết quả Private; idempotent nên lặp lại sau khi đã công bố vẫn thành công."""
+
+    expected_revision: int
+    reason: str | None = None
+
+
+class ReopenTrackSchedules(BaseModel):
+    public: TrackScheduleIn | None = None
+    private: TrackScheduleIn | None = None
+
+
+class ReopenRequest(BaseModel):
+    """Mở lại competition; dual nhận lịch nhánh mới tùy chọn trong cùng transition."""
+
+    expected_revision: int | None = None
+    reason: str | None = None
+    tracks: ReopenTrackSchedules | None = None
+
+
+def validate_track_schedule(label: str, data: TrackScheduleIn) -> None:
+    if as_utc(data.start_at) >= as_utc(data.end_at):
+        raise ValueError(f"Nhánh {label}: thời gian bắt đầu phải trước thời gian kết thúc.")
+    if data.quota_per_day is not None and not 0 <= data.quota_per_day <= _QUOTA_MAX:
+        raise ValueError(f"Nhánh {label}: quota mỗi ngày phải từ 0 đến {_QUOTA_MAX}.")
+
+
+def change_record(admin_email: str, *, action: str, reason: str | None, revision: int) -> dict:
+    """Vết thay đổi quản trị ghi cùng state update; không phải audit ledger bất biến."""
+    return {
+        "by": admin_email,
+        "at": datetime.now(timezone.utc),
+        "action": action,
+        "reason": reason,
+        "revision": revision,
+    }
+
+
+def schedule_sets(competition: dict, track: str, data: TrackScheduleIn) -> dict:
+    """Các field $set của một lượt đổi lịch nhánh, kèm khoảng tổng cập nhật atomic.
+
+    Envelope nằm cùng lượt ghi để mọi bản đọc thấy lịch cấp cuộc thi và lịch nhánh luôn khớp nhau.
+    """
+    updates: dict = {
+        f"tracks.{track}.start_at": data.start_at,
+        f"tracks.{track}.end_at": data.end_at,
+    }
+    if data.quota_per_day is not None:
+        updates[f"tracks.{track}.quota_per_day"] = data.quota_per_day
+    schedules = {}
+    for candidate in TRACKS:
+        if candidate == track:
+            schedules[candidate] = (data.start_at, data.end_at)
+        else:
+            schedules[candidate] = competition_tracks.track_schedule(competition, candidate)
+    start, end = competition_tracks.envelope(schedules)
+    updates["start_at"] = start
+    updates["end_at"] = end
+    return updates
 
 
 def normalize_resources(resources: list) -> list[dict]:
@@ -101,14 +210,16 @@ def _validate_resource_url(url: str) -> str:
         raise ValueError("Link tài nguyên không được để trống.")
     if len(url) > _RESOURCE_URL_MAX:
         raise ValueError(f"Link tài nguyên tối đa {_RESOURCE_URL_MAX} ký tự.")
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+    except ValueError:
+        # urlparse ném ValueError cho URL dị dạng (IPv6 hỏng, port ngoài dải...): 422 chứ không 500.
+        raise ValueError("Link tài nguyên không hợp lệ.") from None
+    if parsed.scheme != "https" or not hostname:
         raise ValueError("Link tài nguyên phải bắt đầu bằng https://.")
     if parsed.username or parsed.password:
         raise ValueError("Link tài nguyên không được chứa thông tin đăng nhập.")
-    host = parsed.hostname or ""
-    if not any(host == allowed or host.endswith(f".{allowed}") for allowed in _RESOURCE_HOSTS):
-        raise ValueError("Chỉ chấp nhận link Google Drive (drive.google.com hoặc docs.google.com).")
     return url
 
 
@@ -125,29 +236,87 @@ async def find_competition_by_slug(db: AsyncIOMotorDatabase, slug: str) -> dict 
     return await db[COMPETITIONS_COLLECTION].find_one({"slug": slug})
 
 
+def _track_document(track: CompetitionTrackCreate, *, private: bool) -> dict:
+    document = {
+        "start_at": track.start_at,
+        "end_at": track.end_at,
+        "quota_per_day": track.quota_per_day,
+        "resources": normalize_resources(track.resources),
+        "ground_truth": None,
+        # Bằng chứng chạy thử tách theo nhánh: GT của nhánh là một phần dấu vân tay của nhánh đó.
+        "verification": None,
+        "admission_seq": 0,
+    }
+    if private:
+        document["result_policy"] = track.result_policy
+        document["publish_condition"] = track.publish_condition
+        document["results_published_at"] = None
+        document["results_published_by"] = None
+    return document
+
+
+def _dual_document(data: CompetitionCreate) -> dict:
+    """Khoảng tổng của cuộc thi suy từ hai lịch nhánh, không nhận lịch cấp cuộc thi."""
+    schedules = {
+        PUBLIC: (data.public_track.start_at, data.public_track.end_at),
+        PRIVATE: (data.private_track.start_at, data.private_track.end_at),
+    }
+    start, end = competition_tracks.envelope(schedules)
+    return {
+        "mode": MODE_DUAL,
+        "start_at": start,
+        "end_at": end,
+        # Quota cấp cuộc thi không tồn tại ở dual: mỗi nhánh giữ bucket riêng.
+        "control_revision": 1,
+        "stop_generation": 0,
+        "tracks": {
+            PUBLIC: _track_document(data.public_track, private=False),
+            PRIVATE: _track_document(data.private_track, private=True),
+        },
+    }
+
+
 async def insert_competition(db: AsyncIOMotorDatabase, data: CompetitionCreate, created_by: str) -> dict:
     now = datetime.now(timezone.utc)
-    result = await db[COMPETITIONS_COLLECTION].insert_one(
-        {
-            "slug": data.slug,
-            "name": data.name.strip(),
-            "short_description": data.short_description.strip(),
-            "status": "draft",
-            "start_at": data.start_at,
-            "end_at": data.end_at,
-            "join_mode": data.join_mode,
-            "join_code_hash": None,
-            "primary_metric": data.primary_metric,
-            "quota_per_day": data.quota_per_day,
-            "leaderboard_visible": data.leaderboard_visible,
-            "resources": normalize_resources(data.resources),
-            "normalization": normalization.config_payload(data.normalization),
-            "created_by": created_by,
-            "created_at": now,
-            "updated_at": now,
-        }
-    )
+    document = {
+        "slug": data.slug,
+        "name": data.name.strip(),
+        "short_description": data.short_description.strip(),
+        "status": "draft",
+        "join_mode": data.join_mode,
+        "join_code_hash": None,
+        "primary_metric": data.primary_metric,
+        "leaderboard_visible": data.leaderboard_visible,
+        "resources": normalize_resources(data.resources),
+        "normalization": normalization.config_payload(data.normalization),
+        "created_by": created_by,
+        "created_at": now,
+        "updated_at": now,
+    }
+    if data.mode == MODE_DUAL:
+        document.update(_dual_document(data))
+    else:
+        # Single giữ nguyên hình dạng document cũ: không `mode`, quota và lịch ở cấp cuộc thi.
+        document["start_at"] = data.start_at
+        document["end_at"] = data.end_at
+        document["quota_per_day"] = data.quota_per_day
+    result = await db[COMPETITIONS_COLLECTION].insert_one(document)
     return await db[COMPETITIONS_COLLECTION].find_one({"_id": result.inserted_id})
+
+
+def _validate_track(label: str, track: CompetitionTrackCreate, *, private: bool) -> None:
+    if as_utc(track.start_at) >= as_utc(track.end_at):
+        raise ValueError(f"Nhánh {label}: thời gian bắt đầu phải trước thời gian kết thúc.")
+    if not 0 <= track.quota_per_day <= _QUOTA_MAX:
+        raise ValueError(f"Nhánh {label}: quota mỗi ngày phải từ 0 đến {_QUOTA_MAX}.")
+    normalize_resources(track.resources)
+    if private:
+        if track.result_policy not in competition_tracks.RESULT_POLICIES:
+            raise ValueError("Chính sách công bố phải là immediate hoặc manual.")
+        if track.publish_condition not in competition_tracks.PUBLISH_CONDITIONS:
+            raise ValueError(
+                "Điều kiện công bố phải là admin_decides hoặc after_closed_and_scored."
+            )
 
 
 def validate_create(data: CompetitionCreate) -> None:
@@ -156,14 +325,30 @@ def validate_create(data: CompetitionCreate) -> None:
         raise ValueError(f"Slug chỉ gồm a-z, 0-9 và dấu gạch ngang (tối đa {_SLUG_MAX} ký tự).")
     if not data.name.strip():
         raise ValueError("Tên cuộc thi không được để trống.")
-    if as_utc(data.start_at) >= as_utc(data.end_at):
-        raise ValueError("Thời gian bắt đầu phải trước thời gian kết thúc.")
+    if data.mode not in competition_tracks.MODES:
+        raise ValueError("Chế độ cuộc thi phải là single hoặc public_private.")
     if data.join_mode not in JOIN_MODES:
         raise ValueError("Join mode phải là open, code hoặc invite_only.")
     if data.primary_metric not in METRICS:
         raise ValueError("Primary metric phải là f1, precision hoặc recall.")
-    if not 0 <= data.quota_per_day <= _QUOTA_MAX:
-        raise ValueError(f"Quota mỗi ngày phải từ 0 đến {_QUOTA_MAX}.")
+    if data.mode == MODE_DUAL:
+        if data.start_at is not None or data.end_at is not None:
+            raise ValueError(
+                "Cuộc thi hai nhánh dùng lịch của từng nhánh; không nhận lịch cấp cuộc thi."
+            )
+        if data.public_track is None or data.private_track is None:
+            raise ValueError("Cuộc thi hai nhánh cần lịch và quota cho cả nhánh Public lẫn Private.")
+        _validate_track("Public", data.public_track, private=False)
+        _validate_track("Private", data.private_track, private=True)
+    else:
+        if data.public_track is not None or data.private_track is not None:
+            raise ValueError("Cuộc thi thông thường không nhận cấu hình nhánh Public/Private.")
+        if data.start_at is None or data.end_at is None:
+            raise ValueError("Cần thời gian bắt đầu và kết thúc của cuộc thi.")
+        if as_utc(data.start_at) >= as_utc(data.end_at):
+            raise ValueError("Thời gian bắt đầu phải trước thời gian kết thúc.")
+        if not 0 <= data.quota_per_day <= _QUOTA_MAX:
+            raise ValueError(f"Quota mỗi ngày phải từ 0 đến {_QUOTA_MAX}.")
     normalize_resources(data.resources)
     normalization.config_payload(data.normalization)
 
@@ -183,6 +368,18 @@ def validate_update(competition: dict, changes: dict) -> dict:
         )
 
     updates = {k: v for k, v in changes.items() if v is not None}
+    if competition_tracks.is_dual(competition):
+        # Lịch và quota của dual thuộc từng nhánh; sửa qua endpoint lịch nhánh để luôn có
+        # revision check, lý do và envelope cập nhật trong cùng một lượt ghi.
+        for field, endpoint in (
+            ("start_at", "lịch nhánh"),
+            ("end_at", "lịch nhánh"),
+            ("quota_per_day", "lịch nhánh"),
+        ):
+            if field in updates:
+                raise ValueError(
+                    f"Cuộc thi hai nhánh không sửa {field} ở cấp cuộc thi; dùng cấu hình {endpoint}."
+                )
     if status == "published":
         locked = [f for f in _LOCKED_WHEN_PUBLISHED if f in updates]
         if locked:
@@ -232,26 +429,138 @@ def competition_summary(competition: dict, membership: dict | None, account: dic
     }
 
 
-def public_competition(competition: dict, membership: dict | None, account: dict | None) -> dict:
+def public_competition(
+    competition: dict, membership: dict | None, account: dict | None, *, now: datetime | None = None
+) -> dict:
     """Representation cho participant: summary + nội dung bên trong khi quyền đọc được cấp."""
     payload = competition_summary(competition, membership, account)
     if payload["access"]["allowed"]:
         payload["resources"] = public_resources(competition)
         payload["submission_config"] = _submission_config(competition, participant=True)
+        if competition_tracks.is_dual(competition):
+            payload["tracks"] = _participant_tracks(
+                competition, membership=membership, now=now or datetime.now(timezone.utc)
+            )
     return payload
 
 
-def admin_competition(competition: dict) -> dict:
-    """Representation cho admin: thêm created_by và luôn có đủ submission_config."""
+def admin_competition(competition: dict, *, now: datetime | None = None) -> dict:
+    """Representation cho admin: thêm created_by, cấu hình nhánh và luôn đủ submission_config."""
     from app.memberships.service import public_membership
 
-    return {
+    payload = {
         **_competition_landing(competition),
         "resources": public_resources(competition),
         "created_by": competition["created_by"],
         "membership": public_membership(None),
         "submission_config": _submission_config(competition, participant=False),
     }
+    if competition_tracks.is_dual(competition):
+        now = now or datetime.now(timezone.utc)
+        payload.update(
+            {
+                "control_revision": int(competition.get("control_revision", 1)),
+                "stop_generation": int(competition.get("stop_generation", 0)),
+                "scoring_locked": competition.get("scoring_locked_at") is not None,
+                "last_change": _last_change_view(competition),
+                "tracks": {
+                    track: admin_track_view(competition, track, now=now) for track in TRACKS
+                },
+            }
+        )
+    return payload
+
+
+def _last_change_view(competition: dict) -> dict | None:
+    change = competition.get("last_change")
+    if not change:
+        return None
+    return {
+        "by": change.get("by"),
+        "at": iso_z(change["at"]) if change.get("at") else None,
+        "reason": change.get("reason"),
+        "action": change.get("action"),
+        "revision": change.get("revision"),
+    }
+
+
+def admin_track_view(competition: dict, track: str, *, now: datetime) -> dict:
+    """Cấu hình nhánh cho trang quản trị: lịch, quota, tài nguyên, GT, readiness và công bố.
+
+    Readiness đi qua đúng hàm của cổng publish để banner admin và endpoint publish không lệch.
+    """
+    from app.scoring.readiness import blocked_reason, check_readiness
+
+    config = competition_tracks.track_config(competition, track) or {}
+    readiness = check_readiness(competition, track=track)
+    view = {
+        **competition_tracks.track_view(competition, track, now=now),
+        "resources": competition_tracks.track_resources(competition, track),
+        "ground_truth": _ground_truth_view(config.get("ground_truth")),
+        "verified": _track_verified(competition, track),
+        "ready": readiness.ready,
+        "not_ready_reason": blocked_reason(readiness),
+        "admission_seq": int(config.get("admission_seq", 0)),
+    }
+    if track == PRIVATE:
+        view["results_published_by"] = config.get("results_published_by")
+    return view
+
+
+def _ground_truth_view(metadata: dict | None) -> dict | None:
+    if metadata is None:
+        return None
+    return {
+        "row_count": metadata.get("row_count"),
+        "columns": metadata.get("columns"),
+        "sha256": metadata.get("sha256"),
+        "uploaded_at": iso_z(metadata["uploaded_at"]) if metadata.get("uploaded_at") else None,
+    }
+
+
+def _track_verified(competition: dict, track: str) -> bool:
+    from app.scoring import models as scoring_models
+    from app.scoring.readiness import verified
+
+    config = scoring_models.stored_config_or_none(competition)
+    if config is None:
+        return False
+    return verified(competition, config, track=track)
+
+
+def _participant_tracks(competition: dict, *, membership: dict | None, now: datetime) -> dict:
+    """Hai nhánh dưới mắt thí sinh: lịch, quota, cửa sổ, quyền nộp, kết quả và quyền xem norm.
+
+    Tài nguyên riêng của nhánh chỉ rời backend từ giờ mở của chính nhánh đó; trước đó chỉ có
+    lịch và placeholder, không có URL nằm chờ trong payload.
+    """
+    view = competition_tracks.tracks_view(competition, now=now) or {}
+    membership_ok = bool(membership and membership.get("active", True))
+    status_ok = competition["status"] == "published"
+    for track, entry in view.items():
+        start, _ = competition_tracks.track_schedule(competition, track)
+        if now >= start:
+            entry["resources"] = competition_tracks.track_resources(competition, track)
+        else:
+            entry["resources"] = []
+        allowed, reason = competition_tracks.can_submit(
+            competition,
+            track,
+            status_ok=status_ok,
+            membership_ok=membership_ok,
+            now=now,
+        )
+        entry["can_submit"] = allowed
+        entry["blocked_reason"] = reason
+        entry["submission_ready"] = _submission_config(
+            competition, participant=True, track=track
+        )["ready"]
+        # Capability chuẩn hóa của nhánh: frontend không tự suy từ đồng hồ hay cờ cấp cuộc thi.
+        # Đây là trạng thái hiển thị, không phải lỗi HTTP - hàm này chỉ chạy khi đã có quyền đọc.
+        norm_visible, norm_hidden_reason = competition_tracks.can_view_norm(competition, track)
+        entry["normalization_visible"] = norm_visible
+        entry["normalization_hidden_reason"] = norm_hidden_reason
+    return view
 
 
 def _competition_landing(competition: dict) -> dict:
@@ -261,14 +570,20 @@ def _competition_landing(competition: dict) -> dict:
         "name": competition["name"],
         "short_description": competition.get("short_description", ""),
         "status": competition["status"],
+        # Dual suy khoảng tổng từ hai nhánh; single giữ nguyên lịch cấp cuộc thi.
+        "mode": competition_tracks.mode_of(competition),
         "start_at": iso_z(competition["start_at"]),
         "end_at": iso_z(competition["end_at"]),
         "join_mode": competition["join_mode"],
         "primary_metric": competition["primary_metric"],
-        "quota_per_day": competition["quota_per_day"],
+        # Quota cấp cuộc thi chỉ tồn tại ở single; dual trả quota theo từng nhánh.
+        "quota_per_day": competition.get("quota_per_day"),
         "leaderboard_visible": competition["leaderboard_visible"],
         "join_code_configured": bool(competition.get("join_code_hash")),
         "normalization": normalization.config_view(competition),
+        "tracks": competition_tracks.tracks_view(
+            competition, now=datetime.now(timezone.utc)
+        ),
     }
 
 
@@ -290,13 +605,14 @@ def _primary_metric_label(competition: dict) -> str | None:
     return key
 
 
-def _submission_config(competition: dict, *, participant: bool) -> dict:
+def _submission_config(competition: dict, *, participant: bool, track: str | None = None) -> dict:
     """Dạng bài nộp và metric mà UI cần, đọc theo đúng đời cấu hình của cuộc thi.
 
     Chỉ được gọi từ payload đã qua kiểm quyền đọc (thành viên đang hoạt động hoặc admin) nên
     `pos_label` - nhãn dương thật của ground truth - luôn được phép trả. `participant` chọn hợp
     đồng thí sinh: metric admin ẩn không rời khỏi backend. Cuộc thi v1 giữ nguyên hình dạng cũ;
-    v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
+    v2 trả schema submission để sinh hướng dẫn/CSV mẫu. `track` chọn đúng ground truth của nhánh
+    khi xét `ready`; dual không truyền track nghĩa là ready chỉ khi cả hai nhánh đã sẵn sàng.
     """
     from app.core.config import get_settings
     from app.scoring import contracts, models
@@ -310,8 +626,17 @@ def _submission_config(competition: dict, *, participant: bool) -> dict:
         if participant
         else contracts.result_contract(competition)
     )
+    if track is None:
+        tracks_with_gt = None if not competition_tracks.is_dual(competition) else list(TRACKS)
+    else:
+        tracks_with_gt = [track]
+    ground_truth_ready = (
+        all(ground_truth_available(competition, t) for t in tracks_with_gt)
+        if tracks_with_gt is not None
+        else ground_truth_available(competition)
+    )
     payload = {
-        "ready": bool((config or config_v2) and ground_truth_available(competition)),
+        "ready": bool((config or config_v2) and ground_truth_ready),
         "version": 2 if is_v2 else 1,
         "max_upload_mb": get_settings().max_upload_mb,
         "max_notebook_mb": get_settings().max_notebook_mb,

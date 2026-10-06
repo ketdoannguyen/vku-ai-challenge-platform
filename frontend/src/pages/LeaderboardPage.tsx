@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import { ApiClientError } from "../api/client";
-import { accessLostReason, formatLocal } from "../api/competitions";
+import {
+  TRACKS,
+  TRACK_LABEL,
+  accessLostReason,
+  formatLocal,
+  isDual,
+  parseTrack,
+  unpublishedNote,
+  type Track,
+} from "../api/competitions";
 import {
   fetchLeaderboard,
   formatMetric,
@@ -13,7 +22,10 @@ import {
 import { ErrorBox, Loading } from "../components/ui";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
-import { NORM_RANKING_NOTE } from "../lib/normalization";
+import {
+  currentNormHiddenReason,
+  hiddenNormNote,
+} from "../lib/normalization";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 /** Số dòng mỗi trang; backend chặn 1–200 nên đây chỉ là lựa chọn hiển thị. */
@@ -32,11 +44,8 @@ function rankingNote(label: string | null): string {
     : "Xếp theo điểm chấm của cuộc thi; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.";
 }
 
-/**
- * Mẫu số và thời điểm dựng bảng norm. Chỉ render khi thí sinh được xem dữ liệu dẫn xuất -
- * backend đã trả `normalization: null` khi bảng hoặc metric nguồn bị ẩn.
- */
-function NormMetaLine({
+/** Mẫu số chỉ hiện khi nhánh đang xem được phép đọc metadata norm. */
+function NormSummary({
   board,
   sourceLabel,
   decimals,
@@ -46,11 +55,28 @@ function NormMetaLine({
   decimals: number;
 }) {
   return (
-    <p className="lb-lead text-muted">
-      Baseline {sourceLabel} {formatMetric(board.baseline, decimals)} · Điểm gốc tốt nhất
-      hiện tại {formatMetric(board.reference_best, decimals)} · Bảng dựng lúc{" "}
-      {formatLocal(board.calculated_at)}
-    </p>
+    <div className="lb-norm-summary">
+      <p className="lb-norm-formula">
+        Tính theo điểm norm score · {board.max_score} ×{" "}
+        {board.higher_is_better
+          ? "(điểm gốc − baseline) / (điểm tốt nhất − baseline)"
+          : "(baseline − điểm gốc) / (baseline − điểm tốt nhất)"}
+      </p>
+      <dl className="lb-norm-facts">
+        <div data-tone="blue">
+          <dt>Baseline · {sourceLabel}</dt>
+          <dd>{formatMetric(board.baseline, decimals)}</dd>
+        </div>
+        <div data-tone="yellow">
+          <dt>Điểm gốc tốt nhất</dt>
+          <dd>{formatMetric(board.reference_best, decimals)}</dd>
+        </div>
+        <div data-tone="red">
+          <dt>Giới hạn điểm</dt>
+          <dd>0–{board.max_score}</dd>
+        </div>
+      </dl>
+    </div>
   );
 }
 
@@ -61,6 +87,23 @@ export function LeaderboardPage() {
   /** Số thập phân của metric chính; hợp đồng rỗng (bản nháp v2) rơi về mức 4 như bộ chấm v1. */
   const primaryDecimals =
     contract.metrics.find((metric) => metric.key === contract.primary_metric)?.decimals ?? 4;
+  // Dual: hai nhánh có hai bảng riêng, không dùng chung.
+  const dual = isDual(competition);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const track: Track = (dual ? parseTrack(searchParams.get("track")) : null) ?? "public";
+  const view = dual ? competition.tracks?.[track] ?? null : null;
+  /**
+   * Bảng của nhánh đang xem đã công bố chưa: Public luôn hiện, Private chờ dấu mốc công bố.
+   * Đây là metadata của shell (tự làm mới theo nhịp) nên bảng tự mở khi BTC công bố, không cần
+   * người dùng tải lại trang.
+   */
+  const published = view ? view.results_released : true;
+  /**
+   * Metadata chưa kịp thấy lần công bố mà server đã từ chối (lệch nhịp hiếm): hiện bảng "chờ công
+   * bố" thay vì báo lỗi, và tự xoá khi có lượt tải thành công.
+   */
+  const [unpublished, setUnpublished] = useState(false);
+  const boardHidden = !published || unpublished;
   const [data, setData] = useState<ParticipantLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(competition.leaderboard_visible);
   const [refreshing, setRefreshing] = useState(false);
@@ -76,7 +119,7 @@ export function LeaderboardPage() {
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const loadData = useCallback(
     async (nextOffset: number, keepRows: boolean, silent = false) => {
-      if (!competition.leaderboard_visible) return;
+      if (!competition.leaderboard_visible || !published) return;
       const sequence = ++requestSequence.current;
       if (!silent) {
         manualLoads.current += 1;
@@ -85,13 +128,19 @@ export function LeaderboardPage() {
         else setLoading(true);
       }
       try {
-        const result = await fetchLeaderboard(competition.id, PAGE_SIZE, nextOffset);
+        const result = await fetchLeaderboard(
+          competition.id,
+          PAGE_SIZE,
+          nextOffset,
+          dual ? track : null,
+        );
         // Response cũ không được ghi đè response mới khi người dùng đổi trang liên tục.
         if (sequence !== requestSequence.current) return;
         hasData.current = true;
         setData(result);
         // Lượt ngầm thành công cũng xoá băng lỗi cũ: dữ liệu mới đã về thì lỗi hết đúng.
         setError(null);
+        setUnpublished(false);
         setLastUpdated(new Date().toLocaleTimeString("vi-VN"));
         // total co lại có thể làm trang đang xem vượt range: lùi về trang cuối còn dữ liệu.
         const lastOffset = Math.max(0, Math.floor((result.total - 1) / PAGE_SIZE) * PAGE_SIZE);
@@ -113,6 +162,15 @@ export function LeaderboardPage() {
           hasData.current = false;
           setData(null);
           if (!silent) setError(reason);
+        } else if (
+          reason instanceof ApiClientError &&
+          reason.code === "PRIVATE_RESULTS_UNPUBLISHED"
+        ) {
+          // Kết quả Private chưa công bố: xoá dòng đã tải và chuyển sang thẻ "chờ công bố" thay vì
+          // báo lỗi; vòng tự làm mới vẫn chạy để tự mở bảng khi metadata thấy dấu mốc công bố.
+          hasData.current = false;
+          setData(null);
+          setUnpublished(true);
         } else if (!silent) {
           setError(reason);
         }
@@ -128,8 +186,28 @@ export function LeaderboardPage() {
         }
       }
     },
-    [competition.id, competition.leaderboard_visible, reportAccessLost],
+    [competition.id, competition.leaderboard_visible, reportAccessLost, dual, track, published],
   );
+
+  // Đổi nhánh là đổi hẳn bảng: bỏ dòng của nhánh cũ thay vì để chúng mang nhãn nhánh mới, và về
+  // trang đầu vì phân trang của hai bảng không liên quan nhau.
+  useEffect(() => {
+    hasData.current = false;
+    setData(null);
+    setUnpublished(false);
+    setQuery((current) =>
+      current.offset === 0 ? current : { offset: 0, attempt: current.attempt + 1 },
+    );
+  }, [track]);
+
+  // Master BXH vừa bị tắt giữa chừng: bỏ rows/me/norm đang giữ và vô hiệu request đang bay, để
+  // lượt bật lại sau đó phải tải mới thay vì hiện lại dữ liệu của lần công bố trước.
+  useEffect(() => {
+    if (competition.leaderboard_visible) return;
+    requestSequence.current += 1;
+    hasData.current = false;
+    setData(null);
+  }, [competition.leaderboard_visible]);
 
   useEffect(() => {
     void loadData(query.offset, hasData.current);
@@ -139,6 +217,11 @@ export function LeaderboardPage() {
   const requestPage = useCallback((nextOffset: number) => {
     setQuery((current) => ({ offset: Math.max(0, nextOffset), attempt: current.attempt + 1 }));
   }, []);
+
+  /** Đổi nhánh ghi vào URL để back/forward và bookmark giữ đúng nhánh đang xem. */
+  function selectTrack(next: Track) {
+    if (next !== track) setSearchParams({ track: next });
+  }
 
   /**
    * Lượt làm mới ngầm: không đụng trạng thái tải để bảng không nháy, và nhường khi
@@ -151,13 +234,23 @@ export function LeaderboardPage() {
     await loadData(query.offset, true, true);
   }, [loadData, query.offset]);
 
-  // Bảng đang công bố thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
-  const refreshStatus = useAutoRefresh(competition.leaderboard_visible, silentRefresh, { intervalMs: AUTO_REFRESH_MS });
+  // Bảng đang công bố thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn. Nhánh chưa công bố
+  // không có dòng để làm mới - metadata của shell mới là thứ mở bảng khi BTC công bố.
+  const refreshStatus = useAutoRefresh(
+    competition.leaderboard_visible && published,
+    silentRefresh,
+    { intervalMs: AUTO_REFRESH_MS },
+  );
 
   const busy = loading || refreshing;
 
+  // Quyền xem norm đọc từ metadata HIỆN TẠI của nhánh: bị thu hồi giữa chừng thì metadata norm
+  // còn nằm trong response đã tải cũng bị coi như không có.
+  const normHidden = currentNormHiddenReason(competition, dual ? track : null);
   /** Metadata norm của lần dựng bảng đang xem; null khi norm tắt hoặc thí sinh không được xem. */
-  const norm = data?.normalization ?? null;
+  const norm = normHidden ? null : data?.normalization ?? null;
+  /** Câu giải thích khi norm bị capability che nhưng bảng vẫn xem được (metric nguồn bị ẩn). */
+  const hiddenNorm = norm === null ? hiddenNormNote(normHidden) : null;
   /** Nhãn và số thập phân của metric nguồn để đọc baseline/mẫu số đúng đơn vị điểm gốc. */
   const sourceLabel = norm
     ? metricLabel(contract, norm.source_metric) ?? norm.source_metric
@@ -165,6 +258,74 @@ export function LeaderboardPage() {
   const sourceDecimals =
     contract.metrics.find((metric) => metric.key === norm?.source_metric)?.decimals ??
     primaryDecimals;
+
+  const header = (
+    <div className="lb-head">
+      <div className="lb-head-top">
+        <div className="lb-eyebrow">
+          <span>{dual ? `Bảng xếp hạng nhánh ${TRACK_LABEL[track]}` : "Bảng xếp hạng công bố"}</span>
+          <span>/</span>
+          <span className="results-slug">{competition.slug}</span>
+        </div>
+        {dual && (
+          <div className="dash-filters" role="group" aria-label="Chọn nhánh xếp hạng">
+            {TRACKS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className="dash-filter"
+                aria-pressed={item === track}
+                onClick={() => selectTrack(item)}
+              >
+                {TRACK_LABEL[item]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="lb-head-main">
+        <div className="lb-head-copy">
+          <h2 className="lb-title">Bảng xếp hạng{dual ? ` ${TRACK_LABEL[track]}` : ""}</h2>
+          {!boardHidden && (
+            norm && sourceLabel ? (
+              <NormSummary board={norm} sourceLabel={sourceLabel} decimals={sourceDecimals} />
+            ) : hiddenNorm ? (
+              <p className="lb-lead text-muted" role="status">{hiddenNorm}</p>
+            ) : (
+              <p className="lb-lead text-muted">
+                {rankingNote(metricLabel(contract, data?.primary_metric ?? contract.primary_metric))}
+              </p>
+            )
+          )}
+        </div>
+        {!boardHidden && data && (
+          <div className="lb-head-tools">
+            {lastUpdated && (
+              <div className="lb-sync-bar">
+                <div className="lb-sync-dot" />
+                <span>Cập nhật lúc: <strong>{lastUpdated}</strong></span>
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              aria-disabled={busy}
+              onClick={() => {
+                if (!busy) requestPage(data.offset);
+              }}
+              title="Tải lại bảng điểm"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M23 4v6h-6M1 20v-6h6" />
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+              </svg>
+              <span>Làm mới</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   // S08b: Chưa công bố bảng xếp hạng (không gọi API)
   if (!competition.leaderboard_visible) {
@@ -254,6 +415,41 @@ export function LeaderboardPage() {
     );
   }
 
+  // Dual, nhánh Private chưa công bố: không có dòng nào để tải, nhưng vẫn giữ bộ chọn nhánh để
+  // thí sinh xem được bảng Public tham khảo và đọc đúng thông báo theo cấu hình công bố.
+  if (boardHidden) {
+    return (
+      <section className="lb-page">
+        {header}
+
+        <div className="lb-locked-card">
+          <div className="lb-locked-content">
+            <div className="lb-locked-emblem" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+
+            <h2 className="lb-locked-title">Kết quả nhánh Private chưa được công bố.</h2>
+            <p className="lb-locked-lead">
+              {unpublishedNote(competition)} Bảng nhánh Public vẫn xem được để tham khảo.
+            </p>
+
+            <div className="lb-locked-actions">
+              <Link to="../submissions" className="btn btn-secondary">
+                Xem bài đã nộp
+              </Link>
+              <Link to="../submit" className="btn">
+                Nộp bài mới
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
   if (loading && !data) return <Loading label="Đang tải bảng xếp hạng..." />;
   if (error && !data) {
@@ -272,19 +468,7 @@ export function LeaderboardPage() {
   if (!data || data.total === 0) {
     return (
       <section className="lb-page">
-        <div className="lb-head">
-          <div className="lb-head-copy">
-            <h2 className="lb-title">Bảng xếp hạng</h2>
-            <p className="lb-lead text-muted">
-              {norm
-                ? NORM_RANKING_NOTE
-                : rankingNote(metricLabel(contract, contract.primary_metric))}
-            </p>
-            {norm && sourceLabel && (
-              <NormMetaLine board={norm} sourceLabel={sourceLabel} decimals={sourceDecimals} />
-            )}
-          </div>
-        </div>
+        {header}
         <AutoRefreshNotice {...refreshStatus} />
         <div className="empty-state">
           <div className="empty-state-icon" aria-hidden="true">
@@ -309,49 +493,7 @@ export function LeaderboardPage() {
 
   return (
     <section className="lb-page">
-      {/* Tiêu đề & giải thích quy tắc tie-break */}
-      <div className="lb-head">
-        <div className="lb-head-copy">
-          <div className="lb-eyebrow">
-            <span>Bảng xếp hạng công bố</span>
-            <span>/</span>
-            <span className="results-slug">{competition.slug}</span>
-          </div>
-          <h2 className="lb-title">Bảng xếp hạng</h2>
-          <p className="lb-lead text-muted">
-            {norm
-              ? NORM_RANKING_NOTE
-              : rankingNote(metricLabel(contract, data.primary_metric))}
-          </p>
-          {norm && sourceLabel && (
-            <NormMetaLine board={norm} sourceLabel={sourceLabel} decimals={sourceDecimals} />
-          )}
-        </div>
-
-        <div className="lb-head-tools">
-          {lastUpdated && (
-            <div className="lb-sync-bar">
-              <div className="lb-sync-dot" />
-              <span>Cập nhật lúc: <strong>{lastUpdated}</strong></span>
-            </div>
-          )}
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            aria-disabled={busy}
-            onClick={() => {
-              if (!busy) requestPage(data.offset);
-            }}
-            title="Tải lại bảng điểm"
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M23 4v6h-6M1 20v-6h6" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-            <span>Làm mới</span>
-          </button>
-        </div>
-      </div>
+      {header}
 
       <AutoRefreshNotice {...refreshStatus} />
 
@@ -380,7 +522,7 @@ export function LeaderboardPage() {
             </span>
           </div>
           <dl className="lb-me-facts">
-            <div>
+            <div className="lb-me-score">
               <dt>{norm ? "Điểm norm" : "Điểm chính"}</dt>
               <dd>
                 {norm
@@ -388,6 +530,12 @@ export function LeaderboardPage() {
                   : formatMetric(data.me.primary_score, primaryDecimals)}
               </dd>
             </div>
+            {norm && (
+              <div className="lb-me-source-score">
+                <dt>Điểm gốc · {metricLabel(contract, contract.primary_metric)}</dt>
+                <dd>{formatMetric(data.me.primary_score, primaryDecimals)}</dd>
+              </div>
+            )}
             <div>
               <dt>Số bài đã nộp</dt>
               <dd>{data.me.total_submissions}</dd>
@@ -478,19 +626,20 @@ export function LeaderboardPage() {
                   )}
                 </td>
                 {norm && (
-                  <td className="score-cell primary-score">
-                    {formatMetric(entry.normalized_score, norm.decimals)}
+                  <td className="score-cell lb-score-cell lb-norm-score primary-score">
+                    <span className="score-pill norm">{formatMetric(entry.normalized_score, norm.decimals)}</span>
                   </td>
                 )}
                 {contract.metrics.map((metric) => (
                   <td
                     key={metric.key}
-                    className={`score-cell${
-                      // Cột được nhấn là cột đang quyết định thứ hạng: norm khi bật, ngược lại metric chính.
-                      metric.key === contract.primary_metric && norm === null ? " primary-score" : ""
-                    }`}
+                    className={`score-cell${metric.key === contract.primary_metric ? " lb-score-cell lb-raw-score primary-score" : ""}`}
                   >
-                    {formatMetric(entry.metrics[metric.key], metric.decimals)}
+                    {metric.key === contract.primary_metric ? (
+                      <span className="score-pill">{formatMetric(entry.metrics[metric.key], metric.decimals)}</span>
+                    ) : (
+                      formatMetric(entry.metrics[metric.key], metric.decimals)
+                    )}
                   </td>
                 ))}
                 <td className="lb-time-cell">

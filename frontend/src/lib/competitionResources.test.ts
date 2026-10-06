@@ -29,16 +29,31 @@ test("so sánh theo giá trị chuẩn hóa để bỏ qua khoảng trắng và 
   ).toBe(true);
 });
 
-test("từ chối tài nguyên thiếu tên hoặc link ngoài Google Drive/Docs", () => {
+test("từ chối tài nguyên thiếu tên hoặc link không phải https", () => {
   expect(
     cleanCompetitionResources([{ label: "", url: "https://drive.google.com/file/d/abc" }]),
   ).toEqual({ ok: false, message: "Mỗi tài nguyên cần có tên." });
 
   expect(
-    cleanCompetitionResources([{ label: "Dataset", url: "https://example.com/data.csv" }]),
+    cleanCompetitionResources([{ label: "Dataset", url: "http://example.com/data.csv" }]),
   ).toEqual({
     ok: false,
-    message: "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+    message: "Link tài nguyên phải là URL https hợp lệ.",
+  });
+});
+
+test("nhận link tài nguyên ngoài Google Drive/Docs (S3, máy chủ riêng)", () => {
+  expect(
+    cleanCompetitionResources([
+      { label: "Dataset S3", url: "https://bucket.s3.amazonaws.com/btc/dataset.zip" },
+      { label: "Test", url: "https://example.com/data.csv" },
+    ]),
+  ).toEqual({
+    ok: true,
+    resources: [
+      { label: "Dataset S3", url: "https://bucket.s3.amazonaws.com/btc/dataset.zip" },
+      { label: "Test", url: "https://example.com/data.csv" },
+    ],
   });
 });
 

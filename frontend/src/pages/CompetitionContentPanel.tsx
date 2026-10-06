@@ -3,8 +3,9 @@
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
 import type { CompetitionMetadata, SubmissionConfig } from "../api/competitions";
-import { accessLostReason, formatLocal } from "../api/competitions";
+import { TRACKS, accessLostReason, formatLocal, isDual, normalizationOf } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
+import { TrackCard } from "../components/TrackCard";
 import { ErrorBox, Loading } from "../components/ui";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 import type { CompetitionContext } from "./CompetitionDetailPage";
@@ -55,28 +56,58 @@ export function CompetitionOverview() {
   const { competition: c, contents, contentsLoading, contentsError, reloadContents } =
     useOutletContext<CompetitionContext>();
 
-  const canSubmit = c.membership.active && c.status !== "closed" && c.quota_per_day > 0;
+  const dual = isDual(c);
+  // Dual nộp theo nhánh qua thẻ nhánh; nút dưới đây chỉ dành cho cuộc thi một nhánh.
+  const canSubmit =
+    !dual && c.membership.active && c.status !== "closed" && (c.quota_per_day ?? 0) > 0;
   const config = c.submission_config;
+  // Khoảng nghỉ giữa hai cửa sổ: không nhánh nào đang nhận bài thì phải nói thẳng.
+  const anyOpen = TRACKS.some((track) => c.tracks?.[track]?.window_state === "open");
 
   return (
     <section className="ov">
       <h2 className="ov-title">Tổng quan</h2>
 
+      {dual && (
+        <section className="ov-block">
+          <h3 className="ov-block-title">Hai nhánh thi đấu</h3>
+          <div className="track-cards">
+            {TRACKS.map((track) => (
+              <TrackCard
+                key={track}
+                competition={c}
+                track={track}
+                submitTo={`submit?track=${track}`}
+              />
+            ))}
+          </div>
+          {!anyOpen && (
+            <p className="status-banner warning" role="status">
+              Hiện chưa có nhánh nào nhận bài.
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="ov-block">
         <h3 className="ov-block-title">Thể lệ &amp; cách tham gia</h3>
         <ul className="ov-facts">
           <li>
-            <strong>Thời gian.</strong> Diễn ra từ {formatLocal(c.start_at)} đến{" "}
-            {formatLocal(c.end_at)}.
+            <strong>Thời gian.</strong>{" "}
+            {dual
+              ? `Khoảng tổng từ ${formatLocal(c.start_at)} đến ${formatLocal(c.end_at)}; mỗi nhánh có lịch riêng.`
+              : `Diễn ra từ ${formatLocal(c.start_at)} đến ${formatLocal(c.end_at)}.`}
           </li>
           <li>
             <strong>Tham gia.</strong> {JOIN_MODE_DETAIL[c.join_mode]}.
           </li>
           <li>
             <strong>Hạn mức nộp.</strong>{" "}
-            {c.quota_per_day > 0
-              ? `Tối đa ${c.quota_per_day} lượt mỗi ngày.`
-              : "Không nhận bài nộp."}
+            {dual
+              ? "Mỗi nhánh có hạn mức riêng."
+              : (c.quota_per_day ?? 0) > 0
+                ? `Tối đa ${c.quota_per_day} lượt mỗi ngày.`
+                : "Không nhận bài nộp."}
           </li>
         </ul>
       </section>
@@ -87,6 +118,17 @@ export function CompetitionOverview() {
           <li>
             <strong>Chỉ số chính.</strong> <span>{c.primary_metric_label ?? NOT_CONFIGURED}</span>
           </li>
+          {/* Cuộc thi bật chuẩn hóa: nói ngay cách xếp hạng để thí sinh không đoán từ số điểm. */}
+          {normalizationOf(c).enabled && (
+            <li>
+              <strong>Xếp hạng.</strong>{" "}
+              <span>
+                Điểm xếp hạng là norm score (thang 0–50) quy đổi từ điểm gốc
+                {c.primary_metric_label ? ` ${c.primary_metric_label}` : ""}; công thức chi tiết ở
+                bảng xếp hạng.
+              </span>
+            </li>
+          )}
           <li>
             <strong>Cột ID.</strong> <span>{configValue(config.id_column)}</span>
           </li>
@@ -159,13 +201,14 @@ export function CompetitionOverview() {
       </section>
 
       <div className="ov-actions">
-        {canSubmit ? (
-          <Link className="btn" to="submit">
-            Nộp bài
-          </Link>
-        ) : (
-          <p className="ov-hint">{submitBlockedReason(c)}</p>
-        )}
+        {!dual &&
+          (canSubmit ? (
+            <Link className="btn" to="submit">
+              Nộp bài
+            </Link>
+          ) : (
+            <p className="ov-hint">{submitBlockedReason(c)}</p>
+          ))}
         {c.leaderboard_visible && (
           <Link className="btn btn-secondary" to="leaderboard">
             Xem bảng xếp hạng

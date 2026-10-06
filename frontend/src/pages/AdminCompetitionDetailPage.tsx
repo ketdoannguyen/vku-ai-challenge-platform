@@ -12,28 +12,44 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiClientError } from "../api/client";
 import type {
   AdminCompetition,
   CompetitionResource,
+  PublishCondition,
+  ResultPolicy,
+  Track,
+  TrackWindowState,
 } from "../api/competitions";
 import {
   DEFAULT_UPLOAD_LIMITS,
   formatLocal,
+  isDual,
+  isoToLocalInput,
   JOIN_MODE_LABEL,
+  localInputToIso,
   MAX_COMPETITION_RESOURCES,
+  MODE_LABEL,
+  OFFICIAL_TRACK,
   primaryMetricLabel,
+  PUBLISH_CONDITION_LABEL,
+  RESULT_POLICY_LABEL,
   STATUS_LABEL,
+  TRACKS,
+  TRACK_LABEL,
+  TRACK_WINDOW_LABEL,
   displayStatus,
   statusClass,
 } from "../api/competitions";
 import type { ContentSummary } from "../api/contents";
 import {
+  fetchSubmissionScopeStats,
   formatMetric,
   metricLabel,
   resultContract,
   type LeaderboardResponse,
   type ResultContract,
+  type SubmissionScopeStats,
 } from "../api/results";
 import { NORM_RANKING_NOTE } from "../lib/normalization";
 import {
@@ -57,7 +73,7 @@ import {
 import { downloadArtifact } from "../lib/downloadArtifact";
 import { SLUG_MAX } from "../lib/slug";
 
-type Tab = "contents" | "assets" | "resources" | "scoring" | "results" | "members" | "settings";
+type Tab = "contents" | "assets" | "resources" | "scoring" | "results" | "tracks" | "members" | "settings";
 
 type IconComponent = (props: { className?: string }) => ReactNode;
 
@@ -72,6 +88,16 @@ const ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }
   // Cấu hình AI là chuyện của từng cuộc thi, không phải thiết lập toàn hệ thống, nên nằm cùng
   // trang thay vì tách sang trang riêng. Để cuối rail vì là việc dọn dẹp sau cùng.
   { key: "settings", label: "Cài đặt", Icon: IconSparkle },
+];
+
+/**
+ * Rail của cuộc thi dual: thêm tab vận hành hai nhánh (lịch, gia hạn/mở lại, công bố Private)
+ * ngay sau Kết quả. Cuộc thi thông thường giữ nguyên bảy tab cũ - không thêm bề mặt không dùng.
+ */
+const DUAL_ADMIN_TABS: ReadonlyArray<{ key: Tab; label: string; Icon: IconComponent }> = [
+  ...ADMIN_TABS.slice(0, 5),
+  { key: "tracks", label: "Nhánh thi", Icon: IconCalendar },
+  ...ADMIN_TABS.slice(5),
 ];
 
 /**
@@ -104,6 +130,58 @@ const SUMMARY_FACTS: ReadonlyArray<{
     read: (c) => primaryMetricLabel(c),
   },
   { label: "Quota", Icon: IconClock, read: (c) => `${c.quota_per_day} lượt/ngày` },
+];
+
+
+/**
+ * Dải tóm tắt của cuộc thi dual: hai lịch nhánh thay cho cặp Bắt đầu/Kết thúc cấp cuộc thi
+ * (envelope chỉ là min/max nên không nói được nhánh nào đang nhận bài), kèm trạng thái công bố
+ * và công tắc BXH thí sinh.
+ */
+const DUAL_SUMMARY_FACTS: ReadonlyArray<{
+  label: string;
+  Icon: IconComponent;
+  mono?: boolean;
+  read: (competition: AdminCompetition) => ReactNode;
+}> = [
+  { label: "Slug", Icon: IconTag, mono: true, read: (c) => c.slug },
+  { label: "Hình thức", Icon: IconInfo, read: () => MODE_LABEL.public_private },
+  { label: "Tham gia", Icon: IconKey, read: (c) => JOIN_MODE_LABEL[c.join_mode] ?? c.join_mode },
+  ...TRACKS.map((track) => ({
+    label: TRACK_LABEL[track],
+    Icon: track === OFFICIAL_TRACK ? IconFlag : IconCalendar,
+    read: (c: AdminCompetition) => {
+      const view = c.tracks?.[track];
+      if (!view) return "—";
+      return (
+        <>
+          <span>
+            {formatLocal(view.start_at)} → {formatLocal(view.end_at)}
+          </span>
+          <span className="admin-detail-fact-note">
+            {TRACK_WINDOW_LABEL[view.window_state]} · {view.quota_per_day} lượt/ngày
+          </span>
+        </>
+      );
+    },
+  })),
+  {
+    label: "Kết quả Private",
+    Icon: IconClock,
+    read: (c) => {
+      const view = c.tracks?.private;
+      if (!view) return "—";
+      if (view.result_policy === "immediate") return RESULT_POLICY_LABEL.immediate;
+      return view.results_released && view.results_published_at
+        ? `Đã công bố ${formatLocal(view.results_published_at)}`
+        : "Chưa công bố";
+    },
+  },
+  {
+    label: "BXH thí sinh",
+    Icon: IconTarget,
+    read: (c) => (c.leaderboard_visible ? "Đang hiện" : "Đang ẩn"),
+  },
 ];
 
 interface AdminContent extends ContentSummary {
@@ -198,6 +276,18 @@ interface ScoringStatus {
   quota_per_day: number;
   max_upload_mb: number;
   source_limit_kb: number;
+  /** Dual: bộ chấm là của chung nhưng ground truth và bằng chứng chạy thử tách theo nhánh. */
+  mode?: "public_private";
+  tracks?: Record<Track, ScoringTrackView> | null;
+}
+
+/** Trạng thái chấm điểm của một nhánh trong cuộc thi dual. */
+interface ScoringTrackView {
+  ground_truth: ScoringStatus["ground_truth"];
+  ready: boolean;
+  not_ready_reason: { code: string; message: string } | null;
+  verified: boolean;
+  verification: ScoringV2["verification"];
 }
 
 /** Trạng thái mới kèm kết quả thật của lượt chạy thử vừa rồi. */
@@ -560,8 +650,12 @@ export function AdminCompetitionDetailPage() {
 
   // Tablist luôn nằm ngang nên chỉ ArrowLeft/ArrowRight dời focus; ArrowUp/ArrowDown
   // để nguyên cho trình duyệt cuộn trang.
-  function handleTabKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
-    const last = ADMIN_TABS.length - 1;
+  function handleTabKeyDown(
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    index: number,
+    tabs: ReadonlyArray<{ key: Tab }>,
+  ) {
+    const last = tabs.length - 1;
     let next: number;
     switch (event.key) {
       case "ArrowRight":
@@ -579,13 +673,13 @@ export function AdminCompetitionDetailPage() {
       case "Enter":
       case " ":
         event.preventDefault();
-        activateTab(ADMIN_TABS[index].key);
+        activateTab(tabs[index].key);
         return;
       default:
         return;
     }
     event.preventDefault();
-    setFocusedTab(ADMIN_TABS[next].key);
+    setFocusedTab(tabs[next].key);
     tabRefs.current[next]?.focus();
   }
 
@@ -611,6 +705,9 @@ export function AdminCompetitionDetailPage() {
 
   const editDisabled = competition.status === "closed";
   const editReason = "Cuộc thi đã kết thúc và không thể chỉnh sửa.";
+  const dual = isDual(competition);
+  const tabs = dual ? DUAL_ADMIN_TABS : ADMIN_TABS;
+  const facts = dual ? DUAL_SUMMARY_FACTS : SUMMARY_FACTS;
   // Quá `end_at` thì hiển thị như đã kết thúc, khớp với việc thí sinh đã không vào được nữa.
   const shownStatus = displayStatus(competition.status, competition.end_at);
   // Backend cũ chưa trả `upload_limits` - rơi về mặc định thay vì ẩn hint.
@@ -737,7 +834,7 @@ export function AdminCompetitionDetailPage() {
 
         <section className="admin-competition-summary" aria-label="Thông tin chung cuộc thi">
           <dl className="admin-detail-facts">
-            {SUMMARY_FACTS.map(({ label, Icon: FactIcon, mono, read }, index) => (
+            {facts.map(({ label, Icon: FactIcon, mono, read }, index) => (
               <div className="admin-detail-fact" key={label} data-tone={toneAt(index)}>
                 <dt>
                   <span className="admin-detail-fact-icon" aria-hidden="true">
@@ -793,7 +890,7 @@ export function AdminCompetitionDetailPage() {
           aria-label="Quản lý cuộc thi"
           role="tablist"
         >
-          {ADMIN_TABS.map(({ key, label, Icon: TabIcon }, index) => (
+          {tabs.map(({ key, label, Icon: TabIcon }, index) => (
             <button
               key={key}
               ref={(el) => {
@@ -808,7 +905,7 @@ export function AdminCompetitionDetailPage() {
               tabIndex={focusedTab === key ? 0 : -1}
               className={`admin-detail-tab${tab === key ? " active" : ""}`}
               onClick={() => activateTab(key)}
-              onKeyDown={(event) => handleTabKeyDown(event, index)}
+              onKeyDown={(event) => handleTabKeyDown(event, index, tabs)}
             >
               <TabIcon className="admin-detail-tab-icon" />
               <span>{label}</span>
@@ -851,6 +948,14 @@ export function AdminCompetitionDetailPage() {
             </div>
           )}
           {tab === "results" && <ResultsPanel competition={competition} />}
+          {tab === "tracks" && (
+            <TracksPanel
+              competition={competition}
+              onCompetitionChanged={load}
+              onNotify={notify}
+              onReopen={() => setConfirming("reopen")}
+            />
+          )}
           {tab === "members" && <MembersPanel competition={competition} />}
         </div>
       </div>
@@ -866,7 +971,20 @@ export function AdminCompetitionDetailPage() {
           }}
         />
       )}
-      {confirming && (
+      {/* Dual mở lại kèm lịch nhánh mới trong cùng một CAS: modal riêng thay vì xác nhận trống,
+          để admin không phải mở trạng thái rồi sửa lịch ở lượt ghi thứ hai. */}
+      {confirming === "reopen" && dual ? (
+        <DualReopenModal
+          competition={competition}
+          onRefresh={load}
+          onDone={async (message) => {
+            setConfirming(null);
+            notify(message);
+            await load();
+          }}
+          onClose={() => setConfirming(null)}
+        />
+      ) : confirming ? (
         <CompetitionActionConfirmModal
           action={confirming}
           competition={competition}
@@ -887,7 +1005,7 @@ export function AdminCompetitionDetailPage() {
           }}
           onClose={() => setConfirming(null)}
         />
-      )}
+      ) : null}
       {deleting && (
         <CompetitionDeleteModal
           competition={competition}
@@ -906,6 +1024,10 @@ const RESULTS_AUTO_REFRESH_MS = 3_000;
 
 function ResultsPanel({ competition }: { competition: AdminCompetition }) {
   const contract = resultContract(competition.submission_config);
+  const dual = isDual(competition);
+  /** Dual: bảng đang xem theo nhánh nào; Private là nguồn xếp hạng chính thức. */
+  const [track, setTrack] = useState<Track>(OFFICIAL_TRACK);
+  const scope = dual ? `?track=${track}` : "";
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [leaderboardError, setLeaderboardError] = useState<unknown>(null);
@@ -921,8 +1043,8 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
     setExportError(null);
     try {
       await downloadArtifact(
-        `/admin/competitions/${competition.id}/export.xlsx`,
-        `${competition.slug}-ket-qua.xlsx`,
+        `/admin/competitions/${competition.id}/export.xlsx${scope}`,
+        `${competition.slug}-ket-qua${dual ? `-${track}` : ""}.xlsx`,
       );
     } catch (err) {
       setExportError(err);
@@ -941,7 +1063,7 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
       }
       try {
         const response = await api.get<LeaderboardResponse>(
-          `/admin/competitions/${competition.id}/leaderboard`,
+          `/admin/competitions/${competition.id}/leaderboard${scope}`,
         );
         // Lượt tải cũ không được ghi đè lượt mới khi bảng được mở lại liên tiếp.
         if (sequence !== requestSequence.current) return;
@@ -959,7 +1081,7 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
         }
       }
     },
-    [competition.id],
+    [competition.id, scope],
   );
 
   useEffect(() => {
@@ -1002,22 +1124,52 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
               <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
             </div>
           </div>
-          <button
-            className="btn admin-results-export admin-detail-primary-action"
-            type="button"
-            aria-busy={exporting}
-            disabled={exporting}
-            onClick={() => void exportResults()}
-          >
-            {exporting ? "Đang xuất..." : "Xuất Excel"}
-          </button>
+          <div className="results-head-actions">
+            {dual && (
+              <span className={`status-badge ${track === OFFICIAL_TRACK ? "success" : "closed"}`}>
+                {TRACK_LABEL[track]}
+              </span>
+            )}
+            <button
+              className="btn admin-results-export admin-detail-primary-action"
+              type="button"
+              aria-busy={exporting}
+              disabled={exporting}
+              onClick={() => void exportResults()}
+            >
+              {exporting ? "Đang xuất..." : "Xuất Excel"}
+            </button>
+          </div>
         </div>
+        {dual && (
+          <fieldset className="form-field ac-policy-options">
+            <legend className="field-label">Nhánh xem kết quả</legend>
+            {TRACKS.map((option) => (
+              <label key={option} className={track === option ? "selected" : undefined}>
+                <input
+                  type="radio"
+                  name="results-track"
+                  checked={track === option}
+                  onChange={() => setTrack(option)}
+                />
+                <span>{TRACK_LABEL[option]}</span>
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {dual && track === OFFICIAL_TRACK && !competition.tracks?.private?.results_released && (
+          <p className="text-muted">
+            Private chưa công bố — bảng xếp hạng này chỉ admin thấy, số liệu còn thay đổi khi có
+            bài mới.
+          </p>
+        )}
         {/* Tách "Điểm xếp hạng" khỏi "Metric nguồn" để admin không đọc nhầm cột metric gốc
             là con số đang dùng để xếp hạng. */}
         {norm && (
           <p className="text-muted">
             Điểm xếp hạng: Norm / {norm.max_score}. Metric nguồn {sourceLabel} với baseline{" "}
             {formatMetric(norm.baseline, sourceDecimals)} · Điểm gốc tốt nhất hiện tại{" "}
+            {dual ? `nhánh ${TRACK_LABEL[track]} (mặt bằng riêng của nhánh) ` : ""}
             {formatMetric(norm.reference_best, sourceDecimals)} · Bảng dựng lúc{" "}
             {formatLocal(norm.calculated_at)}. {NORM_RANKING_NOTE}
           </p>
@@ -1073,10 +1225,942 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
         competitionId={competition.id}
         resultContract={contract}
         normalization={competition.normalization}
+        tracks={dual ? TRACKS : null}
         title="Danh sách submissions"
         listLabel="Danh sách bài nộp của cuộc thi"
       />
     </div>
+  );
+}
+
+/** ---------- Nhánh thi (dual) ---------- */
+
+/** Revision điều khiển hiện tại; mọi lượt ghi lịch/chính sách/công bố gửi kèm để chặn ghi đè. */
+function controlRevision(competition: AdminCompetition): number {
+  return competition.control_revision ?? 1;
+}
+
+/** Tone của badge cửa sổ nhận bài: đang mở xanh, chưa mở vàng, đã đóng xám. */
+function windowClass(state: TrackWindowState): string {
+  if (state === "open") return "success";
+  return state === "scheduled" ? "warning" : "closed";
+}
+
+/** Nhãn đọc được của `last_change.action`; mã lạ giữ nguyên để không giấu thao tác. */
+const CHANGE_ACTION_LABEL: Record<string, string> = {
+  publish: "publish cuộc thi",
+  close: "kết thúc cuộc thi",
+  reopen: "mở lại cuộc thi",
+  track_schedule: "đổi lịch nhánh",
+  private_policy: "đổi chính sách công bố",
+  publish_results: "công bố kết quả Private",
+};
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : "Lỗi không xác định";
+}
+
+/** Hai admin cùng ghi: lượt sau phải thấy dữ liệu mới trước khi thử lại. */
+function isRevisionConflict(error: unknown): boolean {
+  return error instanceof ApiClientError && error.code === "COMPETITION_REVISION_CONFLICT";
+}
+
+/**
+ * Tab vận hành của cuộc thi dual: lịch từng nhánh (gia hạn/mở lại nhánh) và công bố kết quả
+ * Private (trạng thái, chính sách, số lượt chấm, nút công bố).
+ */
+function TracksPanel({
+  competition,
+  onCompetitionChanged,
+  onNotify,
+  onReopen,
+}: {
+  competition: AdminCompetition;
+  onCompetitionChanged: () => Promise<void>;
+  onNotify: (text: string) => void;
+  /** Mở modal mở lại cuộc thi kèm lịch nhánh mới - cùng modal với nút ở header. */
+  onReopen: () => void;
+}) {
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [editingPolicy, setEditingPolicy] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [stats, setStats] = useState<SubmissionScopeStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [statsError, setStatsError] = useState<unknown>(null);
+
+  const privateView = competition.tracks?.private ?? null;
+  const released = privateView?.results_released ?? false;
+  const policy = privateView?.result_policy ?? "manual";
+  const condition = privateView?.publish_condition ?? "admin_decides";
+  const strict = policy === "manual" && condition === "after_closed_and_scored";
+  const windowOpen = privateView?.window_state === "open";
+  const processing = (stats?.in_flight ?? 0) > 0;
+  const closed = competition.status === "closed";
+  const lastChange = competition.last_change ?? null;
+
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    setStatsError(null);
+    try {
+      setStats(await fetchSubmissionScopeStats(competition.id, OFFICIAL_TRACK));
+    } catch (err) {
+      setStatsError(err);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [competition.id]);
+
+  // Revision điều khiển là mốc kích hoạt: công bố, gia hạn và mở lại đều tăng nó, nên số liệu
+  // phải đọc lại sau mỗi lượt ghi đó.
+  const revision = controlRevision(competition);
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats, revision]);
+
+  /**
+   * Lý do nút công bố bị chặn, suy từ dữ liệu backend trả (cửa sổ nhánh, lượt đang xử lý).
+   * Điều kiện chặt là cấu hình của riêng cuộc thi nên admin đổi được ngay trong mục này.
+   */
+  const publishBlocked =
+    competition.status === "draft"
+      ? "Cần publish cuộc thi trước khi công bố kết quả Private."
+      : strict && windowOpen
+        ? "Private vẫn đang trong thời gian nhận bài; chưa công bố được."
+        : strict && processing
+          ? "Private còn bài đã nhận đang xử lý; chưa công bố được."
+          : null;
+
+  return (
+    <div className="admin-detail-column">
+      <section className="admin-detail-card" data-tone="blue">
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconCalendar className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Lịch hai nhánh</h2>
+              <p className="admin-detail-card-desc">
+                Mỗi nhánh có giờ mở/đóng và quota riêng; hai lịch được giao nhau hoặc nối tiếp đều
+                hợp lệ.
+              </p>
+            </div>
+          </div>
+          {closed && (
+            <button
+              type="button"
+              className="btn btn-secondary admin-detail-outline-action"
+              onClick={onReopen}
+            >
+              <IconReopen className="admin-detail-action-icon" />
+              <span>Mở lại cuộc thi</span>
+            </button>
+          )}
+        </div>
+        <ul className="admin-track-list">
+          {TRACKS.map((track) => {
+            const view = competition.tracks?.[track];
+            if (!view) return null;
+            return (
+              <li className="admin-track-item" key={track}>
+                <div className="admin-track-head">
+                  <strong>{TRACK_LABEL[track]}</strong>
+                  <span className={`status-badge ${windowClass(view.window_state)}`}>
+                    {TRACK_WINDOW_LABEL[view.window_state]}
+                  </span>
+                </div>
+                <dl className="scoring-metadata">
+                  <div className="scoring-meta-item">
+                    <dt>Lịch hiện tại</dt>
+                    <dd>
+                      {formatLocal(view.start_at)} → {formatLocal(view.end_at)}
+                    </dd>
+                  </div>
+                  <div className="scoring-meta-item">
+                    <dt>Lượt mỗi ngày</dt>
+                    <dd>{view.quota_per_day} lượt</dd>
+                  </div>
+                </dl>
+                <div className="admin-track-actions">
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={closed}
+                    title={
+                      closed
+                        ? "Cuộc thi đã kết thúc — dùng Mở lại để đổi lịch trong cùng thao tác."
+                        : undefined
+                    }
+                    onClick={() => setEditingTrack(track)}
+                  >
+                    {view.window_state === "closed" ? "Mở lại nhánh" : "Gia hạn"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {lastChange && (
+          <p className="text-muted admin-track-note">
+            Thay đổi gần nhất: {CHANGE_ACTION_LABEL[lastChange.action] ?? lastChange.action} ·{" "}
+            {lastChange.by}
+            {lastChange.at ? ` · ${formatLocal(lastChange.at)}` : ""} · revision{" "}
+            {lastChange.revision}
+            {lastChange.reason ? ` · lý do: ${lastChange.reason}` : ""}
+          </p>
+        )}
+      </section>
+
+      <section className="admin-detail-card" data-tone="yellow">
+        <div className="admin-detail-card-head">
+          <div className="admin-detail-section-heading">
+            <span className="admin-detail-card-icon" aria-hidden="true">
+              <IconPublish className="admin-detail-card-icon-glyph" />
+            </span>
+            <div>
+              <h2 className="admin-detail-card-title">Công bố kết quả Private</h2>
+              <p className="admin-detail-card-desc">
+                Private là nguồn xếp hạng; Public chỉ để tham khảo.
+              </p>
+            </div>
+          </div>
+          <span className={`status-badge ${released ? "success" : "warning"}`}>
+            {released ? "Đã công bố" : "Đang giữ kín"}
+          </span>
+        </div>
+
+        <dl className="scoring-metadata">
+          <div className="scoring-meta-item">
+            <dt>Chính sách</dt>
+            <dd>
+              {policy === "immediate"
+                ? RESULT_POLICY_LABEL.immediate
+                : RESULT_POLICY_LABEL.manual}
+            </dd>
+          </div>
+          {policy === "manual" && (
+            <div className="scoring-meta-item">
+              <dt>Điều kiện công bố</dt>
+              <dd>{PUBLISH_CONDITION_LABEL[condition]}</dd>
+            </div>
+          )}
+          {released && privateView?.results_published_at && (
+            <div className="scoring-meta-item">
+              <dt>Thời điểm công bố</dt>
+              <dd>
+                {formatLocal(privateView.results_published_at)}
+                {privateView.results_published_by ? ` · ${privateView.results_published_by}` : ""}
+              </dd>
+            </div>
+          )}
+        </dl>
+
+        <div className="admin-track-actions">
+          {!released && policy === "manual" && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setEditingPolicy(true)}
+            >
+              Đổi chính sách công bố
+            </button>
+          )}
+          {!released && policy === "manual" && (
+            <button
+              type="button"
+              className="btn admin-detail-primary-action"
+              disabled={publishBlocked !== null}
+              title={publishBlocked ?? undefined}
+              onClick={() => setPublishing(true)}
+            >
+              Công bố kết quả Private
+            </button>
+          )}
+          {!released && policy === "manual" && publishBlocked !== null && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setEditingPolicy(true)}
+            >
+              Đổi điều kiện để công bố sớm
+            </button>
+          )}
+        </div>
+        {!released && policy === "manual" && publishBlocked !== null && (
+          <p className="text-muted admin-track-note" role="status">
+            {publishBlocked}
+          </p>
+        )}
+        {!released && policy === "immediate" && (
+          <p className="text-muted admin-track-note">
+            Điểm hiện ngay sau khi chấm; không cần công bố từng đợt.
+          </p>
+        )}
+        {released && (
+          <p className="text-muted admin-track-note">
+            Kết quả đã công bố không thể trở lại bí mật; BXH Private tiếp tục cập nhật khi có bài
+            mới hoặc bài được xét duyệt lại.
+          </p>
+        )}
+
+        <h3 className="admin-track-subtitle">Lượt chấm nhánh Private</h3>
+        {statsError !== null ? (
+          <div className="admin-section-error">
+            <ErrorBox error={statsError} />
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={() => void loadStats()}
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : statsLoading && stats === null ? (
+          <Loading />
+        ) : stats ? (
+          <dl className="scoring-metadata">
+            <div className="scoring-meta-item">
+              <dt>Tổng lượt chấm</dt>
+              <dd>{stats.total}</dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Đã chấm xong</dt>
+              <dd>{stats.completed}</dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Lỗi / quá hạn</dt>
+              <dd>{stats.failed}</dd>
+            </div>
+            <div className="scoring-meta-item">
+              <dt>Đang xử lý</dt>
+              <dd>{stats.in_flight}</dd>
+            </div>
+          </dl>
+        ) : null}
+      </section>
+
+      {editingTrack && (
+        <TrackScheduleModal
+          competition={competition}
+          track={editingTrack}
+          onRefresh={onCompetitionChanged}
+          onDone={async () => {
+            setEditingTrack(null);
+            onNotify(`Đã cập nhật lịch nhánh ${TRACK_LABEL[editingTrack]}.`);
+            await onCompetitionChanged();
+          }}
+          onClose={() => setEditingTrack(null)}
+        />
+      )}
+      {editingPolicy && (
+        <PrivatePolicyModal
+          competition={competition}
+          onRefresh={onCompetitionChanged}
+          onDone={async () => {
+            setEditingPolicy(false);
+            onNotify("Đã cập nhật chính sách công bố kết quả Private.");
+            await onCompetitionChanged();
+          }}
+          onClose={() => setEditingPolicy(false)}
+        />
+      )}
+      {publishing && (
+        <PrivatePublishModal
+          competition={competition}
+          processing={processing}
+          onRefresh={onCompetitionChanged}
+          onDone={async () => {
+            setPublishing(false);
+            onNotify("Đã công bố kết quả Private.");
+            await onCompetitionChanged();
+          }}
+          onClose={() => setPublishing(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Modal gia hạn/mở lại một nhánh: hiện lịch cũ, xem trước lịch mới và bắt buộc ghi lý do. */
+function TrackScheduleModal({
+  competition,
+  track,
+  onRefresh,
+  onDone,
+  onClose,
+}: {
+  competition: AdminCompetition;
+  track: Track;
+  onRefresh: () => Promise<void>;
+  onDone: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const view = competition.tracks?.[track] ?? null;
+  const [startAt, setStartAt] = useState(view ? isoToLocalInput(view.start_at) : "");
+  const [endAt, setEndAt] = useState(view ? isoToLocalInput(view.end_at) : "");
+  const [quota, setQuota] = useState(view ? String(view.quota_per_day) : "5");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!view) return null;
+
+  const reopening = view.window_state === "closed";
+  const label = TRACK_LABEL[track];
+  const newStartMs = Date.parse(localInputToIso(startAt) || "");
+  const newEndMs = Date.parse(localInputToIso(endAt) || "");
+  const shortening = Number.isFinite(newEndMs) && newEndMs < Date.parse(view.end_at);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!Number.isFinite(newStartMs) || !Number.isFinite(newEndMs) || newStartMs >= newEndMs) {
+      setError(`Nhánh ${label}: thời gian bắt đầu phải trước thời gian kết thúc.`);
+      return;
+    }
+    if (reopening && newEndMs <= Date.now()) {
+      setError(`Nhánh ${label} đã hết hạn: giờ đóng mới phải ở tương lai để nhận bài trở lại.`);
+      return;
+    }
+    const quotaValue = quota.trim() === "" ? null : Number(quota);
+    if (
+      quotaValue !== null &&
+      (!Number.isInteger(quotaValue) || quotaValue < 0 || quotaValue > 1000)
+    ) {
+      setError("Quota mỗi ngày phải là số nguyên từ 0 đến 1000.");
+      return;
+    }
+    if (!reason.trim()) {
+      setError("Cần ghi lý do đổi lịch nhánh.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/admin/competitions/${competition.id}/tracks/${track}/schedule`, {
+        start_at: localInputToIso(startAt),
+        end_at: localInputToIso(endAt),
+        quota_per_day: quotaValue,
+        expected_revision: controlRevision(competition),
+        reason: reason.trim(),
+      });
+      await onDone();
+    } catch (err) {
+      // Giữ nguyên lịch admin vừa nhập, chỉ tải lại dữ liệu để lượt thử sau dùng revision mới.
+      if (isRevisionConflict(err)) await onRefresh();
+      setError(
+        isRevisionConflict(err)
+          ? `${messageOf(err)} Dữ liệu vừa được tải lại; kiểm tra lịch hiện tại rồi lưu lại.`
+          : messageOf(err),
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={reopening ? `Mở lại nhánh ${label}` : `Gia hạn nhánh ${label}`}
+      onClose={onClose}
+      large={false}
+    >
+      <form onSubmit={submit}>
+        <p className="text-muted">
+          Lịch hiện tại: {formatLocal(view.start_at)} → {formatLocal(view.end_at)}
+        </p>
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="field-label" htmlFor="track-schedule-start">
+              Mở nhận bài
+            </label>
+            <input
+              id="track-schedule-start"
+              className="input"
+              type="datetime-local"
+              value={startAt}
+              disabled={busy}
+              onChange={(event) => setStartAt(event.target.value)}
+            />
+          </div>
+          <div className="form-field">
+            <label className="field-label" htmlFor="track-schedule-end">
+              Đóng nhận bài
+            </label>
+            <input
+              id="track-schedule-end"
+              className="input"
+              type="datetime-local"
+              value={endAt}
+              disabled={busy}
+              onChange={(event) => setEndAt(event.target.value)}
+            />
+          </div>
+        </div>
+        <div className="form-field">
+          <label className="field-label" htmlFor="track-schedule-quota">
+            Lượt mỗi ngày
+          </label>
+          <input
+            id="track-schedule-quota"
+            className="input"
+            type="number"
+            min={0}
+            max={1000}
+            value={quota}
+            disabled={busy}
+            onChange={(event) => setQuota(event.target.value)}
+          />
+        </div>
+        {shortening && (
+          <p className="text-muted">Lịch mới rút ngắn thời gian nhận bài so với lịch hiện tại.</p>
+        )}
+        <p className="text-muted">
+          Đổi lịch không thay ground truth, điểm đã chấm, quota đã dùng hay trạng thái công bố.
+          {view.results_released && " BXH Private tiếp tục thay đổi khi có bài mới."}
+        </p>
+        <div className="form-field">
+          <label className="field-label" htmlFor="track-schedule-reason">
+            Lý do
+          </label>
+          <input
+            id="track-schedule-reason"
+            className="input"
+            value={reason}
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </div>
+        {error && (
+          <div className="error-box" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            Hủy
+          </button>
+          <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
+            {busy ? "Đang lưu..." : "Lưu lịch mới"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Modal đổi chính sách công bố Private trước lần công bố đầu tiên. */
+function PrivatePolicyModal({
+  competition,
+  onRefresh,
+  onDone,
+  onClose,
+}: {
+  competition: AdminCompetition;
+  onRefresh: () => Promise<void>;
+  onDone: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const view = competition.tracks?.private ?? null;
+  const released = view?.results_released ?? false;
+  const [policy, setPolicy] = useState<ResultPolicy>(view?.result_policy ?? "manual");
+  const [condition, setCondition] = useState<PublishCondition>(
+    view?.publish_condition ?? "admin_decides",
+  );
+  const [confirmReveal, setConfirmReveal] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  if (!view) return null;
+
+  // Chuyển sang hiện ngay là mở kết quả vĩnh viễn: xác nhận tường minh, không suy ra từ lựa chọn.
+  const reveal = policy === "immediate" && !released;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!reason.trim()) {
+      setError("Cần ghi lý do đổi chính sách công bố.");
+      return;
+    }
+    if (reveal && !confirmReveal) {
+      setError("Chuyển sang hiện điểm ngay sẽ công bố kết quả Private vĩnh viễn; cần xác nhận.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/admin/competitions/${competition.id}/tracks/private/policy`, {
+        result_policy: policy,
+        publish_condition: policy === "manual" ? condition : "admin_decides",
+        expected_revision: controlRevision(competition),
+        reason: reason.trim(),
+        confirm_reveal: reveal ? confirmReveal : false,
+      });
+      await onDone();
+    } catch (err) {
+      if (isRevisionConflict(err)) await onRefresh();
+      setError(
+        isRevisionConflict(err)
+          ? `${messageOf(err)} Dữ liệu vừa được tải lại; kiểm tra chính sách hiện tại rồi lưu lại.`
+          : messageOf(err),
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Chính sách công bố kết quả Private" onClose={onClose} large={false}>
+      <form onSubmit={submit}>
+        <fieldset className="form-field ac-policy-options">
+          <legend className="field-label">Kết quả Private</legend>
+          {(Object.keys(RESULT_POLICY_LABEL) as ResultPolicy[]).map((option) => (
+            <label key={option} className={policy === option ? "selected" : undefined}>
+              <input
+                type="radio"
+                name="private-policy"
+                value={option}
+                checked={policy === option}
+                disabled={busy}
+                onChange={() => setPolicy(option)}
+              />
+              <span>{RESULT_POLICY_LABEL[option]}</span>
+            </label>
+          ))}
+        </fieldset>
+        {policy === "manual" && (
+          <div className="form-field">
+            <label className="field-label" htmlFor="private-condition">
+              Điều kiện công bố
+            </label>
+            <select
+              id="private-condition"
+              className="input"
+              value={condition}
+              disabled={busy}
+              onChange={(event) => setCondition(event.target.value as PublishCondition)}
+            >
+              {(Object.keys(PUBLISH_CONDITION_LABEL) as PublishCondition[]).map((option) => (
+                <option key={option} value={option}>
+                  {PUBLISH_CONDITION_LABEL[option]}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        {reveal && (
+          <>
+            <p className="text-muted">
+              Kết quả Private sẽ hiển thị vĩnh viễn và không thể trở lại bí mật.
+            </p>
+            <div className="checkbox-field">
+              <input
+                id="private-policy-reveal"
+                type="checkbox"
+                checked={confirmReveal}
+                disabled={busy}
+                onChange={(event) => setConfirmReveal(event.target.checked)}
+              />
+              <label htmlFor="private-policy-reveal">
+                Tôi hiểu kết quả Private sẽ được công bố ngay và không thể thu hồi.
+              </label>
+            </div>
+          </>
+        )}
+        <div className="form-field">
+          <label className="field-label" htmlFor="private-policy-reason">
+            Lý do
+          </label>
+          <input
+            id="private-policy-reason"
+            className="input"
+            value={reason}
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </div>
+        {error && (
+          <div className="error-box" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            Hủy
+          </button>
+          <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
+            {busy ? "Đang lưu..." : "Lưu chính sách"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Xác nhận công bố: lời văn theo đúng trạng thái hiện tại của Private và công tắc BXH. */
+function PrivatePublishModal({
+  competition,
+  processing,
+  onRefresh,
+  onDone,
+  onClose,
+}: {
+  competition: AdminCompetition;
+  /** Còn lượt Private chưa kết thúc - quyết định lời văn và mức cảnh báo. */
+  processing: boolean;
+  onRefresh: () => Promise<void>;
+  onDone: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const view = competition.tracks?.private ?? null;
+  const live = view?.window_state === "open" || processing;
+  const body = [
+    live
+      ? "Private vẫn đang nhận bài và có thể còn bài đang chấm. Công bố sẽ hiển thị kết quả hiện có và các kết quả phát sinh sau đó. BXH tiếp tục cập nhật; dữ liệu đã công bố không thể trở lại bí mật."
+      : "Private đã đóng nhận bài và không còn bài đang xử lý. Công bố sẽ hiển thị kết quả hiện có; BXH vẫn có thể thay đổi nếu có bài được xét duyệt lại.",
+    ...(competition.leaderboard_visible
+      ? []
+      : [
+          "Bảng xếp hạng thí sinh đang tắt: điểm của các bài đủ điều kiện vẫn hiện trong lịch sử của thí sinh, nhưng BXH vẫn ẩn cho tới khi admin bật lại.",
+        ]),
+  ].join(" ");
+
+  return (
+    <ConfirmModal
+      title="Công bố kết quả Private"
+      body={body}
+      confirmLabel="Công bố"
+      danger
+      onConfirm={async () => {
+        try {
+          await api.post(
+            `/admin/competitions/${competition.id}/tracks/private/publish-results`,
+            { expected_revision: controlRevision(competition) },
+          );
+        } catch (err) {
+          if (isRevisionConflict(err)) await onRefresh();
+          throw err;
+        }
+        await onDone();
+      }}
+      onClose={onClose}
+    />
+  );
+}
+
+/**
+ * Mở lại cuộc thi dual: đổi lifecycle và lịch nhánh trong một lượt ghi CAS. Nhánh không đổi giữ
+ * nguyên lịch hiện có và được liệt kê rõ nếu nó vẫn đang mở.
+ */
+function DualReopenModal({
+  competition,
+  onRefresh,
+  onDone,
+  onClose,
+}: {
+  competition: AdminCompetition;
+  onRefresh: () => Promise<void>;
+  onDone: (message: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [change, setChange] = useState<Record<Track, boolean>>({ public: false, private: false });
+  const [forms, setForms] = useState<Record<Track, { startAt: string; endAt: string; quota: string }>>(
+    () => {
+      const initial = {} as Record<Track, { startAt: string; endAt: string; quota: string }>;
+      for (const track of TRACKS) {
+        const view = competition.tracks?.[track];
+        initial[track] = {
+          // Giữ giờ mở lịch sử; giờ đóng mới để trống vì phải là một mốc tương lai do admin chọn.
+          startAt: view ? isoToLocalInput(view.start_at) : "",
+          endAt: "",
+          quota: view ? String(view.quota_per_day) : "5",
+        };
+      }
+      return initial;
+    },
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // Mốc so sánh chốt lúc mở modal: phần tóm tắt chỉ để mô tả, backend vẫn là nơi quyết định.
+  const [nowMs] = useState(Date.now);
+  const privateReleased = competition.tracks?.private?.results_released ?? false;
+
+  /** Cửa sổ sau khi mở lại của một nhánh: dùng lịch mới nếu đổi, ngược lại giữ lịch hiện có. */
+  function windowAfter(track: Track): { endIso: string | null; accepts: boolean } {
+    const view = competition.tracks?.[track];
+    if (!change[track]) {
+      const end = view?.end_at ?? null;
+      return { endIso: end, accepts: Boolean(end && Date.parse(end) > nowMs) };
+    }
+    const endIso = localInputToIso(forms[track].endAt);
+    return { endIso: endIso || null, accepts: Boolean(endIso && Date.parse(endIso) > nowMs) };
+  }
+
+  const summary = TRACKS.map((track) => {
+    const { endIso, accepts } = windowAfter(track);
+    const label = TRACK_LABEL[track];
+    return accepts && endIso
+      ? `${label} nhận bài đến ${formatLocal(endIso)}`
+      : `${label} không nhận bài (lịch hiện tại đã qua và không đổi)`;
+  }).join(" · ");
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!reason.trim()) {
+      setError("Cần ghi lý do mở lại cuộc thi.");
+      return;
+    }
+    const tracks: Record<string, { start_at: string; end_at: string; quota_per_day: number } | null> =
+      {};
+    for (const track of TRACKS) {
+      if (!change[track]) {
+        tracks[track] = null;
+        continue;
+      }
+      const startIso = localInputToIso(forms[track].startAt);
+      const endIso = localInputToIso(forms[track].endAt);
+      const startMs = Date.parse(startIso || "");
+      const endMs = Date.parse(endIso || "");
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+        setError(`Nhánh ${TRACK_LABEL[track]}: thời gian bắt đầu phải trước thời gian kết thúc.`);
+        return;
+      }
+      if (endMs <= nowMs) {
+        setError(`Nhánh ${TRACK_LABEL[track]}: giờ đóng mới phải ở tương lai để nhận bài trở lại.`);
+        return;
+      }
+      const quotaValue = forms[track].quota.trim() === "" ? 0 : Number(forms[track].quota);
+      if (!Number.isInteger(quotaValue) || quotaValue < 0 || quotaValue > 1000) {
+        setError("Quota mỗi ngày phải là số nguyên từ 0 đến 1000.");
+        return;
+      }
+      tracks[track] = { start_at: startIso, end_at: endIso, quota_per_day: quotaValue };
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api.post(`/admin/competitions/${competition.id}/reopen`, {
+        expected_revision: controlRevision(competition),
+        reason: reason.trim(),
+        tracks,
+      });
+      await onDone("Đã mở lại cuộc thi.");
+    } catch (err) {
+      if (isRevisionConflict(err)) await onRefresh();
+      setError(
+        isRevisionConflict(err)
+          ? `${messageOf(err)} Dữ liệu vừa được tải lại; kiểm tra lịch hiện tại rồi thử lại.`
+          : messageOf(err),
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Mở lại cuộc thi" onClose={onClose}>
+      <form onSubmit={submit}>
+        <p className="text-muted">
+          Mở lại cuộc thi và đổi lịch nhánh trong cùng một thao tác. Nhánh không đổi giữ nguyên
+          lịch hiện có.
+        </p>
+        {TRACKS.map((track) => {
+          const view = competition.tracks?.[track];
+          if (!view) return null;
+          return (
+            <fieldset className="admin-track-reopen" key={track}>
+              <legend className="field-label">{TRACK_LABEL[track]}</legend>
+              <p className="text-muted">
+                Hiện tại: {formatLocal(view.start_at)} → {formatLocal(view.end_at)} ·{" "}
+                {TRACK_WINDOW_LABEL[view.window_state]}
+              </p>
+              <div className="checkbox-field">
+                <input
+                  id={`reopen-${track}-change`}
+                  type="checkbox"
+                  checked={change[track]}
+                  disabled={busy}
+                  onChange={(event) =>
+                    setChange((current) => ({ ...current, [track]: event.target.checked }))
+                  }
+                />
+                <label htmlFor={`reopen-${track}-change`}>Gia hạn nhánh này khi mở lại</label>
+              </div>
+              {change[track] && (
+                <div className="form-grid">
+                  <div className="form-field">
+                    <label className="field-label" htmlFor={`reopen-${track}-start`}>
+                      Mở nhận bài
+                    </label>
+                    <input
+                      id={`reopen-${track}-start`}
+                      className="input"
+                      type="datetime-local"
+                      value={forms[track].startAt}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setForms((current) => ({
+                          ...current,
+                          [track]: { ...current[track], startAt: event.target.value },
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="field-label" htmlFor={`reopen-${track}-end`}>
+                      Đóng nhận bài mới
+                    </label>
+                    <input
+                      id={`reopen-${track}-end`}
+                      className="input"
+                      type="datetime-local"
+                      value={forms[track].endAt}
+                      disabled={busy}
+                      onChange={(event) =>
+                        setForms((current) => ({
+                          ...current,
+                          [track]: { ...current[track], endAt: event.target.value },
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+            </fieldset>
+          );
+        })}
+        <p className="text-muted" role="status">
+          Sau khi mở lại: {summary}.
+        </p>
+        {privateReleased && windowAfter("private").accepts && (
+          <p className="text-muted">
+            Private sẽ nhận bài đến {formatLocal(windowAfter("private").endIso ?? "")}. Điểm và BXH
+            đã công bố tiếp tục hiển thị; bài mới được chấm và cập nhật vào BXH. Các lượt đã dùng
+            hôm nay không được hoàn lại.
+          </p>
+        )}
+        <div className="form-field">
+          <label className="field-label" htmlFor="reopen-reason">
+            Lý do
+          </label>
+          <input
+            id="reopen-reason"
+            className="input"
+            value={reason}
+            disabled={busy}
+            onChange={(event) => setReason(event.target.value)}
+          />
+        </div>
+        {error && (
+          <div className="error-box" role="alert">
+            {error}
+          </div>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>
+            Hủy
+          </button>
+          <button className="btn admin-detail-primary-action" type="submit" disabled={busy}>
+            {busy ? "Đang mở lại..." : "Mở lại"}
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
@@ -1267,6 +2351,18 @@ function verificationText(scoring: ScoringV2): string {
   return verification.tested_at
     ? `Lượt chạy thử khớp cấu hình hiện tại (lúc ${formatLocal(verification.tested_at)}).`
     : "Lượt chạy thử khớp cấu hình hiện tại.";
+}
+
+/** Như `verificationText` nhưng đọc bằng chứng riêng của một nhánh trong cuộc thi dual. */
+function trackVerificationText(view: ScoringTrackView): string {
+  const verification = view.verification;
+  if (!verification) return "Chưa chạy thử nhánh này lần nào.";
+  if (!view.verified) {
+    return "Lượt chạy thử đã cũ vì cấu hình hoặc ground truth của nhánh đã đổi sau đó; chạy thử lại trước khi publish.";
+  }
+  const at = verification.tested_at ? ` (lúc ${formatLocal(verification.tested_at)})` : "";
+  const by = verification.tested_by ? ` Người chạy: ${verification.tested_by}.` : "";
+  return `Lượt chạy thử khớp cấu hình hiện tại${at}.${by}`;
 }
 
 /**
@@ -1483,6 +2579,12 @@ function ScoringPanel({
   const [form, setForm] = useState<ScoringForm>(EMPTY_FORM);
   const [testResult, setTestResult] = useState<ScoringTestResult["test"] | null>(null);
   const [pendingGroundTruth, setPendingGroundTruth] = useState<File | null>(null);
+  /** Dual: hàng chờ ground truth riêng từng nhánh, tải lên ngay sau lượt lưu cấu hình. */
+  const [pendingTrackGroundTruth, setPendingTrackGroundTruth] = useState<
+    Partial<Record<Track, File>>
+  >({});
+  /** Dual: nhánh dùng ground truth thật cho lượt chạy thử kế tiếp. */
+  const [testTrack, setTestTrack] = useState<Track>(OFFICIAL_TRACK);
 
   const load = useCallback(async () => {
     setError(null);
@@ -1556,6 +2658,7 @@ function ScoringPanel({
     }
     // Ground truth chọn trước khi lưu nằm chờ ở đây: phải có schema đã lưu mới kiểm tra được.
     const queued = pendingGroundTruth;
+    const queuedTracks = TRACKS.filter((track) => pendingTrackGroundTruth[track] !== undefined);
     // Cấu hình đang có bằng chứng chạy thử hay không, đọc trước khi ghi: lượt lưu này làm bằng
     // chứng đó hết hiệu lực thì phải nói ngay, vì đó là lúc mục "Đã chạy thử..." rơi về Chưa đạt.
     const wasVerified = Boolean(status?.scoring?.verified);
@@ -1588,44 +2691,74 @@ function ScoringPanel({
         );
         setStatus(saved);
         setPendingGroundTruth(null);
+      } else if (queuedTracks.length > 0 && saved.scoring) {
+        // Dual: mỗi nhánh một tệp, tải tuần tự. Mỗi lượt tải ground truth tự tăng revision nên
+        // lượt sau phải dùng revision của lượt trước, không phải revision lúc bắt đầu hàng chờ.
+        let revision = saved.scoring.revision;
+        for (const track of queuedTracks) {
+          const file = pendingTrackGroundTruth[track];
+          if (!file) continue;
+          saved = await api.upload<ScoringStatus>(
+            `/admin/competitions/${competition.id}/ground-truth`,
+            file,
+            { expected_revision: String(revision), track },
+          );
+          revision = saved.scoring?.revision ?? revision;
+          setStatus(saved);
+          setPendingTrackGroundTruth((current) => ({ ...current, [track]: undefined }));
+        }
       }
-      const done = queued ? "Đã lưu cấu hình và tải lên ground truth." : "Đã lưu cấu hình chấm điểm.";
+      const done =
+        queued || queuedTracks.length > 0
+          ? "Đã lưu cấu hình và tải lên ground truth."
+          : "Đã lưu cấu hình chấm điểm.";
       return wasVerified && !saved.scoring?.verified
         ? `${done} Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi publish.`
         : done;
     }, "save");
   }
 
-  function uploadGroundTruth(file: File) {
+  function uploadGroundTruth(file: File, track?: Track) {
     // Ground truth là một phần của dấu vân tay: tệp mới làm lượt chạy thử cũ hết hiệu lực,
-    // nên câu thông báo phải nói luôn thay vì để checklist tự rơi về Chưa đạt.
-    const wasVerified = Boolean(status?.scoring?.verified);
+    // nên câu thông báo phải nói luôn thay vì để checklist tự rơi về Chưa đạt. Dual đọc bằng
+    // chứng theo nhánh vì mỗi nhánh có ground truth riêng.
+    const wasVerified = track
+      ? Boolean(status?.tracks?.[track]?.verified)
+      : Boolean(status?.scoring?.verified);
     void submit(async () => {
       const data = await api.upload<ScoringStatus>(
         `/admin/competitions/${competition.id}/ground-truth`,
         file,
-        status?.scoring ? { expected_revision: String(status.scoring.revision) } : undefined,
+        {
+          ...(status?.scoring ? { expected_revision: String(status.scoring.revision) } : {}),
+          ...(track ? { track } : {}),
+        },
       );
       // File được kiểm tra theo schema đã lưu, nên lượt upload này không ghi đè form đang sửa.
       setStatus(data);
-      const done = "Đã tải lên và kiểm tra ground truth.";
-      return wasVerified && !data.scoring?.verified
+      const done = track
+        ? `Đã tải lên và kiểm tra ground truth nhánh ${TRACK_LABEL[track]}.`
+        : "Đã tải lên và kiểm tra ground truth.";
+      const stillVerified = track
+        ? Boolean(data.tracks?.[track]?.verified)
+        : Boolean(data.scoring?.verified);
+      return wasVerified && !stillVerified
         ? `${done} Lượt chạy thử trước đã hết hiệu lực vì ground truth vừa đổi; chạy thử lại trước khi publish.`
         : done;
     }, "groundTruth");
   }
 
-  function runTest(file: File, revision: number) {
+  function runTest(file: File, revision: number, track?: Track) {
     void submit(async () => {
       const data = await api.postFile<ScoringTestResult>(
         `/admin/competitions/${competition.id}/scoring/test`,
         { file },
-        { expected_revision: String(revision) },
+        { expected_revision: String(revision), ...(track ? { track } : {}) },
       );
       setStatus(data);
       setTestResult(data.test);
       setForm((current) => ({ ...current, ...metricsFromKeys(data.test.observed_keys, current) }));
-      return "Đã chạy thử bộ chấm.";
+      return track ? `Đã chạy thử bộ chấm cho nhánh ${TRACK_LABEL[track]}.` : "Đã chạy thử bộ chấm.";
     }, "test");
   }
 
@@ -1650,6 +2783,8 @@ function ScoringPanel({
   if (loading) return <Loading />;
 
   const scoring = status?.scoring ?? null;
+  /** Dual: ground truth và bằng chứng của từng nhánh; vắng mặt thì giữ nguyên hành vi cũ. */
+  const dualScoring = status?.tracks ?? null;
   const locked = Boolean(status?.locked);
   const disabled = busy !== null || locked;
   /**
@@ -1661,17 +2796,28 @@ function ScoringPanel({
   /** Ô chỉ thuộc phần hiển thị: mở khi chưa khóa, hoặc khi khóa mà còn đường hiển thị. */
   const displayDisabled = busy !== null || (locked && !displayEditable);
   const hasSource = Boolean(scoring?.evaluator.source_sha256);
-  const verification = scoring?.verification ?? null;
   /**
    * Sáu điều kiện publish của kế hoạch; `status.ready` là phán quyết của backend cho cả nhóm.
    * Mỗi mục trỏ tới vùng cần xử lý để admin đi thẳng tới việc còn thiếu thay vì tự tìm.
    */
-  const checklist = [
+  /** Dual tách ground truth và bằng chứng chạy thử theo nhánh; các mục còn lại là của chung. */
+  const checklist: Array<{
+    label: string;
+    done: boolean;
+    target: string;
+    tracks?: Array<{ label: string; done: boolean }>;
+  }> = [
     { label: "Định dạng dữ liệu đã lưu", done: scoring !== null, target: "scoring-section-schema" },
     {
       label: "Ground truth hợp lệ",
       done: status?.ground_truth != null,
       target: "scoring-section-ground-truth",
+      tracks: dualScoring
+        ? TRACKS.map((track) => ({
+            label: TRACK_LABEL[track],
+            done: dualScoring[track].ground_truth != null,
+          }))
+        : undefined,
     },
     {
       label: "Đã lưu source bộ chấm",
@@ -1687,6 +2833,9 @@ function ScoringPanel({
       label: "Đã chạy thử và khớp cấu hình hiện tại",
       done: Boolean(scoring?.verified),
       target: "scoring-section-test",
+      tracks: dualScoring
+        ? TRACKS.map((track) => ({ label: TRACK_LABEL[track], done: dualScoring[track].verified }))
+        : undefined,
     },
     {
       label: "Đã chọn chỉ số chính",
@@ -1699,6 +2848,18 @@ function ScoringPanel({
         .map(([key, value]) => `${key} = ${formatMetric(value, metricDecimals(form.metrics, key))}`)
         .join(" · ")
     : "";
+  /** Dual: bằng chứng đọc theo nhánh đang chọn cho lượt chạy thử kế tiếp. */
+  const testEvidence = dualScoring ? dualScoring[testTrack] : null;
+  const observedKeys =
+    (testEvidence ? testEvidence.verification : scoring?.verification ?? null)?.observed_keys ?? [];
+  const testEvidenceText = testEvidence
+    ? trackVerificationText(testEvidence)
+    : scoring
+      ? verificationText(scoring)
+      : "";
+  const testTrackMissingGroundTruth = dualScoring
+    ? dualScoring[testTrack].ground_truth === null
+    : false;
 
   return (
     <form className="admin-detail-column" onSubmit={saveConfig}>
@@ -1790,9 +2951,22 @@ function ScoringPanel({
                 </a>
               </dt>
               <dd>
-                <span className={`status-badge ${item.done ? "success" : "warning"}`}>
-                  {item.done ? "Đã đạt" : "Chưa đạt"}
-                </span>
+                {item.tracks ? (
+                  <span className="scoring-checklist-tracks">
+                    {item.tracks.map((entry) => (
+                      <span
+                        key={entry.label}
+                        className={`status-badge ${entry.done ? "success" : "warning"}`}
+                      >
+                        {entry.label}: {entry.done ? "Đã đạt" : "Chưa đạt"}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className={`status-badge ${item.done ? "success" : "warning"}`}>
+                    {item.done ? "Đã đạt" : "Chưa đạt"}
+                  </span>
+                )}
               </dd>
             </div>
           ))}
@@ -1890,58 +3064,131 @@ function ScoringPanel({
               <IconInfo className="admin-detail-card-icon-glyph" />
             </span>
             <div>
-              <h2 className="admin-detail-card-title">Ground truth private</h2>
+              <h2 className="admin-detail-card-title">
+                {dualScoring ? "Ground truth theo nhánh" : "Ground truth private"}
+              </h2>
               <p className="admin-detail-card-desc">
                 CSV UTF-8, tối đa <strong>{status?.max_upload_mb ?? 10} MiB</strong>.
               </p>
             </div>
           </div>
-          <FileButton
-            className="btn btn-secondary admin-detail-outline-action"
-            inputLabel="Upload ground truth CSV"
-            accept=".csv,text/csv"
-            disabled={disabled}
-            onFile={(file) => {
-              // Thay ground truth cũ phải qua xác nhận; chưa lưu cấu hình thì tệp nằm chờ
-              // và được tải lên ngay sau lượt lưu đầu tiên.
-              if (status?.ground_truth || scoring === null) {
-                setPendingGroundTruth(file);
-                return;
-              }
-              setPendingGroundTruth(null);
-              uploadGroundTruth(file);
-            }}
-          >
-            {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
-          </FileButton>
+          {!dualScoring && (
+            <FileButton
+              className="btn btn-secondary admin-detail-outline-action"
+              inputLabel="Upload ground truth CSV"
+              accept=".csv,text/csv"
+              disabled={disabled}
+              onFile={(file) => {
+                // Thay ground truth cũ phải qua xác nhận; chưa lưu cấu hình thì tệp nằm chờ
+                // và được tải lên ngay sau lượt lưu đầu tiên.
+                if (status?.ground_truth || scoring === null) {
+                  setPendingGroundTruth(file);
+                  return;
+                }
+                setPendingGroundTruth(null);
+                uploadGroundTruth(file);
+              }}
+            >
+              {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+            </FileButton>
+          )}
         </div>
-        {pendingGroundTruth && !status?.ground_truth ? (
-          <p className="text-muted">
-            Đã chọn <strong>{pendingGroundTruth.name}</strong> — tải lên và kiểm tra ngay sau khi
-            lưu cấu hình.
-          </p>
-        ) : !pendingGroundTruth && scoring === null ? (
-          <p className="text-muted">
-            Chưa lưu cấu hình — tệp chọn trước được tải lên và kiểm tra ngay sau khi lưu.
-          </p>
-        ) : null}
-        {status?.ground_truth ? (
-          <dl className="scoring-metadata">
-            <div className="scoring-meta-item">
-              <dt>Dữ liệu</dt>
-              <dd>{status.ground_truth.row_count} dòng</dd>
-            </div>
-            <div className="scoring-meta-item">
-              <dt>Các cột</dt>
-              <dd>{status.ground_truth.columns.join(", ")}</dd>
-            </div>
-            <div className="scoring-meta-item">
-              <dt>Upload lúc</dt>
-              <dd>{formatLocal(status.ground_truth.uploaded_at)}</dd>
-            </div>
-          </dl>
+        {dualScoring ? (
+          <ul className="admin-track-list">
+            {TRACKS.map((track) => {
+              const view = dualScoring[track];
+              const pending = pendingTrackGroundTruth[track] ?? null;
+              return (
+                <li className="admin-track-item" key={track}>
+                  <div className="admin-track-head">
+                    <strong>Ground truth {TRACK_LABEL[track]}</strong>
+                    <div className="admin-track-actions">
+                      <span className={`status-badge ${view.verified ? "success" : "warning"}`}>
+                        {view.verified ? "Chạy thử khớp" : "Chưa có bằng chứng"}
+                      </span>
+                      <FileButton
+                        className="btn btn-secondary admin-detail-outline-action btn-sm"
+                        inputLabel={`Upload ground truth CSV nhánh ${TRACK_LABEL[track]}`}
+                        accept=".csv,text/csv"
+                        disabled={disabled}
+                        onFile={(file) => {
+                          // Cùng luật với chế độ một nhánh: thay tệp cũ hoặc chưa có cấu hình
+                          // thì tệp nằm chờ và lên ngay sau lượt lưu.
+                          if (view.ground_truth || scoring === null) {
+                            setPendingTrackGroundTruth((current) => ({ ...current, [track]: file }));
+                            return;
+                          }
+                          setPendingTrackGroundTruth((current) => ({
+                            ...current,
+                            [track]: undefined,
+                          }));
+                          uploadGroundTruth(file, track);
+                        }}
+                      >
+                        {view.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+                      </FileButton>
+                    </div>
+                  </div>
+                  {pending && !view.ground_truth && (
+                    <p className="text-muted">
+                      Đã chọn <strong>{pending.name}</strong> — tải lên và kiểm tra ngay sau khi
+                      lưu cấu hình.
+                    </p>
+                  )}
+                  {view.ground_truth ? (
+                    <dl className="scoring-metadata">
+                      <div className="scoring-meta-item">
+                        <dt>Dữ liệu</dt>
+                        <dd>{view.ground_truth.row_count} dòng</dd>
+                      </div>
+                      <div className="scoring-meta-item">
+                        <dt>Các cột</dt>
+                        <dd>{view.ground_truth.columns.join(", ")}</dd>
+                      </div>
+                      <div className="scoring-meta-item">
+                        <dt>Upload lúc</dt>
+                        <dd>{formatLocal(view.ground_truth.uploaded_at)}</dd>
+                      </div>
+                    </dl>
+                  ) : (
+                    <p className="text-muted">Chưa có ground truth.</p>
+                  )}
+                  <p className="text-muted">{trackVerificationText(view)}</p>
+                </li>
+              );
+            })}
+          </ul>
         ) : (
-          <p className="text-muted">Chưa có ground truth.</p>
+          <>
+            {pendingGroundTruth && !status?.ground_truth ? (
+              <p className="text-muted">
+                Đã chọn <strong>{pendingGroundTruth.name}</strong> — tải lên và kiểm tra ngay sau
+                khi lưu cấu hình.
+              </p>
+            ) : !pendingGroundTruth && scoring === null ? (
+              <p className="text-muted">
+                Chưa lưu cấu hình — tệp chọn trước được tải lên và kiểm tra ngay sau khi lưu.
+              </p>
+            ) : null}
+            {status?.ground_truth ? (
+              <dl className="scoring-metadata">
+                <div className="scoring-meta-item">
+                  <dt>Dữ liệu</dt>
+                  <dd>{status.ground_truth.row_count} dòng</dd>
+                </div>
+                <div className="scoring-meta-item">
+                  <dt>Các cột</dt>
+                  <dd>{status.ground_truth.columns.join(", ")}</dd>
+                </div>
+                <div className="scoring-meta-item">
+                  <dt>Upload lúc</dt>
+                  <dd>{formatLocal(status.ground_truth.uploaded_at)}</dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="text-muted">Chưa có ground truth.</p>
+            )}
+          </>
         )}
       </section>
 
@@ -2021,13 +3268,34 @@ function ScoringPanel({
                 className="btn btn-secondary admin-detail-outline-action"
                 inputLabel="Chọn CSV mẫu để chạy thử"
                 accept=".csv,text/csv"
-                disabled={disabled || !hasSource}
-                onFile={(file) => runTest(file, scoring.revision)}
+                disabled={disabled || !hasSource || testTrackMissingGroundTruth}
+                onFile={(file) => runTest(file, scoring.revision, dualScoring ? testTrack : undefined)}
               >
                 {busy === "test" ? "Đang chạy thử…" : "Chọn CSV mẫu để chạy thử"}
               </FileButton>
             )}
           </div>
+          {dualScoring && (
+            <fieldset className="form-field ac-policy-options">
+              <legend className="field-label">Ground truth dùng để chạy thử</legend>
+              {TRACKS.map((track) => (
+                <label key={track} className={testTrack === track ? "selected" : undefined}>
+                  <input
+                    type="radio"
+                    name="scoring-test-track"
+                    checked={testTrack === track}
+                    disabled={busy !== null}
+                    onChange={() => {
+                      // Đổi nhánh thì kết quả lượt chạy vừa rồi không còn thuộc nhánh đang chọn.
+                      setTestTrack(track);
+                      setTestResult(null);
+                    }}
+                  />
+                  <span>{TRACK_LABEL[track]}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           {scoring && !hasSource ? (
             <p className="text-muted">Lưu source bộ chấm trước khi chạy thử.</p>
           ) : scoring ? (
@@ -2036,10 +3304,16 @@ function ScoringPanel({
                 Chạy source đã lưu với ground truth thật và CSV mẫu có đủ ID. Khóa metric lấy từ
                 kết quả chạy thật, không suy đoán từ source.
               </p>
+              {testTrackMissingGroundTruth && (
+                <p className="text-muted">
+                  Nhánh {TRACK_LABEL[testTrack]} chưa có ground truth — tải lên trước khi chạy
+                  thử.
+                </p>
+              )}
               <dl className="scoring-metadata">
                 <div className="scoring-meta-item">
                   <dt>Khóa metric đã chạy</dt>
-                  <dd>{verification?.observed_keys.join(", ") || "chưa có"}</dd>
+                  <dd>{observedKeys.join(", ") || "chưa có"}</dd>
                 </div>
                 {testResult && (
                   <>
@@ -2054,7 +3328,7 @@ function ScoringPanel({
                   </>
                 )}
               </dl>
-              <p className="text-muted">{verificationText(scoring)}</p>
+              <p className="text-muted">{testEvidenceText}</p>
             </>
           ) : (
             <p className="text-muted">Lưu cấu hình trước khi chạy thử.</p>
@@ -2971,8 +4245,8 @@ function ResourcesPanel({
           <div>
             <h2 className="admin-detail-card-title">Tài nguyên tải về</h2>
             <p className="admin-detail-card-desc">
-              Chỉ nhận link Google Drive hoặc Google Docs. Hãy đặt quyền chia sẻ “Bất kỳ ai có
-              liên kết” để thí sinh có thể mở tài liệu.
+              Nhận mọi link tài nguyên https (Google Drive, Google Docs, S3, máy chủ riêng...). Hãy
+              đặt quyền truy cập để thí sinh có thể mở tài liệu.
             </p>
           </div>
         </div>
@@ -3015,7 +4289,7 @@ function ResourcesPanel({
                       type="url"
                       value={resource.url}
                       onChange={(event) => updateResource(index, { url: event.target.value })}
-                      placeholder="https://drive.google.com/..."
+                      placeholder="https://..."
                     />
                   </div>
                   <button
