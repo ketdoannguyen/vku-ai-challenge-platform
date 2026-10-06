@@ -102,10 +102,14 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await collection.create_index(
         [("competition_id", 1), ("created_at", -1), ("_id", -1)]
     )
-    # Trục AI: vòng reconcile quét theo `state`, bảng admin lọc theo `verdict`. Index thường (không
-    # partial) vì mongomock không hỗ trợ đầy đủ partial expression trên field lồng nhau.
+    # Trục AI: vòng reconcile quét theo `state`, bảng admin lọc theo `verdict` và trạng thái nguồn.
+    # Index thường (không partial) vì mongomock không hỗ trợ đầy đủ partial expression trên field
+    # lồng nhau.
     await collection.create_index([("ai_review.state", 1), ("created_at", -1), ("_id", -1)])
     await collection.create_index([("ai_review.verdict", 1), ("created_at", -1), ("_id", -1)])
+    await collection.create_index(
+        [("ai_review.source_status", 1), ("created_at", -1), ("_id", -1)]
+    )
 
 
 def eligible_query(query: dict | None = None) -> dict:
@@ -142,6 +146,26 @@ def ai_review_filter(value: str) -> dict:
         return {"ai_review.state": {"$in": list(ai_constants.AI_PENDING_STATES)}}
     if value == ai_constants.FILTER_AI_ERROR:
         return {"ai_review.verdict": ai_constants.VERDICT_ERROR}
+    if value in (ai_constants.FILTER_AI_SOURCE_EXTERNAL, ai_constants.FILTER_AI_SOURCE_UNCLEAR):
+        return {
+            "ai_review.state": ai_constants.AI_STATE_COMPLETED,
+            "ai_review.source_signal_version": ai_constants.SOURCE_SIGNAL_VERSION,
+            "ai_review.source_status": (
+                ai_constants.SOURCE_STATUS_EXTERNAL
+                if value == ai_constants.FILTER_AI_SOURCE_EXTERNAL
+                else ai_constants.SOURCE_STATUS_UNCLEAR
+            ),
+        }
+    if value == ai_constants.FILTER_AI_SOURCE_NOT_EVALUATED:
+        # Gồm cả row COMPLETED từ phiên bản cũ thiếu trạng thái nguồn mới (kể cả signals rỗng,
+        # warning count = 0): thiếu dữ kiện không được hiển thị như sạch.
+        return {
+            "ai_review.state": ai_constants.AI_STATE_COMPLETED,
+            "$or": [
+                {"ai_review.source_signal_version": {"$ne": ai_constants.SOURCE_SIGNAL_VERSION}},
+                {"ai_review.source_status": ai_constants.SOURCE_STATUS_NOT_EVALUATED},
+            ],
+        }
     return {"ai_review.verdict": value.upper()}
 
 

@@ -5,10 +5,10 @@
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { AdminCompetition } from "../api/competitions";
 import { CompetitionActionConfirmModal, CompetitionFormModal } from "./AdminCompetitionManagement";
 
-const BASE: Competition = {
+const BASE: AdminCompetition = {
   id: "1",
   slug: "ai-challenge-2026",
   name: "AI Challenge 2026",
@@ -21,6 +21,10 @@ const BASE: Competition = {
   quota_per_day: 5,
   leaderboard_visible: true,
   join_code_configured: false,
+  created_by: "admin-1",
+  member_count: 0,
+  inactive_member_count: 0,
+  submission_count: 0,
   resources: [],
   membership: { active: false, joined_at: null },
   submission_config: {
@@ -55,7 +59,7 @@ function mockApi(respond: (init: RequestInit) => { body: unknown; status: number
   );
 }
 
-function renderForm(competition?: Competition, onClose = vi.fn()) {
+function renderForm(competition?: AdminCompetition, onClose = vi.fn()) {
   const onSaved = vi.fn();
   render(
     <CompetitionFormModal
@@ -320,7 +324,7 @@ test("sửa cuộc thi published: slug bị khoá, tài nguyên chuyển sang ta
       ? { body: { ...BASE, status: "published" }, status: 200 }
       : { body: BASE, status: 200 },
   );
-  const published: Competition = {
+  const published: AdminCompetition = {
     ...BASE,
     status: "published",
     resources: [{ label: "Dataset", url: "https://drive.google.com/file/d/abc" }],
@@ -477,7 +481,7 @@ test("sửa nháp đang bật norm: giữ giá trị đã lưu và mô tả đú
   mockApi((init) =>
     init.method === "PATCH" ? { body: BASE, status: 200 } : { body: BASE, status: 200 },
   );
-  const draft: Competition = {
+  const draft: AdminCompetition = {
     ...BASE,
     normalization: { enabled: true, baseline: 0.4, version: 1 },
   };
@@ -506,7 +510,7 @@ test("cuộc thi đã publish: cấu hình norm readonly kèm lý do và không 
   mockApi((init) =>
     init.method === "PATCH" ? { body: BASE, status: 200 } : { body: BASE, status: 200 },
   );
-  const published: Competition = {
+  const published: AdminCompetition = {
     ...BASE,
     status: "published",
     normalization: { enabled: true, baseline: 0.4, version: 1 },

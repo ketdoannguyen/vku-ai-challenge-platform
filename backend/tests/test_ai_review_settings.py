@@ -217,11 +217,11 @@ def test_content_source_lists_included_and_excluded_pages(client, ai_env):
     cid = competition["id"]
     problem = client.post(
         f"/api/admin/competitions/{cid}/contents",
-        json={"title": "Đề bài", "slug": "problem", "visibility": "public"},
+        json={"title": "Đề bài", "slug": "problem"},
     ).json()["id"]
     client.post(
         f"/api/admin/competitions/{cid}/contents",
-        json={"title": "Chưa viết", "slug": "draft", "visibility": "members"},
+        json={"title": "Chưa viết", "slug": "draft"},
     )
     uploaded = client.put(
         f"/api/admin/competitions/{cid}/contents/{problem}/file",

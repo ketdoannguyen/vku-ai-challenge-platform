@@ -16,6 +16,7 @@ from openpyxl import load_workbook
 
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.leaderboard import service
+from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.submissions.service import SUBMISSIONS_COLLECTION
 from tests.helpers import V2_SCHEMA, login, login_participant, publish_v2_competition
 
@@ -99,6 +100,22 @@ def _submission(
         )
     )
     return submission_id
+
+
+def _insert_membership(client, competition_id: ObjectId, account_id: ObjectId) -> None:
+    """Quyền đọc BXH cần membership đang hoạt động; luồng join thật đã có test_memberships.py lo."""
+    now = datetime.now(timezone.utc)
+    _run(
+        client.app.state.mongo.db[MEMBERSHIPS_COLLECTION].insert_one(
+            {
+                "competition_id": competition_id,
+                "account_id": account_id,
+                "active": True,
+                "joined_at": now,
+                "updated_at": now,
+            }
+        )
+    )
 
 
 def _v2_competition(competition_id: ObjectId, *, higher_is_better: bool) -> dict:
@@ -387,6 +404,7 @@ def test_export_bypasses_the_cache_and_reads_fresh_entries(client, monkeypatch):
     participant = _account(client, "thi.sinh@vku.vn")
     newcomer_id = _create_account(client, "Đội Mới", "cache-export-new@vku.vn")
     competition_id = _competition(client, "cache-export")
+    _insert_membership(client, competition_id, participant["_id"])
     _submission(client, competition_id, participant["_id"], 0.6, BASE)
     counter = _counting_ranked_entries(monkeypatch)
 
@@ -417,6 +435,9 @@ def test_leaderboard_needs_auth_and_hidden_board_never_reaches_the_cache(client,
     participant = _account(client, "thi.sinh@vku.vn")
     visible_id = _competition(client, "cache-auth-visible")
     hidden_id = _competition(client, "cache-auth-hidden", leaderboard_visible=False)
+    # Có membership để phép thử chạm đúng nhánh LEADERBOARD_HIDDEN, không dừng ở cổng membership.
+    _insert_membership(client, visible_id, participant["_id"])
+    _insert_membership(client, hidden_id, participant["_id"])
     _submission(client, visible_id, participant["_id"], 0.7, BASE)
     _submission(client, hidden_id, participant["_id"], 0.7, BASE)
     counter = _counting_ranked_entries(monkeypatch)
@@ -437,6 +458,7 @@ def test_leaderboard_needs_auth_and_hidden_board_never_reaches_the_cache(client,
 def test_review_decision_invalidates_cached_leaderboard(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _competition(client, "cache-review")
+    _insert_membership(client, competition_id, participant["_id"])
     submission_id = _submission(client, competition_id, participant["_id"], 0.8, BASE)
     board_url = f"/api/competitions/{competition_id}/leaderboard"
 
@@ -466,6 +488,7 @@ def test_review_decision_invalidates_cached_leaderboard(client):
 def test_leaderboard_refreshes_after_ttl(client, monkeypatch):
     competitor_id = _create_account(client, "Đội Sớm", "cache-ttl-early@vku.vn")
     competition_id = _competition(client, "cache-ttl")
+    _insert_membership(client, competition_id, _account(client, "thi.sinh@vku.vn")["_id"])
     _submission(client, competition_id, competitor_id, 0.5, BASE)
 
     cache = service._RankedBoardCache(max_entries=8, ttl_seconds=0.5)

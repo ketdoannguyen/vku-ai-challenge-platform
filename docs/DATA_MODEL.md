@@ -95,7 +95,7 @@ Fields:
 - `title`
 - `slug` (format như competition slug, unique trong competition)
 - `order` (int 0-9999, default max+10)
-- `visibility`: `public` (mọi account đã đăng nhập) | `members` (membership active)
+- `visibility` - **đã bỏ từ ADR-060**: document cũ còn field nhưng backend không đọc/không ghi nữa; quyền đọc tài liệu do membership của cuộc thi quyết định ở route, không do field này
 - `markdown_path` (relative trong DATA_DIR: `competitions/<cid>/content/<content_id>.md` - backend sinh, không dùng input user)
 - `size_bytes` (int | null - null = chưa upload file)
 - `created_at`, `updated_at` (UTC, timezone-aware)
@@ -136,8 +136,9 @@ Fields:
   - `reviewed_by` (ObjectId → accounts._id), `reviewed_at` (UTC, timezone-aware)
   - Ghi **cả object** trong một `$set` trên một document nên không bao giờ trộn metadata của hai lần xét duyệt; chỉ giữ quyết định **gần nhất**, không có event history. `reviewed_by`/`reviewed_at` không bao giờ đi ra endpoint participant.
 - `content_snapshot` (object | absent) - bản thể lệ và tài nguyên **bất biến** đã chốt tại thời điểm nộp, chỉ có khi AI bật lúc submit (ADR-036): `{state: "CAPTURED" | "ERROR", revision_id, content_hash, error_code, captured_at}`. `ERROR` ghi lại sự thật là không chụp được (`CONTENT_EMPTY` | `CONTENT_SNAPSHOT_TOO_LARGE` | `CONTENT_CHANGED_DURING_CAPTURE` | `CONTENT_UNREADABLE`) chứ **không** chặn lượt nộp; bài không chụp được thì không chạy lại AI được và admin thấy banner giải thích.
-- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, source_warning_count, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
-  - `source_warning_count` (int | null, ADR-055) - số dấu hiệu nguồn dataset cần BTC xem lại từ lượt hiện tại; chỉ admin đọc, `null` trong lúc chờ/chạy lại; không thay verdict.
+- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, source_status, source_signal_version, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
+  - `source_status` (str | null, ADR-062) - trạng thái nguồn **sau hậu kiểm** của lượt hiện tại (`ALIGNED` | `EXTERNAL` | `UNCLEAR` | `NOT_EVALUATED`), ghi từ `source_assessment` của audit row chứ không đếm warning; chỉ admin đọc và chỉ có khi `source_signal_version` khớp version hiện hành. `null` ở lượt QUEUED/RUNNING/ERROR và ở row cũ (thiếu dữ kiện - **không** đọc thành đã sạch); QUEUED/rerun/reconcile xóa cả cặp field này. `source_warning_count` của row cũ vẫn nằm trong DB nhưng **không còn được ghi hay đọc**.
+  - `source_signal_version` (str | null, ADR-062) - version sinh ra `source_status`; lệch version hiện hành nghĩa là dữ liệu chưa hậu kiểm lại, API trả `source_status: null` nhưng vẫn trả version để admin biết.
   - `participant_summary` (str | null, ADR-040) - **gợi ý ngắn do model soạn nháp cho thí sinh**, tối đa 10 từ, chỉ admin đọc. Nó **không** đi ra endpoint participant: `participant_projection` vẫn thay summary bằng câu cố định theo verdict, và chữ duy nhất tới tay thí sinh vẫn là `review.note` do người duyệt gửi (ADR-035). `null` khi model không có gì để nói; `request_manual_review` **xoá** field này cùng lúc reset projection để gợi ý của lượt cũ không sống dậy sau khi chạy lại.
 - `artifacts.notebook.sha256` (str | absent ở record cũ) - SHA-256 của **bytes notebook gốc** lúc nộp, ghi ngay khi insert để cache/audit không phải đọc lại MinIO chỉ để định danh; worker vẫn băm lại bytes đã lưu khi xử lý và coi đó là nguồn sự thật.
 
@@ -282,7 +283,7 @@ Xoá competition `published` không có trong phạm vi: cuộc thi đang chạy
 
 Được copy:
 - Config cấp cuộc thi: `join_mode`, `primary_metric`, `quota_per_day`, `leaderboard_visible`, `resources`; `name` = `"<tên nguồn> (bản sao)"`, `slug` mới `<slug>-copy`, `start_at`/`end_at` mới (now → +1 năm), `created_by` = admin thực hiện. Slug hết 5 ứng viên → 409 `SLUG_EXISTS`.
-- `competition_contents`: title/slug/order/visibility giữ nguyên; `_id`, `markdown_path` và file là của bản sao. Markdown chỉ copy khi nguồn có `size_bytes`; ghi atomic rồi cập nhật `size_bytes`; trang chưa upload giữ `size_bytes: null`.
+- `competition_contents`: title/slug/order giữ nguyên; `_id`, `markdown_path` và file là của bản sao. Markdown chỉ copy khi nguồn có `size_bytes`; ghi atomic rồi cập nhật `size_bytes`; trang chưa upload giữ `size_bytes: null`.
 - Assets: giữ nguyên tên `uuid4.<ext>` (để link tương đối `assets/...` trong Markdown vẫn trỏ đúng), đọc và kiểm signature như endpoint list trước khi ghi vào `assets/` của bản sao.
 - `scoring_config`: v1 copy nguyên cấu hình cột cố định; v2 copy `input_schema`/`evaluator`/`output_contract` nhưng `revision = 0`, `evaluator.runtime_id = null`, `verification = null`; source bộ chấm ghi lại dưới `private/evaluator/<sha256>.py` của bản sao.
 - `ground_truth` + file: v1 ghi `private/ground_truth.csv`; v2 ghi `private/ground-truth-<sha256[:16]>.csv`; `path` trỏ về bản sao, `sha256`/`row_count`/`columns` giữ nguyên sau khi đối chiếu với file thật và schema.
@@ -334,7 +335,7 @@ _id: ObjectId
 competition_id: ObjectId
 content_hash: str                     SHA-256 hex của canonical payload
 pages: [
-  {content_id, title, slug, order, visibility: "public"|"members",
+  {content_id, title, slug, order,
    markdown: str, markdown_sha256: str, size_bytes: int}
 ]
 resources: [{label: str, url: str}]      link Google Drive BTC cấp tại thời điểm nộp (ADR-055)
@@ -349,7 +350,7 @@ Indexes:
 
 Không có revision counter: `content_hash` + `_id` + `created_at` đã đủ làm identity/audit, và bỏ counter thì không có race giữa hai lần chụp đồng thời.
 
-Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, visibility, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata, bytes hoặc `resources` đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ. Revision trước ADR-055 thiếu `resources` được hiểu là `[]` khi AI chạy lại.
+Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata, bytes hoặc `resources` đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ. Revision trước ADR-055 thiếu `resources` được hiểu là `[]` khi AI chạy lại. ADR-060 bỏ `visibility` khỏi payload hash nên lần chụp đầu tiên sau thay đổi của cùng nội dung tạo revision mới; revision cũ giữ nguyên (không sửa lại lịch sử).
 
 Capture (tối đa 3 vòng) - chạy ngay trong request nộp bài, có trần thời gian:
 1. Đọc metadata content đã sắp thứ tự (snapshot A).
@@ -360,7 +361,7 @@ Capture (tối đa 3 vòng) - chạy ngay trong request nộp bài, có trần t
 6. Không page nào đọc được ⇒ `CONTENT_EMPTY`. Vượt `AI_REVIEW_MAX_SNAPSHOT_BYTES` (mặc định 8 MiB, luôn dưới trần 16 MiB của Mongo) ⇒ `CONTENT_SNAPSHOT_TOO_LARGE`; **không** cắt bớt bản authoritative.
 7. Upsert theo `(competition_id, content_hash)`; `DuplicateKeyError` được coi là cache hit.
 
-"Nội dung đã publish" ở đây là **mọi content record có Markdown đọc được**, bất kể `visibility`; không thêm lifecycle page mới và không hard-code slug.
+"Nội dung đã publish" ở đây là **mọi content record có Markdown đọc được**; không thêm lifecycle page mới và không hard-code slug.
 
 ### 11.3 `ai_review_jobs` - hàng đợi bền
 
@@ -426,11 +427,19 @@ findings: [
    reason,
    evidence: [{cell, start_line, end_line, snippet}]}
 ]
-source_signals: [{cell, start_line, end_line, snippet, reason,
-                  match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE",
-                  urls: [{url, match, resource_label}], warning: bool}]   ADR-055; admin-only
+source_assessment: {                  ADR-062; admin-only, một đánh giá nguồn cho cả notebook
+  model_status: "ALIGNED" | "EXTERNAL" | "UNCLEAR" | null   đề xuất ban đầu của model
+  status: "ALIGNED" | "EXTERNAL" | "UNCLEAR" | "NOT_EVALUATED"   kết quả sau hậu kiểm
+  reason: str                          lời giải thích của AI (UI ghi rõ tác giả là AI)
+  evidence: [{cell, start_line, end_line, snippet}]   snippet do server dựng lại từ notebook
+  rejected_evidence: [{cell, start_line, end_line, code}]   code: CELL_NOT_FOUND | CELL_NOT_CODE | RANGE_INVALID
+  validation_codes: [str]              SOURCE_ASSESSMENT_MISSING | SOURCE_RESOURCES_MISSING | SOURCE_EVIDENCE_MISSING |
+                                       SOURCE_EVIDENCE_INVALID | SOURCE_EVIDENCE_PARTIALLY_INVALID | SOURCE_NOTEBOOK_TRUNCATED
+}
+source_signals: [...]                  ADR-055; **row cũ, không còn được ghi** - chỉ đọc lịch sử
+source_warning_count: int              ADR-055; row cũ, không còn được ghi hay đọc
 resources_configured: int               số link trong revision dùng đối chiếu
-resources_in_notebook: [{label, cells: [int]}]   ADR-059; quét CODE cell, admin-only; [] = quét rồi không thấy, vắng = row trước ADR-059
+resources_in_notebook: [{label, cells: [int]}]   ADR-059; quét CODE cell, admin-only; [] = quét rồi không thấy, vắng = row trước ADR-059; từ ADR-062 chỉ là dữ kiện phụ, không quyết định status
 notebook_sha256: str                   luôn bằng SHA-256 của bytes gốc đã gửi model
 notebook_normalized_sha256: str        SHA-256 của bản đã chuẩn hoá
 notebook_stats: {cells, code_cells, markdown_cells, lines, truncated, omitted_cells}
@@ -439,7 +448,7 @@ provider: "openai_compatible"
 provider_host, model
 prompt_version, normalization_version, context_policy_version
 canonicalization_version, rule_ref_version, verifier_version   ADR-045; row cũ thiếu ⇒ đọc ra null
-source_signal_version: str             ADR-055; row cũ thiếu ⇒ đọc ra null
+source_signal_version: str             ADR-055; từ ADR-062 version mới đánh dấu assessment; row cũ thiếu ⇒ đọc ra null
 cache_key
 source: "PROVIDER" | "CACHE" | "PIPELINE"
 reused_from_review_id: ObjectId | null

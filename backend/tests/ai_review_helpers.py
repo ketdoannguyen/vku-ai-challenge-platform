@@ -194,7 +194,6 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
                         {
                             **revision_pages(markdown)[0],
                             "content_id": ObjectId(),
-                            "visibility": "public",
                             "markdown_sha256": hashlib.sha256(encoded).hexdigest(),
                             "size_bytes": len(encoded),
                         }
@@ -242,6 +241,8 @@ async def seed(db, *, markdown=MARKDOWN, content_hash="content-1", slug="ai-cup"
             "verdict": None,
             "summary": None,
             "participant_summary": None,
+            "source_status": None,
+            "source_signal_version": None,
             "latest_review_id": None,
             "requested_at": now,
             "updated_at": now,

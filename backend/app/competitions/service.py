@@ -215,17 +215,30 @@ def validate_update(competition: dict, changes: dict) -> dict:
     return updates
 
 
-def public_competition(competition: dict, membership: dict | None = None) -> dict:
-    """Representation cho guest/participant - không bao giờ lộ join_code_hash, created_by."""
+def competition_summary(competition: dict, membership: dict | None, account: dict | None) -> dict:
+    """Representation giới thiệu cho list và landing detail: thông tin thẻ + trạng thái quyền đọc.
+
+    Không chứa resources/submission_config - nội dung bên trong chỉ nằm ở `public_competition`
+    khi quyền đọc được cấp. Không bao giờ lộ join_code_hash, created_by.
+    """
+    from app.competitions.access import read_access
     from app.memberships.service import public_membership
 
     return {
-        **_competition_core(competition),
+        **_competition_landing(competition),
+        "primary_metric_label": _primary_metric_label(competition),
         "membership": public_membership(membership),
-        "submission_config": _submission_config(
-            competition, include_pos_label=_is_active_member(membership), participant=True
-        ),
+        "access": read_access(membership, account),
     }
+
+
+def public_competition(competition: dict, membership: dict | None, account: dict | None) -> dict:
+    """Representation cho participant: summary + nội dung bên trong khi quyền đọc được cấp."""
+    payload = competition_summary(competition, membership, account)
+    if payload["access"]["allowed"]:
+        payload["resources"] = public_resources(competition)
+        payload["submission_config"] = _submission_config(competition, participant=True)
+    return payload
 
 
 def admin_competition(competition: dict) -> dict:
@@ -233,16 +246,15 @@ def admin_competition(competition: dict) -> dict:
     from app.memberships.service import public_membership
 
     return {
-        **_competition_core(competition),
+        **_competition_landing(competition),
+        "resources": public_resources(competition),
         "created_by": competition["created_by"],
         "membership": public_membership(None),
-        "submission_config": _submission_config(
-            competition, include_pos_label=True, participant=False
-        ),
+        "submission_config": _submission_config(competition, participant=False),
     }
 
 
-def _competition_core(competition: dict) -> dict:
+def _competition_landing(competition: dict) -> dict:
     return {
         "id": str(competition["_id"]),
         "slug": competition["slug"],
@@ -256,21 +268,35 @@ def _competition_core(competition: dict) -> dict:
         "quota_per_day": competition["quota_per_day"],
         "leaderboard_visible": competition["leaderboard_visible"],
         "join_code_configured": bool(competition.get("join_code_hash")),
-        "resources": public_resources(competition),
         "normalization": normalization.config_view(competition),
     }
 
 
-def _is_active_member(membership: dict | None) -> bool:
-    return membership is not None and membership.get("active", True)
+def _primary_metric_label(competition: dict) -> str | None:
+    """Nhãn metric chính theo hợp đồng thí sinh cho thẻ tóm tắt.
+
+    None khi chưa cấu hình hoặc metric chính bị admin ẩn - không rơi về `primary_metric` của
+    document v2 vì field đó là di sản v1, không phải metric đang được chấm.
+    """
+    from app.scoring import contracts
+
+    contract = contracts.participant_contract(competition)
+    key = contract.primary_metric
+    if not key:
+        return None
+    for metric in contract.metrics:
+        if metric.key == key:
+            return metric.label
+    return key
 
 
-def _submission_config(competition: dict, *, include_pos_label: bool, participant: bool) -> dict:
+def _submission_config(competition: dict, *, participant: bool) -> dict:
     """Dạng bài nộp và metric mà UI cần, đọc theo đúng đời cấu hình của cuộc thi.
 
-    `pos_label` là nhãn dương thật nên chỉ trả cho admin và thành viên đang hoạt động.
-    `participant` chọn hợp đồng thí sinh: metric admin ẩn không rời khỏi backend. Cuộc thi v1 giữ
-    nguyên hình dạng cũ; v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
+    Chỉ được gọi từ payload đã qua kiểm quyền đọc (thành viên đang hoạt động hoặc admin) nên
+    `pos_label` - nhãn dương thật của ground truth - luôn được phép trả. `participant` chọn hợp
+    đồng thí sinh: metric admin ẩn không rời khỏi backend. Cuộc thi v1 giữ nguyên hình dạng cũ;
+    v2 trả schema submission để sinh hướng dẫn/CSV mẫu.
     """
     from app.core.config import get_settings
     from app.scoring import contracts, models
@@ -306,8 +332,7 @@ def _submission_config(competition: dict, *, include_pos_label: bool, participan
     payload["id_column"] = config["id_column"] if config else None
     payload["prediction_column"] = config["prediction_column"] if config else None
     payload["average"] = config["average"] if config else None
-    if include_pos_label:
-        payload["pos_label"] = config.get("pos_label") if config else None
+    payload["pos_label"] = config.get("pos_label") if config else None
     return payload
 
 

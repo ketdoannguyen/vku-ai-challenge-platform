@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { CompetitionDetail } from "../api/competitions";
 import { setDocumentHidden } from "../test/timers";
 import { LeaderboardPage } from "./LeaderboardPage";
 
@@ -18,19 +18,39 @@ async function advance(ms: number) {
   });
 }
 
-const COMPETITION = {
+const COMPETITION: CompetitionDetail = {
   id: "64a000000000000000000001",
   slug: "results-cup",
   name: "Results Cup",
+  short_description: "",
+  status: "published",
+  start_at: "2026-01-01T00:00:00Z",
+  end_at: "2027-01-01T00:00:00Z",
+  join_mode: "open",
   primary_metric: "f1",
+  quota_per_day: 5,
   leaderboard_visible: true,
-} as Competition;
+  join_code_configured: false,
+  primary_metric_label: "F1",
+  membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  access: { allowed: true, reason: null },
+  resources: [],
+  submission_config: {
+    ready: true,
+    id_column: "id",
+    prediction_column: "prediction",
+    average: "binary",
+    pos_label: "1",
+    max_upload_mb: 10,
+    max_notebook_mb: 20,
+  },
+};
 
 /**
  * Cuộc thi v2 khai báo metric riêng. `primary_metric` của document vẫn là "f1" (field v1 còn sót
  * lại) nên test này chứng minh bảng đọc hợp đồng chứ không đọc field cũ đó.
  */
-const V2_COMPETITION: Competition = {
+const V2_COMPETITION: CompetitionDetail = {
   ...COMPETITION,
   submission_config: {
     ready: true,
@@ -48,7 +68,7 @@ const V2_COMPETITION: Competition = {
 };
 
 /** Bản nháp v2 chưa khai báo metric: hợp đồng rỗng, không metric nào là chỉ số chính. */
-const V2_DRAFT_COMPETITION: Competition = {
+const V2_DRAFT_COMPETITION: CompetitionDetail = {
   ...COMPETITION,
   submission_config: {
     ready: false,
@@ -61,11 +81,14 @@ const V2_DRAFT_COMPETITION: Competition = {
   },
 };
 
-function renderPage(competition: Competition = COMPETITION) {
+/** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
+const reportAccessLost = vi.fn();
+
+function renderPage(competition: CompetitionDetail = COMPETITION) {
   return render(
     <MemoryRouter initialEntries={["/competitions/results-cup/leaderboard"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition, contents: [] }} />}>
+        <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/leaderboard" element={<LeaderboardPage />} />
         </Route>
       </Routes>
@@ -80,8 +103,8 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function mockResponse(body: unknown) {
-  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body)));
+function mockResponse(body: unknown, status = 200) {
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body, status)));
 }
 
 /** Fetch phân trang thật; `gateOffset` giữ response của một trang lại để kiểm tra lúc đang tải. */
@@ -146,6 +169,7 @@ function entry(rank: number, name: string, overrides: Record<string, unknown> = 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  reportAccessLost.mockClear();
   vi.useRealTimers();
   setDocumentHidden(false);
 });
@@ -277,6 +301,16 @@ test("leaderboard hidden hiển thị thông báo và không gọi API", async (
   // Chưa công bố thì cả vòng tự làm mới ngầm cũng không được chạy.
   await advance(AUTO_REFRESH_MS * 5);
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("mất quyền đọc cuộc thi: báo shell khóa gate thay vì hiện lỗi tải bảng", async () => {
+  mockResponse({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, 401);
+
+  renderPage();
+
+  await waitFor(() => expect(reportAccessLost).toHaveBeenCalledWith("login_required"));
+  // Lỗi phân quyền không phải lỗi tải: không hiện băng báo lỗi, shell sẽ thay cả trang.
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("leaderboard visible nhưng chưa có điểm hiển thị empty state", async () => {
@@ -638,9 +672,12 @@ test("bảng bị ẩn giữa chừng: 403 xoá điểm đã tải thay vì đ�
 
   hidden = true;
   await advance(AUTO_REFRESH_MS);
-  // Quyền xem đã mất: điểm cũ không được nằm lại trên màn hình.
+  // Bảng vừa bị ẩn: điểm cũ không được nằm lại trên màn hình. Shell sẽ phát hiện qua lượt
+  // làm mới của chính nó và thay bằng thẻ "chưa công bố", nên trang bảng không báo lỗi.
   expect(screen.queryByText("Người 1")).toBeNull();
-  expect(screen.getByRole("alert")).toHaveTextContent("Bảng xếp hạng hiện chưa được công bố.");
+  expect(screen.queryByRole("alert")).toBeNull();
+  // Ẩn bảng không phải mất quyền đọc cuộc thi - không được khóa cả gate.
+  expect(reportAccessLost).not.toHaveBeenCalled();
 
   // 403 là lỗi quyền: vòng tự làm mới dừng hẳn, không quay lại hỏi nữa.
   const calls = urls.length;

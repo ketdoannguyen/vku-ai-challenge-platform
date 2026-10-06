@@ -19,7 +19,6 @@ async def _seed(
     title="Đề bài",
     slug="problem",
     order=10,
-    visibility="public",
     markdown="Nội dung thể lệ.",
     size_bytes=None,
     content_id=None,
@@ -39,7 +38,6 @@ async def _seed(
         "title": title,
         "slug": slug,
         "order": order,
-        "visibility": visibility,
         "markdown_path": relative,
         "size_bytes": stored_size,
         "created_at": datetime.now(timezone.utc),
@@ -66,12 +64,38 @@ async def test_pages_follow_display_order_then_id(mock_db, tmp_path):
     assert [page.content_id for page in revision.pages] == [first, tie_small, tie_large, last]
 
 
-async def test_public_and_members_pages_are_both_part_of_the_policy(mock_db, tmp_path):
-    await _seed(mock_db, tmp_path, slug="problem", visibility="public")
-    await _seed(mock_db, tmp_path, slug="rules", visibility="members")
+async def test_every_page_with_markdown_is_part_of_the_policy(mock_db, tmp_path):
+    """Không còn nhãn public/members: mọi page có Markdown đều vào policy."""
+    await _seed(mock_db, tmp_path, slug="problem")
+    await _seed(mock_db, tmp_path, slug="rules")
     revision = await _capture(mock_db, tmp_path)
     assert revision.page_count == 2
-    assert {page.visibility for page in revision.pages} == {"public", "members"}
+    assert {page.slug for page in revision.pages} == {"problem", "rules"}
+
+
+async def test_legacy_document_with_visibility_field_is_still_captured(mock_db, tmp_path):
+    """Document cũ còn field `visibility` đi cùng đường - field thừa trong DB bị bỏ qua."""
+    content_id = ObjectId()
+    markdown = "Nội dung thể lệ."
+    path = content_file_path(tmp_path, str(COMPETITION), str(content_id))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(markdown, encoding="utf-8")
+    await mock_db[content_snapshot.CONTENTS_COLLECTION].insert_one(
+        {
+            "_id": content_id,
+            "competition_id": COMPETITION,
+            "title": "Thể lệ",
+            "slug": "legacy",
+            "order": 10,
+            "visibility": "members",
+            "markdown_path": f"competitions/{COMPETITION}/content/{content_id}.md",
+            "size_bytes": len(markdown.encode()),
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        }
+    )
+    revision = await _capture(mock_db, tmp_path)
+    assert [page.slug for page in revision.pages] == ["legacy"]
 
 
 async def test_page_without_markdown_is_excluded_and_reported(mock_db, tmp_path):

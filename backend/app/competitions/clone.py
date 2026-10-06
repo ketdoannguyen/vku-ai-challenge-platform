@@ -213,8 +213,7 @@ async def populate(db, clone: dict, data: SourceSnapshot) -> dict:
             copied = await contents.insert_content(
                 db, clone["_id"],
                 contents.ContentCreate(
-                    title=page["title"], slug=page["slug"],
-                    order=page["order"], visibility=page["visibility"],
+                    title=page["title"], slug=page["slug"], order=page["order"],
                 ),
             )
             if markdown is not None:

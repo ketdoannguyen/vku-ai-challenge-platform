@@ -15,7 +15,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type {
   AdminCompetition,
-  Competition,
   CompetitionResource,
 } from "../api/competitions";
 import {
@@ -92,7 +91,7 @@ const SUMMARY_FACTS: ReadonlyArray<{
   label: string;
   Icon: IconComponent;
   mono?: boolean;
-  read: (competition: Competition) => ReactNode;
+  read: (competition: AdminCompetition) => ReactNode;
 }> = [
   { label: "Slug", Icon: IconTag, mono: true, read: (c) => c.slug },
   { label: "Bắt đầu", Icon: IconCalendar, read: (c) => formatLocal(c.start_at) },
@@ -905,7 +904,7 @@ export function AdminCompetitionDetailPage() {
 /** Nhịp tự làm mới ngầm khi tab Kết quả đang mở. */
 const RESULTS_AUTO_REFRESH_MS = 3_000;
 
-function ResultsPanel({ competition }: { competition: Competition }) {
+function ResultsPanel({ competition }: { competition: AdminCompetition }) {
   const contract = resultContract(competition.submission_config);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
@@ -1471,7 +1470,7 @@ function ScoringPanel({
   competition,
   onCompetitionChanged,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   // Readiness của publish nằm ở state trang cha, nên panel phải báo lại sau mỗi lần đổi
   // config/ground truth - nếu không banner "Chưa thể publish" và nút Publish đứng hình.
   onCompetitionChanged: () => Promise<void>;
@@ -2328,7 +2327,6 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
                 <th scope="col">Thứ tự</th>
                 <th scope="col">Tiêu đề</th>
                 <th scope="col">Slug</th>
-                <th scope="col">Hiển thị</th>
                 <th scope="col">File</th>
                 <th scope="col">Thao tác</th>
               </tr>
@@ -2336,7 +2334,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="table-state">
+                  <td colSpan={5} className="table-state">
                     <Loading />
                   </td>
                 </tr>
@@ -2359,7 +2357,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
                 ))
               ) : error ? null : (
                 <tr>
-                  <td colSpan={6} className="table-state">
+                  <td colSpan={5} className="table-state">
                     Chưa có trang nội dung nào.
                   </td>
                 </tr>
@@ -2515,12 +2513,6 @@ function ContentRow({
           <code>{content.slug}</code>
         </td>
         <td>
-          <span className={`status-badge ${content.visibility === "members" ? "warning" : "neutral"}`}>
-            <span className="status-dot" />
-            {content.visibility === "members" ? "Chỉ thành viên" : "Mọi thí sinh"}
-          </span>
-        </td>
-        <td>
           {content.size_bytes !== null ? (
             <span className="status-badge success file-status-badge">
               <span>Đã upload</span>
@@ -2583,7 +2575,7 @@ function ContentRow({
       </tr>
       {rowError && (
         <tr>
-          <td colSpan={6} className="table-state error-cell">
+          <td colSpan={5} className="table-state error-cell">
             <span role="alert">{rowError}</span>
           </td>
         </tr>
@@ -2607,7 +2599,6 @@ function ContentFormModal({
   const [title, setTitle] = useState(content?.title ?? "");
   // Sửa trang cũng bám theo tiêu đề: đổi tiêu đề là đổi URL trang nội dung.
   const { slug, onTitleChange, onSlugChange } = useAutoSlug(content?.slug ?? "", true);
-  const [visibility, setVisibility] = useState<"public" | "members">(content?.visibility ?? "public");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -2615,7 +2606,7 @@ function ContentFormModal({
     e.preventDefault();
     setBusy(true);
     setError("");
-    const payload = { title, slug: slug.trim().toLowerCase(), visibility };
+    const payload = { title, slug: slug.trim().toLowerCase() };
     try {
       if (isEdit) {
         await api.patch(`/admin/competitions/${competitionId}/contents/${content.id}`, payload);
@@ -2669,20 +2660,6 @@ function ContentFormModal({
                 ? "Bám theo tiêu đề: sửa tiêu đề là đổi URL trang. Gõ tay để tự chọn slug khác."
                 : "Tự điền theo tiêu đề, gõ tay để đổi."}
             </small>
-          </div>
-          <div className="form-field">
-            <label className="field-label" htmlFor="content-visibility">
-              Hiển thị cho
-            </label>
-            <select
-              id="content-visibility"
-              className="input"
-              value={visibility}
-              onChange={(e) => setVisibility(e.target.value as "public" | "members")}
-            >
-              <option value="public">Mọi thí sinh</option>
-              <option value="members">Chỉ thành viên cuộc thi</option>
-            </select>
           </div>
         </div>
         {error && (
@@ -3430,7 +3407,7 @@ function JoinCodePanel({
   competition,
   onCompetitionChanged,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   onCompetitionChanged: () => Promise<void>;
 }) {
   const [codeConfigured, setCodeConfigured] = useState(competition.join_code_configured);
@@ -3551,7 +3528,7 @@ function JoinCodePanel({
   );
 }
 
-function MembersPanel({ competition }: { competition: Competition }) {
+function MembersPanel({ competition }: { competition: AdminCompetition }) {
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [total, setTotal] = useState(0);
   const [activeTotal, setActiveTotal] = useState(0);

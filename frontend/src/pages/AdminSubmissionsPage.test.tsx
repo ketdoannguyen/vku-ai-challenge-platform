@@ -37,7 +37,7 @@ const ROW: GlobalSubmissionItem = {
   },
   account: { id: "a1", name: "Đội 1", email: "team1@vku.vn" },
   competition: { id: "c1", slug: "cup-1", name: "Cup 1" },
-  // Chưa từng bị xét duyệt: mặc định hợp lệ.
+  // Chưa từng bị xét duyệt: chưa có quyết định nào của BTC, không phải đã hợp lệ.
   review: null,
   // Cuộc thi chưa từng bật AI lúc nộp bài.
   ai_review: null,
@@ -913,9 +913,13 @@ test("trường Xét duyệt là badge có chữ; lý do, người duyệt và t
     within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
   ).toBeTruthy();
 
-  // Chưa từng bị xét duyệt nghĩa là hợp lệ, và chỉ có thao tác từ chối.
+  // Chưa từng bị xét duyệt không phải "hợp lệ": badge phải nói rõ chưa có quyết định, nếu không
+  // BTC đọc nhầm thành một phán quyết đã duyệt. Thao tác thì vẫn chỉ có từ chối.
   const validItem = itemOf("Đội hợp lệ");
-  expect(statusBadge(validItem, "Xét duyệt")).toHaveAttribute("aria-label", "Hợp lệ");
+  expect(statusBadge(validItem, "Xét duyệt")).toHaveAttribute(
+    "aria-label",
+    "Chưa có quyết định BTC",
+  );
   expect(
     within(fieldValue(validItem, "Thao tác")).getByRole("button", { name: "Không chấp nhận" }),
   ).toBeTruthy();
@@ -1255,15 +1259,51 @@ test("trường AI hiện kết luận sơ bộ, bài chưa từng được đá
   );
 });
 
-test("cảnh báo nguồn dataset hiện riêng với kết luận CLEAR", async () => {
+test("trạng thái nguồn là trục riêng, không bị kết luận CLEAR che mất", async () => {
   mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: {
-    ...AI_PROJECTION, verdict: "CLEAR", source_warning_count: 1,
+    ...AI_PROJECTION, verdict: "CLEAR", source_status: "EXTERNAL", source_signal_version: "v3",
   } }])));
   renderPage();
   await screen.findByText("Đội 0");
   const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
   expect(within(cell).getByText("Không phát hiện")).toBeTruthy();
-  expect(within(cell).getByText("Nguồn dữ liệu cần kiểm tra")).toBeTruthy();
+  expect(within(cell).getByText("AI: Có dấu hiệu dùng nguồn ngoài")).toBeTruthy();
+});
+
+test("lượt cũ thiếu trạng thái nguồn không được im lặng như đã sạch", async () => {
+  // Row COMPLETED trước phiên bản assessment: không có source_status. Thiếu dữ kiện không phải
+  // bằng chứng sạch, nên badge nguồn vẫn phải hiện - nhưng là nhãn "chưa đánh giá theo phiên bản
+  // mới" chứ không phải một nhãn sạch.
+  mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: {
+    ...AI_PROJECTION, verdict: "CLEAR",
+  } }])));
+  renderPage();
+  await screen.findByText("Đội 0");
+  const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
+  expect(within(cell).getByText("Không phát hiện")).toBeTruthy();
+  expect(within(cell).getByText("Nguồn: Chưa đánh giá theo phiên bản mới")).toBeTruthy();
+});
+
+test("trạng thái nguồn chưa đánh giá được hiện đúng nhãn riêng", async () => {
+  mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: {
+    ...AI_PROJECTION, verdict: "INCONCLUSIVE", source_status: "NOT_EVALUATED",
+  } }])));
+  renderPage();
+  await screen.findByText("Đội 0");
+  const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
+  expect(within(cell).getByText("Nguồn: Chưa đánh giá được")).toBeTruthy();
+});
+
+test("lượt AI lỗi không có trạng thái nguồn nào để hiện", async () => {
+  // ERROR không phải một kết luận về nguồn: không được thêm badge nguồn giả.
+  mockApi(() => jsonResponse(pageOf([{ ...AI_ROW, ai_review: {
+    ...AI_PROJECTION, verdict: "ERROR", source_status: null,
+  } }])));
+  renderPage();
+  await screen.findByText("Đội 0");
+  const cell = fieldValue(itemOf("Đội 0"), "AI sơ bộ");
+  expect(within(cell).getByText("Chưa hoàn tất")).toBeTruthy();
+  expect(within(cell).queryByText(/^Nguồn:/)).toBeNull();
 });
 
 test("vạch nhấn ở lề thẻ lấy mức nặng nhất trong ba trục", async () => {
@@ -1339,6 +1379,31 @@ test("lọc theo kết luận AI là trục riêng, không lẫn với trạng t
   });
   await waitFor(() => expect(lastParams(urls).get("review")).toBe("accepted"));
   expect(lastParams(urls).get("ai_review")).toBe("flagged");
+});
+
+test("ba bộ lọc nguồn mới nằm cùng trục AI và gửi đúng giá trị", async () => {
+  const { urls } = mockApi();
+  renderPage();
+  await screen.findByText("Đội 0");
+
+  const filter = screen.getByLabelText("Lọc theo kết luận AI");
+  const labels = within(filter).getAllByRole("option").map((option) => option.textContent);
+  for (const label of [
+    "AI: Có dấu hiệu dùng nguồn ngoài",
+    "Nguồn: Chưa xác minh",
+    "Nguồn: Chưa đánh giá được",
+  ]) {
+    expect(labels).toContain(label);
+  }
+
+  for (const value of ["source_external", "source_unclear", "source_not_evaluated"]) {
+    fireEvent.change(filter, { target: { value } });
+    await waitFor(() => expect(lastParams(urls).get("ai_review")).toBe(value));
+    expect(lastParams(urls).get("offset")).toBe("0");
+    // Trục nguồn không được kéo theo trạng thái chấm hay trạng thái duyệt.
+    expect(lastParams(urls).has("status")).toBe(false);
+    expect(lastParams(urls).has("review")).toBe(false);
+  }
 });
 
 test("Chi tiết AI mở đúng modal và chạy lại làm mới bảng mà không đụng tới trục duyệt", async () => {

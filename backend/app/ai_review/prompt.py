@@ -60,22 +60,42 @@ chấm thành công không chứng minh notebook tái lập được CSV đó. N
 `id/prediction`, TODO hoặc code chưa chạy không chứng minh CSV đã nộp sai header, thiếu dòng hay \
 không được chấm. Chỉ được nhận xét notebook chưa chứng minh cách tạo CSV tương ứng, không tuyên bố \
 file thực nộp sai định dạng. Phân biệt rõ lỗi khả năng tái lập notebook với tính hợp lệ của file CSV.
-- Độc lập với findings/verdict, ghi `source_signals` cho CODE cell có dấu hiệu lấy DATASET \
-từ URL/ID (kể cả Drive và nguồn ngoài), kể cả khi thể lệ không có điều cấm. Trích đúng cell/dòng \
-chứa lời gọi hoặc URL/ID. Không ghi tín hiệu từ markdown, comment, `pip install`, tải model weights \
-hay API dự đoán không dùng để lấy dataset. Link cùng file hoặc thư mục BTC cấp là hợp lệ; file \
-trong thư mục chỉ có thể xác nhận khi có bằng chứng rõ, không suy ra membership từ ID. URL động, \
-redirect, tệp địa phương không rõ nguồn: chỉ nêu cần xem lại, không tự nhận đã đối chiếu được. \
-Không nói notebook đã được chạy hoặc dữ liệu đã thực sự tải; `source_signals` là dấu hiệu code tĩnh \
-cho BTC, không tự thay đổi verdict hay chứng minh vi phạm.
-- Chỉ link/ID nằm trong <COMPETITION_RESOURCES> là nguồn dataset được chấp nhận. Quét TOÀN BỘ CODE \
-cell, không chỉ chỗ đã có nghi vấn: mọi lời gọi nạp dataset từ nguồn khác — Drive cá nhân \
-(`drive.mount` rồi đọc `/content/drive/MyDrive/...` hay `/content/drive/Shareddrives/...`), link/ID \
-Drive không có trong danh sách, link khác, nguồn ngoài — đều phải có `source_signals` riêng tại \
-đúng cell/dòng, kể cả khi notebook cũng dùng link BTC cấp ở cell khác (trộn nguồn rồi gộp dữ liệu).
-- `reason` của tín hiệu nguồn gọi tên nhóm nguồn: "link BTC cấp", "Drive cá nhân", "Drive không rõ", \
-"link khác" hoặc "nguồn ngoài". Tối đa 10 tín hiệu: nhiều chỗ nạp cùng nhóm thì gộp một tín hiệu và \
-nêu các cell còn lại trong `reason`.
+- Độc lập với findings/verdict, đánh giá nguồn dữ liệu của CẢ notebook trong `source_assessment` \
+(một object: status, reason, evidence), kể cả khi thể lệ không có điều cấm. Đây là dấu hiệu code \
+tĩnh cho BTC xem xét: nó không tự thay đổi verdict, và verdict CLEAR không có nghĩa nguồn đã được \
+xác minh. Nhắc link BTC, để link trong comment, hay gán biến rồi không dùng KHÔNG chứng minh đã \
+dùng dữ liệu BTC.
+- `status` = ALIGNED khi nối được toàn pipeline về nguồn BTC cấp: dẫn các đoạn cho thấy link BTC \
+được định nghĩa, rồi dữ liệu được tải/đọc/sử dụng. Link định nghĩa ở cell trước và biến được dùng \
+ở cell sau, hay dữ liệu đi qua biến hoặc đường dẫn trung gian, không phải lý do để hạ thấp. Đường \
+dẫn hay lệnh dùng link/ID TRÙNG tài nguyên trong <COMPETITION_RESOURCES> vẫn là nguồn BTC kể cả \
+khi đọc qua Drive cá nhân đã mount (`/content/drive/MyDrive/<ID>/...` hay \
+`/content/drive/Shareddrives/<ID>/...`) - đó là cách đọc folder BTC sau `drive.mount`. Cuộc thi có \
+nhiều tài nguyên BTC: dùng MỘT trong số đó là đủ.
+- `status` = EXTERNAL khi code nạp/sử dụng dataset từ nguồn không được cấp, với bằng chứng nêu \
+đích danh nguồn ngoài: tải từ domain/URL ngoài (kaggle, huggingface, archive), `load_dataset` của \
+dataset ngoài, hoặc nguồn ngoài khác được nêu đích danh. Dẫn đúng chỗ code DÙNG nguồn đó, không \
+chỉ chỗ nhắc URL, kể cả khi notebook cũng dùng nguồn BTC ở cell khác (trộn nguồn rồi gộp dữ \
+liệu). Chỉ `drive.mount`, hay đường dẫn/link/ID không trùng tài nguyên BTC nào, tự nó KHÔNG phải \
+bằng chứng nguồn ngoài: file có thể nằm trong folder BTC cấp (danh sách không liệt kê từng file) - \
+trường hợp đó là UNCLEAR, không tự kết luận ngoài.
+- `status` = UNCLEAR khi chưa nối được nguồn gốc: tệp đã upload sẵn (ZIP/CSV) không thể hiện được \
+tải từ đâu; tệp cục bộ không rõ nguồn gốc; đọc từ Drive cá nhân/Shareddrives mà không dùng link/ID \
+trùng tài nguyên BTC; link/ID không trùng tài nguyên BTC nhưng chưa rõ có thuộc folder BTC hay \
+không (ví dụ `gdown --id <ID lạ>` rồi đọc tệp: chỉ "không thấy link BTC" hoặc một ID trơ trọi \
+không đủ để kết luận EXTERNAL); chỉ có bằng chứng gián tiếp như tên tệp trùng, cấu trúc \
+cột, số dòng hay điểm cao; URL chỉ được nhắc ở markdown/comment; quan hệ file trong folder chưa \
+xác minh - không suy ra membership của file từ ID thư mục; hoặc mã quan trọng nằm ngoài notebook. \
+Tệp cục bộ được tải/giải nén từ nguồn BTC ngay trong notebook thì dẫn đúng đoạn tải/giải nén đó.
+- Notebook có thể bị lược bớt khi quá dài và bạn không thấy phần bị lược: nếu trong phần đã đọc \
+chưa đủ nối nguồn gốc thì trả UNCLEAR và nói rõ phạm vi đã đọc; không mặc định phần không thấy là \
+tuân thủ.
+- `reason` tối đa 1.000 ký tự, giải thích ngắn gọn toàn pipeline và nhóm nguồn. `evidence` tối đa \
+10 khoảng cell/dòng cho một đánh giá gộp: gộp các đoạn của cùng một mạch, không kể lể từng cell. \
+UNCLEAR được phép không có trích dẫn; khi đó nói rõ chưa nối được nguồn gốc, không bịa vị trí. \
+Không nói notebook đã được chạy hoặc dữ liệu đã thực sự tải.
+- Findings, summary và đánh giá nguồn phải nhất quán: khi nguồn chưa rõ (ví dụ ZIP upload sẵn), \
+không khẳng định nguồn đã tuân thủ chỉ vì tệp đúng cấu trúc.
 - Quy định không thể kiểm chứng chỉ từ notebook phải ghi \
 `{"checkability": "NOT_CHECKABLE_FROM_NOTEBOOK"}` và KHÔNG được tạo ra vi phạm.
 - Nếu logic quan trọng nằm trong module riêng tư không có source trong notebook, hãy kết luận \
@@ -104,13 +124,16 @@ nhưng đứt giữa chừng.
     "status": "VIOLATION|COMPLIANT|UNCLEAR",
     "reason": "vì sao",
     "evidence": [{"cell": 1, "start_line": 1, "end_line": 2, "snippet": "đoạn trích"}]}],
- "source_signals": [{"cell": 1, "start_line": 1, "end_line": 2,
-                     "reason": "dấu hiệu lấy dataset cần đối chiếu"}]}
+ "source_assessment": {"status": "ALIGNED|EXTERNAL|UNCLEAR",
+                       "reason": "vì sao, ngắn gọn cho cả pipeline",
+                       "evidence": [{"cell": 1, "start_line": 1, "end_line": 2}]}}
 
-Không gửi bất kỳ field nào ngoài schema trên. Trường `snippet` không bắt buộc: máy chủ tự dựng lại \
+Không gửi bất kỳ field nào ngoài schema trên. Mục `source_assessment` bắt buộc: thiếu nó nghĩa là \
+lượt review không có đánh giá nguồn dùng được. Trường `snippet` không bắt buộc: máy chủ tự dựng lại \
 đoạn trích từ đúng cell/dòng bạn nêu. Trường `rule_quote` không bắt buộc nhưng nên có.
 Trường `participant_summary` không bắt buộc, nhưng dài quá 200 ký tự thì cả câu trả lời bị coi là \
-không hợp lệ."""
+không hợp lệ. Kết thúc câu trả lời ngay tại dấu `}` đóng object: sau đó không thêm bất kỳ ký tự \
+nào - không thẻ đóng, không ngoặc thừa, không văn bản."""
 
 
 @dataclass(frozen=True)

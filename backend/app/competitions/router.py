@@ -1,7 +1,9 @@
 """Participant competition API: list published/closed, detail by slug. Draft luôn ẩn.
 
-Đọc công khai (ADR-014): khách chưa đăng nhập vẫn xem được, chỉ là không có membership
-nên `membership.active` luôn false. Draft vẫn ẩn với mọi đối tượng.
+Thẻ giới thiệu vẫn công khai cho mọi người, nhưng nội dung bên trong cuộc thi chỉ dành cho
+thành viên đang hoạt động hoặc admin. List/detail trả `access` để frontend biết mở hay khóa
+landing; `resources`/`submission_config` chỉ xuất hiện khi quyền đọc được cấp (xem
+`app.competitions.access`). Draft vẫn ẩn với mọi đối tượng.
 """
 
 from datetime import datetime, timezone
@@ -36,8 +38,9 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         await memberships_by_competition(db, competition_ids, account["_id"]) if account else {}
     )
     submission_counts = await service.submission_counts(db, competition_ids)
-    # Hạng/điểm chỉ có nghĩa với thành viên đang hoạt động; tổng bài đã nộp thì mọi account đã
-    # đăng nhập đều có (kể cả non-member). Một aggregation cho cả trang, không truy vấn per-card.
+    # Số liệu cá nhân (hạng/điểm/bài đã nộp) chỉ có nghĩa với thành viên đang hoạt động - người
+    # chưa tham gia hoặc đã bị vô hiệu hóa không nhận gì. Một aggregation cho cả trang, không
+    # truy vấn per-card; không có cuộc thi nào đủ điều kiện thì bỏ luôn lượt đọc.
     active_id_set = {
         competition_id
         for competition_id, membership in memberships.items()
@@ -47,7 +50,7 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         await submissions_service.my_stats_by_competition(
             db, competition_ids, account["_id"], datetime.now(timezone.utc)
         )
-        if account
+        if active_id_set
         else {}
     )
     # Account doc đã nằm sẵn trong request.state từ middleware - không tốn truy vấn cho cờ ghim.
@@ -55,19 +58,17 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
     return {
         "competitions": [
             {
-                **service.public_competition(competition, memberships.get(competition["_id"])),
+                **service.competition_summary(
+                    competition, memberships.get(competition["_id"]), account
+                ),
                 "submission_count": submission_counts[competition["_id"]],
                 "pinned": competition["_id"] in pinned_ids,
                 **(
-                    {"my_submission_count": my_stats[competition["_id"]]["total"]}
-                    if account
-                    else {}
-                ),
-                **(
                     {
+                        "my_submission_count": my_stats[competition["_id"]]["total"],
                         "my_stats": await _my_stats(
                             db, competition, account["_id"], my_stats[competition["_id"]]
-                        )
+                        ),
                     }
                     if competition["_id"] in active_id_set
                     else {}
@@ -122,7 +123,7 @@ async def get_competition_by_slug(slug: str, request: Request, account: Optional
     if competition is None or competition["status"] == "draft":
         raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
     membership = await get_membership(db, competition["_id"], account["_id"]) if account else None
-    payload = service.public_competition(competition, membership)
+    payload = service.public_competition(competition, membership, account)
     # Quota chỉ tốn một count_documents nên chỉ tính khi thật sự dùng được: thành viên đang
     # hoạt động của cuộc thi đang mở. List cố ý không tính để tránh N+1.
     if (

@@ -6,7 +6,7 @@ import {
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
 } from "../api/aiReview";
-import { formatLocal } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import {
   fetchMySubmissions,
   formatMetric,
@@ -32,7 +32,7 @@ const PAGE_SIZE = 50;
 const AUTO_REFRESH_MS = 3_000;
 
 export function MySubmissionsPage() {
-  const { competition } = useOutletContext<CompetitionContext>();
+  const { competition, reportAccessLost } = useOutletContext<CompetitionContext>();
   // Cuộc thi v2 khai báo metric riêng, nên cột chỉ số lấy từ hợp đồng thay vì cố định f1/precision/recall.
   const contract = resultContract(competition.submission_config);
   const primaryMetric = contract.metrics.find((metric) => metric.key === contract.primary_metric);
@@ -87,8 +87,16 @@ export function MySubmissionsPage() {
         }
       } catch (reason) {
         if (sequence !== requestSequence.current) return;
+        // Quyền đọc vừa mất: nhường shell đóng gate ngay, không giữ lịch sử đã tải trên màn hình.
+        const lost = accessLostReason(reason);
+        if (lost !== null) {
+          hasData.current = false;
+          setData(null);
+          reportAccessLost(lost);
+        } else if (!silent) {
+          setError(reason);
+        }
         // Chỉ lượt ngầm ném lỗi ra ngoài: hook cần thấy lỗi để thử lại hoặc dừng hẳn.
-        if (!silent) setError(reason);
         if (silent) throw reason;
       } finally {
         if (!silent) {
@@ -100,7 +108,7 @@ export function MySubmissionsPage() {
         }
       }
     },
-    [competition.id],
+    [competition.id, reportAccessLost],
   );
 
   useEffect(() => {

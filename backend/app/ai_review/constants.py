@@ -66,6 +66,28 @@ VERIFY_EVIDENCE_PARTIALLY_INVALID = "EVIDENCE_PARTIALLY_INVALID"
 REVIEW_STATUS_COMPLETED = "COMPLETED"
 REVIEW_STATUS_FAILED = "FAILED"
 
+# --- Đánh giá nguồn dataset của một lượt review ----------------------------------------------
+# Model trả một đánh giá cho CẢ notebook; backend chỉ kiểm cấu trúc và vị trí trích dẫn, không
+# chứng nhận suy luận nguồn là đúng. `NOT_EVALUATED` do backend sinh: thiếu đánh giá hoặc thiếu
+# tài nguyên BTC để đối chiếu - không bao giờ được đọc thành "nguồn đã sạch".
+SOURCE_STATUS_ALIGNED = "ALIGNED"
+SOURCE_STATUS_EXTERNAL = "EXTERNAL"
+SOURCE_STATUS_UNCLEAR = "UNCLEAR"
+SOURCE_STATUS_NOT_EVALUATED = "NOT_EVALUATED"
+
+# Mã lý do một vị trí trích dẫn bị loại khỏi đánh giá nguồn.
+SOURCE_EVIDENCE_CELL_NOT_FOUND = "CELL_NOT_FOUND"
+SOURCE_EVIDENCE_CELL_NOT_CODE = "CELL_NOT_CODE"
+SOURCE_EVIDENCE_RANGE_INVALID = "RANGE_INVALID"
+
+# Mã chẩn đoán vì sao đánh giá nguồn bị hạ hoặc không dùng được.
+SOURCE_ASSESSMENT_MISSING = "SOURCE_ASSESSMENT_MISSING"
+SOURCE_RESOURCES_MISSING = "SOURCE_RESOURCES_MISSING"
+SOURCE_EVIDENCE_MISSING = "SOURCE_EVIDENCE_MISSING"
+SOURCE_EVIDENCE_INVALID = "SOURCE_EVIDENCE_INVALID"
+SOURCE_EVIDENCE_PARTIALLY_INVALID = "SOURCE_EVIDENCE_PARTIALLY_INVALID"
+SOURCE_NOTEBOOK_TRUNCATED = "SOURCE_NOTEBOOK_TRUNCATED"
+
 # `source` của một review row: gọi provider thật, dùng lại cache, hay do pipeline sinh (không gọi).
 SOURCE_PROVIDER = "PROVIDER"
 SOURCE_CACHE = "CACHE"
@@ -79,10 +101,15 @@ SOURCE_PIPELINE = "PIPELINE"
 # v6: chỉ gắn cờ vi phạm phương pháp có chứng cứ; phân biệt notebook và CSV đã nộp.
 # v7: nguồn dataset BTC là ngữ cảnh riêng và tín hiệu nguồn không phụ thuộc verdict.
 # v8: chỉ tài nguyên BTC cấp là nguồn dataset hợp lệ; quét toàn notebook, mỗi nguồn khác một tín hiệu.
-PROMPT_VERSION = "ai-review-v8"
+# v9: một đánh giá nguồn cho cả notebook (`source_assessment`) thay cho danh sách tín hiệu từng đoạn.
+# v10: sau đánh giá model thật - đường dẫn/ID trùng tài nguyên BTC qua Drive cá nhân vẫn là nguồn BTC
+# (template không bị báo ngoài); ID không rõ quan hệ và Drive cá nhân không ID là UNCLEAR, không tự
+# kết luận ngoài; output phải kết thúc ngay tại `}` (model thật hay nối thẻ đóng/ngoặc thừa).
+PROMPT_VERSION = "ai-review-v10"
 NORMALIZATION_VERSION = "notebook-v3"
 # v2: thêm dữ kiện quét toàn notebook (`resources_in_notebook`); literal `/content/drive` không còn bị bỏ qua.
-SOURCE_SIGNAL_VERSION = "dataset-source-v2"
+# v3: đánh giá nguồn toàn notebook có hậu kiểm (`source_assessment`); hậu kiểm chỉ còn kiểm cấu trúc.
+SOURCE_SIGNAL_VERSION = "dataset-source-v3"
 CONTEXT_POLICY_VERSION = "context-v2"
 # Canonical hoá văn bản luật và phân đoạn `rule_ref` là thuật toán tất định: đổi chúng là đổi digest
 # nên phải bump version, và cache cũ tự động không còn dùng được.
@@ -95,9 +122,8 @@ VERIFIER_VERSION = "verifier-v2"
 # --- Giới hạn cấu trúc output ---------------------------------------------------------------
 # Trần cứng để output model không bao giờ phình to trong Mongo; vượt trần là output không hợp lệ.
 MAX_FINDINGS = 20
-MAX_SOURCE_SIGNALS = 10
-MAX_SOURCE_URLS_PER_SIGNAL = 5
-MAX_SOURCE_URL_CHARS = 2048
+# Một đánh giá nguồn gộp các đoạn liên quan của cả pipeline, không kể lể từng cell.
+MAX_SOURCE_EVIDENCE = 10
 MAX_EVIDENCE_PER_FINDING = 5
 MAX_SUMMARY_CHARS = 1_000
 # Trần kỹ thuật rộng cho câu gợi ý gửi thí sinh: prompt dặn khoảng 10 từ, nhưng một câu dài hơn
@@ -119,6 +145,11 @@ FILTER_AI_ALL = "all"
 FILTER_AI_CLEAR = "clear"
 FILTER_AI_FLAGGED = "flagged"
 FILTER_AI_INCONCLUSIVE = "inconclusive"
+# Ba bộ lọc dưới đây đọc đánh giá nguồn của phiên bản hiện hành; row COMPLETED từ phiên bản cũ
+# được xếp vào `source_not_evaluated` vì thiếu dữ kiện, không mặc định là sạch.
+FILTER_AI_SOURCE_EXTERNAL = "source_external"
+FILTER_AI_SOURCE_UNCLEAR = "source_unclear"
+FILTER_AI_SOURCE_NOT_EVALUATED = "source_not_evaluated"
 FILTER_AI_ERROR = "error"
 FILTER_AI_PENDING = "pending"
 FILTER_AI_NONE = "none"
@@ -127,6 +158,9 @@ AI_FILTERS = (
     FILTER_AI_CLEAR,
     FILTER_AI_FLAGGED,
     FILTER_AI_INCONCLUSIVE,
+    FILTER_AI_SOURCE_EXTERNAL,
+    FILTER_AI_SOURCE_UNCLEAR,
+    FILTER_AI_SOURCE_NOT_EVALUATED,
     FILTER_AI_ERROR,
     FILTER_AI_PENDING,
     FILTER_AI_NONE,

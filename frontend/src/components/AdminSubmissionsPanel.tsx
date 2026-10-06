@@ -32,10 +32,13 @@ import {
 import { Link } from "react-router-dom";
 import {
   AI_FILTER_OPTIONS,
+  AI_SOURCE_LEGACY_LABEL,
+  AI_SOURCE_STATUS_LABEL,
   AI_STATE_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
   type AiReviewFilter,
+  type AiSourceStatus,
   type AiVerdict,
 } from "../api/aiReview";
 import { api } from "../api/client";
@@ -88,10 +91,13 @@ const STATUS_OPTIONS = [
   { value: "failed", label: "Lỗi chấm điểm" },
 ];
 
-/** Trục duyệt tách khỏi trục chấm điểm: "Hợp lệ" gồm cả bài chưa từng bị xét duyệt. */
+/**
+ * Trục duyệt tách khỏi trục chấm điểm: nhánh "accepted" gồm cả bài chưa từng bị xét duyệt, nên
+ * nhãn nói đúng phạm vi lọc thay vì ngụ ý BTC đã duyệt từng bài.
+ */
 const REVIEW_OPTIONS = [
   { value: "", label: "Mọi trạng thái duyệt" },
-  { value: "accepted", label: "Hợp lệ" },
+  { value: "accepted", label: "Chưa bị từ chối" },
   { value: "rejected", label: "Không chấp nhận" },
 ];
 
@@ -476,7 +482,8 @@ export function AdminSubmissionsPanel({
       return <StatusBadge tone={tone} glyph="dash" label="Không xét duyệt được" />;
     }
     if (!submission.review) {
-      return <StatusBadge tone={tone} glyph="check" label="Hợp lệ" />;
+      // Chưa có quyết định của BTC, không phải "hợp lệ": nhãn cũ bị đọc thành phán quyết đã duyệt.
+      return <StatusBadge tone={tone} glyph="check" label="Chưa có quyết định BTC" />;
     }
     const rejected = submission.review.status === "rejected";
     return (
@@ -517,8 +524,18 @@ export function AdminSubmissionsPanel({
         ) : (
           <StatusBadge tone={tone} glyph="dash" label="Chưa đánh giá" />
         )}
-        {projection?.source_warning_count ? (
-          <StatusBadge tone="warning" glyph="alert" label="Nguồn dữ liệu cần kiểm tra" />
+        {/* Lượt hoàn tất luôn có badge nguồn: thiếu trạng thái (row cũ) hiện nhãn chưa đánh giá
+            theo phiên bản mới, không im lặng như đã sạch. Lượt lỗi/đang chạy không có nhánh này. */}
+        {projection?.verdict && projection.verdict !== "ERROR" ? (
+          projection.source_status ? (
+            <StatusBadge
+              tone={SOURCE_STATUS_TONE[projection.source_status]}
+              glyph={SOURCE_STATUS_GLYPH[projection.source_status]}
+              label={AI_SOURCE_STATUS_LABEL[projection.source_status]}
+            />
+          ) : (
+            <StatusBadge tone="muted" glyph="dash" label={AI_SOURCE_LEGACY_LABEL} />
+          )
         ) : null}
         <button
           type="button"
@@ -1141,6 +1158,26 @@ const AI_VERDICT_GLYPH: Record<AiVerdict, Glyph> = {
   FLAGGED: "alert",
   INCONCLUSIVE: "question",
   ERROR: "clock",
+};
+
+/** Hình dạng theo trạng thái nguồn, cùng nguyên tắc tách hình khỏi màu với verdict. */
+const SOURCE_STATUS_GLYPH: Record<AiSourceStatus, Glyph> = {
+  ALIGNED: "check",
+  EXTERNAL: "alert",
+  UNCLEAR: "question",
+  NOT_EVALUATED: "dash",
+};
+
+/**
+ * Tone của trạng thái nguồn. "Phù hợp" để `info` chứ không `success`: đây là nhận định của AI,
+ * không phải xác nhận của BTC. Còn lại là mức cần xem lại hoặc thiếu dữ kiện; không tô đỏ vì
+ * dấu hiệu nguồn không phải vi phạm đã được kết luận.
+ */
+const SOURCE_STATUS_TONE: Record<AiSourceStatus, IconTone> = {
+  ALIGNED: "info",
+  EXTERNAL: "warning",
+  UNCLEAR: "warning",
+  NOT_EVALUATED: "muted",
 };
 
 /** Tone của vạch nhấn ở lề thẻ. Chỉ ba mức, vì vạch thẻ là tín hiệu "bài này có gì đáng xem không". */

@@ -45,28 +45,43 @@ from tests.ai_review_helpers import (  # noqa: F401 - fixture tái xuất cho py
 from tests.helpers import notebook_bytes
 
 
-async def test_dataset_warning_is_independent_of_clear_verdict_and_survives_cache(mock_db, ai_env):
+async def test_source_assessment_is_stored_verified_and_reused_from_cache(mock_db, ai_env):
     resources = [{"label": "Dataset", "url": "https://drive.google.com/file/d/OFFICIAL/view"}]
-    notebook = code_notebook("df = pd.read_csv('https://data.example.org/train.csv')")
+    notebook = code_notebook(
+        "url = 'https://drive.google.com/uc?id=OFFICIAL'",
+        "external = pd.read_csv('https://data.example.org/train.csv')",
+    )
     submission = await seed(mock_db, notebook=notebook, resources=resources)
-    output = {**CLEAR_OUTPUT, "source_signals": [
-        {"cell": 1, "start_line": 1, "end_line": 1, "reason": "Có lệnh tải dataset ngoài"}
-    ]}
+    output = {**CLEAR_OUTPUT, "source_assessment": {
+        "status": "EXTERNAL",
+        "reason": "Code đọc một nguồn ngoài danh sách BTC.",
+        "evidence": [{"cell": 1, "start_line": 2, "end_line": 2}],
+    }}
     _, outcome = await run(mock_db, handler(output))
     assert outcome == service.OUTCOME_COMPLETED
     review = (await reviews(mock_db))[0]
+    # Đánh giá nguồn độc lập với verdict: CLEAR vẫn kèm dấu hiệu dùng nguồn ngoài cho BTC đọc.
     assert review["verdict"] == constants.VERDICT_CLEAR
-    assert review["source_signals"][0]["match"] == "EXTERNAL_SOURCE"
-    assert (await submission_of(mock_db, submission["_id"]))["ai_review"]["source_warning_count"] == 1
-    assert "source_warning_count" not in service.serializers.participant_projection(
-        await submission_of(mock_db, submission["_id"]), True
-    )
+    assessment = review["source_assessment"]
+    assert assessment["model_status"] == "EXTERNAL"
+    assert assessment["status"] == "EXTERNAL"
+    assert assessment["validation_codes"] == []
+    # Trích dẫn trong audit row là bản dựng từ notebook, không phải lời model kể.
+    assert "external = pd.read_csv" in assessment["evidence"][0]["snippet"]
+    stored = await submission_of(mock_db, submission["_id"])
+    assert stored["ai_review"]["source_status"] == "EXTERNAL"
+    assert stored["ai_review"]["source_signal_version"] == constants.SOURCE_SIGNAL_VERSION
+    assert "source_status" not in service.serializers.participant_projection(stored, True)
+
+    # Cache cùng khoá: assessment đã hậu kiểm được sao chép nguyên vẹn, không tính lại.
     await seed(mock_db, competition_id=submission["competition_id"],
                account_id=submission["account_id"], notebook=notebook)
     calls = []
     await run(mock_db, handler(CLEAR_OUTPUT, calls))
     assert calls == []
-    assert (await reviews(mock_db))[-1]["source_signals"][0]["warning"] is True
+    cached = (await reviews(mock_db))[-1]
+    assert cached["source"] == constants.SOURCE_CACHE
+    assert cached["source_assessment"] == assessment
 
 
 async def test_notebook_resource_scan_is_stored_and_reused_from_cache(mock_db, ai_env):
@@ -76,19 +91,18 @@ async def test_notebook_resource_scan_is_stored_and_reused_from_cache(mock_db, a
         {"cell_type": "code", "source": ["df = pd.read_csv('https://drive.google.com/uc?id=OFFICIAL')\n"]},
     ])
     submission = await seed(mock_db, notebook=notebook, resources=resources)
-    output = {**CLEAR_OUTPUT, "source_signals": [
-        {"cell": 1, "start_line": 1, "end_line": 1, "reason": "Có lệnh tải dataset ngoài"}
-    ]}
-    _, outcome = await run(mock_db, handler(output))
+    _, outcome = await run(mock_db, handler(CLEAR_OUTPUT))
     assert outcome == service.OUTCOME_COMPLETED
     review = (await reviews(mock_db))[0]
+    # Dữ kiện quét là thông tin admin: vào audit row và modal, không vào projection thí sinh.
     assert review["resources_in_notebook"] == [{"label": "Dataset BTC", "cells": [2]}]
     assert service.serializers.review_detail(review)["resources_in_notebook"] == review["resources_in_notebook"]
-    # Dữ kiện quét là thông tin admin, không đi vào projection của thí sinh và không cộng cảnh báo.
-    assert "resources_in_notebook" not in service.serializers.participant_projection(
-        await submission_of(mock_db, submission["_id"]), True
-    )
-    assert (await submission_of(mock_db, submission["_id"]))["ai_review"]["source_warning_count"] == 1
+    stored = await submission_of(mock_db, submission["_id"])
+    assert "resources_in_notebook" not in service.serializers.participant_projection(stored, True)
+    # Lượt này không có đánh giá nguồn: dấu vết nói đúng "chưa đánh giá được", không suy ra trạng
+    # thái từ việc quét được link BTC.
+    assert review["source_assessment"]["validation_codes"] == [constants.SOURCE_ASSESSMENT_MISSING]
+    assert stored["ai_review"]["source_status"] == constants.SOURCE_STATUS_NOT_EVALUATED
 
     await seed(mock_db, competition_id=submission["competition_id"],
                account_id=submission["account_id"], notebook=notebook)
@@ -448,6 +462,23 @@ async def test_missing_revision_stops_before_the_provider(mock_db, ai_env):
     assert stored["ai_review"]["state"] == constants.AI_STATE_ERROR
 
 
+async def test_an_error_row_leaves_no_source_state_behind(mock_db, ai_env):
+    """Lượt lỗi không có assessment: audit row và projection phải sạch trạng thái nguồn, không thừa
+    hưởng từ lượt trước và không bịa một trạng thái nào."""
+    submission = await seed(mock_db)
+    await mock_db[content_snapshot.REVISIONS_COLLECTION].delete_many({})
+
+    _, outcome = await run(mock_db, handler(CLEAR_OUTPUT))
+
+    assert outcome == service.OUTCOME_FAILED
+    review = (await reviews(mock_db))[0]
+    assert review["verdict"] == constants.VERDICT_ERROR
+    assert "source_assessment" not in review
+    stored = await submission_of(mock_db, submission["_id"])
+    assert stored["ai_review"]["source_status"] is None
+    assert stored["ai_review"]["source_signal_version"] is None
+
+
 @pytest.mark.parametrize(
     ("exc", "expected_code"),
     [
@@ -640,6 +671,9 @@ async def test_throttling_and_provider_errors_are_retried(mock_db, ai_env, statu
         b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [], \\"confidence\\": 0.9}"}}]}',
         b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [{\\"status\\": \\"VIOLATION\\"}]}"}}]}',
         b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [{\\"source_content_title\\": \\"a\\", \\"source_content_slug\\": \\"rules\\", \\"rule_text\\": \\"x\\", \\"checkability\\": \\"CHECKABLE_FROM_NOTEBOOK\\", \\"status\\": \\"VIOLATION\\", \\"reason\\": \\"y\\", \\"evidence\\": []}]}"}}]}',
+        # Đánh giá nguồn sai schema (status lạ / field lạ) làm cả response không dùng được.
+        b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [], \\"source_assessment\\": {\\"status\\": \\"MAYBE\\", \\"reason\\": \\"y\\"}}"}}]}',
+        b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [], \\"source_assessment\\": {\\"status\\": \\"ALIGNED\\", \\"reason\\": \\"y\\", \\"confidence\\": 0.9}}"}}]}',
     ],
 )
 async def test_unusable_model_output_is_an_error_row_without_retry(mock_db, ai_env, body):

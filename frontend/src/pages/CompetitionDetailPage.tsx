@@ -3,16 +3,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useParams, useResolvedPath } from "react-router-dom";
 import { ApiClientError, api } from "../api/client";
-import type { Competition, Membership } from "../api/competitions";
+import type {
+  CompetitionAccessReason,
+  CompetitionDetail,
+  CompetitionDetailResponse,
+  CompetitionSummary,
+  LockedCompetition,
+  Membership,
+} from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
   displayStatus,
   formatLocal,
-  primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
 import { fetchContents, type ContentSummary } from "../api/contents";
+import { useOptionalAuth } from "../auth/AuthContext";
+import { returnToFromLocation } from "../auth/returnTo";
 import { ErrorBox } from "../components/ui";
 import { CompetitionResources } from "../components/CompetitionResources";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
@@ -30,7 +38,8 @@ const WORKSPACE_TITLE: { suffix: string; title: string }[] = [
 ];
 
 export interface CompetitionContext {
-  competition: Competition;
+  /** Payload đã được cấp quyền đọc: Outlet chỉ được mount khi shell đã qua gate. */
+  competition: CompetitionDetail;
   contents: ContentSummary[];
   contentsLoading?: boolean;
   contentsError?: unknown;
@@ -38,12 +47,9 @@ export interface CompetitionContext {
   reloadContents: () => Promise<void>;
   /** Tải lại cuộc thi (quota sau khi nộp) mà không bật skeleton, để không unmount trang con. */
   refreshCompetition: () => Promise<void>;
+  /** Route con vừa nhận lỗi 401/403 membership: shell đóng gate ngay và xác minh lại detail. */
+  reportAccessLost: (reason: CompetitionAccessReason) => void;
 }
-
-export const VISIBILITY_LABEL: Record<ContentSummary["visibility"], string> = {
-  public: "Mọi thí sinh",
-  members: "Chỉ thành viên cuộc thi",
-};
 
 /** Wrapper SVG dùng chung: icon trang trí nên luôn aria-hidden. */
 function Icon({ children }: { children: React.ReactNode }) {
@@ -145,7 +151,7 @@ function shellTitle({
   isContentRoute: boolean;
   pathname: string;
   error: unknown;
-  competition: Competition | null;
+  competition: CompetitionSummary | null;
 }): string | undefined {
   if (isContentRoute) return undefined;
   const workspace = WORKSPACE_TITLE.find((item) => pathname.endsWith(item.suffix));
@@ -154,44 +160,131 @@ function shellTitle({
   return competition?.name ?? "Cuộc thi";
 }
 
+/** Payload kèm danh tính phiên đã tạo ra nó - không hiển thị dữ liệu của phiên trước. */
+interface LoadedCompetition {
+  identity: string | null;
+  competition: CompetitionDetailResponse;
+}
+
+/** Quyền đọc nội dung bên trong đã được cấp: gate của cả shell chia đôi ở đây. */
+function canRead(competition: CompetitionDetailResponse): competition is CompetitionDetail {
+  return competition.access.allowed;
+}
+
+/**
+ * Landing khóa: masthead giới thiệu vẫn hiện, phần bên trong thay bằng thông báo theo
+ * lý do backend trả về. Không mount tab, mục lục, tài nguyên hay Outlet.
+ */
+function LockedPanel({
+  competition,
+  onMembershipChange,
+  onEngagedChange,
+}: {
+  competition: LockedCompetition;
+  onMembershipChange: (membership: Membership) => void;
+  onEngagedChange: (engaged: boolean) => void;
+}) {
+  const location = useLocation();
+  const reason = competition.access.reason;
+  const end = new Date(competition.end_at).getTime();
+  const ended = competition.status === "closed" || (Number.isFinite(end) && Date.now() > end);
+
+  let message: string;
+  let action: React.ReactNode = null;
+  if (reason === "login_required") {
+    // Khách đã join từ trước vẫn cần lối này để xác thực lại và đọc nội dung.
+    message = "Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung.";
+    action = (
+      <Link className="btn" to="/login" state={{ from: returnToFromLocation(location) }}>
+        Đăng nhập
+      </Link>
+    );
+  } else if (reason === "membership_inactive") {
+    message = "Quyền tham gia cuộc thi của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Ban Tổ chức.";
+  } else if (ended) {
+    // Hết thời gian tham gia thì nút join chắc chắn thất bại nên không mời bấm.
+    message = "Cuộc thi đã hết thời gian tham gia. Nội dung chỉ dành cho thành viên đã tham gia.";
+  } else if (competition.join_mode === "invite_only") {
+    message = "Bạn chưa được phép tham gia cuộc thi này. Vui lòng liên hệ Ban Tổ chức để được mời.";
+  } else {
+    message = "Hãy tham gia cuộc thi trước để xem nội dung.";
+    action = (
+      <JoinControl
+        competition={competition}
+        showEnter={false}
+        onEngagedChange={onEngagedChange}
+        onMembershipChange={onMembershipChange}
+      />
+    );
+  }
+
+  return (
+    <div className="comp-locked-card">
+      <div className="comp-locked-content">
+        <span className="vku-accent" aria-hidden="true">
+          <span className="blue" />
+          <span className="red" />
+          <span className="yellow" />
+        </span>
+        <div className="comp-locked-emblem" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth={1.75}>
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+        </div>
+        <h2 className="comp-locked-title">Nội dung cuộc thi dành cho thành viên</h2>
+        <p className="comp-locked-lead">{message}</p>
+        {action && <div className="comp-locked-actions">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function CompetitionDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { pathname } = useLocation();
-  const [competition, setCompetition] = useState<Competition | null>(null);
+  const auth = useOptionalAuth();
+  // Danh tính phiên: `undefined` = /auth/me chưa xong nên chưa gọi API (payload phải thuộc
+  // đúng phiên); `null` = khách. Ngoài AuthProvider (test dựng component lẻ) coi như khách.
+  const account = auth === null ? null : auth.loading ? undefined : auth.account;
+  const identity: string | null | undefined = account === undefined ? undefined : (account?.id ?? null);
+  const [loaded, setLoaded] = useState<LoadedCompetition | null>(null);
   const [contents, setContents] = useState<ContentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [contentsLoading, setContentsLoading] = useState(true);
   const [contentsError, setContentsError] = useState<unknown>(null);
-  /** Slug của request mới nhất: response của slug cũ không được ghi vào state khi đổi nhanh. */
-  const requestedSlug = useRef(slug);
-  /** Response cũ không được ghi đè dữ liệu mới hơn (làm mới sau nộp bài, làm mới ngầm). */
-  const competitionSequence = useRef(0);
+  /** Response cũ không được ghi đè dữ liệu mới hơn (đổi slug/phiên, join/leave, làm mới ngầm). */
+  const sequence = useRef(0);
+  const contentsSequence = useRef(0);
   /** Thao tác tham gia/rời đang chờ hoặc modal đang mở: dừng tự làm mới để không ghi đè. */
   const [joinEngaged, setJoinEngaged] = useState(false);
 
   const loadCompetition = useCallback(async () => {
+    if (identity === undefined) return;
     const forSlug = slug;
-    requestedSlug.current = forSlug;
+    const request = ++sequence.current;
     setLoading(true);
     setError(null);
     try {
-      const data = await api.get<Competition>(`/competitions/${forSlug}`);
-      if (requestedSlug.current === forSlug) setCompetition(data);
+      const data = await api.get<CompetitionDetailResponse>(`/competitions/${forSlug}`);
+      if (request === sequence.current) setLoaded({ identity, competition: data });
     } catch (err) {
-      if (requestedSlug.current === forSlug) setError(err);
+      if (request === sequence.current) setError(err);
     } finally {
-      if (requestedSlug.current === forSlug) setLoading(false);
+      if (request === sequence.current) setLoading(false);
     }
-  }, [slug]);
+  }, [identity, slug]);
 
   /** Refetch im lặng, lỗi ném ra cho hook tự xử lý trạng thái thử lại. */
   const silentRefreshCompetition = useCallback(async () => {
     const forSlug = slug;
-    const sequence = ++competitionSequence.current;
-    const data = await api.get<Competition>(`/competitions/${forSlug}`);
-    if (requestedSlug.current === forSlug && sequence === competitionSequence.current) setCompetition(data);
-  }, [slug]);
+    const request = ++sequence.current;
+    const data = await api.get<CompetitionDetailResponse>(`/competitions/${forSlug}`);
+    // Payload gắn đúng danh tính của lượt gọi: response về sau khi đổi phiên bị guard "stale"
+    // loại khỏi màn hình dù có lọt vào state.
+    if (request === sequence.current) setLoaded({ identity: identity ?? null, competition: data });
+  }, [identity, slug]);
 
   /** Refetch im lặng: quota là thông tin phụ, lỗi mạng không được xoá nội dung đang xem. */
   const refreshCompetition = useCallback(async () => {
@@ -206,51 +299,112 @@ export function CompetitionDetailPage() {
   // tuyệt đối không rơi về "chưa có nội dung" vì hai tình huống này khác nhau.
   const loadContents = useCallback(async () => {
     const forSlug = slug!;
+    const request = ++contentsSequence.current;
     setContentsLoading(true);
     setContentsError(null);
     try {
       const data = await fetchContents(forSlug);
-      if (requestedSlug.current !== forSlug) return;
+      if (request !== contentsSequence.current) return;
       setContents(data.contents);
     } catch (err) {
-      if (requestedSlug.current !== forSlug) return;
+      if (request !== contentsSequence.current) return;
       setContentsError(err);
       setContents([]);
     } finally {
-      if (requestedSlug.current === forSlug) setContentsLoading(false);
+      if (request === contentsSequence.current) setContentsLoading(false);
     }
   }, [slug]);
 
   useEffect(() => {
-    // Đổi slug: xoá dữ liệu cũ trước khi tải slug mới để không hiển thị nhầm cuộc thi.
-    setCompetition(null);
+    // Đổi slug hoặc đổi phiên: vô hiệu request đang bay và xoá dữ liệu cũ trước khi tải lại.
+    sequence.current += 1;
+    contentsSequence.current += 1;
+    setLoaded(null);
     setContents([]);
     setContentsError(null);
     setContentsLoading(true);
+    setLoading(true);
     void loadCompetition();
   }, [loadCompetition]);
 
+  // Payload đang giữ không thuộc slug/phiên hiện tại: chờ lượt nạp mới thay vì render nó.
+  const stale =
+    loaded !== null && (loaded.competition.slug !== slug || loaded.identity !== identity);
+  const current = stale ? null : (loaded?.competition ?? null);
+  const readable = current !== null && canRead(current);
+
   useEffect(() => {
-    // Chỉ hỏi mục lục khi cuộc thi của đúng slug hiện tại đã tải xong: slug sai (404)
-    // không tốn thêm request nội dung và không hiện lỗi nội dung gây nhiễu.
-    if (competition?.slug !== slug) return;
+    // Chỉ hỏi mục lục khi payload hiện tại cho phép đọc: người ngoài không được biết
+    // tài liệu nào tồn tại, và cũng không tốn request.
+    if (!readable) return;
     void loadContents();
-  }, [competition?.slug, slug, loadContents]);
+  }, [identity, readable, slug, loadContents]);
+
+  /**
+   * Đóng gate ngay bằng payload khóa (fail-closed): không chờ mạng và không giữ mục lục
+   * khi quyền đọc vừa mất. Lượt tải lại sau đó sẽ xác minh trạng thái thật từ backend.
+   */
+  const lockNow = useCallback(
+    (reason: CompetitionAccessReason) => {
+      sequence.current += 1;
+      contentsSequence.current += 1;
+      setContents([]);
+      setContentsError(null);
+      setContentsLoading(true);
+      setLoaded((prev) =>
+        prev
+          ? {
+              ...prev,
+              competition: { ...prev.competition, access: { allowed: false, reason } },
+            }
+          : prev,
+      );
+    },
+    [],
+  );
+
+  /** Route con báo mất quyền: khóa ngay rồi xác minh lại detail (mạng lỗi không giữ nội dung mở). */
+  const reportAccessLost = useCallback(
+    (reason: CompetitionAccessReason) => {
+      lockNow(reason);
+      void refreshCompetition();
+    },
+    [lockNow, refreshCompetition],
+  );
+
+  const handleMembershipChange = useCallback(
+    (membership: Membership) => {
+      if (membership.active) {
+        // Vừa tham gia: vá membership để nút phản hồi ngay; payload đầy đủ (access/resources/
+        // config/quota) chỉ đến từ lượt tải lại - không tự mở gate từ payload đang bị cắt.
+        sequence.current += 1;
+        setLoaded((prev) =>
+          prev ? { ...prev, competition: { ...prev.competition, membership } } : prev,
+        );
+      } else {
+        // Rời/vô hiệu hoá: đóng gate và xoá mục lục ngay, không chờ mạng.
+        lockNow("membership_inactive");
+      }
+      void refreshCompetition();
+    },
+    [lockNow, refreshCompetition],
+  );
 
   // Gọi vô điều kiện trước mọi nhánh return; chuỗi rỗng khi chưa tải xong cũng trả null.
-  const remaining = useCountdown(competition?.end_at ?? "");
+  const remaining = useCountdown(current?.end_at ?? "");
   const isContentRoute = pathname.includes("/content/");
-  useDocumentTitle(shellTitle({ isContentRoute, pathname, error, competition }));
+  useDocumentTitle(shellTitle({ isContentRoute, pathname, error, competition: current }));
 
-  // Chỉ làm mới khi đúng cuộc thi của slug hiện tại đang hiển thị: trạng thái/quota đổi từ
-  // phía Ban Tổ chức hay lượt nộp sẽ tự hiện, không nháy skeleton và không mất nội dung đang xem.
+  // Chỉ làm mới khi payload đúng slug/phiên đang hiển thị: trạng thái/quota đổi từ phía Ban Tổ
+  // chức hay lượt nộp sẽ tự hiện, không nháy skeleton và không mất nội dung đang xem. Lượt khóa
+  // vẫn tự làm mới để phát hiện thành viên được kích hoạt lại.
   const refreshStatus = useAutoRefresh(
-    competition !== null && competition.slug === slug && !joinEngaged,
+    current !== null && !joinEngaged,
     silentRefreshCompetition,
     { intervalMs: 5_000 },
   );
 
-  if (loading) {
+  if (loading || stale) {
     return (
       <div className="page comp-page" aria-busy="true">
         <p className="sr-only" role="status">
@@ -281,7 +435,7 @@ export function CompetitionDetailPage() {
     );
   }
 
-  if (error || !competition) {
+  if (error || !current) {
     return (
       <div className="page comp-page">
         {/* Trang lỗi vẫn cần một H1 mô tả trạng thái; `ErrorBox` cố ý không tự render heading. */}
@@ -301,7 +455,7 @@ export function CompetitionDetailPage() {
     );
   }
 
-  const c = competition;
+  const c = current;
   // Chip chỉ có nghĩa với cuộc thi đang mở - cuộc thi đã đóng không đếm ngược nữa.
   const countdownLabel = c.status === "published" ? remaining : null;
   // Quá `end_at` thì hiển thị như đã kết thúc, khớp với việc backend đã chặn nộp bài.
@@ -357,13 +511,7 @@ export function CompetitionDetailPage() {
               competition={c}
               showEnter={false}
               onEngagedChange={setJoinEngaged}
-              onMembershipChange={(membership: Membership) => {
-                // Vô hiệu hoá response đang bay (có thể mang membership trước khi join) trước khi vá state.
-                competitionSequence.current += 1;
-                setCompetition({ ...c, membership });
-                // Quota chỉ xuất hiện sau khi join - tải lại để chỗ nộp bài biết còn bao nhiêu lượt.
-                void refreshCompetition();
-              }}
+              onMembershipChange={handleMembershipChange}
             />
           </div>
         </div>
@@ -389,7 +537,7 @@ export function CompetitionDetailPage() {
               </Icon>
               Chỉ số chính
             </dt>
-            <dd className="comp-fact-value">{primaryMetricLabel(c)}</dd>
+            <dd className="comp-fact-value">{c.primary_metric_label ?? "Chưa cấu hình"}</dd>
           </div>
           <div className="comp-fact">
             <dt>
@@ -407,83 +555,91 @@ export function CompetitionDetailPage() {
         </dl>
       </header>
 
-      <nav className="comp-tabs" aria-label="Mục lục cuộc thi">
-        {TABS.map((tab) => (
-          <CompTab key={tab.to} to={tab.to} end={tab.end} label={tab.label} icon={tab.icon} />
-        ))}
-      </nav>
+      {canRead(c) ? (
+        <>
+          <nav className="comp-tabs" aria-label="Mục lục cuộc thi">
+            {TABS.map((tab) => (
+              <CompTab key={tab.to} to={tab.to} end={tab.end} label={tab.label} icon={tab.icon} />
+            ))}
+          </nav>
 
-      <div className={`content-layout${!isOverview ? " is-workspace" : ""}`}>
-        {isOverview && (
-          <aside className="content-sidebar">
-            <section className="content-card content-card-toc content-card-vku">
-              <div className="content-card-head">
-                <span className="content-card-title">
-                  <Icon>
-                    <path d="M9 6h11" />
-                    <path d="M9 12h11" />
-                    <path d="M9 18h11" />
-                    <path d="M4.5 6h.01" />
-                    <path d="M4.5 12h.01" />
-                    <path d="M4.5 18h.01" />
-                  </Icon>
-                  Mục lục nội dung
-                </span>
-                {!contentsLoading && !contentsError && contents.length > 0 && (
-                  <span className="content-card-count">{contents.length}</span>
-                )}
-              </div>
+          <div className={`content-layout${!isOverview ? " is-workspace" : ""}`}>
+            {isOverview && (
+              <aside className="content-sidebar">
+                <section className="content-card content-card-toc content-card-vku">
+                  <div className="content-card-head">
+                    <span className="content-card-title">
+                      <Icon>
+                        <path d="M9 6h11" />
+                        <path d="M9 12h11" />
+                        <path d="M9 18h11" />
+                        <path d="M4.5 6h.01" />
+                        <path d="M4.5 12h.01" />
+                        <path d="M4.5 18h.01" />
+                      </Icon>
+                      Mục lục nội dung
+                    </span>
+                    {!contentsLoading && !contentsError && contents.length > 0 && (
+                      <span className="content-card-count">{contents.length}</span>
+                    )}
+                  </div>
 
-              {contentsLoading ? (
-                <p className="content-nav-state" role="status">
-                  Đang tải nội dung…
-                </p>
-              ) : contentsError ? (
-                <div className="content-nav-state" role="alert">
-                  <p>Không tải được danh sách nội dung.</p>
-                  <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
-                    Thử lại
-                  </button>
-                </div>
-              ) : contents.length > 0 ? (
-                <nav className="content-nav" aria-label="Nội dung cuộc thi">
-                  {contents.map((item) => (
-                    <NavLink
-                      key={item.id}
-                      to={`content/${item.slug}`}
-                      className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
-                    >
-                      <span className="content-nav-title">{item.title}</span>
-                      {item.visibility === "public" && (
-                        <span className="chip">{VISIBILITY_LABEL[item.visibility]}</span>
-                      )}
-                    </NavLink>
-                  ))}
-                </nav>
-              ) : (
-                <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
-              )}
-            </section>
+                  {contentsLoading ? (
+                    <p className="content-nav-state" role="status">
+                      Đang tải nội dung…
+                    </p>
+                  ) : contentsError ? (
+                    <div className="content-nav-state" role="alert">
+                      <p>Không tải được danh sách nội dung.</p>
+                      <button type="button" className="btn btn-secondary" onClick={() => void loadContents()}>
+                        Thử lại
+                      </button>
+                    </div>
+                  ) : contents.length > 0 ? (
+                    <nav className="content-nav" aria-label="Nội dung cuộc thi">
+                      {contents.map((item) => (
+                        <NavLink
+                          key={item.id}
+                          to={`content/${item.slug}`}
+                          className={({ isActive }) => `content-nav-item${isActive ? " active" : ""}`}
+                        >
+                          <span className="content-nav-title">{item.title}</span>
+                        </NavLink>
+                      ))}
+                    </nav>
+                  ) : (
+                    <p className="content-nav-state">Ban Tổ chức chưa đăng nội dung cho cuộc thi này.</p>
+                  )}
+                </section>
 
-            <CompetitionResources resources={c.resources} />
-          </aside>
-        )}
+                <CompetitionResources resources={c.resources} />
+              </aside>
+            )}
 
-        <div className="card comp-body">
-          <Outlet
-            context={
-              {
-                competition: c,
-                contents,
-                contentsLoading,
-                contentsError,
-                reloadContents: loadContents,
-                refreshCompetition,
-              } satisfies CompetitionContext
-            }
-          />
-        </div>
-      </div>
+            <div className="card comp-body">
+              <Outlet
+                context={
+                  {
+                    competition: c,
+                    contents,
+                    contentsLoading,
+                    contentsError,
+                    reloadContents: loadContents,
+                    refreshCompetition,
+                    reportAccessLost,
+                  } satisfies CompetitionContext
+                }
+              />
+            </div>
+          </div>
+        </>
+      ) : (
+        <LockedPanel
+          competition={c}
+          onMembershipChange={handleMembershipChange}
+          onEngagedChange={setJoinEngaged}
+        />
+      )}
     </div>
   );
 }

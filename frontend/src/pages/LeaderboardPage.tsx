@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ApiClientError } from "../api/client";
-import { formatLocal } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import {
   fetchLeaderboard,
   formatMetric,
@@ -21,11 +21,6 @@ const PAGE_SIZE = 25;
 
 /** Nhịp tự làm mới ngầm khi tab đang mở. */
 const AUTO_REFRESH_MS = 3_000;
-
-/** 401/403 nghĩa là quyền xem đã mất: bảng vừa bị ẩn hoặc phiên đã hết hạn. */
-function accessLost(reason: unknown): boolean {
-  return reason instanceof ApiClientError && (reason.status === 401 || reason.status === 403);
-}
 
 /**
  * Câu mô tả quy tắc xếp hạng. Cuộc thi chưa khai báo metric chính (bản nháp v2) thì không nêu tên
@@ -60,7 +55,7 @@ function NormMetaLine({
 }
 
 export function LeaderboardPage() {
-  const { competition } = useOutletContext<CompetitionContext>();
+  const { competition, reportAccessLost } = useOutletContext<CompetitionContext>();
   // Cột metric và số thập phân đọc từ hợp đồng của cuộc thi, không cố định f1/precision/recall.
   const contract = resultContract(competition.submission_config);
   /** Số thập phân của metric chính; hợp đồng rỗng (bản nháp v2) rơi về mức 4 như bộ chấm v1. */
@@ -105,11 +100,19 @@ export function LeaderboardPage() {
         }
       } catch (reason) {
         if (sequence !== requestSequence.current) return;
-        if (accessLost(reason)) {
-          // Bảng bị ẩn giữa chừng: điểm đã tải không được nằm lại trên màn hình.
+        // 401/membership bị thu hồi: quyền đọc cả cuộc thi đã mất - nhường shell đóng gate
+        // ngay, không giữ điểm đã tải trên màn hình.
+        const lost = accessLostReason(reason);
+        if (lost !== null) {
           hasData.current = false;
           setData(null);
-          setError(reason);
+          reportAccessLost(lost);
+        } else if (reason instanceof ApiClientError && reason.code === "LEADERBOARD_HIDDEN") {
+          // Bảng vừa bị ẩn giữa chừng: xoá điểm đã tải; lượt làm mới của shell sẽ cập nhật
+          // `leaderboard_visible` và thẻ "chưa công bố" tự hiện, nên không báo mất quyền.
+          hasData.current = false;
+          setData(null);
+          if (!silent) setError(reason);
         } else if (!silent) {
           setError(reason);
         }
@@ -125,7 +128,7 @@ export function LeaderboardPage() {
         }
       }
     },
-    [competition.id, competition.leaderboard_visible],
+    [competition.id, competition.leaderboard_visible, reportAccessLost],
   );
 
   useEffect(() => {

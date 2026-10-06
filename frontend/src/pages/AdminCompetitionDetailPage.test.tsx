@@ -40,8 +40,8 @@ const COMPETITION = {
 
 const CONTENTS = {
   contents: [
-    { id: "c1", slug: "problem", title: "Đề bài", order: 10, visibility: "public", size_bytes: 128, updated_at: "2026-09-15T00:00:00Z" },
-    { id: "c2", slug: "rules", title: "Rules", order: 20, visibility: "members", size_bytes: null, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "c1", slug: "problem", title: "Đề bài", order: 10, size_bytes: 128, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "c2", slug: "rules", title: "Rules", order: 20, size_bytes: null, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -167,7 +167,6 @@ const AI_REVIEW_SETTINGS = {
         title: "Thể lệ",
         slug: "rules",
         order: 1,
-        visibility: "public",
         included: true,
         reason: "OK",
       },
@@ -303,7 +302,9 @@ test("tab Nội dung render table theo order + trạng thái file", async () => 
   expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("5 lượt/ngày");
   expect(screen.getByText("Chưa có file")).toBeTruthy();
   expect(screen.getByText("Đã upload")).toBeTruthy();
-  expect(screen.getByText("Chỉ thành viên")).toBeTruthy();
+  // Không còn cột/badge hiển thị "public vs members": mọi tài liệu đều chỉ thành viên active đọc được.
+  expect(screen.queryByText("Hiển thị")).toBeNull();
+  expect(screen.queryByText("Chỉ thành viên")).toBeNull();
 });
 
 test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter mở được picker", async () => {

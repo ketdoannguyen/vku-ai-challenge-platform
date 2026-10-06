@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api } from "../api/client";
-import type { AdminCompetition, Competition, CompetitionResource } from "../api/competitions";
+import type { AdminCompetition, CompetitionResource } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
@@ -176,13 +176,13 @@ function IconMailCheck({ className }: { className?: string }) {
 type SectionTone = "blue" | "red" | "yellow";
 
 /** Icon và tone trang trí cho từng chế độ tham gia - không đọc trạng thái nghiệp vụ nào khác. */
-const JOIN_MODE_TONE: Record<Competition["join_mode"], SectionTone> = {
+const JOIN_MODE_TONE: Record<AdminCompetition["join_mode"], SectionTone> = {
   open: "blue",
   code: "red",
   invite_only: "yellow",
 };
 
-const JOIN_MODE_ICON: Record<Competition["join_mode"], ReactNode> = {
+const JOIN_MODE_ICON: Record<AdminCompetition["join_mode"], ReactNode> = {
   open: <IconUsersRound />,
   code: <IconKeyRound />,
   invite_only: <IconMailCheck />,
@@ -229,10 +229,10 @@ export function CompetitionActionConfirmModal({
   returnFocusRef,
 }: {
   action: CompetitionAction;
-  competition: Competition;
+  competition: AdminCompetition;
   onSuccess: (
     action: CompetitionAction,
-    clonedCompetition?: Competition,
+    clonedCompetition?: AdminCompetition,
   ) => void | Promise<void>;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -241,7 +241,7 @@ export function CompetitionActionConfirmModal({
 
   async function confirm() {
     if (action === "clone") {
-      const clone = await api.post<Competition>(
+      const clone = await api.post<AdminCompetition>(
         `/admin/competitions/${competition.id}/clone`,
       );
       await onSuccess(action, clone);
@@ -272,7 +272,7 @@ export function CompetitionDeleteModal({
   onClose,
   returnFocusRef,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   onDeleted: () => void | Promise<void>;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -367,7 +367,7 @@ const NO_SOURCE_METRIC = "Chưa cấu hình";
  * Mô tả nguồn điểm chuẩn hóa theo hợp đồng đang cấu hình. Nháp v2 chưa khai báo metric thì nói rõ
  * lấy từ tab Chấm điểm, không mặc định F1.
  */
-function normalizationSourceHint(competition?: Competition): string {
+function normalizationSourceHint(competition?: AdminCompetition): string {
   const label = competition ? primaryMetricLabel(competition) : null;
   if (!competition || !label || label === NO_SOURCE_METRIC) {
     return "Điểm xếp hạng là norm 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.";
@@ -385,7 +385,7 @@ export function CompetitionFormModal({
   onSaved,
   returnFocusRef,
 }: {
-  competition?: Competition;
+  competition?: AdminCompetition;
   onClose: () => void;
   onSaved: (competition: AdminCompetition) => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -406,7 +406,7 @@ export function CompetitionFormModal({
   const [endAt, setEndAt] = useState(
     competition ? isoToLocalInput(competition.end_at) : "",
   );
-  const [joinMode, setJoinMode] = useState<Competition["join_mode"]>(
+  const [joinMode, setJoinMode] = useState<AdminCompetition["join_mode"]>(
     competition?.join_mode ?? "open",
   );
   const [quota, setQuota] = useState(
@@ -626,7 +626,7 @@ export function CompetitionFormModal({
             <fieldset className="ac-join-fieldset">
               <legend className="ac-required sr-only">Cách tham gia</legend>
               <div className="ac-join-options">
-                {(Object.keys(JOIN_MODE_LABEL) as Competition["join_mode"][]).map(
+                {(Object.keys(JOIN_MODE_LABEL) as AdminCompetition["join_mode"][]).map(
                   (mode) => (
                     <label
                       key={mode}

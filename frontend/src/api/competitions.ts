@@ -1,5 +1,6 @@
 /** Types + helpers dùng chung cho competition API (Sprint 03). */
 
+import { ApiClientError } from "./client";
 import type { ResultContract } from "./results";
 
 export interface Membership {
@@ -62,14 +63,8 @@ export interface NormalizationConfig {
   version: number;
 }
 
-/** Cấu hình chuẩn hóa để render: response cũ chưa có field được coi là tắt. */
-export function normalizationOf(competition: {
-  normalization?: NormalizationConfig;
-}): NormalizationConfig {
-  return competition.normalization ?? { enabled: false, baseline: null, version: 1 };
-}
-
-export interface Competition {
+/** Metadata giới thiệu dùng chung cho payload thí sinh lẫn admin. */
+export interface CompetitionMetadata {
   id: string;
   slug: string;
   name: string;
@@ -84,9 +79,38 @@ export interface Competition {
   join_code_configured: boolean;
   /** Vắng mặt với response cũ trước khi có chuẩn hóa - hiểu là đang tắt. */
   normalization?: NormalizationConfig;
-  resources: CompetitionResource[];
+}
+
+/** Cấu hình chuẩn hóa để render: response cũ chưa có field được coi là tắt. */
+export function normalizationOf(competition: {
+  normalization?: NormalizationConfig;
+}): NormalizationConfig {
+  return competition.normalization ?? { enabled: false, baseline: null, version: 1 };
+}
+
+/** Lý do backend từ chối quyền đọc nội dung bên trong cuộc thi. */
+export type CompetitionAccessReason =
+  | "login_required"
+  | "membership_required"
+  | "membership_inactive";
+
+/**
+ * Trạng thái quyền đọc nội dung bên trong cuộc thi của người đang xem, do backend quyết định:
+ * `allowed` chỉ khi có membership đang hoạt động (hoặc admin). Người ngoài vẫn thấy phần giới thiệu.
+ */
+export type CompetitionAccess =
+  | { allowed: true; reason: null }
+  | { allowed: false; reason: CompetitionAccessReason };
+
+/**
+ * Thẻ giới thiệu cuộc thi (list + landing detail): không bao giờ chứa resources hay
+ * submission_config. Số liệu cá nhân chỉ có khi membership đang hoạt động.
+ */
+export interface CompetitionSummary extends CompetitionMetadata {
+  /** Nhãn metric chính theo hợp đồng thí sinh; null khi chưa cấu hình hoặc metric chính bị ẩn. */
+  primary_metric_label: string | null;
   membership: Membership;
-  submission_config: SubmissionConfig;
+  access: CompetitionAccess;
   /** Aggregate chỉ được bảo đảm trên public/admin list; detail không chạy thêm query này. */
   submission_count?: number;
   /** Vắng mặt với guest, người chưa join, member bị vô hiệu hóa và cuộc thi đã đóng. */
@@ -95,12 +119,35 @@ export interface Competition {
   my_stats?: MyStats;
   /** Ghim riêng của account đang đăng nhập; guest luôn false. Chỉ public list trả về. */
   pinned?: boolean;
-  /**
-   * Tổng bài đã nộp của account hiện tại trong cuộc thi, mọi status/review - cùng định nghĩa
-   * với `total` trong lịch sử nộp bài, khác `submission_count` toàn hệ thống. Chỉ có khi đã
-   * đăng nhập (kể cả non-member); guest không nhận field này.
-   */
+  /** Tổng bài của account hiện tại; chỉ trả khi membership đang hoạt động, không xoá dữ liệu gốc. */
   my_submission_count?: number;
+}
+
+/** Chi tiết đầy đủ bên trong cuộc thi - chỉ trả khi backend đã cấp quyền đọc. */
+export interface CompetitionDetail extends CompetitionSummary {
+  access: { allowed: true; reason: null };
+  resources: CompetitionResource[];
+  submission_config: SubmissionConfig;
+}
+
+/** Landing khóa: chỉ còn phần giới thiệu khi chưa có membership đang hoạt động. */
+export interface LockedCompetition extends CompetitionSummary {
+  access: { allowed: false; reason: CompetitionAccessReason };
+}
+
+/** Response của `GET /api/competitions/{slug}`: landing khóa hoặc chi tiết đầy đủ. */
+export type CompetitionDetailResponse = CompetitionDetail | LockedCompetition;
+
+/**
+ * Lý do mất quyền đọc rút từ lỗi API của một route nội dung; `null` nghĩa là lỗi khác
+ * (403 nghiệp vụ như LEADERBOARD_HIDDEN, lỗi mạng...) và không được coi là mất quyền.
+ */
+export function accessLostReason(reason: unknown): CompetitionAccessReason | null {
+  if (!(reason instanceof ApiClientError)) return null;
+  if (reason.status === 401) return "login_required";
+  if (reason.code === "MEMBERSHIP_INACTIVE") return "membership_inactive";
+  if (reason.code === "MEMBERSHIP_REQUIRED") return "membership_required";
+  return null;
 }
 
 /** Response của PUT/DELETE ghim: `pinned` là trạng thái SAU thao tác nên gọi lặp vẫn nhất quán. */
@@ -137,16 +184,22 @@ export interface LeaveResponse {
 }
 
 export interface CompetitionsResponse {
-  competitions: Competition[];
+  competitions: CompetitionSummary[];
 }
 
-/** Bảng admin kèm số liệu tổng hợp và created_by - endpoint public không trả về các field này. */
-export interface AdminCompetition extends Competition {
+/**
+ * Payload admin: đầy đủ resources/submission_config theo hợp đồng admin. Cố ý không kế thừa
+ * union của thí sinh - admin API không trả `access` hay `primary_metric_label`.
+ */
+export interface AdminCompetition extends CompetitionMetadata {
   created_by: string;
   /** Chỉ đếm thành viên đang hoạt động; người đã rời/bị vô hiệu hóa nằm ở inactive_member_count. */
   member_count: number;
   inactive_member_count: number;
   submission_count: number;
+  resources: CompetitionResource[];
+  membership: Membership;
+  submission_config: SubmissionConfig;
   /** Chỉ endpoint admin detail trả về - list cố ý không đọc ground truth cho từng dòng. */
   publish_ready?: boolean;
   publish_blocked_reason?: PublishBlockedReason | null;
@@ -178,7 +231,7 @@ export interface AdminCompetitionsResponse {
   competitions: AdminCompetition[];
 }
 
-export const STATUS_LABEL: Record<Competition["status"], string> = {
+export const STATUS_LABEL: Record<CompetitionMetadata["status"], string> = {
   draft: "Nháp",
   published: "Đang diễn ra",
   closed: "Đã kết thúc",
@@ -193,15 +246,15 @@ export const STATUS_LABEL: Record<Competition["status"], string> = {
  * đếm ngược nên nhãn tự đổi ngay khi tới hạn.
  */
 export function displayStatus(
-  status: Competition["status"],
+  status: CompetitionMetadata["status"],
   endAt: string,
-): Competition["status"] {
+): CompetitionMetadata["status"] {
   if (status !== "published") return status;
   const end = new Date(endAt).getTime();
   return Number.isFinite(end) && Date.now() > end ? "closed" : status;
 }
 
-export const JOIN_MODE_LABEL: Record<Competition["join_mode"], string> = {
+export const JOIN_MODE_LABEL: Record<CompetitionMetadata["join_mode"], string> = {
   open: "Tự do tham gia",
   code: "Cần mã tham gia",
   invite_only: "Chỉ theo lời mời",
@@ -215,11 +268,14 @@ const LEGACY_METRIC_LABEL: Record<string, string> = {
 };
 
 /**
- * Nhãn metric chính của cuộc thi để hiển thị. Ưu tiên hợp đồng kết quả; response cũ chưa có hợp đồng
+ * Nhãn metric chính cho payload admin (đầy đủ `submission_config`). Payload thí sinh dùng thẳng
+ * `primary_metric_label` do server tính. Ưu tiên hợp đồng kết quả; response cũ chưa có hợp đồng
  * thì rơi về tên metric v1. Bản nháp v2 chưa khai báo metric hiện "Chưa cấu hình" - `primary_metric`
  * của document là field v1 còn sót lại, không phải metric đang được chấm.
  */
-export function primaryMetricLabel(competition: Competition): string {
+export function primaryMetricLabel(
+  competition: Pick<AdminCompetition, "primary_metric" | "submission_config">,
+): string {
   const config = competition.submission_config;
   const contract = config?.result_contract;
   const key = contract ? config?.primary_metric : competition.primary_metric;
@@ -274,7 +330,7 @@ export function isSafeResourceUrl(value: string): boolean {
 }
 
 /** published → success, closed → muted, draft (admin-only view) → warning. */
-export function statusClass(status: Competition["status"]): string {
+export function statusClass(status: CompetitionMetadata["status"]): string {
   if (status === "published") return "success";
   if (status === "closed") return "closed";
   return "warning";

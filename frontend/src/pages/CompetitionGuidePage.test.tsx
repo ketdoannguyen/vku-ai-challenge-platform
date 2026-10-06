@@ -6,11 +6,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { CompetitionDetail } from "../api/competitions";
 import { CompetitionDetailPage } from "./CompetitionDetailPage";
 import { CompetitionGuidePage } from "./CompetitionGuidePage";
 
-const BASE: Competition = {
+const BASE: CompetitionDetail = {
   id: "1",
   slug: "ai-challenge-2026",
   name: "AI Challenge 2026",
@@ -23,6 +23,8 @@ const BASE: Competition = {
   quota_per_day: 7,
   leaderboard_visible: true,
   join_code_configured: true,
+  primary_metric_label: "F1",
+  access: { allowed: true, reason: null },
   resources: [],
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   submission_config: {
@@ -43,7 +45,7 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function mockApi(competition: Competition = BASE) {
+function mockApi(competition: CompetitionDetail = BASE) {
   const urls: string[] = [];
   vi.stubGlobal(
     "fetch",

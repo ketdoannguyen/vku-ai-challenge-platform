@@ -21,6 +21,8 @@ const COMPETITION = {
   quota_per_day: 7,
   leaderboard_visible: true,
   join_code_configured: true,
+  primary_metric_label: "F1",
+  access: { allowed: true, reason: null },
   resources: [],
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   submission_config: {
@@ -35,8 +37,8 @@ const COMPETITION = {
 
 const CONTENTS = {
   contents: [
-    { id: "a", slug: "problem", title: "Đề bài", order: 20, visibility: "public", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
-    { id: "b", slug: "rules", title: "Rules", order: 10, visibility: "members", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "a", slug: "problem", title: "Đề bài", order: 20, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "b", slug: "rules", title: "Rules", order: 10, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -106,10 +108,7 @@ test("load competition + sidebar sắp theo order, dừng ở Tổng quan và ta
   const items = nav.querySelectorAll(".content-nav-item");
   // Frontend render theo thứ tự API trả về; backend đã sort theo order (Rules 10 trước Đề bài 20)
   expect(items[0].textContent).toContain("Đề bài");
-  expect(items[0].textContent).toContain("Mọi thí sinh");
   expect(items[1].textContent).toBe("Rules");
-  // Chip chỉ gắn cho tài liệu công khai, nên mục "Rules" (members) không có nhãn này.
-  expect(nav.textContent).not.toContain("Chỉ thành viên cuộc thi");
   // Badge đếm của mục lục chỉ còn đúng con số, không còn hậu tố "mục"; scope vào
   // section chứa nav để không dính badge của block Tài nguyên cùng class.
   expect(within(nav.closest("section") as HTMLElement).getByText("2")).toBeTruthy();
@@ -185,7 +184,7 @@ test("mục lục cuộc thi là điều hướng route, không giả lập tab"
   expect(within(leaderboardNav).getByRole("link", { name: "Tổng quan" }).getAttribute("aria-current")).toBeNull();
 });
 
-test("mục Hướng dẫn đứng ngay sau Tổng quan, mở được và không cần đăng nhập", async () => {
+test("mục Hướng dẫn đứng ngay sau Tổng quan và mở được với thành viên", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
     return { body: COMPETITION, status: 200 };
@@ -200,15 +199,15 @@ test("mục Hướng dẫn đứng ngay sau Tổng quan, mở được và khôn
   expect(within(nav).getByRole("link", { name: "Hướng dẫn" }).getAttribute("aria-current")).toBeNull();
 });
 
-test("trang Hướng dẫn mở công khai ở route riêng, không hiện sidebar mục lục nội dung", async () => {
+test("trang Hướng dẫn mở ở route riêng với thành viên, không hiện sidebar mục lục nội dung", async () => {
   apiMock((url) => {
     if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
-    return { body: { ...COMPETITION, membership: { active: false, joined_at: null } }, status: 200 };
+    return { body: COMPETITION, status: 200 };
   });
   renderAt("/competitions/ai-challenge-2026/huong-dan");
   await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 });
 
-  // Khách chưa tham gia vẫn đọc được hướng dẫn; đây là trang workspace nên không có rail trái.
+  // Đây là trang workspace nên không có rail trái; gate membership đã mở từ shell.
   expect(screen.queryByRole("navigation", { name: "Nội dung cuộc thi" })).toBeNull();
   const nav = screen.getByRole("navigation", { name: "Mục lục cuộc thi" });
   expect(within(nav).getByRole("link", { name: "Hướng dẫn" }).getAttribute("aria-current")).toBe("page");
@@ -274,7 +273,6 @@ test("header nội dung chỉ còn tiêu đề", async () => {
       return {
         body: {
           ...CONTENTS.contents[0],
-          visibility: "members",
           markdown: "Nội dung tài liệu.",
         },
         status: 200,
@@ -289,14 +287,12 @@ test("header nội dung chỉ còn tiêu đề", async () => {
   const title = await screen.findByRole("heading", { name: "Đề bài", level: 2 });
   const header = title.closest("header");
   expect(header).toHaveClass("article-head");
-  // Ngày cập nhật và nhãn visibility đều đã bỏ, header chỉ còn đúng một tiêu đề.
+  // Ngày cập nhật và nhãn hiển thị đều đã bỏ, header chỉ còn đúng một tiêu đề.
   expect(header?.children).toHaveLength(1);
   expect(header?.querySelector("time")).toBeNull();
   // Nền sọc chéo là lớp trang trí thuần CSS, không tiêu tốn phần tử DOM nào.
   expect(header?.querySelector(".vku-accent")).toBeNull();
   expect(within(header as HTMLElement).queryByText(/^Cập nhật /)).toBeNull();
-  expect(within(header as HTMLElement).queryByText("Chỉ thành viên cuộc thi")).toBeNull();
-  expect(within(header as HTMLElement).queryByText("Mọi thí sinh")).toBeNull();
 });
 
 test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an toàn", async () => {
@@ -365,7 +361,8 @@ test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nh�
       }
       if (url.includes("/contents")) return json(CONTENTS);
       detailCalls += 1;
-      // Lần 1: chưa join nên backend chưa trả quota. Lần 2: đã là thành viên nên có quota.
+      // Lần 1: chưa tham gia nên backend chỉ trả landing khóa. Lần 2: đã là thành viên
+      // nên payload đầy đủ (quota) và gate mở.
       return json({
         ...COMPETITION,
         join_mode: "open",
@@ -373,6 +370,10 @@ test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nh�
           detailCalls === 1
             ? { active: false, joined_at: null }
             : { active: true, joined_at: "2026-09-15T00:00:00Z" },
+        access:
+          detailCalls === 1
+            ? { allowed: false, reason: "membership_required" }
+            : { allowed: true, reason: null },
         quota: { per_day: 7, used_today: 2, remaining: 5, resets_at: "2026-11-02T00:00:00Z" },
       });
     }),
@@ -380,11 +381,204 @@ test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nh�
 
   renderAt("/competitions/ai-challenge-2026");
   await screen.findByRole("heading", { name: "AI Challenge 2026" });
-  fireEvent.click(screen.getByRole("button", { name: "Tham gia" }));
+  // Masthead cũng có nút tham gia; bấm đúng nút trong landing khóa.
+  const locked = document.querySelector(".comp-locked-card") as HTMLElement;
+  fireEvent.click(within(locked).getByRole("button", { name: "Tham gia" }));
 
   await waitFor(() => expect(detailCalls).toBe(2));
+  // Join chỉ vá membership; gate chỉ mở bằng payload đầy đủ từ lượt tải lại.
+  await screen.findByRole("navigation", { name: "Mục lục cuộc thi" });
   expect(screen.getByText("Đã tham gia")).toBeTruthy();
   expect(screen.queryByText("Đang tải cuộc thi…")).toBeNull();
+});
+
+test("khách chưa đăng nhập: landing khóa kèm lối đăng nhập, URL sâu cũng không mở nội dung", async () => {
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response(
+        JSON.stringify({
+          ...COMPETITION,
+          membership: { active: false, joined_at: null },
+          access: { allowed: false, reason: "login_required" },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    }),
+  );
+  renderAt("/competitions/ai-challenge-2026/submit");
+
+  expect(
+    await screen.findByText("Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung."),
+  ).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Đăng nhập" })).toBeTruthy();
+  // Gate đóng ở shell nên URL sâu không mount được trang con, cũng không hỏi mục lục.
+  expect(screen.queryByTestId("workspace-submit")).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Mục lục cuộc thi" })).toBeNull();
+  expect(urls.some((url) => url.includes("/contents"))).toBe(false);
+});
+
+test("người chưa tham gia: landing khóa mời tham gia, không lộ tab lẫn mục lục", async () => {
+  const urls: string[] = [];
+  apiMock((url) => {
+    urls.push(url);
+    return {
+      body: {
+        ...COMPETITION,
+        join_mode: "open",
+        membership: { active: false, joined_at: null },
+        access: { allowed: false, reason: "membership_required" },
+      },
+      status: 200,
+    };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+
+  expect(await screen.findByText("Hãy tham gia cuộc thi trước để xem nội dung.")).toBeTruthy();
+  const locked = document.querySelector(".comp-locked-card") as HTMLElement;
+  expect(within(locked).getByRole("button", { name: "Tham gia" })).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Mục lục cuộc thi" })).toBeNull();
+  expect(screen.queryByText("Mục lục nội dung")).toBeNull();
+  expect(urls.some((url) => url.includes("/contents"))).toBe(false);
+});
+
+test("cuộc thi chỉ theo lời mời: landing khóa nói rõ chưa được phép, không mời bấm join", async () => {
+  apiMock(() => ({
+    body: {
+      ...COMPETITION,
+      join_mode: "invite_only",
+      membership: { active: false, joined_at: null },
+      access: { allowed: false, reason: "membership_required" },
+    },
+    status: 200,
+  }));
+  renderAt("/competitions/ai-challenge-2026");
+
+  expect(
+    await screen.findByText(
+      "Bạn chưa được phép tham gia cuộc thi này. Vui lòng liên hệ Ban Tổ chức để được mời.",
+    ),
+  ).toBeTruthy();
+  const locked = document.querySelector(".comp-locked-card") as HTMLElement;
+  expect(within(locked).queryByRole("button")).toBeNull();
+});
+
+test("membership bị vô hiệu hóa: landing khóa nói lý do và không tự mời tham gia lại", async () => {
+  apiMock(() => ({
+    body: {
+      ...COMPETITION,
+      membership: { active: false, joined_at: "2026-09-15T00:00:00Z" },
+      access: { allowed: false, reason: "membership_inactive" },
+    },
+    status: 200,
+  }));
+  renderAt("/competitions/ai-challenge-2026");
+
+  expect(
+    await screen.findByText(
+      "Quyền tham gia cuộc thi của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Ban Tổ chức.",
+    ),
+  ).toBeTruthy();
+  const locked = document.querySelector(".comp-locked-card") as HTMLElement;
+  expect(within(locked).queryByRole("button")).toBeNull();
+});
+
+test("cuộc thi đã kết thúc: người chưa tham gia chỉ thấy landing khóa, không còn nút tham gia", async () => {
+  apiMock(() => ({
+    body: {
+      ...COMPETITION,
+      status: "closed",
+      join_mode: "open",
+      membership: { active: false, joined_at: null },
+      access: { allowed: false, reason: "membership_required" },
+    },
+    status: 200,
+  }));
+  renderAt("/competitions/ai-challenge-2026");
+
+  expect(
+    await screen.findByText(
+      "Cuộc thi đã hết thời gian tham gia. Nội dung chỉ dành cho thành viên đã tham gia.",
+    ),
+  ).toBeTruthy();
+  const locked = document.querySelector(".comp-locked-card") as HTMLElement;
+  expect(within(locked).queryByRole("button")).toBeNull();
+});
+
+test("tài liệu trả 401 giữa chừng: shell đóng gate thay vì hiện lỗi tải nội dung", async () => {
+  let detailCalls = 0;
+  apiMock((url) => {
+    if (url.endsWith("/contents/problem")) {
+      return { body: { error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, status: 401 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    detailCalls += 1;
+    // Lượt xác minh lại sau khi mất quyền: backend trả landing khóa.
+    return detailCalls === 1
+      ? { body: COMPETITION, status: 200 }
+      : {
+          body: {
+            ...COMPETITION,
+            membership: { active: false, joined_at: null },
+            access: { allowed: false, reason: "login_required" },
+          },
+          status: 200,
+        };
+  });
+  renderAt("/competitions/ai-challenge-2026/content/problem");
+
+  expect(
+    await screen.findByText("Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Mục lục cuộc thi" })).toBeNull();
+  // Mất quyền không phải tài liệu hỏng: không hiện lỗi tải kèm nút thử lại.
+  expect(screen.queryByText("Thử lại")).toBeNull();
+  expect(detailCalls).toBe(2);
+});
+
+test("rời cuộc thi: gate đóng ngay, mục lục bị xoá và không còn tab", async () => {
+  let detailCalls = 0;
+  apiMock((url) => {
+    if (url.endsWith("/leave")) {
+      return {
+        body: {
+          competition_id: "1",
+          membership: { active: false, joined_at: "2026-09-15T00:00:00Z" },
+          left_now: true,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    detailCalls += 1;
+    return {
+      body:
+        detailCalls === 1
+          ? COMPETITION
+          : {
+              ...COMPETITION,
+              membership: { active: false, joined_at: "2026-09-15T00:00:00Z" },
+              access: { allowed: false, reason: "membership_inactive" },
+            },
+      status: 200,
+    };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("navigation", { name: "Nội dung cuộc thi" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Rời cuộc thi" }));
+  const dialog = screen.getByRole("dialog", { name: "Rời cuộc thi" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Rời cuộc thi" }));
+
+  expect(
+    await screen.findByText(
+      "Quyền tham gia cuộc thi của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Ban Tổ chức.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("navigation", { name: "Mục lục cuộc thi" })).toBeNull();
+  expect(screen.queryByRole("navigation", { name: "Nội dung cuộc thi" })).toBeNull();
 });
 
 test("cuộc thi không có link ngoài vẫn thấy block tài nguyên với notebook khung", async () => {

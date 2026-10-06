@@ -3,11 +3,11 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { CompetitionSummary } from "../api/competitions";
 import { AuthProvider } from "../auth/AuthContext";
 import { JoinControl } from "./JoinControl";
 
-function makeCompetition(overrides: Partial<Competition> = {}): Competition {
+function makeCompetition(overrides: Partial<CompetitionSummary> = {}): CompetitionSummary {
   return {
     id: "1",
     slug: "ai-cup",
@@ -20,18 +20,10 @@ function makeCompetition(overrides: Partial<Competition> = {}): Competition {
     primary_metric: "f1",
     quota_per_day: 5,
     leaderboard_visible: true,
-    resources: [],
     join_code_configured: false,
+    primary_metric_label: "F1",
     membership: { active: false, joined_at: null },
-    submission_config: {
-      ready: false,
-      id_column: null,
-      prediction_column: null,
-      average: null,
-      pos_label: null,
-      max_upload_mb: 10,
-      max_notebook_mb: 20,
-    },
+    access: { allowed: false, reason: "membership_required" },
     ...overrides,
   };
 }
@@ -239,8 +231,9 @@ test("khách: CTA đăng nhập kèm đường dẫn quay lại, không gọi AP
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-const MEMBER: Competition = makeCompetition({
+const MEMBER: CompetitionSummary = makeCompetition({
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  access: { allowed: true, reason: null },
 });
 
 test("đã tham gia: rời cuộc thi phải xác nhận rồi mới gọi API", async () => {

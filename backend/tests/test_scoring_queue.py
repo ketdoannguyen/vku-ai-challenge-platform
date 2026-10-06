@@ -306,11 +306,32 @@ def test_vo_hieu_hoa_membership_thi_luot_khong_duoc_cham(client, fake_runner):
     assert deactivated.status_code == 200, deactivated.text
 
     assert run_worker(client) == 1
+    # Thí sinh bị vô hiệu hóa mất luôn quyền xem lượt của chính mình...
     login_participant(client)
-    body = attempt_status(client, cid, queued["attempt_id"])
-    assert body["status"] == "FAILED"
-    assert body["error"]["code"] == "MEMBERSHIP_INACTIVE"
+    denied = client.get(f"/api/competitions/{cid}/submissions/attempts/{queued['attempt_id']}")
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMBERSHIP_INACTIVE"
+    # ...nên xác minh phán quyết của worker ở đúng bản ghi attempt.
+    attempts = attempt_documents(client)
+    assert [attempt["status"] for attempt in attempts] == ["FAILED"]
+    assert attempts[0]["error"]["code"] == "MEMBERSHIP_INACTIVE"
     assert submission_documents(client) == []
+
+
+def test_admin_doc_luot_cua_chinh_minh_khong_can_membership(client, fake_runner):
+    """Admin miễn membership ở route đọc lượt (ADR-060); lượt của thí sinh vẫn 404."""
+    competition = publish_v2_competition(client)
+    cid = competition["id"]
+    queued = submit(client, cid, V2_SUBMISSION).json()
+
+    login(client)  # admin, không có membership trong cuộc thi này
+    listed = client.get(f"/api/competitions/{cid}/submissions/attempts")
+    assert listed.status_code == 200
+    assert listed.json() == {"attempts": []}
+
+    foreign = client.get(f"/api/competitions/{cid}/submissions/attempts/{queued['attempt_id']}")
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_kho_tam_hong_khi_nhan_bai_thi_khong_giu_luot(client, fake_runner, fake_artifact_storage):

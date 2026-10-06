@@ -7,11 +7,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import { formatLocal, type Competition } from "../api/competitions";
+import { formatLocal, type CompetitionDetail } from "../api/competitions";
 import { CompetitionContentPanel, CompetitionOverview } from "./CompetitionContentPanel";
 import { CompetitionDetailPage } from "./CompetitionDetailPage";
 
-const BASE: Competition = {
+const BASE: CompetitionDetail = {
   id: "1",
   slug: "ai-challenge-2026",
   name: "AI Challenge 2026",
@@ -24,6 +24,8 @@ const BASE: Competition = {
   quota_per_day: 7,
   leaderboard_visible: true,
   join_code_configured: true,
+  primary_metric_label: "F1",
+  access: { allowed: true, reason: null },
   resources: [],
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   submission_config: {
@@ -39,8 +41,8 @@ const BASE: Competition = {
 
 const CONTENTS = {
   contents: [
-    { id: "a", slug: "problem", title: "Đề bài", order: 20, visibility: "public", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
-    { id: "b", slug: "rules", title: "Rules", order: 10, visibility: "members", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "a", slug: "problem", title: "Đề bài", order: 20, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "b", slug: "rules", title: "Rules", order: 10, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -123,7 +125,7 @@ test("Tổng quan nêu thể lệ và quy cách bài nộp bằng dữ liệu th
 });
 
 test("cấu hình chưa thiết lập hiển thị “Chưa cấu hình”, không lộ null/undefined", async () => {
-  const unconfigured: Competition = {
+  const unconfigured: CompetitionDetail = {
     ...BASE,
     submission_config: {
       ready: false,
@@ -189,10 +191,12 @@ test("lỗi mục lục nội dung không xoá thể lệ/quy cách và có nút
   await waitFor(() => expect(docList().getByRole("link", { name: /^Đề bài/ })).toBeTruthy());
 });
 
-test("chưa tham gia và cuộc thi còn nhận bài thì Tổng quan nói rõ vì sao chưa nộp được", async () => {
-  const guest: Competition = { ...BASE, membership: { active: false, joined_at: null } };
+test("admin xem trước (chưa có membership): Tổng quan nói rõ vì sao chưa nộp được", async () => {
+  // Admin đọc được payload nhưng chưa tham gia cuộc thi; gate vẫn mở nên đây là nhánh
+  // duy nhất còn thấy được thông báo chặn nộp bài "chưa tham gia" trong Tổng quan.
+  const preview: CompetitionDetail = { ...BASE, membership: { active: false, joined_at: null } };
   apiMock((url) =>
-    url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: guest, status: 200 },
+    url.includes("/contents") ? { body: CONTENTS, status: 200 } : { body: preview, status: 200 },
   );
   renderAt("/competitions/ai-challenge-2026");
 

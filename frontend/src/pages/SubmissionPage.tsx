@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type { ParticipantAiReview } from "../api/aiReview";
 import { ApiClientError, api } from "../api/client";
-import { formatLocal } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import { formatMetric, resultContract, type Metrics } from "../api/results";
 import { ErrorBox, FileButton } from "../components/ui";
 import { useDeadlineClock } from "../hooks/useCountdown";
@@ -96,7 +96,7 @@ const OUT_OF_TIME = {
 };
 
 export function SubmissionPage() {
-  const { competition, refreshCompetition } = useOutletContext<CompetitionContext>();
+  const { competition, refreshCompetition, reportAccessLost } = useOutletContext<CompetitionContext>();
   const [files, setFiles] = useState<Record<SlotKind, File | null>>({
     csv: null,
     notebook: null,
@@ -206,6 +206,12 @@ export function SubmissionPage() {
           setError(err);
           return;
         }
+        const lost = accessLostReason(err);
+        if (lost !== null) {
+          // Quyền đọc vừa mất: nhường shell đóng gate, dừng vòng hỏi trạng thái lượt.
+          reportAccessLost(lost);
+          return;
+        }
         // Lỗi khác chỉ là một vòng hỏng: vòng sau thử lại.
       }
       timer = window.setTimeout(poll, ATTEMPT_POLL_MS);
@@ -216,7 +222,7 @@ export function SubmissionPage() {
       stopped = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [attempt, timedOut, competition.id, refreshCompetition]);
+  }, [attempt, timedOut, competition.id, refreshCompetition, reportAccessLost]);
 
   /** Trần và định dạng khác nhau theo từng slot nên luật kiểm tra nằm cùng một chỗ. */
   function rejectReason(kind: SlotKind, selectedFile: File): string | null {
@@ -277,6 +283,12 @@ export function SubmissionPage() {
       setSubmitKey(null);
       setAttempt(response);
     } catch (err) {
+      const lost = accessLostReason(err);
+      if (lost !== null) {
+        // Quyền nộp bài vừa mất: nhường shell đóng gate thay vì chỉ hiện lỗi tại chỗ.
+        reportAccessLost(lost);
+        return;
+      }
       setError(err);
     } finally {
       setSubmitting(false);
