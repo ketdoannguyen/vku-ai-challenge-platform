@@ -27,7 +27,7 @@ MAX_CAPTURE_ATTEMPTS = 3
 
 # Chỉ những field này tham gia so sánh hai lần đọc metadata; `markdown_path`/`size_bytes` quyết định
 # page có được đọc hay không nên chúng cũng phải nằm trong phép so sánh.
-_METADATA_FIELDS = ("title", "slug", "order", "visibility", "markdown_path", "size_bytes", "updated_at")
+_METADATA_FIELDS = ("title", "slug", "order", "markdown_path", "size_bytes", "updated_at")
 
 
 class SnapshotError(Exception):
@@ -43,7 +43,6 @@ class PageSnapshot:
     title: str
     slug: str
     order: int
-    visibility: str
     markdown: str
     markdown_sha256: str
     size_bytes: int
@@ -102,7 +101,6 @@ async def content_source_view(db, competition_id, *, settings) -> dict:
                 "title": content["title"],
                 "slug": content["slug"],
                 "order": content["order"],
-                "visibility": content["visibility"],
                 "included": reason == "OK",
                 "reason": reason,
             }
@@ -185,7 +183,6 @@ def _capture_pages(contents: list[dict], settings) -> _CapturedPages:
                 title=content["title"],
                 slug=content["slug"],
                 order=content["order"],
-                visibility=content["visibility"],
                 markdown=markdown,
                 markdown_sha256=hashlib.sha256(data).hexdigest(),
                 size_bytes=len(data),
@@ -222,7 +219,6 @@ def canonical_content_hash(pages: list[PageSnapshot], resources: list[dict]) -> 
             "title": page.title,
             "slug": page.slug,
             "order": page.order,
-            "visibility": page.visibility,
             "markdown_sha256": page.markdown_sha256,
             "markdown": page.markdown,
         }
@@ -271,7 +267,6 @@ def _page_document(page: PageSnapshot) -> dict:
         "title": page.title,
         "slug": page.slug,
         "order": page.order,
-        "visibility": page.visibility,
         "markdown": page.markdown,
         "markdown_sha256": page.markdown_sha256,
         "size_bytes": page.size_bytes,
@@ -290,7 +285,6 @@ def _result(document: dict, captured: _CapturedPages, *, reused: bool) -> Captur
                 title=page["title"],
                 slug=page["slug"],
                 order=page["order"],
-                visibility=page["visibility"],
                 markdown=page["markdown"],
                 markdown_sha256=page["markdown_sha256"],
                 size_bytes=page["size_bytes"],

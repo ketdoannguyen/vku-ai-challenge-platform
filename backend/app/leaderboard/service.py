@@ -1,19 +1,37 @@
 """Best-submission ranking shared by participant, admin and export APIs."""
 
 import asyncio
+import logging
 import time
 import weakref
 from collections import Counter, OrderedDict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.core.datetimes import iso_z
-from app.scoring import contracts
+from app.scoring import contracts, normalization
 from app.submissions.service import SUBMISSIONS_COLLECTION, eligible_query
+
+logger = logging.getLogger(__name__)
 
 # Bảng xếp hạng thô được cache rất ngắn: đủ lâu để gộp các lượt đọc trùng nhau lúc đông người xem,
 # đủ ngắn để bài nộp hay quyết định duyệt mới xuất hiện gần như tức thì. Trần entry chặn RAM.
 _CACHE_MAX_ENTRIES = 128
 _CACHE_TTL_SECONDS = 1.0
+
+
+@dataclass(frozen=True)
+class RankedBoard:
+    """Bảng đã xếp hạng kèm metadata chuẩn hóa của đúng lần dựng ra nó.
+
+    Không suy `reference_best` từ các entry đã chọn: nhóm toàn 0 có thể chọn bài rất sớm với raw
+    thấp, nên `max(entry.raw)` lúc đó không còn là best thực của cuộc thi. Metadata phải đi cùng
+    entries như một gói để bảng, `me`, thẻ cuộc thi và file export không lệch nhau.
+    """
+
+    entries: list[dict] = field(default_factory=list)
+    normalization_metadata: dict | None = None
 
 
 def _rank_direction(competition: dict) -> int:
@@ -25,60 +43,136 @@ def _rank_direction(competition: dict) -> int:
     return 1 if ranking and not ranking[1] else -1
 
 
-async def ranked_entries(db, competition: dict) -> list[dict]:
-    """Bài tốt nhất của mỗi account, xếp theo metric chính và chiều của hợp đồng kết quả."""
-    # Participant, admin và file export dùng chung một tập eligible nên ba đường không thể lệch nhau.
-    query = eligible_query({"competition_id": competition["_id"], "status": "completed"})
-    cursor = db[SUBMISSIONS_COLLECTION].find(query).sort(
-        [
-            ("primary_score", _rank_direction(competition)),
-            # Bằng điểm thì bài đạt điểm sớm hơn đứng trước, bất kể chiều xếp hạng.
-            ("created_at", 1),
-            ("account_id", 1),
-            ("_id", 1),
-        ]
-    )
-    submissions = [submission async for submission in cursor]
-    counts = Counter(submission["account_id"] for submission in submissions)
+async def ranked_board(db, competition: dict) -> RankedBoard:
+    """Bài đại diện của mỗi account, xếp theo norm khi cuộc thi bật chuẩn hóa, ngược lại theo raw.
 
-    best = []
+    Nhánh chuẩn hóa tính norm cho **mọi** bài eligible rồi mới chọn bài đại diện: đội toàn 0 phải
+    đứng theo bài 0 nộp sớm nhất, không phải theo bài raw tốt nhất của đội.
+    """
+    # Participant, admin và file export dùng chung một tập eligible nên ba đường không thể lệch nhau.
+    rule = normalization.active_rule(competition)
+    query = eligible_query({"competition_id": competition["_id"], "status": "completed"})
+    cursor = db[SUBMISSIONS_COLLECTION].find(query)
+    if rule is None:
+        submissions = [
+            submission
+            async for submission in cursor.sort(
+                [
+                    ("primary_score", _rank_direction(competition)),
+                    # Bằng điểm thì bài đạt điểm sớm hơn đứng trước, bất kể chiều xếp hạng.
+                    ("created_at", 1),
+                    ("account_id", 1),
+                    ("_id", 1),
+                ]
+            )
+        ]
+        ranked = [(submission.get("primary_score"), submission) for submission in submissions]
+        metadata = None
+    else:
+        submissions = [submission async for submission in cursor]
+        usable = _usable(submissions)
+        # Mẫu số tính trên TOÀN BỘ bài hợp lệ, trước khi chọn bài đại diện hay cắt trang.
+        reference = normalization.reference_best(
+            [submission["primary_score"] for submission in usable], rule.higher_is_better
+        )
+        ranked = _normalized(usable, rule, reference)
+        metadata = normalization.board_metadata(
+            rule, reference=reference, calculated_at=datetime.now(timezone.utc)
+        )
+
+    counts = Counter(submission["account_id"] for submission in submissions)
+    best = _first_per_account(ranked)
+    account_ids = [submission["account_id"] for _, submission in best]
+    accounts = {
+        account["_id"]: account
+        async for account in db[ACCOUNTS_COLLECTION].find({"_id": {"$in": account_ids}})
+    }
+    entries = []
+    for rank, (normalized_score, submission) in enumerate(best, start=1):
+        account_id = submission["account_id"]
+        account = accounts.get(account_id)
+        entry = {
+            "rank": rank,
+            "account_id": str(account_id),
+            "display_name": account["name"] if account else "Tài khoản đã xóa",
+            "primary_score": submission["primary_score"],
+            "metrics": submission["metrics"],
+            "best_submission_id": str(submission["_id"]),
+            "best_submission_at": iso_z(submission["created_at"]),
+            "total_submissions": counts[account_id],
+        }
+        if metadata is not None:
+            entry["normalized_score"] = normalized_score
+        entries.append(entry)
+    return RankedBoard(entries=entries, normalization_metadata=metadata)
+
+
+def _valid(raw) -> bool:
+    """Điểm gốc đọc từ DB phải là số hữu hạn thật; bản ghi hỏng bị loại khỏi cả bảng lẫn mẫu số."""
+    return normalization.is_valid_score(raw)
+
+
+def _usable(submissions: list[dict]) -> list[dict]:
+    usable = [submission for submission in submissions if _valid(submission.get("primary_score"))]
+    if len(usable) != len(submissions):
+        logger.warning(
+            "Bỏ %d bài nộp có điểm gốc không phải số hữu hạn khỏi bảng xếp hạng",
+            len(submissions) - len(usable),
+        )
+    return usable
+
+
+def _normalized(
+    usable: list[dict], rule: normalization.Rule, reference: float | None
+) -> list[tuple[float, dict]]:
+    """`(norm, bài nộp)` của mọi bài dùng được, xếp `norm DESC` rồi mới tới thời điểm nộp.
+
+    Hoà norm - kể cả cả bảng cùng 0 - phân định bằng bài được nhận sớm hơn; raw không bao giờ là
+    tiêu chí phụ, vì làm vậy sẽ đảo ngược đúng thứ tự mà norm vừa quyết định.
+    """
+    ranked = [
+        (
+            normalization.score(
+                submission["primary_score"],
+                baseline=rule.baseline,
+                reference=reference,
+                higher_is_better=rule.higher_is_better,
+            ),
+            submission,
+        )
+        for submission in usable
+    ]
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            item[1]["created_at"],
+            item[1]["account_id"],
+            item[1]["_id"],
+        )
+    )
+    return ranked
+
+
+def _first_per_account(ranked: list[tuple]) -> list[tuple]:
+    """Lấy bài đứng đầu của mỗi account trên danh sách ĐÃ xếp - giữ nguyên thứ tự toàn cục."""
+    best: list[tuple] = []
     seen = set()
-    for submission in submissions:
+    for normalized_score, submission in ranked:
         account_id = submission["account_id"]
         if account_id not in seen:
             seen.add(account_id)
-            best.append(submission)
-
-    accounts = {
-        account["_id"]: account
-        async for account in db[ACCOUNTS_COLLECTION].find({"_id": {"$in": list(seen)}})
-    }
-    entries = []
-    for rank, submission in enumerate(best, start=1):
-        account_id = submission["account_id"]
-        account = accounts.get(account_id)
-        entries.append(
-            {
-                "rank": rank,
-                "account_id": str(account_id),
-                "display_name": account["name"] if account else "Tài khoản đã xóa",
-                "primary_score": submission["primary_score"],
-                "metrics": submission["metrics"],
-                "best_submission_id": str(submission["_id"]),
-                "best_submission_at": iso_z(submission["created_at"]),
-                "total_submissions": counts[account_id],
-            }
-        )
-    return entries
+            best.append((normalized_score, submission))
+    return best
 
 
-class _RankedEntriesCache:
-    """Cache TTL ngắn + single-flight cho danh sách xếp hạng thô.
+class _RankedBoardCache:
+    """Cache TTL ngắn + single-flight cho bảng xếp hạng đã dựng.
 
-    - Khoá gồm danh tính DB, id cuộc thi và chiều xếp hạng nên hai cuộc thi, hai chiều hay hai DB
-      không bao giờ dùng chung kết quả - kể cả khi nhiều test chạy trong cùng một tiến trình.
-    - Chỉ cache danh sách thô đầy đủ metric; payload thí sinh vẫn lọc `visible_metrics` theo từng
-      request nên cache không thể làm lộ metric bị ẩn.
+    - Khoá gồm danh tính DB, id cuộc thi, chiều xếp hạng và danh tính cấu hình chuẩn hóa nên hai
+      cuộc thi, hai chiều, hai baseline hay hai DB không bao giờ dùng chung kết quả - kể cả khi
+      nhiều test chạy trong cùng một tiến trình.
+    - Chỉ cache bảng thô đầy đủ metric; payload thí sinh vẫn lọc `visible_metrics` và norm theo
+      từng request nên cache không thể làm lộ metric bị ẩn.
     - Lượt đọc trùng khoá rơi vào lúc cache đang được nạp sẽ chờ chung một kết quả thay vì cùng
       chạy truy vấn.
     - `invalidate` tăng epoch: lượt nạp bắt đầu trước invalidate không được ghi lại vào cache và
@@ -96,10 +190,18 @@ class _RankedEntriesCache:
         self._epoch = 0
         self._inflight: dict[tuple, tuple[int, asyncio.Future]] = {}
 
-    async def get(self, db, competition: dict, loader) -> list[dict]:
+    async def get(self, db, competition: dict, loader) -> RankedBoard:
         # `MongoContext.db` trả một wrapper mới mỗi lần đọc nên id(db) không ổn định; client và tên
         # database mới là danh tính thật của nguồn dữ liệu.
-        key = (id(db.client), db.name, competition["_id"], _rank_direction(competition))
+        key = (
+            id(db.client),
+            db.name,
+            competition["_id"],
+            _rank_direction(competition),
+            # Đổi baseline/nguồn là đổi luật xếp hạng: bảng cũ phải trượt khỏi cache ngay cả khi
+            # entry còn trong TTL.
+            *normalization.cache_identity(competition),
+        )
         entries = self._lookup(key, db)
         if entries is not None:
             return entries
@@ -142,7 +244,7 @@ class _RankedEntriesCache:
         for key in stale:
             del self._entries[key]
 
-    def _lookup(self, key, db) -> list[dict] | None:
+    def _lookup(self, key, db) -> RankedBoard | None:
         entry = self._entries.get(key)
         if entry is None:
             return None
@@ -154,47 +256,53 @@ class _RankedEntriesCache:
         self._entries.move_to_end(key)
         return entries
 
-    def _store(self, key, db, entries: list[dict]) -> None:
+    def _store(self, key, db, board: RankedBoard) -> None:
         self._entries[key] = (
             weakref.ref(db.client),
             time.monotonic() + self._ttl_seconds,
-            entries,
+            board,
         )
         self._entries.move_to_end(key)
         while len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
 
 
-_ranked_entries_cache = _RankedEntriesCache()
+_ranked_board_cache = _RankedBoardCache()
 
 
-async def cached_ranked_entries(db, competition: dict) -> list[dict]:
-    """Bản cache ngắn hạn của `ranked_entries` cho hai đường leaderboard.
+async def cached_ranked_board(db, competition: dict) -> RankedBoard:
+    """Bản cache ngắn hạn của `ranked_board` cho hai đường leaderboard và thẻ cuộc thi.
 
     Export không đi qua đây: file tải về phải khớp dữ liệu tại đúng thời điểm admin bấm.
     """
-    return await _ranked_entries_cache.get(db, competition, ranked_entries)
+    return await _ranked_board_cache.get(db, competition, ranked_board)
 
 
 def invalidate_competition(competition_id) -> None:
     """Bỏ cache của một cuộc thi ngay sau thao tác đổi tư cách tính điểm (duyệt/từ chối bài nộp)."""
-    _ranked_entries_cache.invalidate(competition_id)
+    _ranked_board_cache.invalidate(competition_id)
 
 
-def _participant_entry(entry: dict, current_account_id, contract) -> dict:
+def _participant_entry(
+    entry: dict, current_account_id, contract, *, normalization_visible: bool
+) -> dict:
     """Bỏ account_id và gắn cờ người xem - `me` dùng chung serializer này để không lộ định danh.
 
-    `contract` là hợp đồng thí sinh: metric admin ẩn không rời khỏi backend.
+    `contract` là hợp đồng thí sinh: metric admin ẩn không rời khỏi backend. `normalization_visible`
+    false (bảng bị ẩn hoặc metric nguồn bị ẩn) thì điểm norm trả `null` - khoá vẫn có để UI biết
+    cuộc thi đang bật chuẩn hóa, nhưng giá trị thì không.
     """
     item = {key: value for key, value in entry.items() if key != "account_id"}
     item["is_current_user"] = entry["account_id"] == str(current_account_id)
+    if "normalized_score" in item and not normalization_visible:
+        item["normalized_score"] = None
     contracts.apply_metric_visibility(item, contract)
     return item
 
 
 def leaderboard_response(
     competition: dict,
-    entries: list[dict],
+    board: RankedBoard,
     *,
     current_account_id=None,
     limit: int = 50,
@@ -202,30 +310,52 @@ def leaderboard_response(
 ) -> dict:
     """Trang participant: `rank` giữ nguyên thứ hạng toàn cục; `me` tìm trên full list rồi mới cắt trang."""
     contract = contracts.participant_contract(competition)
+    # Đọc quyền xem một lần cho cả trang: mọi entry và metadata phải theo cùng một quyết định.
+    normalization_visible = normalization.participant_visible(competition)
+    entries = board.entries
     page = entries[offset : offset + limit]
     me = next(
         (entry for entry in entries if entry["account_id"] == str(current_account_id)), None
     )
-    return {
+    payload = {
         "competition_id": str(competition["_id"]),
         "primary_metric": contract.primary_metric,
-        "entries": [_participant_entry(entry, current_account_id, contract) for entry in page],
+        "entries": [
+            _participant_entry(
+                entry, current_account_id, contract, normalization_visible=normalization_visible
+            )
+            for entry in page
+        ],
         "total": len(entries),
         "limit": limit,
         "offset": offset,
         "has_more": offset + len(page) < len(entries),
-        "me": _participant_entry(me, current_account_id, contract) if me else None,
+        "me": (
+            _participant_entry(
+                me, current_account_id, contract, normalization_visible=normalization_visible
+            )
+            if me
+            else None
+        ),
     }
+    if board.normalization_metadata is not None:
+        payload["normalization"] = (
+            board.normalization_metadata if normalization_visible else None
+        )
+    return payload
 
 
-def admin_leaderboard_response(competition: dict, entries: list[dict]) -> dict:
-    """Admin/export luôn nhận toàn bộ danh sách kèm account_id, không phân trang."""
-    return {
+def admin_leaderboard_response(competition: dict, board: RankedBoard) -> dict:
+    """Admin/export luôn nhận toàn bộ danh sách kèm account_id và đủ metadata, không phân trang."""
+    payload = {
         "competition_id": str(competition["_id"]),
         "primary_metric": _primary_metric(competition),
-        "entries": entries,
-        "total": len(entries),
+        "entries": board.entries,
+        "total": len(board.entries),
     }
+    if board.normalization_metadata is not None:
+        payload["normalization"] = board.normalization_metadata
+    return payload
 
 
 def _primary_metric(competition: dict) -> str | None:

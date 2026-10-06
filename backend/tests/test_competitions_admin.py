@@ -402,7 +402,7 @@ def test_clone_copies_content_assets_ground_truth_and_v1_config(client, isolated
     cid = source['id']
     configure_scoring(client, cid)
     page = client.post(f'/api/admin/competitions/{cid}/contents', json={
-        'title': 'Thể lệ', 'slug': 'the-le', 'visibility': 'public', 'order': 10,
+        'title': 'Thể lệ', 'slug': 'the-le', 'order': 10,
     }).json()
     assert client.put(
         f"/api/admin/competitions/{cid}/contents/{page['id']}/file",

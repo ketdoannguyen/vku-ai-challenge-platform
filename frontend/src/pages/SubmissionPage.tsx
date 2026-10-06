@@ -2,10 +2,11 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import type { ParticipantAiReview } from "../api/aiReview";
 import { ApiClientError, api } from "../api/client";
-import { formatLocal } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import { formatMetric, resultContract, type Metrics } from "../api/results";
 import { ErrorBox, FileButton } from "../components/ui";
 import { useDeadlineClock } from "../hooks/useCountdown";
+import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import { SUBMISSION_PITFALLS, submissionSchema } from "../lib/submissionRequirements";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
@@ -21,6 +22,8 @@ interface SubmissionResult {
   quota_remaining: number;
   /** Vắng mặt khi cuộc thi chưa bật AI hoặc không công khai kết luận cho thí sinh. */
   ai_review?: ParticipantAiReview;
+  /** Norm tạm chốt một lần lúc bài được ghi nhận; vắng khi cuộc thi không bật norm hoặc bị ẩn. */
+  normalization_snapshot?: { score: number; calculated_at: string };
 }
 
 /** Hai part bắt buộc của một lượt nộp - thiếu một trong hai thì backend từ chối. */
@@ -93,7 +96,7 @@ const OUT_OF_TIME = {
 };
 
 export function SubmissionPage() {
-  const { competition, refreshCompetition } = useOutletContext<CompetitionContext>();
+  const { competition, refreshCompetition, reportAccessLost } = useOutletContext<CompetitionContext>();
   const [files, setFiles] = useState<Record<SlotKind, File | null>>({
     csv: null,
     notebook: null,
@@ -146,6 +149,8 @@ export function SubmissionPage() {
     clock >= new Date(attempt.deadline_at).getTime();
 
   const result = attempt?.submission ?? null;
+  // Chỉ có khi cuộc thi bật norm và người xem được xem - backend đã lọc theo quyền.
+  const snapshot = result?.normalization_snapshot ?? null;
   const waiting = attempt !== null && WAITING_ATTEMPT_STATUSES.has(attempt.status) && !timedOut;
   const failure =
     timedOut && !result
@@ -201,6 +206,12 @@ export function SubmissionPage() {
           setError(err);
           return;
         }
+        const lost = accessLostReason(err);
+        if (lost !== null) {
+          // Quyền đọc vừa mất: nhường shell đóng gate, dừng vòng hỏi trạng thái lượt.
+          reportAccessLost(lost);
+          return;
+        }
         // Lỗi khác chỉ là một vòng hỏng: vòng sau thử lại.
       }
       timer = window.setTimeout(poll, ATTEMPT_POLL_MS);
@@ -211,7 +222,7 @@ export function SubmissionPage() {
       stopped = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [attempt, timedOut, competition.id, refreshCompetition]);
+  }, [attempt, timedOut, competition.id, refreshCompetition, reportAccessLost]);
 
   /** Trần và định dạng khác nhau theo từng slot nên luật kiểm tra nằm cùng một chỗ. */
   function rejectReason(kind: SlotKind, selectedFile: File): string | null {
@@ -272,6 +283,12 @@ export function SubmissionPage() {
       setSubmitKey(null);
       setAttempt(response);
     } catch (err) {
+      const lost = accessLostReason(err);
+      if (lost !== null) {
+        // Quyền nộp bài vừa mất: nhường shell đóng gate thay vì chỉ hiện lỗi tại chỗ.
+        reportAccessLost(lost);
+        return;
+      }
       setError(err);
     } finally {
       setSubmitting(false);
@@ -421,8 +438,21 @@ export function SubmissionPage() {
             </div>
 
             <div className="metric-grid sub-result-cards">
+              {/* Có norm tạm thì norm là điểm nổi bật; điểm gốc và các metric vẫn xem được bên cạnh. */}
+              {snapshot && (
+                <div className="metric-card sub-result-card primary" data-metric="normalization">
+                  <div className="sub-result-card-top">
+                    <span className="sub-result-metric-label">{PROVISIONAL_NORM_LABEL}</span>
+                    <span className="sub-result-metric-badge">0–50</span>
+                  </div>
+                  <div className="sub-result-score">
+                    <strong>{formatMetric(snapshot.score, 2)}</strong>
+                  </div>
+                </div>
+              )}
               {contract.metrics.map((metric) => {
-                const isPrimary = metric.key === contract.primary_metric;
+                // Có norm thì metric nguồn không còn là điểm xếp hạng chính của cuộc thi.
+                const isPrimary = snapshot === null && metric.key === contract.primary_metric;
                 return (
                   <div
                     className={`metric-card sub-result-card${isPrimary ? " primary" : ""}`}
@@ -447,6 +477,15 @@ export function SubmissionPage() {
                 );
               })}
             </div>
+
+            {/* Snapshot là ảnh chụp lúc ghi nhận, không phải norm hiện tại của bảng xếp hạng. */}
+            {snapshot && (
+              <p className="sub-result-ai-note text-muted">
+                Con số tạm tính lúc {formatLocal(snapshot.calculated_at)}; điểm norm hiện tại có
+                thể đã đổi theo kết quả tốt nhất của cuộc thi.{" "}
+                <Link to="../leaderboard">Xem bảng xếp hạng để đối chiếu</Link>.
+              </p>
+            )}
 
             <div className="sub-result-quota-card">
               <div className="sub-result-quota-info">

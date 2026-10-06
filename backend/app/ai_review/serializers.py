@@ -55,7 +55,14 @@ def admin_projection(submission: dict) -> dict | None:
         "participant_summary": projection.get("participant_summary"),
         "generation": projection.get("generation"),
         "run_id": projection.get("run_id"),
-        "source_warning_count": projection.get("source_warning_count"),
+        # Chỉ tin trạng thái nguồn khi version khớp phiên bản hiện hành: dữ liệu sót từ code khác
+        # không được hiển thị như kết quả mới.
+        "source_status": (
+            projection.get("source_status")
+            if projection.get("source_signal_version") == constants.SOURCE_SIGNAL_VERSION
+            else None
+        ),
+        "source_signal_version": projection.get("source_signal_version"),
         "latest_review_id": (
             str(projection["latest_review_id"]) if projection.get("latest_review_id") else None
         ),
@@ -78,6 +85,8 @@ def review_detail(review: dict) -> dict:
         "summary": review["summary"],
         "participant_summary": review.get("participant_summary"),
         "findings": review.get("findings") or [],
+        "source_assessment": review.get("source_assessment"),
+        # `source_signals` chỉ còn để đọc lịch sử: row mới không bao giờ có field này.
         "source_signals": review.get("source_signals") or [],
         "resources_configured": review.get("resources_configured", 0),
         "resources_in_notebook": review.get("resources_in_notebook"),

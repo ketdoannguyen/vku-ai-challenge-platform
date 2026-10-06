@@ -1,7 +1,9 @@
 """Participant competition API: list published/closed, detail by slug. Draft luôn ẩn.
 
-Đọc công khai (ADR-014): khách chưa đăng nhập vẫn xem được, chỉ là không có membership
-nên `membership.active` luôn false. Draft vẫn ẩn với mọi đối tượng.
+Thẻ giới thiệu vẫn công khai cho mọi người, nhưng nội dung bên trong cuộc thi chỉ dành cho
+thành viên đang hoạt động hoặc admin. List/detail trả `access` để frontend biết mở hay khóa
+landing; `resources`/`submission_config` chỉ xuất hiện khi quyền đọc được cấp (xem
+`app.competitions.access`). Draft vẫn ẩn với mọi đối tượng.
 """
 
 from datetime import datetime, timezone
@@ -13,6 +15,7 @@ from app.auth.dependencies import CurrentAccount, OptionalAccount
 from app.competitions import service
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
+from app.scoring import normalization
 from app.submissions import service as submissions_service
 
 router = APIRouter(prefix="/api/competitions")
@@ -35,8 +38,9 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         await memberships_by_competition(db, competition_ids, account["_id"]) if account else {}
     )
     submission_counts = await service.submission_counts(db, competition_ids)
-    # Hạng/điểm chỉ có nghĩa với thành viên đang hoạt động; tổng bài đã nộp thì mọi account đã
-    # đăng nhập đều có (kể cả non-member). Một aggregation cho cả trang, không truy vấn per-card.
+    # Số liệu cá nhân (hạng/điểm/bài đã nộp) chỉ có nghĩa với thành viên đang hoạt động - người
+    # chưa tham gia hoặc đã bị vô hiệu hóa không nhận gì. Một aggregation cho cả trang, không
+    # truy vấn per-card; không có cuộc thi nào đủ điều kiện thì bỏ luôn lượt đọc.
     active_id_set = {
         competition_id
         for competition_id, membership in memberships.items()
@@ -46,7 +50,7 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
         await submissions_service.my_stats_by_competition(
             db, competition_ids, account["_id"], datetime.now(timezone.utc)
         )
-        if account
+        if active_id_set
         else {}
     )
     # Account doc đã nằm sẵn trong request.state từ middleware - không tốn truy vấn cho cờ ghim.
@@ -54,19 +58,17 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
     return {
         "competitions": [
             {
-                **service.public_competition(competition, memberships.get(competition["_id"])),
+                **service.competition_summary(
+                    competition, memberships.get(competition["_id"]), account
+                ),
                 "submission_count": submission_counts[competition["_id"]],
                 "pinned": competition["_id"] in pinned_ids,
                 **(
-                    {"my_submission_count": my_stats[competition["_id"]]["total"]}
-                    if account
-                    else {}
-                ),
-                **(
                     {
+                        "my_submission_count": my_stats[competition["_id"]]["total"],
                         "my_stats": await _my_stats(
                             db, competition, account["_id"], my_stats[competition["_id"]]
-                        )
+                        ),
                     }
                     if competition["_id"] in active_id_set
                     else {}
@@ -82,19 +84,33 @@ async def _my_stats(db, competition: dict, account_id, counts: dict) -> dict:
 
     Không tự tính lại thứ hạng: `leaderboard_response` giữ nguyên quy tắc tie-break, chiều metric
     và lọc metric ẩn của bảng. Bảng bị ẩn thì không trả hạng/điểm và không tốn lượt đọc bảng.
+    `best_score` là raw của đúng bài đại diện nên không hứa là raw tốt nhất của đội; norm hiện tại
+    nằm ở `best_normalized_score`, null khi cuộc thi không bật norm hoặc người xem không được xem.
     """
-    stats = {"rank": None, "rank_total": None, "best_score": None, "used_today": counts["today"]}
+    stats = {
+        "rank": None,
+        "rank_total": None,
+        "best_score": None,
+        "best_normalized_score": None,
+        "used_today": counts["today"],
+    }
     if not competition["leaderboard_visible"] or counts["eligible_count"] == 0:
         return stats
-    entries = await leaderboard_service.cached_ranked_entries(db, competition)
+    try:
+        board = await leaderboard_service.cached_ranked_board(db, competition)
+    except normalization.NormalizationError:
+        # Cấu hình norm hỏng (chỉ tới được bằng sửa tay ngoài API): thẻ vẫn phải mở được với số
+        # liệu null, còn BXH của chính cuộc thi đó vẫn thất bại ồn ào thay vì xếp theo luật sai.
+        return stats
     response = leaderboard_service.leaderboard_response(
-        competition, entries, current_account_id=account_id, limit=1
+        competition, board, current_account_id=account_id, limit=1
     )
     me = response["me"]
     if me is not None:
         stats["rank"] = me["rank"]
         stats["rank_total"] = response["total"]
         stats["best_score"] = me["primary_score"]
+        stats["best_normalized_score"] = me.get("normalized_score")
     return stats
 
 
@@ -107,7 +123,7 @@ async def get_competition_by_slug(slug: str, request: Request, account: Optional
     if competition is None or competition["status"] == "draft":
         raise api_error(404, "NOT_FOUND", "Không tìm thấy cuộc thi.")
     membership = await get_membership(db, competition["_id"], account["_id"]) if account else None
-    payload = service.public_competition(competition, membership)
+    payload = service.public_competition(competition, membership, account)
     # Quota chỉ tốn một count_documents nên chỉ tính khi thật sự dùng được: thành viên đang
     # hoạt động của cuộc thi đang mở. List cố ý không tính để tránh N+1.
     if (

@@ -13,6 +13,7 @@ from app.competitions import clone as clone_service, service
 from app.core.config import get_settings
 from app.core.errors import api_error
 from app.core.slugs import is_valid_slug
+from app.scoring import normalization
 from app.scoring.readiness import blocked_reason, check_readiness
 
 logger = logging.getLogger(__name__)
@@ -126,10 +127,21 @@ async def edit_competition(
         raise api_error(422, "VALIDATION_ERROR", str(exc))
     if not updates:
         return _admin_detail(competition)
-    await db[service.COMPETITIONS_COLLECTION].update_one(
-        {"_id": competition["_id"]},
-        {"$set": {**updates, "updated_at": datetime.now(timezone.utc)}},
+    query: dict = {"_id": competition["_id"]}
+    if "normalization" in updates:
+        # Cấu hình chuẩn hóa chỉ ghi khi cuộc thi còn nguyên trạng thái đã đọc: một lượt publish
+        # xen giữa phải làm lượt ghi trượt (409) thay vì đổi luật của cuộc thi đã publish.
+        query["status"] = "draft"
+        query.update(normalization.config_guard(competition))
+    result = await db[service.COMPETITIONS_COLLECTION].update_one(
+        query, {"$set": {**updates, "updated_at": datetime.now(timezone.utc)}}
     )
+    if result.matched_count == 0:
+        raise api_error(
+            409,
+            "COMPETITION_CHANGED",
+            "Cuộc thi vừa được thay đổi ở nơi khác, tải lại trang rồi thử lại.",
+        )
     logger.info("Admin %s edited competition %s fields=%s", admin["email"], competition["slug"], sorted(updates))
     return _admin_detail(await _get_competition_or_404(db, competition_id))
 
@@ -188,7 +200,7 @@ async def publish_competition(competition_id: str, request: Request, admin: Admi
         "draft",
         "published",
         "publish",
-        guard=_verified_config(competition),
+        guard={**_verified_config(competition), **normalization.config_guard(competition)},
     )
 
 
@@ -197,6 +209,8 @@ def _verified_config(competition: dict) -> dict:
 
     Không có điều kiện này thì một lần lưu cấu hình chen giữa lượt kiểm tra và lượt ghi sẽ publish
     một bộ chấm chưa xác minh. Cuộc thi v1 không có revision nên chỉ cần cấu hình chưa bị đổi sang v2.
+    Publish còn ghép thêm guard chuẩn hóa (pin từng subfield vì field có thể vắng ở bản cũ) để
+    baseline đã qua readiness là baseline được publish.
     """
     config = competition.get("scoring_config") or {}
     if config.get("version") == 2:
@@ -237,12 +251,21 @@ async def _transition(
             "INVALID_TRANSITION",
             f"Không thể {action} cuộc thi đang ở trạng thái {competition['status']}.",
         )
-    query = {"_id": competition["_id"], **(guard or {})}
+    # Trạng thái đã đọc được ghim ngay trong filter: một lượt close/reopen/publish khác xen giữa
+    # phải làm lượt ghi trượt thay vì áp thao tác dựa trên trạng thái cũ.
+    query = {"_id": competition["_id"], "status": expected, **(guard or {})}
     result = await db[service.COMPETITIONS_COLLECTION].update_one(
         query,
         {"$set": {"status": target, "updated_at": datetime.now(timezone.utc)}},
     )
-    if guard is not None and result.matched_count == 0:
+    if result.matched_count == 0:
+        current = await _get_competition_or_404(db, competition_id)
+        if current["status"] != expected:
+            raise api_error(
+                422,
+                "INVALID_TRANSITION",
+                f"Trạng thái cuộc thi vừa thay đổi, tải lại trang rồi {action} lại.",
+            )
         raise api_error(
             409,
             "SCORING_REVISION_CONFLICT",
@@ -275,6 +298,7 @@ async def clone_competition(competition_id: str, request: Request, admin: AdminA
             quota_per_day=source["quota_per_day"],
             leaderboard_visible=source["leaderboard_visible"],
             resources=service.public_resources(source),
+            normalization=data_snapshot.normalization,
         )
         try:
             clone = await service.insert_competition(db, data, created_by=admin["email"])

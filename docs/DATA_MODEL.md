@@ -56,6 +56,7 @@ Fields:
 - `primary_metric`: `f1` | `precision` | `recall` - **chỉ cuộc thi v1 đọc field này**; từ ADR-048 chỉ số chính của cuộc thi v2 nằm trong `scoring_config.output_contract.primary_metric`, và mọi đường đọc dùng `contracts.result_contract()` để hai đời ra cùng một hình dạng
 - `quota_per_day` (0-1000)
 - `leaderboard_visible` (bool)
+- `normalization` (object | absent ở document cũ) - cấu hình chuẩn hóa 0-50 tùy chọn (ADR-061): `{enabled: bool, baseline: float | null, version: 1}`, ghi bằng `$set` **nguyên object** nên tắt luôn lưu `{enabled:false, baseline:null}` (không baseline mồ côi); field vắng = tắt, **không migration/backfill**. Chỉ sửa được khi `draft` - `validate_update` từ chối published/closed, và lượt ghi ghim `status=draft` + từng subfield đã đọc ngay trong filter Mongo (field vắng đòi `$exists:false`, không so nguyên subdocument) nên race với publish/sửa baseline trượt 409 `COMPETITION_CHANGED` thay vì ghi dưới luật khác. `version`/cap 50/số thập phân 2 do backend ấn định, không đọc từ client; clone copy nguyên cấu hình
 - `resources` (list, default `[]` | absent ở document cũ) - link Google Drive cho participant tải, xem §9
 - `scoring_config` (object | absent) - Sprint 05, hai đời phân biệt bằng field `version` (ADR-048); chỉ chứa CSV/metric behavior, xem §7
 - `ground_truth` (object | absent) - Sprint 05; metadata/path private, xem §8
@@ -67,7 +68,7 @@ Indexes:
 
 Derived field (không lưu DB):
 - `submission_count` - **không** là field của document. `GET /api/competitions` chạy một aggregation `$match competition_id` + `$group _id` trên `submissions` cho cả trang rồi gắn vào từng item (ADR-032). Đếm mọi document submission đã persist, không phụ thuộc `status` **lẫn `review`**, nên bài bị reject (không tạo document) không được tính, còn bài đã persist mà admin từ chối thì vẫn tính - nó vẫn là một lượt đã tiêu (ADR-035). Không migration, không index mới: index có prefix `competition_id` của `submissions` (§6) đã phục vụ `$match` này. Detail và endpoint admin không dùng lại field này - admin đã có `submission_count` từ `activity_counts`.
-- `my_stats` - **không** là field của document. `GET /api/competitions` gắn vào item **chỉ khi** người gọi là thành viên đang hoạt động: `{rank, rank_total, best_score, used_today}` (ADR-056). `used_today` đếm bài `completed` trong ngày UTC hiện tại, cùng quy ước `quota` (bài bị admin từ chối vẫn tiêu lượt, ADR-035; mốc ngày theo ADR-019) và tính bằng một aggregation `$facet` cho cả trang. `rank`/`rank_total`/`best_score` lấy từ `leaderboard_response(limit=1)` nên giữ nguyên tie-break, chiều metric và lọc metric ẩn (ADR-012); bảng bị ẩn thì không trả hạng/điểm và không đọc bảng. Không migration, không index mới: aggregation lọc theo `(competition_id, account_id)` đã dùng index sẵn có của `submissions` (§6).
+- `my_stats` - **không** là field của document. `GET /api/competitions` gắn vào item **chỉ khi** người gọi là thành viên đang hoạt động: `{rank, rank_total, best_score, best_normalized_score, used_today}` (ADR-056, `best_normalized_score` từ ADR-061). `used_today` đếm bài `completed` trong ngày UTC hiện tại, cùng quy ước `quota` (bài bị admin từ chối vẫn tiêu lượt, ADR-035; mốc ngày theo ADR-019) và tính bằng một aggregation `$facet` cho cả trang. `rank`/`rank_total`/`best_score`/`best_normalized_score` lấy từ `leaderboard_response(limit=1)` nên giữ nguyên tie-break, chiều metric và lọc metric ẩn (ADR-012); bảng bị ẩn thì không trả hạng/điểm và không đọc bảng; `best_normalized_score` còn `null` khi cuộc thi tắt norm hoặc metric nguồn bị ẩn - không fallback về raw. Không migration, không index mới: aggregation lọc theo `(competition_id, account_id)` đã dùng index sẵn có của `submissions` (§6).
 
 ## 4. competition_memberships - implemented (Sprint 04)
 
@@ -94,7 +95,7 @@ Fields:
 - `title`
 - `slug` (format như competition slug, unique trong competition)
 - `order` (int 0-9999, default max+10)
-- `visibility`: `public` (mọi account đã đăng nhập) | `members` (membership active)
+- `visibility` - **đã bỏ từ ADR-060**: document cũ còn field nhưng backend không đọc/không ghi nữa; quyền đọc tài liệu do membership của cuộc thi quyết định ở route, không do field này
 - `markdown_path` (relative trong DATA_DIR: `competitions/<cid>/content/<content_id>.md` - backend sinh, không dùng input user)
 - `size_bytes` (int | null - null = chưa upload file)
 - `created_at`, `updated_at` (UTC, timezone-aware)
@@ -127,6 +128,7 @@ Fields:
 - `metrics`: raw float, **tập khoá do hợp đồng kết quả của cuộc thi quyết định** - `{f1, precision, recall}` ở cuộc thi v1, đúng tập khoá bộ chấm Python trả về ở cuộc thi v2 (ADR-048). Đây vốn đã là `dict[str, float]` nên không có migration; UI, sort, leaderboard và Excel đọc cột từ `contracts.result_contract(competition)` chứ không đọc theo tên khoá
 - `primary_score` - luôn là `metrics[primary_metric]` của hợp đồng, không tính lại và không đổi thang
 - `scoring_ref` (object | absent) - **chỉ có ở bài chấm bằng bộ chấm v2** (ADR-048), ghim lại đúng thứ đã sinh ra điểm để hậu kiểm: `{version: 2, revision, config_fingerprint, source_sha256, ground_truth_sha256, submission_sha256, runtime_id}`. Bài v1 và bài legacy không có field này; không chứa source, ground truth hay đường dẫn
+- `normalization_snapshot` (object | absent) - **snapshot tạm** của cuộc thi bật chuẩn hóa, ghi **một lần** cùng document lúc ghi nhận kết quả (ADR-061) rồi **không bao giờ viết lại**: `{version, source_metric, higher_is_better, baseline, reference_best, score, calculated_at}`. `score` là norm 0-50 của chính bài tại đúng mặt bằng quan sát lúc đó - mẫu số gồm cả bài đang ghi khi nó vượt baseline nên bài đầu vượt baseline nhận 50 chứ không hơn; `reference_best` là điểm gốc tốt nhất trong tập eligible + bài đang ghi. `calculated_at` là thời điểm chấm/ghi, **không** phải mốc tie-break của bảng xếp hạng. `primary_score`/`metrics` không đổi; snapshot không bị viết lại khi new best/reject/restore/close. Worker v2 đối soát bắt gặp bài đã ghi thì không tính lại; worker chết trước insert thì lượt commit thành công sau dựng snapshot mới
 - `created_at`
 - `review` (object | absent ở record cũ) - quyết định xét duyệt **hậu kiểm** của admin, là trục **độc lập** với `status` (ADR-035):
   - `status`: `rejected` | `accepted`
@@ -134,12 +136,15 @@ Fields:
   - `reviewed_by` (ObjectId → accounts._id), `reviewed_at` (UTC, timezone-aware)
   - Ghi **cả object** trong một `$set` trên một document nên không bao giờ trộn metadata của hai lần xét duyệt; chỉ giữ quyết định **gần nhất**, không có event history. `reviewed_by`/`reviewed_at` không bao giờ đi ra endpoint participant.
 - `content_snapshot` (object | absent) - bản thể lệ và tài nguyên **bất biến** đã chốt tại thời điểm nộp, chỉ có khi AI bật lúc submit (ADR-036): `{state: "CAPTURED" | "ERROR", revision_id, content_hash, error_code, captured_at}`. `ERROR` ghi lại sự thật là không chụp được (`CONTENT_EMPTY` | `CONTENT_SNAPSHOT_TOO_LARGE` | `CONTENT_CHANGED_DURING_CAPTURE` | `CONTENT_UNREADABLE`) chứ **không** chặn lượt nộp; bài không chụp được thì không chạy lại AI được và admin thấy banner giải thích.
-- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, source_warning_count, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
-  - `source_warning_count` (int | null, ADR-055) - số dấu hiệu nguồn dataset cần BTC xem lại từ lượt hiện tại; chỉ admin đọc, `null` trong lúc chờ/chạy lại; không thay verdict.
+- `ai_review` (object | absent) - trục trạng thái AI, **độc lập** với `status` và `review` (ADR-036): `{state: "QUEUED" | "RUNNING" | "COMPLETED" | "ERROR", verdict: "CLEAR" | "FLAGGED" | "INCONCLUSIVE" | "ERROR" | null, summary, participant_summary, generation, run_id, latest_review_id, source_status, source_signal_version, requested_at, updated_at}`. Chỉ có khi `auto_review=true` hoặc admin đã chạy tay; `auto_review=false` vẫn chụp revision nhưng **không** tạo projection/job. Snapshot lỗi + auto ⇒ `state/verdict="ERROR"` với `run_id` cố định để reconciler bảo đảm có audit row, và **không** tạo job gọi provider. Không có field nào ở đây ảnh hưởng `metrics`, `primary_score`, `status` hay tư cách xếp hạng.
+  - `source_status` (str | null, ADR-062) - trạng thái nguồn **sau hậu kiểm** của lượt hiện tại (`ALIGNED` | `EXTERNAL` | `UNCLEAR` | `NOT_EVALUATED`), ghi từ `source_assessment` của audit row chứ không đếm warning; chỉ admin đọc và chỉ có khi `source_signal_version` khớp version hiện hành. `null` ở lượt QUEUED/RUNNING/ERROR và ở row cũ (thiếu dữ kiện - **không** đọc thành đã sạch); QUEUED/rerun/reconcile xóa cả cặp field này. `source_warning_count` của row cũ vẫn nằm trong DB nhưng **không còn được ghi hay đọc**.
+  - `source_signal_version` (str | null, ADR-062) - version sinh ra `source_status`; lệch version hiện hành nghĩa là dữ liệu chưa hậu kiểm lại, API trả `source_status: null` nhưng vẫn trả version để admin biết.
   - `participant_summary` (str | null, ADR-040) - **gợi ý ngắn do model soạn nháp cho thí sinh**, tối đa 10 từ, chỉ admin đọc. Nó **không** đi ra endpoint participant: `participant_projection` vẫn thay summary bằng câu cố định theo verdict, và chữ duy nhất tới tay thí sinh vẫn là `review.note` do người duyệt gửi (ADR-035). `null` khi model không có gì để nói; `request_manual_review` **xoá** field này cùng lúc reset projection để gợi ý của lượt cũ không sống dậy sau khi chạy lại.
 - `artifacts.notebook.sha256` (str | absent ở record cũ) - SHA-256 của **bytes notebook gốc** lúc nộp, ghi ngay khi insert để cache/audit không phải đọc lại MinIO chỉ để định danh; worker vẫn băm lại bytes đã lưu khi xử lý và coi đó là nguồn sự thật.
 
 Policy: validation-rejected không tạo record và file không được lưu (ADR-011). Một lượt nộp hợp lệ cần **cả** CSV lẫn notebook; thiếu một trong hai thì không upload object nào và không tiêu quota. `quota_remaining` là response-derived field, không lưu DB. Hạn mức/ngày đọc từ bộ đếm `quota_day`/`quota_used` trên membership (§4), seed từ số bài `completed` theo `created_at` trong ngày UTC khi sang ngày mới (ADR-034).
+
+`normalization_snapshot` là **dữ liệu dẫn xuất**, không phải điểm gốc: chỉ đi ra API khi cuộc thi đang bật chuẩn hóa, bài có snapshot, **và** người xem được xem dữ liệu dẫn xuất - `leaderboard_visible` **và** metric nguồn không bị ẩn (ADR-061); điều kiện này đánh giá lại ở **mỗi request**, không lấy từ cờ lúc nộp. Participant chỉ nhận `{score, calculated_at}`; admin nhận đủ; bài không có snapshot **không có key**, không bao giờ bịa 0. Bảng xếp hạng và export **không** đọc snapshot: norm live là phép tính lại trên `primary_score` của toàn tập eligible, còn snapshot chỉ là con số lịch sử của đúng bài đó.
 
 Document thiếu `review` (mọi record cũ và mọi bài chưa từng bị xét duyệt) mặc định là **được tính kết quả**: predicate dùng chung là `status == "completed" AND review.status != "rejected"`, và `$ne` khớp cả document thiếu field nên **không cần migration hay backfill**. Từ chối và khôi phục đều không đụng `status`, `metrics`, `primary_score`, `artifacts`, `submission_no`, `created_at` hay counter quota - nhờ vậy quota, scoring lock, bảo vệ xoá member và việc giữ artifact giữ nguyên hành vi; khôi phục cũng không chấm lại vì metrics đã nằm trong document.
 
@@ -278,7 +283,7 @@ Xoá competition `published` không có trong phạm vi: cuộc thi đang chạy
 
 Được copy:
 - Config cấp cuộc thi: `join_mode`, `primary_metric`, `quota_per_day`, `leaderboard_visible`, `resources`; `name` = `"<tên nguồn> (bản sao)"`, `slug` mới `<slug>-copy`, `start_at`/`end_at` mới (now → +1 năm), `created_by` = admin thực hiện. Slug hết 5 ứng viên → 409 `SLUG_EXISTS`.
-- `competition_contents`: title/slug/order/visibility giữ nguyên; `_id`, `markdown_path` và file là của bản sao. Markdown chỉ copy khi nguồn có `size_bytes`; ghi atomic rồi cập nhật `size_bytes`; trang chưa upload giữ `size_bytes: null`.
+- `competition_contents`: title/slug/order giữ nguyên; `_id`, `markdown_path` và file là của bản sao. Markdown chỉ copy khi nguồn có `size_bytes`; ghi atomic rồi cập nhật `size_bytes`; trang chưa upload giữ `size_bytes: null`.
 - Assets: giữ nguyên tên `uuid4.<ext>` (để link tương đối `assets/...` trong Markdown vẫn trỏ đúng), đọc và kiểm signature như endpoint list trước khi ghi vào `assets/` của bản sao.
 - `scoring_config`: v1 copy nguyên cấu hình cột cố định; v2 copy `input_schema`/`evaluator`/`output_contract` nhưng `revision = 0`, `evaluator.runtime_id = null`, `verification = null`; source bộ chấm ghi lại dưới `private/evaluator/<sha256>.py` của bản sao.
 - `ground_truth` + file: v1 ghi `private/ground_truth.csv`; v2 ghi `private/ground-truth-<sha256[:16]>.csv`; `path` trỏ về bản sao, `sha256`/`row_count`/`columns` giữ nguyên sau khi đối chiếu với file thật và schema.
@@ -330,7 +335,7 @@ _id: ObjectId
 competition_id: ObjectId
 content_hash: str                     SHA-256 hex của canonical payload
 pages: [
-  {content_id, title, slug, order, visibility: "public"|"members",
+  {content_id, title, slug, order,
    markdown: str, markdown_sha256: str, size_bytes: int}
 ]
 resources: [{label: str, url: str}]      link Google Drive BTC cấp tại thời điểm nộp (ADR-055)
@@ -345,7 +350,7 @@ Indexes:
 
 Không có revision counter: `content_hash` + `_id` + `created_at` đã đủ làm identity/audit, và bỏ counter thì không có race giữa hai lần chụp đồng thời.
 
-Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, visibility, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata, bytes hoặc `resources` đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ. Revision trước ADR-055 thiếu `resources` được hiểu là `[]` khi AI chạy lại.
+Canonical hash: serialize UTF-8 JSON với key/order cố định và compact separators, gồm `content_id`, title, slug, order, Markdown SHA-256 và Markdown text của **từng** page theo `(order, _id)`. **Không** chứa timestamp - nếu chứa thì mỗi lần chụp lại là một revision mới và unique index mất hết tác dụng. Metadata, bytes hoặc `resources` đổi ⇒ hash mới; nội dung giống hệt ⇒ tái sử dụng revision cũ. Revision trước ADR-055 thiếu `resources` được hiểu là `[]` khi AI chạy lại. ADR-060 bỏ `visibility` khỏi payload hash nên lần chụp đầu tiên sau thay đổi của cùng nội dung tạo revision mới; revision cũ giữ nguyên (không sửa lại lịch sử).
 
 Capture (tối đa 3 vòng) - chạy ngay trong request nộp bài, có trần thời gian:
 1. Đọc metadata content đã sắp thứ tự (snapshot A).
@@ -356,7 +361,7 @@ Capture (tối đa 3 vòng) - chạy ngay trong request nộp bài, có trần t
 6. Không page nào đọc được ⇒ `CONTENT_EMPTY`. Vượt `AI_REVIEW_MAX_SNAPSHOT_BYTES` (mặc định 8 MiB, luôn dưới trần 16 MiB của Mongo) ⇒ `CONTENT_SNAPSHOT_TOO_LARGE`; **không** cắt bớt bản authoritative.
 7. Upsert theo `(competition_id, content_hash)`; `DuplicateKeyError` được coi là cache hit.
 
-"Nội dung đã publish" ở đây là **mọi content record có Markdown đọc được**, bất kể `visibility`; không thêm lifecycle page mới và không hard-code slug.
+"Nội dung đã publish" ở đây là **mọi content record có Markdown đọc được**; không thêm lifecycle page mới và không hard-code slug.
 
 ### 11.3 `ai_review_jobs` - hàng đợi bền
 
@@ -422,11 +427,19 @@ findings: [
    reason,
    evidence: [{cell, start_line, end_line, snippet}]}
 ]
-source_signals: [{cell, start_line, end_line, snippet, reason,
-                  match: "MATCHED_RESOURCE" | "FOLDER_MEMBERSHIP_UNVERIFIED" | "EXTERNAL_SOURCE" | "UNVERIFIED_SOURCE",
-                  urls: [{url, match, resource_label}], warning: bool}]   ADR-055; admin-only
+source_assessment: {                  ADR-062; admin-only, một đánh giá nguồn cho cả notebook
+  model_status: "ALIGNED" | "EXTERNAL" | "UNCLEAR" | null   đề xuất ban đầu của model
+  status: "ALIGNED" | "EXTERNAL" | "UNCLEAR" | "NOT_EVALUATED"   kết quả sau hậu kiểm
+  reason: str                          lời giải thích của AI (UI ghi rõ tác giả là AI)
+  evidence: [{cell, start_line, end_line, snippet}]   snippet do server dựng lại từ notebook
+  rejected_evidence: [{cell, start_line, end_line, code}]   code: CELL_NOT_FOUND | CELL_NOT_CODE | RANGE_INVALID
+  validation_codes: [str]              SOURCE_ASSESSMENT_MISSING | SOURCE_RESOURCES_MISSING | SOURCE_EVIDENCE_MISSING |
+                                       SOURCE_EVIDENCE_INVALID | SOURCE_EVIDENCE_PARTIALLY_INVALID | SOURCE_NOTEBOOK_TRUNCATED
+}
+source_signals: [...]                  ADR-055; **row cũ, không còn được ghi** - chỉ đọc lịch sử
+source_warning_count: int              ADR-055; row cũ, không còn được ghi hay đọc
 resources_configured: int               số link trong revision dùng đối chiếu
-resources_in_notebook: [{label, cells: [int]}]   ADR-059; quét CODE cell, admin-only; [] = quét rồi không thấy, vắng = row trước ADR-059
+resources_in_notebook: [{label, cells: [int]}]   ADR-059; quét CODE cell, admin-only; [] = quét rồi không thấy, vắng = row trước ADR-059; từ ADR-062 chỉ là dữ kiện phụ, không quyết định status
 notebook_sha256: str                   luôn bằng SHA-256 của bytes gốc đã gửi model
 notebook_normalized_sha256: str        SHA-256 của bản đã chuẩn hoá
 notebook_stats: {cells, code_cells, markdown_cells, lines, truncated, omitted_cells}
@@ -435,7 +448,7 @@ provider: "openai_compatible"
 provider_host, model
 prompt_version, normalization_version, context_policy_version
 canonicalization_version, rule_ref_version, verifier_version   ADR-045; row cũ thiếu ⇒ đọc ra null
-source_signal_version: str             ADR-055; row cũ thiếu ⇒ đọc ra null
+source_signal_version: str             ADR-055; từ ADR-062 version mới đánh dấu assessment; row cũ thiếu ⇒ đọc ra null
 cache_key
 source: "PROVIDER" | "CACHE" | "PIPELINE"
 reused_from_review_id: ObjectId | null

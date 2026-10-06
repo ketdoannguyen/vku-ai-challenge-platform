@@ -446,6 +446,13 @@ async def _commit(
         {"_id": attempt["_id"]}, {"_id": 1}
     )
     if stored is None:
+        # Snapshot norm tạm dựng ngay trước khi ghi, chỉ ở nhánh chưa có bài: lượt đối soát bắt gặp
+        # bài đã ghi sẽ không bao giờ tính lại, nên snapshot đã lưu giữ nguyên vĩnh viễn.
+        norm_snapshot = await submissions_service.normalization_snapshot(
+            db, context.competition, raw=scored.primary_score, now=now
+        )
+        if norm_snapshot is not None:
+            document["normalization_snapshot"] = norm_snapshot
         await artifact_storage.put_bytes(
             prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT]
         )

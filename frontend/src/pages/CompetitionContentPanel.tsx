@@ -2,12 +2,12 @@
 
 import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, useNavigationType, useOutletContext, useParams } from "react-router-dom";
-import type { Competition, SubmissionConfig } from "../api/competitions";
-import { formatLocal, primaryMetricLabel } from "../api/competitions";
+import type { CompetitionMetadata, SubmissionConfig } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import { fetchContent, type ContentDetail } from "../api/contents";
 import { ErrorBox, Loading } from "../components/ui";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { VISIBILITY_LABEL, type CompetitionContext } from "./CompetitionDetailPage";
+import type { CompetitionContext } from "./CompetitionDetailPage";
 
 /** react-markdown + remark-gfm + rehype-sanitize chỉ cần ở route nội dung; tách khỏi entry chunk. */
 const MarkdownView = lazy(() =>
@@ -15,7 +15,7 @@ const MarkdownView = lazy(() =>
 );
 
 /** Mô tả cách tham gia ở phần tóm tắt - khác nhãn chip trên masthead để không lặp chữ trên cùng màn hình. */
-const JOIN_MODE_DETAIL: Record<Competition["join_mode"], string> = {
+const JOIN_MODE_DETAIL: Record<CompetitionMetadata["join_mode"], string> = {
   open: "Mở tự do cho mọi thí sinh",
   code: "Cần mã do Ban Tổ chức cấp",
   invite_only: "Chỉ dành cho thí sinh được mời",
@@ -37,7 +37,7 @@ function configValue(value: string | null | undefined): string {
 }
 
 /** Vì sao chưa nộp được bài - chỉ gọi khi canSubmit sai, tức chưa tham gia và cuộc thi còn nhận bài. */
-function submitBlockedReason(c: Competition): string {
+function submitBlockedReason(c: CompetitionMetadata): string {
   if (c.status === "closed") return "Cuộc thi đã kết thúc nên không nhận thêm bài nộp.";
   if (c.quota_per_day === 0) return "Cuộc thi hiện không nhận bài nộp.";
   if (c.join_mode === "invite_only")
@@ -85,7 +85,7 @@ export function CompetitionOverview() {
         <h3 className="ov-block-title">Quy cách bài nộp</h3>
         <ul className="ov-facts">
           <li>
-            <strong>Chỉ số chính.</strong> <span>{primaryMetricLabel(c)}</span>
+            <strong>Chỉ số chính.</strong> <span>{c.primary_metric_label ?? NOT_CONFIGURED}</span>
           </li>
           <li>
             <strong>Cột ID.</strong> <span>{configValue(config.id_column)}</span>
@@ -147,12 +147,7 @@ export function CompetitionOverview() {
                 <li key={item.id}>
                   <Link className="ov-doc" to={`content/${item.slug}`}>
                     <span className="ov-doc-title">{item.title}</span>
-                    <span>
-                      {item.visibility === "members" && (
-                        <span className="chip">{VISIBILITY_LABEL.members}</span>
-                      )}{" "}
-                      Cập nhật {formatLocal(item.updated_at)}
-                    </span>
+                    <span>Cập nhật {formatLocal(item.updated_at)}</span>
                   </Link>
                 </li>
               ))}
@@ -182,7 +177,7 @@ export function CompetitionOverview() {
 }
 
 export function CompetitionContentPanel() {
-  const { competition, contents } = useOutletContext<CompetitionContext>();
+  const { competition, contents, reportAccessLost } = useOutletContext<CompetitionContext>();
   const { contentSlug } = useParams<{ contentSlug: string }>();
   const [content, setContent] = useState<ContentDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -200,7 +195,15 @@ export function CompetitionContentPanel() {
         if (!cancelled) setContent(data);
       })
       .catch((err) => {
-        if (!cancelled) setError(err);
+        if (cancelled) return;
+        const reason = accessLostReason(err);
+        if (reason !== null) {
+          // Quyền đọc vừa bị thu hồi giữa chừng: nhường shell đóng gate thay vì
+          // hiện lỗi tải tài liệu - nội dung này không còn thuộc về người xem.
+          reportAccessLost(reason);
+          return;
+        }
+        setError(err);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -208,7 +211,7 @@ export function CompetitionContentPanel() {
     return () => {
       cancelled = true;
     };
-  }, [competition.slug, contentSlug, reloadKey]);
+  }, [competition.slug, contentSlug, reloadKey, reportAccessLost]);
 
   // Đổi trang nội dung thì đưa bài viết lên đầu; bỏ qua POP để back/forward giữ vị trí cũ.
   useEffect(() => {

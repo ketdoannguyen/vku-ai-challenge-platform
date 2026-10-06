@@ -144,20 +144,71 @@ def test_the_system_prompt_forbids_inventing_a_ref():
     assert "Chỉ những block có `[RULE_REF ...]` mới là quy định được phép kết luận." in system
 
 
-def test_the_prompt_accepts_only_configured_resources_and_scans_the_whole_notebook():
+def test_the_prompt_asks_for_one_source_assessment_for_the_whole_notebook():
     system = prompt.SYSTEM_PROMPT
-    assert "Chỉ link/ID nằm trong <COMPETITION_RESOURCES> là nguồn dataset được chấp nhận." in system
-    assert "Quét TOÀN BỘ CODE cell" in system
-    assert "kể cả khi notebook cũng dùng link BTC cấp ở cell khác" in system
+    assert "đánh giá nguồn dữ liệu của CẢ notebook trong `source_assessment`" in system
+    assert "ALIGNED khi nối được toàn pipeline về nguồn BTC cấp" in system
+    assert "EXTERNAL khi code nạp/sử dụng dataset từ nguồn không được cấp" in system
+    assert "UNCLEAR khi chưa nối được nguồn gốc" in system
+    # Đánh giá độc lập với verdict: CLEAR không có nghĩa nguồn đã được xác minh.
+    assert "kể cả khi thể lệ không có điều cấm" in system
+    assert "verdict CLEAR không có nghĩa nguồn đã được xác minh" in system
 
 
-def test_the_prompt_names_source_groups_and_caps_signals():
+def test_the_prompt_lists_what_must_fall_to_unclear():
     system = prompt.SYSTEM_PROMPT
-    for group in ('"link BTC cấp"', '"Drive cá nhân"', '"Drive không rõ"', '"link khác"', '"nguồn ngoài"'):
-        assert group in system
-    assert "`drive.mount`" in system
-    assert "/content/drive/MyDrive/" in system
-    assert "Tối đa 10 tín hiệu" in system
+    for phrase in (
+        "tệp đã upload sẵn (ZIP/CSV) không thể hiện được tải từ đâu",
+        "tệp cục bộ không rõ nguồn gốc",
+        "chỉ có bằng chứng gián tiếp như tên tệp trùng, cấu trúc cột, số dòng hay điểm cao",
+        "URL chỉ được nhắc ở markdown/comment",
+        "không suy ra membership của file từ ID thư mục",
+        "mã quan trọng nằm ngoài notebook",
+        "không mặc định phần không thấy là tuân thủ",
+        # Drive cá nhân không trùng tài nguyên BTC, hoặc ID chưa rõ quan hệ folder: không tự kết luận ngoài.
+        "đọc từ Drive cá nhân/Shareddrives mà không dùng link/ID trùng tài nguyên BTC",
+        "link/ID không trùng tài nguyên BTC nhưng chưa rõ có thuộc folder BTC hay không",
+        "một ID trơ trọi không đủ để kết luận EXTERNAL",
+        # Trộn nguồn: dùng nguồn BTC ở cell khác không xoá dấu hiệu nguồn ngoài.
+        "trộn nguồn rồi gộp dữ liệu",
+        # Biến/đường dẫn trung gian và cell sau không phải lý do hạ ALIGNED.
+        "dữ liệu đi qua biến hoặc đường dẫn trung gian",
+    ):
+        assert phrase in system
+
+
+def test_the_prompt_treats_btc_ids_read_through_personal_drive_as_btc_source():
+    system = prompt.SYSTEM_PROMPT
+    assert "Đường dẫn hay lệnh dùng link/ID TRÙNG tài nguyên trong <COMPETITION_RESOURCES> vẫn là nguồn BTC" in system
+    # Nhiều tài nguyên BTC: gọi một link vẫn là ALIGNED.
+    assert "Cuộc thi có nhiều tài nguyên BTC: dùng MỘT trong số đó là đủ." in system
+    # mount/đường dẫn lạ không tự là bằng chứng nguồn ngoài; EXTERNAL cần nguồn nêu đích danh.
+    assert "tự nó KHÔNG phải bằng chứng nguồn ngoài" in system
+    assert "với bằng chứng nêu đích danh nguồn ngoài" in system
+    # ID không có trong danh sách không chứng minh nguồn ngoài: file có thể nằm trong folder BTC.
+    assert "file có thể nằm trong folder BTC cấp (danh sách không liệt kê từng file)" in system
+    assert "trường hợp đó là UNCLEAR, không tự kết luận ngoài" in system
+
+
+def test_the_prompt_requires_output_to_end_at_the_closing_brace():
+    system = prompt.SYSTEM_PROMPT
+    assert "Kết thúc câu trả lời ngay tại dấu `}` đóng object" in system
+
+
+def test_the_prompt_caps_the_source_assessment_and_asks_for_consistency():
+    system = prompt.SYSTEM_PROMPT
+    assert "`reason` tối đa 1.000 ký tự" in system
+    assert "`evidence` tối đa 10 khoảng cell/dòng" in system
+    assert "UNCLEAR được phép không có trích dẫn" in system
+    assert "Findings, summary và đánh giá nguồn phải nhất quán" in system
+    assert '"source_assessment": {"status": "ALIGNED|EXTERNAL|UNCLEAR"' in system
+    assert "Mục `source_assessment` bắt buộc" in system
+
+
+def test_the_prompt_no_longer_carries_the_old_signal_vocabulary():
+    system = prompt.SYSTEM_PROMPT
+    for legacy in ("source_signals", '"link BTC cấp"', '"Drive không rõ"', "Tối đa 10 tín hiệu"):
+        assert legacy not in system
 
 
 def test_the_injection_boundary_still_precedes_the_rules():

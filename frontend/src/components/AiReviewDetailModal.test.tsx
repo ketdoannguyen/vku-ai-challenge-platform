@@ -11,7 +11,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { formatLocal } from "../api/competitions";
-import type { AiReviewDetail, AiReviewRecord } from "../api/aiReview";
+import type { AiReviewDetail, AiReviewRecord, AiSourceAssessment } from "../api/aiReview";
 import type { AdminSubmissionItem } from "../api/results";
 import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { FOCUSABLE } from "./Modal";
@@ -264,14 +264,14 @@ function sourceSignal(overrides: Partial<SourceSignalFixture> = {}): SourceSigna
   };
 }
 
-/** Lượt canonical mang đúng các dấu hiệu nguồn được nêu; projection nói lượt này có cảnh báo. */
+/** Lượt canonical mang đúng các dấu hiệu nguồn được nêu; đây là row cũ trước phiên bản assessment. */
 function detailWithSignals(
   signals: SourceSignalFixture[],
   resourcesConfigured = 1,
   mentions?: AiReviewRecord["resources_in_notebook"],
 ): AiReviewDetail {
   return detailWith({
-    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
+    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR" },
     history: [
       record({
         id: "r2",
@@ -281,6 +281,33 @@ function detailWithSignals(
         resources_in_notebook: mentions,
       }),
     ],
+  });
+}
+
+function sourceAssessment(overrides: Partial<AiSourceAssessment> = {}): AiSourceAssessment {
+  return {
+    model_status: "EXTERNAL",
+    status: "EXTERNAL",
+    reason: "Notebook tải dữ liệu từ nguồn ngoài.",
+    evidence: [
+      {
+        cell: 3,
+        start_line: 4,
+        end_line: 4,
+        snippet: "4 df = pd.read_csv('https://data.example.org/train.csv')",
+      },
+    ],
+    rejected_evidence: [],
+    validation_codes: [],
+    ...overrides,
+  };
+}
+
+/** Lượt canonical của phiên bản assessment: đánh giá nguồn toàn notebook là thứ được trình bày. */
+function detailWithAssessment(value: AiSourceAssessment): AiReviewDetail {
+  return detailWith({
+    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR" },
+    history: [record({ id: "r2", generation: 2, verdict: "CLEAR", source_assessment: value })],
   });
 }
 
@@ -408,12 +435,18 @@ test("danh sách chạm trần URL thì nói ra, không hứa đã liệt kê đ
   ).toBeTruthy();
 });
 
-test("record cũ không có dấu hiệu nguồn thì không dựng mục đối chiếu nào", async () => {
+test("record cũ không có dấu hiệu nguồn vẫn nói rõ chưa được đánh giá theo phiên bản mới", async () => {
   mockApi(() => json({ submission: DETAIL.submission }));
   renderModal();
 
   await screen.findByText("Kết quả đánh giá");
-  expect(screen.queryByText("Nguồn dataset trong notebook")).toBeNull();
+  const card = resultCard();
+  // Thiếu dữ kiện nguồn không được im lặng: row cũ phải mang nhãn nói đúng nó chưa được đánh giá
+  // theo phiên bản mới, thay vì trông như một lượt sạch.
+  expect(within(card).getByText("Nguồn dataset trong notebook")).toBeTruthy();
+  expect(within(card).getByText("Nguồn: Chưa đánh giá theo phiên bản mới.")).toBeTruthy();
+  expect(within(card).queryByText(/xuất hiện trong code cell/)).toBeNull();
+  expect(within(card).queryByText("AI đánh giá nguồn")).toBeNull();
 });
 
 test("quét toàn notebook: tài nguyên BTC xuất hiện trong code cell được nêu kèm số cell", async () => {
@@ -503,7 +536,7 @@ test("lượt không cấu hình tài nguyên thì không hiện dòng kết qu�
 
 test("mục đối chiếu nguồn đứng trước danh sách finding trong thẻ kết quả", async () => {
   mockApi(() => json({}), detailWith({
-    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR", source_warning_count: 1 },
+    ai_review: { ...SUBMISSION.ai_review!, verdict: "CLEAR" },
     history: [{ ...CANONICAL_RUN, source_signals: [sourceSignal()], resources_configured: 1 }],
   }));
   renderModal();
@@ -511,12 +544,10 @@ test("mục đối chiếu nguồn đứng trước danh sách finding trong th�
   await screen.findByText("Kết quả đánh giá");
   const card = resultCard();
   const heading = within(card).getByText("Nguồn dataset trong notebook");
-  // Danh sách finding của thẻ là con trực tiếp; danh sách URL của mục nguồn nằm sâu hơn.
-  const findings = Array.from(card.querySelectorAll(".ai-finding-list")).find(
-    (list) => list.parentElement === card,
-  );
-  expect(findings).toBeTruthy();
-  expect(heading.compareDocumentPosition(findings!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // Danh sách tín hiệu nguồn nằm trong khối nguồn; danh sách finding là khối riêng đứng sau.
+  const findings = within(card).getByText("AI đối chiếu thể lệ").nextElementSibling as HTMLElement;
+  expect(findings.classList.contains("ai-finding-list")).toBe(true);
+  expect(heading.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test("lượt cũ trong lịch sử cũng hiện chi tiết từng nguồn", async () => {
@@ -533,6 +564,91 @@ test("lượt cũ trong lịch sử cũng hiện chi tiết từng nguồn", asy
   expect(within(history).getByText("Nguồn dataset trong notebook")).toBeTruthy();
   expect(within(history).getByText("Không khớp nguồn BTC")).toBeTruthy();
   expect(within(history).getByText("AI ghi nhận: Code tải dataset ngoài")).toBeTruthy();
+});
+
+test("đánh giá nguồn của lượt mới hiện trạng thái, lý do và bằng chứng dựng từ notebook", async () => {
+  mockApi(() => json({}), detailWithAssessment(sourceAssessment()));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const card = resultCard();
+  expect(within(card).getByText("AI đánh giá nguồn")).toBeTruthy();
+  expect(within(card).getByText("AI: Có dấu hiệu dùng nguồn ngoài")).toBeTruthy();
+  // Ranh giới trách nhiệm của hệ thống: đọc code tĩnh, không xác nhận notebook đã chạy.
+  expect(
+    within(card).getByText(/không xác nhận notebook đã chạy hoặc dữ liệu thực tế đã tải/),
+  ).toBeTruthy();
+  expect(within(card).getByText("AI ghi nhận: Notebook tải dữ liệu từ nguồn ngoài.")).toBeTruthy();
+  expect(within(card).getByText("Dòng 4–4 · Cell 3")).toBeTruthy();
+  expect(within(card).getByText("4 df = pd.read_csv('https://data.example.org/train.csv')")).toBeTruthy();
+  // Không hai badge mâu thuẫn: row mới không mang cách đọc cũ và không có nhãn cảnh báo nào khác.
+  expect(within(card).queryByText("Nguồn: Chưa đánh giá theo phiên bản mới.")).toBeNull();
+  expect(within(card).queryByText("Không khớp nguồn BTC")).toBeNull();
+});
+
+test("ALIGNED bị hạ thành UNCLEAR thì nói rõ vì sao bằng chứng chưa đủ", async () => {
+  mockApi(() => json({}), detailWithAssessment(sourceAssessment({
+    model_status: "ALIGNED",
+    status: "UNCLEAR",
+    reason: "Pipeline nối về nguồn BTC qua biến trung gian.",
+    rejected_evidence: [{ cell: 9, start_line: 1, end_line: 2, code: "CELL_NOT_FOUND" }],
+    validation_codes: ["CELL_NOT_FOUND", "SOURCE_EVIDENCE_PARTIALLY_INVALID"],
+  })));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const card = resultCard();
+  expect(within(card).getByText("Nguồn: Chưa xác minh")).toBeTruthy();
+  // Câu hạ cấp nói đủ hai vế và dịch mã thành câu, không đổ mã thô ra UI.
+  expect(within(card).getByText(
+    "AI đề xuất “AI: Phù hợp nguồn BTC”; bằng chứng chưa đủ vì vị trí trích dẫn không có trong notebook; một phần trích dẫn không dùng được.",
+  )).toBeTruthy();
+  // Vị trí bị loại vẫn hiện cho BTC tra cứu, kèm lý do đã dịch.
+  expect(within(card).getByText("Cell 9 · Dòng 1–2")).toBeTruthy();
+  expect(within(card).getByText("vị trí trích dẫn không có trong notebook")).toBeTruthy();
+  // Mã đã diễn giải trong câu hạ cấp không lặp lại thành dòng "Hậu kiểm".
+  expect(within(card).queryByText(/Hậu kiểm:/)).toBeNull();
+  // Trích dẫn hợp lệ còn lại vẫn được hiện, không bị câu hạ cấp che mất.
+  expect(within(card).getByText(/df = pd.read_csv/)).toBeTruthy();
+});
+
+test("đánh giá bị hạ vì thiếu dữ kiện thì nói rõ chưa dùng được và không bịa trích dẫn", async () => {
+  mockApi(() => json({}), detailWithAssessment(sourceAssessment({
+    model_status: "ALIGNED",
+    status: "NOT_EVALUATED",
+    reason: "",
+    evidence: [],
+    validation_codes: ["SOURCE_RESOURCES_MISSING"],
+  })));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const card = resultCard();
+  expect(within(card).getByText("Nguồn: Chưa đánh giá được")).toBeTruthy();
+  expect(within(card).getByText(
+    "AI đề xuất “AI: Phù hợp nguồn BTC”; chưa dùng được vì cuộc thi không có tài nguyên BTC để đối chiếu.",
+  )).toBeTruthy();
+  expect(within(card).getByText("AI không kèm trích dẫn nào cho đánh giá này.")).toBeTruthy();
+  expect(card.querySelectorAll("figure.ai-evidence")).toHaveLength(0);
+});
+
+test("mọi trích dẫn đều bị loại: nói rõ không trích dẫn nào khớp và giữ vị trí bị loại", async () => {
+  mockApi(() => json({}), detailWithAssessment(sourceAssessment({
+    model_status: "EXTERNAL",
+    status: "UNCLEAR",
+    evidence: [],
+    rejected_evidence: [{ cell: 9, start_line: 1, end_line: 1, code: "CELL_NOT_FOUND" }],
+    validation_codes: ["SOURCE_EVIDENCE_INVALID", "SOURCE_NOTEBOOK_TRUNCATED"],
+  })));
+  renderModal();
+
+  await screen.findByText("Kết quả đánh giá");
+  const card = resultCard();
+  expect(within(card).getByText("Nguồn: Chưa xác minh")).toBeTruthy();
+  expect(within(card).getByText("Không trích dẫn nào của AI khớp được với notebook.")).toBeTruthy();
+  expect(within(card).getByText("Cell 9 · Dòng 1–1")).toBeTruthy();
+  // Mã thô không bao giờ lên UI: chúng chỉ được phép xuất hiện dưới dạng câu đã dịch.
+  expect(within(card).queryByText(/SOURCE_/)).toBeNull();
 });
 
 test("COMPLETED dùng record canonical: mỗi kết luận chỉ xuất hiện một lần", async () => {

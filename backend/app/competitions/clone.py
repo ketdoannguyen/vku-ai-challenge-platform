@@ -19,7 +19,7 @@ from app.content import service as contents
 from app.content import storage as files
 from app.core.config import get_settings
 from app.core.errors import api_error
-from app.scoring import csv_validation, models, revisions
+from app.scoring import csv_validation, models, normalization, revisions
 from app.scoring import service as scoring_service
 from app.scoring import storage as scoring_files
 from app.scoring.errors import ScoringValidationError
@@ -37,6 +37,7 @@ class SourceSnapshot:
     pages: list[tuple[dict, bytes | None]]
     assets: list[tuple[str, bytes]]
     ai_config: dict | None
+    normalization: normalization.NormalizationRequest
 
 
 def _invalid() -> Exception:
@@ -159,6 +160,8 @@ async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
             ai_config = ai_settings.snapshot_config(
                 source, updated_by=admin_id, now=datetime.now(timezone.utc), policy=policy
             )
+        # Clone giữ nguyên luật chuẩn hóa; bản ghi hỏng bị chặn ngay ở preflight.
+        normalization_request = normalization.request_of(source)
     except (
         KeyError, OSError, ValueError, TypeError, UnicodeDecodeError, ValidationError,
         ScoringValidationError, ai_settings.SettingsError, url_policy.UrlPolicyError,
@@ -170,7 +173,7 @@ async def snapshot(db, source: dict, *, admin_id: ObjectId) -> SourceSnapshot:
 
     return SourceSnapshot(
         scoring, evaluator_source, ground_truth, ground_truth_metadata,
-        ground_truth_sha256, pages, assets, ai_config,
+        ground_truth_sha256, pages, assets, ai_config, normalization_request,
     )
 
 
@@ -210,8 +213,7 @@ async def populate(db, clone: dict, data: SourceSnapshot) -> dict:
             copied = await contents.insert_content(
                 db, clone["_id"],
                 contents.ContentCreate(
-                    title=page["title"], slug=page["slug"],
-                    order=page["order"], visibility=page["visibility"],
+                    title=page["title"], slug=page["slug"], order=page["order"],
                 ),
             )
             if markdown is not None:

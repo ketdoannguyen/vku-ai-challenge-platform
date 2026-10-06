@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useOutletContext } from "react-router-dom";
 import { ApiClientError } from "../api/client";
-import { formatLocal } from "../api/competitions";
+import { accessLostReason, formatLocal } from "../api/competitions";
 import {
   fetchLeaderboard,
   formatMetric,
   metricLabel,
   resultContract,
+  type NormalizationBoard,
   type ParticipantLeaderboardResponse,
 } from "../api/results";
 import { ErrorBox, Loading } from "../components/ui";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { NORM_RANKING_NOTE } from "../lib/normalization";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 /** Số dòng mỗi trang; backend chặn 1–200 nên đây chỉ là lựa chọn hiển thị. */
@@ -19,11 +21,6 @@ const PAGE_SIZE = 25;
 
 /** Nhịp tự làm mới ngầm khi tab đang mở. */
 const AUTO_REFRESH_MS = 3_000;
-
-/** 401/403 nghĩa là quyền xem đã mất: bảng vừa bị ẩn hoặc phiên đã hết hạn. */
-function accessLost(reason: unknown): boolean {
-  return reason instanceof ApiClientError && (reason.status === 401 || reason.status === 403);
-}
 
 /**
  * Câu mô tả quy tắc xếp hạng. Cuộc thi chưa khai báo metric chính (bản nháp v2) thì không nêu tên
@@ -35,8 +32,30 @@ function rankingNote(label: string | null): string {
     : "Xếp theo điểm chấm của cuộc thi; nếu bằng điểm, bài đạt điểm sớm hơn đứng trước.";
 }
 
+/**
+ * Mẫu số và thời điểm dựng bảng norm. Chỉ render khi thí sinh được xem dữ liệu dẫn xuất -
+ * backend đã trả `normalization: null` khi bảng hoặc metric nguồn bị ẩn.
+ */
+function NormMetaLine({
+  board,
+  sourceLabel,
+  decimals,
+}: {
+  board: NormalizationBoard;
+  sourceLabel: string;
+  decimals: number;
+}) {
+  return (
+    <p className="lb-lead text-muted">
+      Baseline {sourceLabel} {formatMetric(board.baseline, decimals)} · Điểm gốc tốt nhất
+      hiện tại {formatMetric(board.reference_best, decimals)} · Bảng dựng lúc{" "}
+      {formatLocal(board.calculated_at)}
+    </p>
+  );
+}
+
 export function LeaderboardPage() {
-  const { competition } = useOutletContext<CompetitionContext>();
+  const { competition, reportAccessLost } = useOutletContext<CompetitionContext>();
   // Cột metric và số thập phân đọc từ hợp đồng của cuộc thi, không cố định f1/precision/recall.
   const contract = resultContract(competition.submission_config);
   /** Số thập phân của metric chính; hợp đồng rỗng (bản nháp v2) rơi về mức 4 như bộ chấm v1. */
@@ -81,11 +100,19 @@ export function LeaderboardPage() {
         }
       } catch (reason) {
         if (sequence !== requestSequence.current) return;
-        if (accessLost(reason)) {
-          // Bảng bị ẩn giữa chừng: điểm đã tải không được nằm lại trên màn hình.
+        // 401/membership bị thu hồi: quyền đọc cả cuộc thi đã mất - nhường shell đóng gate
+        // ngay, không giữ điểm đã tải trên màn hình.
+        const lost = accessLostReason(reason);
+        if (lost !== null) {
           hasData.current = false;
           setData(null);
-          setError(reason);
+          reportAccessLost(lost);
+        } else if (reason instanceof ApiClientError && reason.code === "LEADERBOARD_HIDDEN") {
+          // Bảng vừa bị ẩn giữa chừng: xoá điểm đã tải; lượt làm mới của shell sẽ cập nhật
+          // `leaderboard_visible` và thẻ "chưa công bố" tự hiện, nên không báo mất quyền.
+          hasData.current = false;
+          setData(null);
+          if (!silent) setError(reason);
         } else if (!silent) {
           setError(reason);
         }
@@ -101,7 +128,7 @@ export function LeaderboardPage() {
         }
       }
     },
-    [competition.id, competition.leaderboard_visible],
+    [competition.id, competition.leaderboard_visible, reportAccessLost],
   );
 
   useEffect(() => {
@@ -128,6 +155,16 @@ export function LeaderboardPage() {
   const refreshStatus = useAutoRefresh(competition.leaderboard_visible, silentRefresh, { intervalMs: AUTO_REFRESH_MS });
 
   const busy = loading || refreshing;
+
+  /** Metadata norm của lần dựng bảng đang xem; null khi norm tắt hoặc thí sinh không được xem. */
+  const norm = data?.normalization ?? null;
+  /** Nhãn và số thập phân của metric nguồn để đọc baseline/mẫu số đúng đơn vị điểm gốc. */
+  const sourceLabel = norm
+    ? metricLabel(contract, norm.source_metric) ?? norm.source_metric
+    : null;
+  const sourceDecimals =
+    contract.metrics.find((metric) => metric.key === norm?.source_metric)?.decimals ??
+    primaryDecimals;
 
   // S08b: Chưa công bố bảng xếp hạng (không gọi API)
   if (!competition.leaderboard_visible) {
@@ -239,8 +276,13 @@ export function LeaderboardPage() {
           <div className="lb-head-copy">
             <h2 className="lb-title">Bảng xếp hạng</h2>
             <p className="lb-lead text-muted">
-              {rankingNote(metricLabel(contract, contract.primary_metric))}
+              {norm
+                ? NORM_RANKING_NOTE
+                : rankingNote(metricLabel(contract, contract.primary_metric))}
             </p>
+            {norm && sourceLabel && (
+              <NormMetaLine board={norm} sourceLabel={sourceLabel} decimals={sourceDecimals} />
+            )}
           </div>
         </div>
         <AutoRefreshNotice {...refreshStatus} />
@@ -277,8 +319,13 @@ export function LeaderboardPage() {
           </div>
           <h2 className="lb-title">Bảng xếp hạng</h2>
           <p className="lb-lead text-muted">
-            {rankingNote(metricLabel(contract, data.primary_metric))}
+            {norm
+              ? NORM_RANKING_NOTE
+              : rankingNote(metricLabel(contract, data.primary_metric))}
           </p>
+          {norm && sourceLabel && (
+            <NormMetaLine board={norm} sourceLabel={sourceLabel} decimals={sourceDecimals} />
+          )}
         </div>
 
         <div className="lb-head-tools">
@@ -334,8 +381,12 @@ export function LeaderboardPage() {
           </div>
           <dl className="lb-me-facts">
             <div>
-              <dt>Điểm chính</dt>
-              <dd>{formatMetric(data.me.primary_score, primaryDecimals)}</dd>
+              <dt>{norm ? "Điểm norm" : "Điểm chính"}</dt>
+              <dd>
+                {norm
+                  ? formatMetric(data.me.normalized_score, norm.decimals)
+                  : formatMetric(data.me.primary_score, primaryDecimals)}
+              </dd>
             </div>
             <div>
               <dt>Số bài đã nộp</dt>
@@ -383,6 +434,12 @@ export function LeaderboardPage() {
             <tr>
               <th scope="col" className="lb-col-rank">Hạng</th>
               <th scope="col">Đội / tài khoản</th>
+              {/* Norm là điểm xếp hạng khi cuộc thi bật chuẩn hóa; metric nguồn ở lại cột phụ. */}
+              {norm && (
+                <th scope="col" className="lb-col-num">
+                  Điểm norm (0–{norm.max_score})
+                </th>
+              )}
               {contract.metrics.map((metric) => (
                 <th scope="col" className="lb-col-num" key={metric.key}>
                   {metric.label}
@@ -420,11 +477,17 @@ export function LeaderboardPage() {
                     <span className="lb-user-badge">Bạn</span>
                   )}
                 </td>
+                {norm && (
+                  <td className="score-cell primary-score">
+                    {formatMetric(entry.normalized_score, norm.decimals)}
+                  </td>
+                )}
                 {contract.metrics.map((metric) => (
                   <td
                     key={metric.key}
                     className={`score-cell${
-                      metric.key === contract.primary_metric ? " primary-score" : ""
+                      // Cột được nhấn là cột đang quyết định thứ hạng: norm khi bật, ngược lại metric chính.
+                      metric.key === contract.primary_metric && norm === null ? " primary-score" : ""
                     }`}
                   >
                     {formatMetric(entry.metrics[metric.key], metric.decimals)}

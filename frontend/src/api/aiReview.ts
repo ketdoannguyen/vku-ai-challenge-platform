@@ -20,6 +20,9 @@ export type AiReviewFilter =
   | "flagged"
   | "clear"
   | "inconclusive"
+  | "source_external"
+  | "source_unclear"
+  | "source_not_evaluated"
   | "error"
   | "pending"
   | "none";
@@ -40,7 +43,13 @@ export interface AdminAiReview extends ParticipantAiReview {
    * Chỉ admin thấy: đây là bản nháp để admin sửa trước khi gửi, không phải thứ thí sinh đọc.
    */
   participant_summary: string | null;
-  source_warning_count?: number | null;
+  /**
+   * Trạng thái nguồn sau hậu kiểm của lượt hiện tại; `null` khi lượt chưa xong, gặp lỗi, hoặc là
+   * row cũ trước phiên bản assessment. Thiếu dữ kiện KHÔNG được đọc thành `ALIGNED`.
+   */
+  source_status?: AiSourceStatus | null;
+  /** Version sinh ra `source_status`; lệch version hiện hành nghĩa là dữ liệu chưa hậu kiểm lại. */
+  source_signal_version?: string | null;
   generation: number | null;
   run_id: string | null;
   latest_review_id: string | null;
@@ -75,7 +84,6 @@ export interface ContentSourcePage {
   title: string;
   slug: string;
   order: number;
-  visibility: string;
   included: boolean;
   reason: ContentSourceReason;
 }
@@ -124,6 +132,35 @@ export interface AiEvidence {
   end_line: number;
   /** Server tự trích lại từ notebook đã lưu, không lấy từ output của model. */
   snippet: string;
+}
+
+/**
+ * Trạng thái nguồn dataset sau hậu kiểm. `NOT_EVALUATED` do backend sinh khi thiếu đánh giá hoặc
+ * thiếu tài nguyên BTC để đối chiếu - đọc thành "nguồn đã sạch" là sai.
+ */
+export type AiSourceStatus = "ALIGNED" | "EXTERNAL" | "UNCLEAR" | "NOT_EVALUATED";
+
+/** Vị trí trích dẫn bị loại khỏi đánh giá nguồn, kèm mã lý do; UI dịch mã, không hiện mã thô. */
+export interface AiRejectedSourceEvidence {
+  cell: number;
+  start_line: number;
+  end_line: number;
+  code: string;
+}
+
+/** Một đánh giá nguồn cho CẢ notebook: đề xuất của AI, kết quả hậu kiểm và bằng chứng hai phía. */
+export interface AiSourceAssessment {
+  /** Đề xuất ban đầu của AI; `null` khi model không trả đánh giá. */
+  model_status: AiSourceStatus | null;
+  /** Kết quả sau hậu kiểm cấu trúc; có thể khác đề xuất khi bị hạ. */
+  status: AiSourceStatus;
+  reason: string;
+  /** Chỉ chứa vị trí CODE cell hợp lệ với snippet server dựng lại, không tin bản model chép. */
+  evidence: AiEvidence[];
+  /** Vị trí AI nêu nhưng không dùng được; giữ lại làm dấu vết cho BTC đọc. */
+  rejected_evidence: AiRejectedSourceEvidence[];
+  /** Mã chẩn đoán vì sao đánh giá thiếu căn cứ hoặc bị hạ; UI dịch sang tiếng Việt. */
+  validation_codes: string[];
 }
 
 export type FindingStatus = "VIOLATION" | "COMPLIANT" | "UNCLEAR";
@@ -219,6 +256,9 @@ export interface AiReviewRecord {
   summary: string | null;
   participant_summary: string | null;
   findings: AiFinding[];
+  /** Đánh giá nguồn toàn notebook; thiếu field nghĩa là row cũ trước phiên bản assessment. */
+  source_assessment?: AiSourceAssessment | null;
+  /** Tín hiệu nguồn của row cũ - chỉ còn để đọc lịch sử, không bao giờ có ở lượt mới. */
   source_signals?: AiSourceSignal[];
   resources_configured?: number;
   /**
@@ -344,11 +384,41 @@ export const SOURCE_URL_MATCH_LABEL: Record<AiSourceMatch, string> = {
   UNVERIFIED_SOURCE: "Chưa xác định",
 };
 
+/** Nhãn trạng thái nguồn cho cả danh sách lẫn modal; một chỗ định nghĩa, hai chỗ đọc. */
+export const AI_SOURCE_STATUS_LABEL: Record<AiSourceStatus, string> = {
+  ALIGNED: "AI: Phù hợp nguồn BTC",
+  EXTERNAL: "AI: Có dấu hiệu dùng nguồn ngoài",
+  UNCLEAR: "Nguồn: Chưa xác minh",
+  NOT_EVALUATED: "Nguồn: Chưa đánh giá được",
+};
+
+/** Row COMPLETED trước phiên bản assessment: thiếu dữ kiện nguồn, không phải đã sạch. */
+export const AI_SOURCE_LEGACY_LABEL = "Nguồn: Chưa đánh giá theo phiên bản mới";
+
+/**
+ * Mã hậu kiểm nguồn → câu tiếng Việt. UI chỉ hiện câu dịch, không bao giờ hiện mã thô; mã lạ bị
+ * ẩn thay vì đổ chuỗi kỹ thuật ra màn hình tác nghiệp.
+ */
+export const SOURCE_CODE_LABEL: Record<string, string> = {
+  CELL_NOT_FOUND: "vị trí trích dẫn không có trong notebook",
+  CELL_NOT_CODE: "trích dẫn nằm ngoài CODE cell",
+  RANGE_INVALID: "khoảng dòng vượt quá nội dung cell",
+  SOURCE_ASSESSMENT_MISSING: "AI không trả đánh giá nguồn cho lượt này",
+  SOURCE_RESOURCES_MISSING: "cuộc thi không có tài nguyên BTC để đối chiếu",
+  SOURCE_EVIDENCE_MISSING: "AI không kèm trích dẫn nào",
+  SOURCE_EVIDENCE_INVALID: "toàn bộ trích dẫn không dùng được",
+  SOURCE_EVIDENCE_PARTIALLY_INVALID: "một phần trích dẫn không dùng được",
+  SOURCE_NOTEBOOK_TRUNCATED: "notebook bị cắt bớt khi gửi AI",
+};
+
 export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: string }> = [
   { value: "all", label: "Mọi trạng thái AI" },
   { value: "flagged", label: "AI: Có dấu hiệu" },
   { value: "clear", label: "AI: Không phát hiện" },
   { value: "inconclusive", label: "AI: Chưa đủ căn cứ" },
+  { value: "source_external", label: "AI: Có dấu hiệu dùng nguồn ngoài" },
+  { value: "source_unclear", label: "Nguồn: Chưa xác minh" },
+  { value: "source_not_evaluated", label: "Nguồn: Chưa đánh giá được" },
   { value: "error", label: "AI lỗi" },
   { value: "pending", label: "AI đang xử lý" },
   { value: "none", label: "Chưa đánh giá" },

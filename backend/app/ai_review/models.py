@@ -13,6 +13,7 @@ from app.ai_review import constants
 _VERDICT = Literal["CLEAR", "FLAGGED", "INCONCLUSIVE"]
 _CHECKABILITY = Literal["CHECKABLE_FROM_NOTEBOOK", "NOT_CHECKABLE_FROM_NOTEBOOK"]
 _FINDING_STATUS = Literal["VIOLATION", "COMPLIANT", "UNCLEAR"]
+_SOURCE_STATUS = Literal["ALIGNED", "EXTERNAL", "UNCLEAR"]
 
 
 def _text(max_length: int) -> type[str]:
@@ -55,13 +56,21 @@ class ModelFinding(BaseModel):
     )
 
 
-class ModelSourceSignal(BaseModel):
+class ModelSourceAssessment(BaseModel):
+    """Một đánh giá nguồn cho CẢ notebook, không phải danh sách tín hiệu rời rạc.
+
+    Backend chỉ kiểm cấu trúc và vị trí trích dẫn; suy luận nguồn vẫn là của model và không được
+    chứng nhận. `evidence` dùng chung `ModelEvidence` như finding, nhưng trần riêng vì một đánh giá
+    gộp cả pipeline.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    cell: int = Field(ge=1)
-    start_line: int = Field(ge=1)
-    end_line: int = Field(ge=1)
+    status: _SOURCE_STATUS
     reason: _text(constants.MAX_REASON_CHARS)
+    evidence: list[ModelEvidence] = Field(
+        default_factory=list, max_length=constants.MAX_SOURCE_EVIDENCE
+    )
 
 
 class ModelReviewOutput(BaseModel):
@@ -81,6 +90,6 @@ class ModelReviewOutput(BaseModel):
     findings: list[ModelFinding] = Field(
         default_factory=list, max_length=constants.MAX_FINDINGS
     )
-    source_signals: list[ModelSourceSignal] = Field(
-        default_factory=list, max_length=constants.MAX_SOURCE_SIGNALS
-    )
+    # Prompt bắt buộc mục này, nhưng parser cố ý cho phép thiếu/null: thiếu đánh giá phải hiện ra
+    # thành "chưa đánh giá được", không được biến cả lượt review thành ERROR.
+    source_assessment: ModelSourceAssessment | None = None

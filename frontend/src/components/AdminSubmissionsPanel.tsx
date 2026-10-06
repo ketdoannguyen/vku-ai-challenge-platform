@@ -32,14 +32,21 @@ import {
 import { Link } from "react-router-dom";
 import {
   AI_FILTER_OPTIONS,
+  AI_SOURCE_LEGACY_LABEL,
+  AI_SOURCE_STATUS_LABEL,
   AI_STATE_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
   type AiReviewFilter,
+  type AiSourceStatus,
   type AiVerdict,
 } from "../api/aiReview";
 import { api } from "../api/client";
-import { formatLocal } from "../api/competitions";
+import {
+  formatLocal,
+  normalizationOf,
+  type NormalizationConfig,
+} from "../api/competitions";
 import {
   ADMIN_SORT_FIELDS,
   formatMetric,
@@ -56,6 +63,7 @@ import {
   type ReviewPayload,
 } from "../api/results";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import { AiReviewDetailModal } from "./AiReviewDetailModal";
 import { AutoRefreshNotice } from "./AutoRefreshNotice";
 import {
@@ -83,10 +91,13 @@ const STATUS_OPTIONS = [
   { value: "failed", label: "Lỗi chấm điểm" },
 ];
 
-/** Trục duyệt tách khỏi trục chấm điểm: "Hợp lệ" gồm cả bài chưa từng bị xét duyệt. */
+/**
+ * Trục duyệt tách khỏi trục chấm điểm: nhánh "accepted" gồm cả bài chưa từng bị xét duyệt, nên
+ * nhãn nói đúng phạm vi lọc thay vì ngụ ý BTC đã duyệt từng bài.
+ */
 const REVIEW_OPTIONS = [
   { value: "", label: "Mọi trạng thái duyệt" },
-  { value: "accepted", label: "Hợp lệ" },
+  { value: "accepted", label: "Chưa bị từ chối" },
   { value: "rejected", label: "Không chấp nhận" },
 ];
 
@@ -151,6 +162,7 @@ interface CompetitionOption {
 export function AdminSubmissionsPanel({
   competitionId,
   resultContract,
+  normalization,
   title,
   listLabel,
 }: {
@@ -161,6 +173,8 @@ export function AdminSubmissionsPanel({
    * gọi phải truyền vào; bảng toàn cục không truyền vì mỗi dòng thuộc một cuộc thi khác nhau.
    */
   resultContract?: ResultContract;
+  /** Cấu hình chuẩn hóa của cuộc thi đang khóa; bảng toàn cục tra theo metadata của từng dòng. */
+  normalization?: NormalizationConfig;
   title: string;
   listLabel: string;
 }) {
@@ -397,8 +411,14 @@ export function AdminSubmissionsPanel({
    * lựa chọn "Cuộc thi"; bù lại nó mới sắp xếp được theo metric, vì backend chỉ nhận khóa metric
    * khi bảng đã khóa vào một cuộc thi - bảng toàn cục trộn nhiều thang điểm nên bị từ chối.
    */
+  // Cuộc thi bật norm xếp hạng theo norm: sort theo "Điểm chính" chỉ còn là sort điểm gốc.
+  const scopedNormEnabled = Boolean(competitionId && normalizationOf({ normalization }).enabled);
   const sortFields = [
-    ...ADMIN_SORT_FIELDS.filter((option) => !option.globalOnly || !competitionId),
+    ...ADMIN_SORT_FIELDS.filter((option) => !option.globalOnly || !competitionId).map((option) =>
+      scopedNormEnabled && option.value === "primary_score"
+        ? { ...option, label: "Điểm gốc" }
+        : option,
+    ),
     ...(competitionId && resultContract
       ? secondaryMetrics(resultContract).map((metric) => ({
           value: metric.key,
@@ -416,6 +436,14 @@ export function AdminSubmissionsPanel({
     if (resultContract) return resultContract;
     return resolveResultContract(
       data?.competitions?.find((item) => item.id === submission.competition_id),
+    );
+  }
+
+  /** Cấu hình norm của một dòng: bảng khóa cuộc thi nhận qua prop, bảng toàn cục tra metadata. */
+  function normalizationOfSubmission(submission: AdminSubmissionItem): NormalizationConfig {
+    if (competitionId) return normalizationOf({ normalization });
+    return normalizationOf(
+      data?.competitions?.find((item) => item.id === submission.competition_id) ?? {},
     );
   }
 
@@ -454,7 +482,8 @@ export function AdminSubmissionsPanel({
       return <StatusBadge tone={tone} glyph="dash" label="Không xét duyệt được" />;
     }
     if (!submission.review) {
-      return <StatusBadge tone={tone} glyph="check" label="Hợp lệ" />;
+      // Chưa có quyết định của BTC, không phải "hợp lệ": nhãn cũ bị đọc thành phán quyết đã duyệt.
+      return <StatusBadge tone={tone} glyph="check" label="Chưa có quyết định BTC" />;
     }
     const rejected = submission.review.status === "rejected";
     return (
@@ -495,8 +524,18 @@ export function AdminSubmissionsPanel({
         ) : (
           <StatusBadge tone={tone} glyph="dash" label="Chưa đánh giá" />
         )}
-        {projection?.source_warning_count ? (
-          <StatusBadge tone="warning" glyph="alert" label="Nguồn dữ liệu cần kiểm tra" />
+        {/* Lượt hoàn tất luôn có badge nguồn: thiếu trạng thái (row cũ) hiện nhãn chưa đánh giá
+            theo phiên bản mới, không im lặng như đã sạch. Lượt lỗi/đang chạy không có nhánh này. */}
+        {projection?.verdict && projection.verdict !== "ERROR" ? (
+          projection.source_status ? (
+            <StatusBadge
+              tone={SOURCE_STATUS_TONE[projection.source_status]}
+              glyph={SOURCE_STATUS_GLYPH[projection.source_status]}
+              label={AI_SOURCE_STATUS_LABEL[projection.source_status]}
+            />
+          ) : (
+            <StatusBadge tone="muted" glyph="dash" label={AI_SOURCE_LEGACY_LABEL} />
+          )
         ) : null}
         <button
           type="button"
@@ -742,6 +781,8 @@ export function AdminSubmissionsPanel({
             {data.submissions.map((submission) => {
               const contract = contractOf(submission);
               const secondary = secondaryMetrics(contract);
+              const norm = normalizationOfSubmission(submission);
+              const snapshot = submission.normalization_snapshot ?? null;
               // Bản nháp chưa chọn metric chính thì Điểm chính lùi về 4 số thập phân như bộ chấm v1.
               const primaryDecimals =
                 contract.metrics.find((metric) => metric.key === contract.primary_metric)
@@ -787,9 +828,10 @@ export function AdminSubmissionsPanel({
                         </dd>
                       </div>
                       {/* Điểm chính đứng riêng khỏi cụm chỉ số: đây là con số duy nhất dùng để xếp
-                          hạng, để lẫn với các metric phụ thì nó không còn nổi nữa. */}
+                          hạng, để lẫn với các metric phụ thì nó không còn nổi nữa. Cuộc thi bật norm
+                          thì nó xuống thành điểm gốc - con số xếp hạng là norm bên cạnh. */}
                       <div className="subm-field">
-                        <dt>Điểm chính</dt>
+                        <dt>{norm.enabled ? "Điểm gốc" : "Điểm chính"}</dt>
                         <dd>
                           <span className="subm-score">
                             <BlockIcon tone="gold">{STAR_PATHS}</BlockIcon>
@@ -799,6 +841,26 @@ export function AdminSubmissionsPanel({
                           </span>
                         </dd>
                       </div>
+                      {norm.enabled && (
+                        <div className="subm-field">
+                          <dt>{PROVISIONAL_NORM_LABEL}</dt>
+                          <dd>
+                            {snapshot ? (
+                              <span
+                                className="subm-score"
+                                title={`v${snapshot.version} · ${snapshot.source_metric} · baseline ${snapshot.baseline} · best lúc ghi ${snapshot.reference_best}`}
+                              >
+                                <span className="subm-result-primary-score">
+                                  {formatMetric(snapshot.score, 2)}
+                                </span>
+                              </span>
+                            ) : (
+                              // Bài cũ chưa có snapshot: để trống, không bịa giá trị lịch sử.
+                              <span className="subm-muted">—</span>
+                            )}
+                          </dd>
+                        </div>
+                      )}
                       <div className="subm-field subm-field-result">
                         <dt>Kết quả</dt>
                         <dd>
@@ -1096,6 +1158,26 @@ const AI_VERDICT_GLYPH: Record<AiVerdict, Glyph> = {
   FLAGGED: "alert",
   INCONCLUSIVE: "question",
   ERROR: "clock",
+};
+
+/** Hình dạng theo trạng thái nguồn, cùng nguyên tắc tách hình khỏi màu với verdict. */
+const SOURCE_STATUS_GLYPH: Record<AiSourceStatus, Glyph> = {
+  ALIGNED: "check",
+  EXTERNAL: "alert",
+  UNCLEAR: "question",
+  NOT_EVALUATED: "dash",
+};
+
+/**
+ * Tone của trạng thái nguồn. "Phù hợp" để `info` chứ không `success`: đây là nhận định của AI,
+ * không phải xác nhận của BTC. Còn lại là mức cần xem lại hoặc thiếu dữ kiện; không tô đỏ vì
+ * dấu hiệu nguồn không phải vi phạm đã được kết luận.
+ */
+const SOURCE_STATUS_TONE: Record<AiSourceStatus, IconTone> = {
+  ALIGNED: "info",
+  EXTERNAL: "warning",
+  UNCLEAR: "warning",
+  NOT_EVALUATED: "muted",
 };
 
 /** Tone của vạch nhấn ở lề thẻ. Chỉ ba mức, vì vạch thẻ là tín hiệu "bài này có gì đáng xem không". */

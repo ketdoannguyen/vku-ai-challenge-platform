@@ -102,7 +102,7 @@ def test_download_requires_auth_and_ownership(client):
     assert foreign.status_code == 404
     assert foreign.json()["error"]["code"] == "NOT_FOUND"
 
-    # Chính chủ vẫn tải được sau khi bị vô hiệu hóa membership: bài của mình là dữ liệu của mình.
+    # Bị vô hiệu hóa membership là mất luôn quyền tải bài của chính mình.
     login(client)
     account = client.get("/api/admin/accounts", params={"q": "thi.sinh@vku.vn"}).json()[
         "accounts"
@@ -115,7 +115,9 @@ def test_download_requires_auth_and_ownership(client):
         == 200
     )
     login_participant(client)
-    assert client.get(url).status_code == 200
+    denied = client.get(url)
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMBERSHIP_INACTIVE"
 
 
 def test_admin_downloads_any_team_artifact_but_participant_cannot(client):
@@ -135,6 +137,23 @@ def test_admin_downloads_any_team_artifact_but_participant_cannot(client):
 
     assert client.get("/api/admin/submissions/khong-phai-objectid/prediction").status_code == 404
     assert client.get(f"/api/admin/submissions/{ObjectId()}/prediction").status_code == 404
+
+
+def test_admin_reads_history_without_membership_but_ownership_holds(client):
+    """Admin miễn membership ở route thí sinh (ADR-060); bài của người khác vẫn là 404."""
+    competition = ready_competition(client)
+    submission = _submit_one(client, competition["id"])
+
+    login(client)  # admin, không có membership trong cuộc thi này
+    history = client.get(f"/api/competitions/{competition['id']}/submissions/me")
+    assert history.status_code == 200
+    assert history.json() == {"submissions": [], "total": 0, "limit": 50, "offset": 0}
+
+    foreign = client.get(
+        f"/api/competitions/{competition['id']}/submissions/{submission['_id']}/prediction"
+    )
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["code"] == "NOT_FOUND"
 
 
 def test_legacy_submission_is_still_downloadable(client, isolated_data_dir):

@@ -25,6 +25,7 @@ from app.scoring import (
     evaluator_source,
     execution,
     models,
+    normalization,
     revisions,
     service,
 )
@@ -243,10 +244,19 @@ async def _save_v1(db, competition: dict, body: service.ScoringConfig, admin: Ad
     except ScoringValidationError as exc:
         raise api_error(422, exc.code, exc.message)
 
-    await db[competitions_service.COMPETITIONS_COLLECTION].update_one(
-        {"_id": competition["_id"]},
+    # Ghi thẳng theo _id (không lọc revision): đây là đường lùi khỏi một cấu hình v2 hỏng, nên
+    # không được đòi hỏi gì về bản ghi đang có - chỉ ghim trạng thái đã đọc để một lượt publish
+    # xen giữa làm lượt ghi trượt thay vì lặng lẽ đổi cách chấm của cuộc thi đã publish.
+    result = await db[competitions_service.COMPETITIONS_COLLECTION].update_one(
+        {"_id": competition["_id"], "status": competition["status"]},
         {"$set": {"scoring_config": body.model_dump(), "updated_at": revisions.utc_now()}},
     )
+    if result.matched_count == 0:
+        raise api_error(
+            409,
+            REVISION_CONFLICT,
+            "Cấu hình đã được thay đổi ở nơi khác, tải lại trang rồi thử lại.",
+        )
     logger.info("Admin %s configured scoring competition=%s", admin["email"], competition["_id"])
     return await _scoring_view(db, await _reload(db, competition))
 
@@ -260,6 +270,13 @@ async def _save_v2(
     current = models.stored_config_or_none(competition)
     current_revision = current.revision if current else revisions.INITIAL_REVISION
     _require_revision(current_revision, body.expected_revision)
+    try:
+        rule = normalization.active_rule(competition)
+    except normalization.NormalizationError as exc:
+        # Cấu hình norm hỏng thì lượt lưu này không biết mình đang ràng buộc với nguồn nào.
+        raise api_error(422, "SCORING_CONFIG_INVALID", str(exc))
+    if rule is not None:
+        _ensure_source_kept(competition, rule, body.output_contract)
     # Bản nháp lưu được từng bước: schema trước, tên bộ chấm / source / metric sau. Ba thứ đó chỉ là
     # điều kiện publish (readiness giữ), không phải điều kiện của một lượt lưu - nếu không thì
     # "khai định dạng rồi lưu trước khi viết bộ chấm" là bất khả thi.
@@ -305,9 +322,37 @@ async def _save_v2(
         competition,
         expected_revision=body.expected_revision,
         sets={"scoring_config": config.model_dump(mode="json")},
+        # Cấu hình norm là một phần của luật đang kiểm tra dù đang bật hay tắt: bật nó giữa chừng
+        # cũng phải làm lượt ghi trượt, không để draft kẹt ở trạng thái bật norm mà thiếu nguồn điểm.
+        guard=normalization.config_guard(competition),
     )
     logger.info("Admin %s configured scoring v2 competition=%s", admin["email"], competition["_id"])
     return await _scoring_view(db, await _reload(db, competition))
+
+
+def _ensure_source_kept(
+    competition: dict, rule: normalization.Rule, contract: models.OutputContract | None
+) -> None:
+    """Cuộc thi đang bật chuẩn hóa thì metric nguồn và chiều xếp hạng không được rời đi.
+
+    Bản nháp chỉ cần còn metric chính (đổi nguồn tự do vì chưa có điểm nào); cuộc thi đã publish
+    thì khóa cả hai - bảng xếp hạng đang chạy trên đúng nguồn đó, kể cả trước bài nộp đầu tiên.
+    """
+    if contract is None or contract.primary_metric is None:
+        raise api_error(
+            422,
+            "SCORING_CONFIG_REQUIRED",
+            "Cuộc thi đang bật chuẩn hóa nên vẫn cần khai báo metric chính.",
+        )
+    if competition["status"] != "draft" and (
+        contract.primary_metric,
+        contract.higher_is_better,
+    ) != (rule.source_metric, rule.higher_is_better):
+        raise api_error(
+            422,
+            "SCORING_LOCKED",
+            "Cuộc thi đang bật chuẩn hóa; không đổi được metric nguồn hoặc chiều xếp hạng sau khi publish.",
+        )
 
 
 async def _store_v1_ground_truth(db, competition: dict, data: bytes, admin: AdminAccount) -> None:
@@ -447,10 +492,24 @@ async def _run_evaluator(
 
 
 async def _update(
-    db, competition: dict, *, expected_revision: int | None, sets: dict
+    db,
+    competition: dict,
+    *,
+    expected_revision: int | None,
+    sets: dict,
+    guard: dict | None = None,
 ) -> None:
+    """Ghi cấu hình với revision, trạng thái đã đọc và guard thêm (nếu có) ghim tại thời điểm ghi.
+
+    Đọc và ghi không nằm trong một transaction, nên một lượt publish xen giữa phải làm lượt ghi
+    trượt (409) thay vì âm thầm áp cấu hình đã được kiểm tra dưới luật cũ.
+    """
     result = await db[competitions_service.COMPETITIONS_COLLECTION].update_one(
-        _revision_filter(competition["_id"], expected_revision),
+        {
+            **_revision_filter(competition["_id"], expected_revision),
+            "status": competition["status"],
+            **(guard or {}),
+        },
         {"$set": {**sets, "updated_at": revisions.utc_now()}},
     )
     if result.matched_count == 0:

@@ -142,6 +142,23 @@ async def resolve_account_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+_COMPETITIONS_CACHE_PREFIX = "/api/competitions"
+
+
+@app.middleware("http")
+async def competitions_no_store_middleware(request: Request, call_next):
+    """Cấm mọi cache cho API cuộc thi vì response phụ thuộc tài khoản - kể cả lỗi phân quyền.
+
+    Gán đè thay vì setdefault để không giữ lại `Cache-Control` sai của bất kỳ handler nào; chỉ
+    đúng tiền tố `/api/competitions`, không đụng `/api/starter-notebook` hay bundle tĩnh.
+    """
+    response = await call_next(request)
+    path = request.url.path
+    if path == _COMPETITIONS_CACHE_PREFIX or path.startswith(f"{_COMPETITIONS_CACHE_PREFIX}/"):
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.middleware("http")
 async def received_at_middleware(request: Request, call_next):
     """Mốc nhận request, sớm hơn cả bước parse multipart.

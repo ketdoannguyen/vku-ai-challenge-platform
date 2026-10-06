@@ -23,7 +23,7 @@ from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
-from app.scoring import contracts, models
+from app.scoring import contracts, models, normalization
 from app.scoring.models import OutputContract
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
 from app.submissions import artifacts as artifacts_reader
@@ -383,8 +383,8 @@ async def admin_leaderboard(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    entries = await leaderboard_service.cached_ranked_entries(db, competition)
-    return leaderboard_service.admin_leaderboard_response(competition, entries)
+    board = await leaderboard_service.cached_ranked_board(db, competition)
+    return leaderboard_service.admin_leaderboard_response(competition, board)
 
 
 @router.get("/{competition_id}/export.xlsx")
@@ -393,15 +393,16 @@ async def export_results(
 ) -> Response:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    entries = await leaderboard_service.ranked_entries(db, competition)
-    content = _build_workbook(competition, entries)
+    # Export cố ý bỏ cache: file tải về phải khớp dữ liệu tại đúng thời điểm admin bấm.
+    board = await leaderboard_service.ranked_board(db, competition)
+    content = _build_workbook(competition, board)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filename = f"{competition['slug']}-results-{timestamp}.xlsx"
     logger.info(
         "Results exported admin=%s competition=%s entries=%s",
         admin["email"],
         competition["_id"],
-        len(entries),
+        len(board.entries),
     )
     return Response(
         content,
@@ -490,44 +491,53 @@ def _competition_ref(competition: dict | None, competition_id) -> dict:
 
 
 def _competition_contracts(competitions: dict) -> list[dict]:
-    """Metadata metric của từng cuộc thi trong trang, kèm id để UI tra theo hàng."""
+    """Metadata metric của từng cuộc thi trong trang, kèm id để UI tra theo hàng.
+
+    Cấu hình chuẩn hóa đi kèm ở khóa riêng, không trộn vào `result_contract`: hợp đồng là output
+    của evaluator và giữ nguyên; norm chỉ đổi cách hiển thị/xếp hạng dẫn xuất.
+    """
     return [
-        {**_competition_ref(competition, competition["_id"]), "result_contract": contracts.contract_payload(competition)}
+        {
+            **_competition_ref(competition, competition["_id"]),
+            "result_contract": contracts.contract_payload(competition),
+            "normalization": normalization.config_view(competition),
+        }
         for competition in competitions.values()
     ]
 
 
-def _build_workbook(competition: dict, entries: list[dict]) -> bytes:
-    """Một cột cho mỗi metric trong hợp đồng kết quả, cùng thứ hạng và số liệu như UI."""
+def _build_workbook(competition: dict, board: leaderboard_service.RankedBoard) -> bytes:
+    """Một cột cho mỗi metric trong hợp đồng kết quả, cùng thứ hạng và số liệu như UI.
+
+    Cuộc thi bật chuẩn hóa có thêm cột **Norm hiện tại** ngay sau điểm gốc - đây là điểm xếp hạng
+    thật của bảng, lấy từ đúng lần build ra `rank` nên không thể lệch nhau. Snapshot tạm của bài
+    nộp không bao giờ lên cột này.
+    """
     contract = contracts.result_contract(competition)
+    metadata = board.normalization_metadata
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Results"
-    sheet.append(
-        (
-            "Rank",
-            "Account ID",
-            "Team name",
-            "Best score",
-            *(metric.label for metric in contract.metrics),
-            "Best submission time",
-            "Total submissions",
-        )
-    )
-    for entry in entries:
+    header = ["Rank", "Account ID", "Team name", "Best score"]
+    if metadata is not None:
+        header.append(f"Norm hiện tại (0–{metadata['max_score']})")
+    header.extend(metric.label for metric in contract.metrics)
+    header.extend(("Best submission time", "Total submissions"))
+    sheet.append(tuple(header))
+    for entry in board.entries:
         # Bản ghi cũ có thể thiếu metric: để ô trống thay vì ghi 0.
         metrics = entry["metrics"] or {}
-        sheet.append(
-            (
-                entry["rank"],
-                entry["account_id"],
-                _formula_safe(entry["display_name"]),
-                entry["primary_score"],
-                *(metrics.get(metric.key) for metric in contract.metrics),
-                entry["best_submission_at"],
-                entry["total_submissions"],
-            )
-        )
+        row = [
+            entry["rank"],
+            entry["account_id"],
+            _formula_safe(entry["display_name"]),
+            entry["primary_score"],
+        ]
+        if metadata is not None:
+            row.append(entry["normalized_score"])
+        row.extend(metrics.get(metric.key) for metric in contract.metrics)
+        row.extend((entry["best_submission_at"], entry["total_submissions"]))
+        sheet.append(tuple(row))
 
     header_fill = PatternFill("solid", fgColor="DCE8F8")
     for cell in sheet[1]:
@@ -535,27 +545,41 @@ def _build_workbook(competition: dict, entries: list[dict]) -> bytes:
         cell.fill = header_fill
     sheet.freeze_panes = "A2"
     sheet.auto_filter.ref = sheet.dimensions
-    widths = (8, 26, 28, 14, *(12 for _ in contract.metrics), 24, 18)
+    widths = (
+        8,
+        26,
+        28,
+        14,
+        *((16,) if metadata is not None else ()),
+        *(12 for _ in contract.metrics),
+        24,
+        18,
+    )
     for index, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(index)].width = width
-    _apply_number_formats(sheet, contract)
-    _append_info_sheet(workbook, competition, contract)
+    _apply_number_formats(sheet, contract, normalization=metadata)
+    _append_info_sheet(workbook, competition, contract, normalization=metadata)
 
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
 
 
-# Bốn cột đầu của sheet Results trước khi tới các cột metric.
+# Bốn cột đầu của sheet Results trước khi tới cột norm (nếu bật) và các cột metric.
 _FIRST_METRIC_COLUMN = 5
 
 
-def _apply_number_formats(sheet, contract: OutputContract) -> None:
+def _apply_number_formats(sheet, contract: OutputContract, *, normalization: dict | None) -> None:
     """Ghi số gốc kèm định dạng hiển thị theo `decimals` - giá trị lưu không bị làm tròn."""
     primary = _metric_by_key(contract, contract.primary_metric)
     formats = {4: primary.decimals if primary else 4}
+    first_metric_column = _FIRST_METRIC_COLUMN
+    if normalization is not None:
+        # Cột norm chèn trước dãy metric nên mọi cột metric dịch phải một ô.
+        formats[_FIRST_METRIC_COLUMN] = normalization["decimals"]
+        first_metric_column += 1
     for offset, metric in enumerate(contract.metrics):
-        formats[_FIRST_METRIC_COLUMN + offset] = metric.decimals
+        formats[first_metric_column + offset] = metric.decimals
     for row in sheet.iter_rows(min_row=2):
         for column, decimals in formats.items():
             row[column - 1].number_format = _decimals_format(decimals)
@@ -569,8 +593,18 @@ def _metric_by_key(contract: OutputContract, key: str | None):
     return next((metric for metric in contract.metrics if metric.key == key), None)
 
 
-def _append_info_sheet(workbook: Workbook, competition: dict, contract: OutputContract) -> None:
-    """Sheet thông tin: bảng này đọc theo bộ chấm nào. Không chứa source, ground truth hay đường dẫn."""
+def _append_info_sheet(
+    workbook: Workbook,
+    competition: dict,
+    contract: OutputContract,
+    *,
+    normalization: dict | None,
+) -> None:
+    """Sheet thông tin: bảng này đọc theo bộ chấm nào. Không chứa source, ground truth hay đường dẫn.
+
+    Cuộc thi bật chuẩn hóa ghi thêm baseline, metric nguồn, mặt bằng và luật hòa điểm để file
+    đứng độc lập với UI về sau.
+    """
     config = models.stored_config_or_none(competition)
     primary = _metric_by_key(contract, contract.primary_metric)
     info = workbook.create_sheet("Info")
@@ -581,6 +615,20 @@ def _append_info_sheet(workbook: Workbook, competition: dict, contract: OutputCo
     info.append(
         ("Ranking", "Higher is better" if contract.higher_is_better else "Lower is better")
     )
+    if normalization is not None:
+        direction = "Higher is better" if normalization["higher_is_better"] else "Lower is better"
+        formula = (
+            "50 × (s − baseline) ÷ (best − baseline)"
+            if normalization["higher_is_better"]
+            else "50 × (baseline − s) ÷ (baseline − best)"
+        )
+        reference = normalization["reference_best"]
+        info.append(("Norm version", normalization["version"]))
+        info.append(("Norm formula", formula))
+        info.append(("Norm baseline", normalization["baseline"]))
+        info.append(("Norm source", f"{normalization['source_metric']} ({direction})"))
+        info.append(("Norm reference best", reference if reference is not None else "—"))
+        info.append(("Norm tie-break", "Earlier eligible submission ranks higher on equal norm"))
     info.append(("Exported at", iso_z(datetime.now(timezone.utc))))
     info.append(("",))
     info.append(("Metric key", "Label", "Decimals"))

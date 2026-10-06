@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { CompetitionDetail } from "../api/competitions";
 import { flushTimers } from "../test/timers";
 import { SubmissionPage } from "./SubmissionPage";
 
-const COMPETITION: Competition = {
+const COMPETITION: CompetitionDetail = {
   id: "64a000000000000000000001",
   slug: "submit-cup",
   name: "Submit Cup",
@@ -19,6 +19,8 @@ const COMPETITION: Competition = {
   leaderboard_visible: true,
   resources: [],
   join_code_configured: false,
+  primary_metric_label: "F1",
+  access: { allowed: true, reason: null },
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   submission_config: {
     ready: true,
@@ -31,18 +33,25 @@ const COMPETITION: Competition = {
   },
 };
 
-function renderPage(competition: Competition = COMPETITION) {
+/** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
+const reportAccessLost = vi.fn();
+
+function renderPage(competition: CompetitionDetail = COMPETITION) {
   const refreshCompetition = vi.fn(async () => {});
   const view = render(
     <MemoryRouter initialEntries={["/competitions/submit-cup/submit"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition, contents: [], refreshCompetition }} />}>
+        <Route
+          element={
+            <Outlet context={{ competition, contents: [], refreshCompetition, reportAccessLost }} />
+          }
+        >
           <Route path="/competitions/:slug/submit" element={<SubmissionPage />} />
         </Route>
       </Routes>
     </MemoryRouter>,
   );
-  return { ...view, refreshCompetition };
+  return { ...view, refreshCompetition, reportAccessLost };
 }
 
 /** Notebook hợp lệ tối thiểu - mọi lượt nộp đều phải kèm tệp này. */
@@ -60,6 +69,7 @@ function selectCsv(name = "result.csv", body = "id,prediction\n1,1\n") {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  reportAccessLost.mockClear();
   vi.useRealTimers();
 });
 
@@ -67,7 +77,7 @@ afterEach(() => {
 const POLL_MS = 1_500;
 
 /** Cuộc thi v2: có hàng đợi chấm nên trang tự tìm lại lượt còn dở khi mở lại. */
-function v2Competition(): Competition {
+function v2Competition(): CompetitionDetail {
   return { ...COMPETITION, submission_config: { ...COMPETITION.submission_config, version: 2 } };
 }
 
@@ -284,6 +294,35 @@ test("submit hiển thị loading, vào hàng đợi rồi ra metrics và quota 
   expect(screen.getAllByText("Chỉ số chính")).toHaveLength(1);
 
   expect(screen.getByText("Còn 4 lượt nộp hôm nay.")).toBeTruthy();
+});
+
+test("cuộc thi bật norm: norm tạm là điểm nổi bật, metric gốc xuống hàng phụ", async () => {
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        normalization_snapshot: { score: 37.5, calculated_at: "2026-09-15T08:00:00Z" },
+      },
+    }),
+  );
+
+  renderPage({ ...COMPETITION, normalization: { enabled: true, baseline: 0.4, version: 1 } });
+  submitOnce();
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  const normCard = document.querySelector<HTMLElement>('[data-metric="normalization"]');
+  expect(normCard).toHaveClass("primary");
+  expect(within(normCard as HTMLElement).getByText("Norm tạm lúc ghi nhận kết quả")).toBeTruthy();
+  expect(within(normCard as HTMLElement).getByText("37.50")).toBeTruthy();
+
+  // Điểm gốc và các metric vẫn xem được, nhưng không còn được nhấn là điểm chính.
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  expect(f1Card).not.toHaveClass("primary");
+  expect(screen.queryByText("Chỉ số chính")).toBeNull();
+
+  // Chú thích nói rõ đây là ảnh chụp tạm kèm đường sang bảng xếp hạng để đối chiếu norm hiện tại.
+  expect(screen.getByText(/Con số tạm tính lúc/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Xem bảng xếp hạng để đối chiếu" })).toBeTruthy();
 });
 
 test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp thành công", async () => {
@@ -518,6 +557,38 @@ test("mở lại trang thì nhận lại lượt đang chờ thay vì nộp mớ
 
   expect(screen.getByText("Bạn đang ở vị trí thứ 2 trong hàng chờ.")).toBeTruthy();
   expect(sent.every((call) => call.method === "GET")).toBe(true);
+});
+
+test("mất quyền khi đang chờ chấm: báo shell khóa gate và dừng vòng hỏi trạng thái", async () => {
+  vi.useFakeTimers();
+  const urls: string[] = [];
+  const { reportAccessLost: report } = renderPage(v2Competition());
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      urls.push(url);
+      if (init?.method === "POST") return json(queued(), 202);
+      if (url.endsWith("/submissions/attempts")) return json({ attempts: [] }, 200);
+      return json(
+        { error: { code: "MEMBERSHIP_REQUIRED", message: "Bạn cần tham gia cuộc thi trước." } },
+        403,
+      );
+    }),
+  );
+
+  submitOnce();
+  await flushTimers(0);
+  expect(screen.getByText("Bài đang chờ chấm")).toBeTruthy();
+
+  await flushTimers(POLL_MS);
+  expect(report).toHaveBeenCalledWith("membership_required");
+
+  // Vòng hỏi trạng thái dừng hẳn: shell đang xác minh quyền và sẽ thay cả trang.
+  const polls = urls.filter((url) => url.includes("/attempts/")).length;
+  expect(polls).toBe(1);
+  await flushTimers(POLL_MS * 5);
+  expect(urls.filter((url) => url.includes("/attempts/")).length).toBe(polls);
 });
 
 test("quá 60 giây thì báo không tính lượt và cho nộp lại bằng key mới", async () => {

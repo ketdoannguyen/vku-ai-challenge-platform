@@ -1,7 +1,8 @@
 """Participant competition content and approved image assets.
 
-Đọc công khai (ADR-014): khách chưa đăng nhập chỉ thấy nội dung `visibility=public`;
-nội dung `members` vẫn 404 vì không có membership nào.
+Nội dung bên trong cuộc thi chỉ đọc được bởi thành viên đang hoạt động hoặc admin - mọi route
+ở đây đi qua `require_read_access` TRƯỚC khi tra tài liệu/đọc file để người ngoài không nhận
+thông tin về sự tồn tại của nội dung (xem `app.competitions.access`).
 """
 
 from pathlib import Path
@@ -10,21 +11,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from app.auth.dependencies import OptionalAccount
+from app.competitions.access import require_read_access
 from app.competitions.service import find_competition_by_slug
 from app.content import service, storage
 from app.core.config import get_settings
 from app.core.errors import api_error
-from app.memberships.service import get_membership
 
 router = APIRouter(prefix="/api/competitions")
-
-
-async def _active_membership(db, competition_id, account: dict | None) -> dict | None:
-    """Membership đang hoạt động của account (None khi là khách hoặc chưa tham gia)."""
-    if account is None:
-        return None
-    membership = await get_membership(db, competition_id, account["_id"])
-    return membership if membership and membership.get("active", True) else None
 
 
 @router.get("/{slug}/contents")
@@ -33,14 +26,9 @@ async def list_visible_contents(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
-    is_member = await _active_membership(db, competition["_id"], account) is not None
+    await require_read_access(db, competition, account)
     contents = await service.list_contents(db, competition["_id"])
-    visible = [
-        item
-        for item in contents
-        if item["visibility"] == "public" or is_member
-    ]
-    return {"contents": [service.public_content(item) for item in visible]}
+    return {"contents": [service.public_content(item) for item in contents]}
 
 
 @router.get("/{slug}/contents/{content_slug}")
@@ -49,24 +37,26 @@ async def get_visible_content(
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
+    await require_read_access(db, competition, account)
     content = await db[service.CONTENTS_COLLECTION].find_one(
         {"competition_id": competition["_id"], "slug": content_slug}
     )
     if content is None:
-        raise api_error(404, "NOT_FOUND", "Không tìm thấy nội dung.")
-    if content["visibility"] == "members" and await _active_membership(
-        db, competition["_id"], account
-    ) is None:
         raise api_error(404, "NOT_FOUND", "Không tìm thấy nội dung.")
     markdown = _read_markdown(content)
     return service.public_content(content, markdown)
 
 
 @router.get("/{slug}/assets/{name}")
-async def get_asset(slug: str, name: str, request: Request) -> Response:
-    """Ảnh công khai trong nội dung - không cần phiên, nhưng vẫn chặn traversal/symlink."""
+async def get_asset(slug: str, name: str, request: Request, account: OptionalAccount) -> Response:
+    """Ảnh trong nội dung - chỉ thành viên/admin, vẫn chặn traversal/symlink.
+
+    Route này cũng phục vụ preview trong trình soạn nội dung của admin, nên admin đọc được ảnh
+    của cuộc thi published/closed mà không cần membership; draft vẫn 404 như trước.
+    """
     db = request.app.state.mongo.db
     competition = await _visible_competition(db, slug)
+    await require_read_access(db, competition, account)
     extension = Path(name).suffix.lower()
     spec = storage.ASSET_TYPES.get(extension)
     if Path(name).name != name or spec is None:
@@ -84,7 +74,7 @@ async def get_asset(slug: str, name: str, request: Request) -> Response:
         media_type=spec[0],
         headers={
             "X-Content-Type-Options": "nosniff",
-            "Cache-Control": "private, max-age=300",
+            "Cache-Control": "private, no-store",
         },
     )
 

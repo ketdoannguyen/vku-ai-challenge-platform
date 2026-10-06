@@ -1,30 +1,23 @@
-"""Đối chiếu dấu hiệu tải dataset trong code notebook với link BTC cấp, không gọi mạng."""
+"""Hậu kiểm đánh giá nguồn dataset của model, không gọi mạng.
 
-import ast
-import io
+Model đọc cả notebook và trả MỘT đánh giá nguồn; backend không chứng nhận suy luận đó. Ở đây chỉ
+làm phần kiểm chắc được: vị trí trích dẫn có thật trong CODE cell của đúng notebook đã gửi, snippet
+dựng lại từ notebook, và dấu vết của vị trí bị loại. Quét dấu vết tài nguyên BTC trong code cell
+(`find_resource_mentions`) vẫn là dữ kiện phụ - sự xuất hiện hay vắng mặt của link không quyết
+định trạng thái nguồn.
+"""
+
 import re
-import tokenize
 from dataclasses import dataclass
 from urllib.parse import parse_qs, urlparse
 
 from app.ai_review import constants
-from app.ai_review.models import ModelSourceSignal
+from app.ai_review.models import ModelSourceAssessment
 from app.ai_review.notebook import CELL_CODE, NormalizedNotebook
 from app.ai_review.verdict import _build_snippet
 
 _URL = re.compile(r"(?:https?|s3|gs|ftp)://[^\s\"'<>()[\]{}`]+", re.IGNORECASE)
 _ID = re.compile(r"^[A-Za-z0-9_-]+$")
-_DATA_CALL = re.compile(
-    r"(?:\b(?:gdown\.(?:download|download_folder)|requests\.(?:get|post)|"
-    r"read_csv|read_parquet|load_dataset|urlretrieve|urlopen)\s*\(|"
-    r"(?:^|\n)\s*!?\s*(?:wget|curl|gdown)\s+)", re.IGNORECASE
-)
-_ID_ARG = re.compile(r"\bid\s*=\s*(['\"])([A-Za-z0-9_-]+)\1")
-_CLI_ID = re.compile(r"--id(?:=|\s+)([A-Za-z0-9_-]+)")
-_DATASET_URL = re.compile(r"(?:\.(?:csv|tsv|parquet)(?:[?&#]|$)|/datasets?[/?.#])", re.IGNORECASE)
-_DATASET_HINT = re.compile(r"\b(?:data|dataset|train|test|validation)\b|(?:^|_)(?:data|dataset)(?:_|$)", re.IGNORECASE)
-# Đường dẫn literal dưới mount point Colab là đọc Drive, không phải tệp cục bộ vô danh.
-_MOUNTED_DRIVE_PATH = re.compile(r"^/content/drive(?:/|$)")
 # ID Drive thật dài 25-44 ký tự; ngưỡng 20 chặn substring trùng ngẫu nhiên khi quét ID thô.
 _MIN_BARE_ID_CHARS = 20
 _DRIVE = {"drive.google.com", "drive.usercontent.google.com"}
@@ -32,21 +25,21 @@ _DOCS = {"docs.google.com"}
 
 
 @dataclass(frozen=True)
-class SourceSignal:
-    cell: int
-    start_line: int
-    end_line: int
-    snippet: str
-    reason: str
-    match: str
-    urls: list[dict]
-    warning: bool
-
-
-@dataclass(frozen=True)
 class ResourceMention:
     label: str
     cells: list[int]
+
+
+@dataclass(frozen=True)
+class SourceAssessment:
+    """Kết quả hậu kiểm: đề xuất của model, trạng thái sau kiểm cấu trúc, và dấu vết đầy đủ."""
+
+    model_status: str | None
+    status: str
+    reason: str
+    evidence: list[dict]
+    rejected_evidence: list[dict]
+    validation_codes: list[str]
 
 
 def drive_identity(url: str) -> tuple[str, str] | None:
@@ -86,181 +79,97 @@ def drive_identity(url: str) -> tuple[str, str] | None:
     return (kind, identifier) if _ID.fullmatch(identifier) else None
 
 
-def _code_views(code: str) -> tuple[str, str]:
-    """Giữ vị trí ký tự; ẩn comment ở cả hai view và string ở view tìm lời gọi."""
-    starts = [0]
-    for line in code.split("\n")[:-1]:
-        starts.append(starts[-1] + len(line) + 1)
-    without_comments = list(code)
-    without_text = list(code)
-    try:
-        for token in tokenize.generate_tokens(io.StringIO(code).readline):
-            if token.type not in {tokenize.COMMENT, tokenize.STRING, tokenize.FSTRING_MIDDLE}:
-                continue
-            begin = starts[token.start[0] - 1] + token.start[1]
-            end = starts[token.end[0] - 1] + token.end[1]
-            if token.type == tokenize.COMMENT:
-                without_comments[begin:end] = " " * (end - begin)
-            without_text[begin:end] = " " * (end - begin)
-    except (tokenize.TokenError, IndentationError, SyntaxError):
-        # Một range trích dẫn có thể cắt giữa lời gọi; các token đã nhận được vẫn hợp lệ.
-        pass
-    return "".join(without_comments), "".join(without_text)
+def verify_source_assessment(
+    assessment: ModelSourceAssessment | None,
+    *,
+    notebook: NormalizedNotebook,
+    resources: list[dict],
+) -> SourceAssessment:
+    """Hậu kiểm theo thứ tự cố định; không suy luận thêm nguồn bằng regex.
 
-
-def _call_end(code: str, match: re.Match) -> int:
-    if not match.group(0).rstrip().endswith("("):
-        start = match.end()
-        end = code.find("\n", start)
-        while end >= 0 and code[start:end].rstrip().endswith("\\"):
-            start = end + 1
-            end = code.find("\n", start)
-        return len(code) if end < 0 else end
-    depth = 1
-    for position in range(match.end(), len(code)):
-        if code[position] == "(":
-            depth += 1
-        elif code[position] == ")":
-            depth -= 1
-            if depth == 0:
-                return position + 1
-    return len(code)
-
-
-def verify_source_signals(
-    signals: list[ModelSourceSignal], *, notebook: NormalizedNotebook, resources: list[dict]
-) -> list[SourceSignal]:
+    Thiếu đánh giá hoặc bản thể lệ không có tài nguyên BTC đối chiếu được là `NOT_EVALUATED` vì
+    thiếu dữ kiện, không phải vì bài sạch. `ALIGNED`/`EXTERNAL` không còn vị trí CODE hợp lệ nào bị
+    hạ xuống `UNCLEAR`; `ALIGNED` còn bị hạ khi trích dẫn bị loại một phần hoặc notebook bị cắt -
+    nhận định cho cả pipeline cần bằng chứng trọn vẹn và phần đã đọc đầy đủ. `EXTERNAL` giữ nguyên
+    khi còn bằng chứng hợp lệ, kèm mã cảnh báo; backend không chứng nhận suy luận của model.
+    """
+    if assessment is None:
+        return SourceAssessment(
+            None, constants.SOURCE_STATUS_NOT_EVALUATED, "", [], [],
+            [constants.SOURCE_ASSESSMENT_MISSING],
+        )
     official = {
-        identity: item["label"]
+        identity
         for item in resources
         if (identity := drive_identity(item["url"])) is not None
     }
-    has_folder = any(kind == "folder" for kind, _ in official)
-    verified = []
-    for signal in signals:
-        cell = notebook.cell(signal.cell)
-        if (cell is None or cell.kind != CELL_CODE or
-                not 1 <= signal.start_line <= signal.end_line <= len(cell.lines)):
-            continue
-        lines = cell.lines[signal.start_line - 1:signal.end_line]
-        code, call_view = _code_views("\n".join(lines))
-        urls = []
-        matches = set()
-        for call in _DATA_CALL.finditer(call_view):
-            call_name = call.group(0).lower()
-            segment = code[call.start():_call_end(call_view, call)]
-            is_gdown = "gdown" in call_name
-            is_cli = not call_name.rstrip().endswith("(")
-            is_reader = "read_csv" in call_name or "read_parquet" in call_name
-            source_id = None
-            dynamic_source = False
-            args = None
-            source = None
-            if not is_cli:
-                expression = "f" + segment[segment.index("("):]
-                try:
-                    args = ast.parse(expression, mode="eval").body
-                except (SyntaxError, ValueError):
-                    args = None
-                if isinstance(args, ast.Call):
-                    keyword = next((kw for kw in args.keywords if kw.arg in {"url", "id"}), None)
-                    source = keyword.value if keyword else (args.args[0] if args.args else None)
-                    if source is not None:
-                        dynamic_source = not isinstance(source, ast.Constant)
-                        if is_gdown and keyword is not None and keyword.arg == "id":
-                            source_id = source.value if isinstance(source, ast.Constant) else None
-                            segment = ""
-                        else:
-                            segment = ast.get_source_segment(expression, source) or ""
-            found_source = False
-            static_url = False
-            for raw in _URL.findall(segment):
-                static_url = True
-                url = raw.rstrip(".,;:!?")
-                if dynamic_source and "{" in segment:
-                    matches.add("UNVERIFIED_SOURCE")
-                    continue
-                identity = drive_identity(url)
-                if identity is None and not (
-                    (is_reader or is_gdown) or _DATASET_URL.search(url) or
-                    "/file/d/" in url or "/drive/folders/" in url
-                ):
-                    # API thông thường/model weights không đủ chứng minh đây là dataset.
-                    continue
-                found_source = True
-                if len(url) > constants.MAX_SOURCE_URL_CHARS:
-                    status = "UNVERIFIED_SOURCE"
-                elif identity in official:
-                    status = "MATCHED_RESOURCE"
-                elif identity is not None and has_folder:
-                    status = "FOLDER_MEMBERSHIP_UNVERIFIED"
-                else:
-                    status = "EXTERNAL_SOURCE"
-                matches.add(status)
-                if len(urls) < constants.MAX_SOURCE_URLS_PER_SIGNAL and not any(
-                    item["url"] == url for item in urls
-                ):
-                    urls.append({"url": url[:constants.MAX_SOURCE_URL_CHARS], "match": status,
-                                 "resource_label": official.get(identity) if status == "MATCHED_RESOURCE" else None})
-            identifiers = []
-            if is_gdown:
-                if source_id is not None:
-                    identifiers.append(str(source_id))
-                elif is_cli:
-                    identifiers.extend(_CLI_ID.findall(segment))
-                    if not identifiers and not static_url:
-                        words = segment.strip().split()
-                        candidate = words[-1] if words else ""
-                        if _ID.fullmatch(candidate) and candidate not in {"gdown", "--folder", "--id"}:
-                            identifiers.append(candidate)
-                elif isinstance(source, ast.Constant) and isinstance(source.value, str):
-                    if _ID.fullmatch(source.value):
-                        identifiers.append(source.value)
-                elif args is None:
-                    original = code[call.start():_call_end(call_view, call)]
-                    original_view = call_view[call.start():_call_end(call_view, call)]
-                    identifiers.extend(match.group(2) for match in _ID_ARG.finditer(original)
-                                       if original_view[match.start():match.start() + 2].lower() == "id")
-                for identifier in identifiers:
-                    if not _ID.fullmatch(identifier):
-                        continue
-                    found_source = True
-                    kind = "folder" if "download_folder" in call_name or (is_cli and "--folder" in segment.split()) else "file"
-                    resource = (kind, identifier)
-                    status = ("MATCHED_RESOURCE" if resource in official else
-                              "FOLDER_MEMBERSHIP_UNVERIFIED" if has_folder else "EXTERNAL_SOURCE")
-                    matches.add(status)
-                    if len(urls) < constants.MAX_SOURCE_URLS_PER_SIGNAL and not any(
-                        item["url"] == f"id={identifier}" for item in urls
-                    ):
-                        urls.append({"url": f"id={identifier}", "match": status,
-                                     "resource_label": official.get(resource)})
-            if not found_source and not static_url:
-                # Literal địa phương không chứng minh nguồn; đường dẫn drive mount và nguồn động vẫn
-                # cảnh báo khi liên quan dataset.
-                if (is_reader and isinstance(args, ast.Call) and isinstance(source, ast.Constant)
-                        and isinstance(source.value, str) and "://" not in source.value
-                        and not _MOUNTED_DRIVE_PATH.match(source.value)):
-                    continue
-                if is_reader or is_gdown or _DATASET_HINT.search(segment):
-                    matches.add("UNVERIFIED_SOURCE")
-        if not matches:
-            continue
-        if "EXTERNAL_SOURCE" in matches:
-            overall = "EXTERNAL_SOURCE"
-        elif "FOLDER_MEMBERSHIP_UNVERIFIED" in matches:
-            overall = "FOLDER_MEMBERSHIP_UNVERIFIED"
-        elif "UNVERIFIED_SOURCE" in matches:
-            overall = "UNVERIFIED_SOURCE"
+    if not official:
+        return SourceAssessment(
+            assessment.status, constants.SOURCE_STATUS_NOT_EVALUATED, assessment.reason, [], [],
+            [constants.SOURCE_RESOURCES_MISSING],
+        )
+    evidence, rejected = _verified_evidence(assessment, notebook)
+    codes: set[str] = set()
+    if rejected:
+        codes.add(
+            constants.SOURCE_EVIDENCE_PARTIALLY_INVALID
+            if evidence
+            else constants.SOURCE_EVIDENCE_INVALID
+        )
+    if notebook.truncated:
+        codes.add(constants.SOURCE_NOTEBOOK_TRUNCATED)
+    status = assessment.status
+    if (
+        status in {constants.SOURCE_STATUS_ALIGNED, constants.SOURCE_STATUS_EXTERNAL}
+        and not evidence
+    ):
+        if not rejected:
+            codes.add(constants.SOURCE_EVIDENCE_MISSING)
+        status = constants.SOURCE_STATUS_UNCLEAR
+    elif status == constants.SOURCE_STATUS_ALIGNED and (rejected or notebook.truncated):
+        status = constants.SOURCE_STATUS_UNCLEAR
+    return SourceAssessment(
+        assessment.status, status, assessment.reason, evidence, rejected, sorted(codes)
+    )
+
+
+def _verified_evidence(
+    assessment: ModelSourceAssessment, notebook: NormalizedNotebook
+) -> tuple[list[dict], list[dict]]:
+    """Giữ vị trí CODE cell hợp lệ kèm snippet dựng thật; vị trí bị loại ghi kèm mã lý do.
+
+    Kiểm cell tồn tại trước khi đọc dòng: cell bị lược khỏi phần gửi model, cell markdown và khoảng
+    dòng vượt biên là ba lỗi khác nhau, và cả ba đều được giữ làm dấu vết cho BTC đọc.
+    """
+    accepted: list[dict] = []
+    rejected: list[dict] = []
+    for item in assessment.evidence:
+        cell = notebook.cell(item.cell)
+        if cell is None:
+            code = constants.SOURCE_EVIDENCE_CELL_NOT_FOUND
+        elif cell.kind != CELL_CODE:
+            code = constants.SOURCE_EVIDENCE_CELL_NOT_CODE
+        elif not 1 <= item.start_line <= item.end_line <= len(cell.lines):
+            code = constants.SOURCE_EVIDENCE_RANGE_INVALID
         else:
-            overall = "MATCHED_RESOURCE"
-        verified.append(SourceSignal(
-            cell=signal.cell, start_line=signal.start_line, end_line=signal.end_line,
-            snippet=_build_snippet(cell.lines, signal.start_line, signal.end_line),
-            reason=signal.reason, match=overall, urls=urls,
-            warning=overall != "MATCHED_RESOURCE",
-        ))
-    return verified
+            accepted.append(
+                {
+                    "cell": item.cell,
+                    "start_line": item.start_line,
+                    "end_line": item.end_line,
+                    "snippet": _build_snippet(cell.lines, item.start_line, item.end_line),
+                }
+            )
+            continue
+        rejected.append(
+            {
+                "cell": item.cell,
+                "start_line": item.start_line,
+                "end_line": item.end_line,
+                "code": code,
+            }
+        )
+    return accepted, rejected
 
 
 def find_resource_mentions(notebook: NormalizedNotebook, resources: list[dict]) -> list[ResourceMention]:

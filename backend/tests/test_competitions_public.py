@@ -1,4 +1,4 @@
-"""Participant competition API: visibility, detail by slug, draft ẩn."""
+"""Participant competition API: danh sách công khai, landing khóa, detail theo quyền đọc."""
 
 import asyncio
 from datetime import datetime, timedelta, timezone
@@ -34,24 +34,28 @@ def seeded(client):
     return client
 
 
-def test_guest_list_hides_draft_and_membership(seeded):
-    """Khách chưa đăng nhập đọc được danh sách (ADR-014) nhưng không thấy draft."""
+def test_guest_list_hides_draft_and_interior(seeded):
+    """Khách thấy thẻ giới thiệu nhưng không thấy draft, tài nguyên hay cấu hình bài nộp."""
     seeded.post("/api/auth/logout")
     resp = seeded.get("/api/competitions")
     assert resp.status_code == 200
     assert [c["slug"] for c in resp.json()["competitions"]] == ["closed-cup", "open-cup"]
     for competition in resp.json()["competitions"]:
         assert competition["membership"] == {"active": False, "joined_at": None}
+        assert competition["access"] == {"allowed": False, "reason": "login_required"}
         assert "join_code" not in competition
         assert "join_code_hash" not in competition
+        assert "resources" not in competition
+        assert "submission_config" not in competition
 
 
 def test_guest_detail_by_slug_and_draft_404(seeded):
     seeded.post("/api/auth/logout")
-    assert seeded.get("/api/competitions/open-cup").json()["membership"] == {
-        "active": False,
-        "joined_at": None,
-    }
+    body = seeded.get("/api/competitions/open-cup").json()
+    assert body["membership"] == {"active": False, "joined_at": None}
+    assert body["access"] == {"allowed": False, "reason": "login_required"}
+    assert "resources" not in body
+    assert "submission_config" not in body
     assert seeded.get("/api/competitions/draft-cup").status_code == 404
 
 
@@ -94,13 +98,62 @@ def test_public_list_exposes_submission_count_without_admin_counts(seeded):
 
 
 def test_public_detail_by_slug(seeded):
+    """Người đã đăng nhập nhưng chưa tham gia: landing khóa, không nội dung."""
     resp = seeded.get("/api/competitions/open-cup")
     assert resp.status_code == 200
     body = resp.json()
     assert body["name"] == "Open Cup"
     assert body["status"] == "published"
+    assert body["access"] == {"allowed": False, "reason": "membership_required"}
+    assert body["membership"] == {"active": False, "joined_at": None}
     assert "join_code" not in body
     assert "submission_count" not in body
+    assert "resources" not in body
+    assert "submission_config" not in body
+
+
+def test_member_detail_exposes_resources_and_config(seeded):
+    """Tham gia xong mới có tài nguyên, cấu hình bài nộp và access.allowed."""
+    assert seeded.post("/api/competitions/open-cup/join", json={}).status_code == 200
+    body = seeded.get("/api/competitions/open-cup").json()
+    assert body["access"] == {"allowed": True, "reason": None}
+    assert body["membership"]["active"] is True
+    assert body["resources"] == []
+    assert body["submission_config"]["version"] == 1
+    # Payload đã qua kiểm quyền nên pos_label (nhãn dương của ground truth) được phép xuất hiện.
+    assert "pos_label" in body["submission_config"]
+    # List chỉ là summary - tài nguyên và cấu hình không bao giờ rò qua đó.
+    listed = seeded.get("/api/competitions").json()["competitions"]
+    open_item = next(item for item in listed if item["slug"] == "open-cup")
+    assert "resources" not in open_item
+    assert "submission_config" not in open_item
+    assert open_item["primary_metric_label"] == "F1"
+
+
+def test_inactive_member_detail_is_locked(seeded):
+    """Bị vô hiệu hóa: membership còn nhưng active false, nội dung khóa lại."""
+    assert seeded.post("/api/competitions/open-cup/join", json={}).status_code == 200
+    seeded.post("/api/auth/login", json={"identifier": "admin@vku.vn", "password": "adminmatkhau1"})
+    competition_id = next(
+        item["id"] for item in seeded.get("/api/admin/competitions").json()["competitions"]
+        if item["slug"] == "open-cup"
+    )
+    account_id = seeded.get(f"/api/admin/competitions/{competition_id}/members").json()["members"][0]["account_id"]
+    assert seeded.patch(
+        f"/api/admin/competitions/{competition_id}/members/{account_id}", json={"active": False}
+    ).status_code == 200
+    seeded.post("/api/auth/login", json={"identifier": "thi.sinh@vku.vn", "password": "thisinhmatkhau1"})
+    body = seeded.get("/api/competitions/open-cup").json()
+    assert body["access"] == {"allowed": False, "reason": "membership_inactive"}
+    assert body["membership"]["active"] is False
+    assert "resources" not in body
+    assert "submission_config" not in body
+    listed = {item["slug"]: item for item in seeded.get("/api/competitions").json()["competitions"]}
+    open_item = listed["open-cup"]
+    assert "my_stats" not in open_item
+    assert "my_submission_count" not in open_item
+    # Số liệu tổng của thẻ vẫn công khai như trước.
+    assert "submission_count" in open_item
 
 
 def test_public_detail_draft_returns_404(seeded):
@@ -126,8 +179,8 @@ def test_public_payload_never_exposes_created_by(seeded):
     assert "created_by" not in seeded.get("/api/competitions/open-cup").json()
 
 
-def test_public_detail_exposes_resources_to_guest(client):
-    """Khách xem tổng quan vẫn thấy link dataset - đây là cách BTC phát tài nguyên."""
+def test_resources_only_for_active_member(client):
+    """Link dataset là nội dung bên trong: guest không thấy, thành viên đang hoạt động mới thấy."""
     resources = [{"label": "Dataset", "url": "https://drive.google.com/drive/folders/abc"}]
     client.post("/api/auth/login", json={"identifier": "admin@vku.vn", "password": "adminmatkhau1"})
     cid = client.post(
@@ -143,6 +196,10 @@ def test_public_detail_exposes_resources_to_guest(client):
     assert publish_competition(client, cid).status_code == 200
     client.post("/api/auth/logout")
 
+    assert "resources" not in client.get("/api/competitions/resource-cup").json()
+    client.post("/api/auth/login", json={"identifier": "thi.sinh@vku.vn", "password": "thisinhmatkhau1"})
+    assert "resources" not in client.get("/api/competitions/resource-cup").json()
+    assert client.post("/api/competitions/resource-cup/join", json={}).status_code == 200
     assert client.get("/api/competitions/resource-cup").json()["resources"] == resources
 
 
@@ -238,8 +295,8 @@ def test_quota_excludes_yesterday_and_absent_for_inactive_member(client):
 
 
 def test_legacy_document_without_resources_serializes_empty(client):
-    """Document tạo trước khi có field resources vẫn phải trả [] - không migration Mongo."""
-    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    """Document tạo trước khi có field resources: thành viên thấy [] - không migration Mongo."""
+    now = datetime.now(timezone.utc)
 
     async def insert_legacy():
         await client.app.state.mongo.db[COMPETITIONS_COLLECTION].insert_one(
@@ -249,8 +306,8 @@ def test_legacy_document_without_resources_serializes_empty(client):
                 "name": "Legacy Cup",
                 "short_description": "",
                 "status": "published",
-                "start_at": now,
-                "end_at": now,
+                "start_at": now - timedelta(days=1),
+                "end_at": now + timedelta(days=1),
                 "join_mode": "open",
                 "join_code_hash": None,
                 "primary_metric": "f1",
@@ -263,6 +320,8 @@ def test_legacy_document_without_resources_serializes_empty(client):
         )
 
     asyncio.run(insert_legacy())
-    body = client.get("/api/competitions/legacy-cup").json()
-    assert body["resources"] == []
-    assert client.get("/api/competitions").json()["competitions"][0]["resources"] == []
+    client.post("/api/auth/logout")
+    assert "resources" not in client.get("/api/competitions/legacy-cup").json()
+    client.post("/api/auth/login", json={"identifier": "thi.sinh@vku.vn", "password": "thisinhmatkhau1"})
+    assert client.post("/api/competitions/legacy-cup/join", json={}).status_code == 200
+    assert client.get("/api/competitions/legacy-cup").json()["resources"] == []
