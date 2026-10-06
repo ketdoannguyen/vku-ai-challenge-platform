@@ -26,10 +26,10 @@ async def leaderboard(
             "LEADERBOARD_HIDDEN",
             "Bảng xếp hạng hiện chưa được công bố.",
         )
-    entries = await service.cached_ranked_entries(db, competition)
+    board = await service.cached_ranked_board(db, competition)
     return service.leaderboard_response(
         competition,
-        entries,
+        board,
         current_account_id=account["_id"],
         limit=limit,
         offset=offset,

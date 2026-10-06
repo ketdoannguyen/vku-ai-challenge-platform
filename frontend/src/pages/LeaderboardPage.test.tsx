@@ -181,6 +181,93 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
   expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
+/** Metadata norm của một lần dựng bảng; test nào cần thì chèn vào payload trang. */
+const NORM_BOARD = {
+  version: 1,
+  source_metric: "f1",
+  higher_is_better: true,
+  baseline: 0.5,
+  max_score: 50,
+  decimals: 2,
+  reference_best: 0.9,
+  calculated_at: "2026-09-15T08:00:00Z",
+};
+
+test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn ở cột phụ", async () => {
+  mockResponse(
+    page({
+      total: 2,
+      normalization: NORM_BOARD,
+      entries: [
+        entry(1, "Đội Sớm", { normalized_score: 50 }),
+        entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+      ],
+      me: entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+    }),
+  );
+
+  renderPage();
+
+  expect(await screen.findByText("Đội Sớm")).toBeTruthy();
+  // Cột norm đứng trước các metric của hợp đồng và nêu rõ thang 0–50.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "Điểm norm (0–50)",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+
+  const top = screen.getByText("Đội Sớm").closest("tr") as HTMLElement;
+  // Điểm xếp hạng là norm 2 chữ số; cột F1 của cùng dòng không còn được nhấn là điểm chính.
+  expect(within(top).getByText("50.00")).toHaveClass("primary-score");
+  expect(within(top).getByText("0.9900")).not.toHaveClass("primary-score");
+
+  // Quy tắc tie-break nói bằng ngôn ngữ norm, kèm mẫu số và thời điểm dựng bảng.
+  expect(
+    screen.getByText(/Bằng norm: bài hợp lệ đạt điểm đó được nộp sớm hơn đứng trước/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/Baseline F1 0\.5000 · Điểm gốc tốt nhất hiện tại 0\.9000 · Bảng dựng lúc/),
+  ).toBeTruthy();
+
+  // Dải cá nhân dùng norm hiện tại từ bảng, không phải điểm gốc.
+  const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(within(meStrip).getByText("Điểm norm")).toBeTruthy();
+  expect(within(meStrip).getByText("12.50")).toBeTruthy();
+});
+
+test("norm bị ẩn (metadata null): giữ nguyên giao diện điểm gốc", async () => {
+  mockResponse(
+    page({
+      total: 1,
+      normalization: null,
+      entries: [entry(1, "Đội Sớm", { normalized_score: null })],
+      me: entry(1, "Đội Sớm", { is_current_user: true, normalized_score: null }),
+    }),
+  );
+
+  renderPage();
+
+  expect(await screen.findByText("Đội Sớm")).toBeTruthy();
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+  // Không rò mẫu số của người khác khi quyền xem đã bị thu hồi.
+  expect(screen.queryByText(/Baseline/)).toBeNull();
+  expect(screen.queryByText("Điểm norm")).toBeNull();
+  const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(within(meStrip).getByText("Điểm chính")).toBeTruthy();
+  expect(within(meStrip).getByText("0.9900")).toBeTruthy();
+});
+
 test("leaderboard hidden hiển thị thông báo và không gọi API", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn();

@@ -1,7 +1,8 @@
 """Cache ngắn hạn của bảng xếp hạng: TTL, trần kích thước, single-flight, phân quyền và export.
 
-Cache chỉ giữ danh sách xếp hạng thô; các bài test ở đây kiểm cả việc lọc metric theo từng request
-lẫn việc export luôn đọc tươi, và việc cache không rò rỉ giữa các DB/test với nhau.
+Cache chỉ giữ bảng xếp hạng thô (chưa lọc metric, chưa chiếu quyền xem norm); các bài test ở đây
+kiểm cả việc lọc metric theo từng request lẫn việc export luôn đọc tươi, và việc cache không rò rỉ
+giữa các DB/test với nhau.
 """
 
 import asyncio
@@ -118,27 +119,32 @@ def _v2_competition(competition_id: ObjectId, *, higher_is_better: bool) -> dict
     }
 
 
+def _board(entry: dict) -> service.RankedBoard:
+    """Bảng giả một entry cho các test cơ chế cache - loader thật luôn trả `RankedBoard`."""
+    return service.RankedBoard(entries=[entry])
+
+
 def _counting_ranked_entries(monkeypatch) -> dict:
     """Đếm số lần loader thật chạy để biết lượt đọc nào đi qua cache."""
-    original = service.ranked_entries
+    original = service.ranked_board
     counter = {"count": 0}
 
     async def counted(db, competition):
         counter["count"] += 1
         return await original(db, competition)
 
-    monkeypatch.setattr(service, "ranked_entries", counted)
+    monkeypatch.setattr(service, "ranked_board", counted)
     return counter
 
 
 async def test_cache_serves_within_ttl_and_reloads_after_expiry(mock_db):
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=0.05)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=0.05)
     competition = {"_id": ObjectId(), "primary_metric": "f1"}
     calls = []
 
     async def loader(db, competition):
         calls.append(len(calls) + 1)
-        return [{"load": len(calls)}]
+        return _board({"load": len(calls)})
 
     first = await cache.get(mock_db, competition, loader)
     second = await cache.get(mock_db, competition, loader)
@@ -148,16 +154,16 @@ async def test_cache_serves_within_ttl_and_reloads_after_expiry(mock_db):
     await asyncio.sleep(0.06)
     third = await cache.get(mock_db, competition, loader)
     assert calls == [1, 2]
-    assert third == [{"load": 2}]
+    assert third == _board({"load": 2})
 
 
 async def test_cache_is_bounded_and_evicts_the_oldest_entry(mock_db):
-    cache = service._RankedEntriesCache(max_entries=2, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=2, ttl_seconds=60.0)
     loaded = []
 
     async def loader(db, competition):
         loaded.append(competition["_id"])
-        return [{"competition": competition["_id"]}]
+        return _board({"competition": competition["_id"]})
 
     first, second, third = ({"_id": ObjectId(), "primary_metric": "f1"} for _ in range(3))
     await cache.get(mock_db, first, loader)
@@ -172,7 +178,7 @@ async def test_cache_is_bounded_and_evicts_the_oldest_entry(mock_db):
 
 
 async def test_concurrent_misses_share_a_single_load(mock_db):
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=60.0)
     competition = {"_id": ObjectId(), "primary_metric": "f1"}
     started = asyncio.Event()
     release = asyncio.Event()
@@ -182,7 +188,7 @@ async def test_concurrent_misses_share_a_single_load(mock_db):
         calls.append(len(calls) + 1)
         started.set()
         await release.wait()
-        return [{"rank": 1}]
+        return _board({"rank": 1})
 
     tasks = [
         asyncio.create_task(cache.get(mock_db, competition, loader)) for _ in range(8)
@@ -194,14 +200,14 @@ async def test_concurrent_misses_share_a_single_load(mock_db):
     release.set()
     results = await asyncio.gather(*tasks)
     assert calls == [1]
-    assert all(result == [{"rank": 1}] for result in results)
+    assert all(result == _board({"rank": 1}) for result in results)
 
     await cache.get(mock_db, competition, loader)
     assert calls == [1]
 
 
 async def test_failed_load_reaches_waiters_without_poisoning_the_cache(mock_db):
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=60.0)
     competition = {"_id": ObjectId(), "primary_metric": "f1"}
     started = asyncio.Event()
     release = asyncio.Event()
@@ -213,7 +219,7 @@ async def test_failed_load_reaches_waiters_without_poisoning_the_cache(mock_db):
             started.set()
             await release.wait()
             raise RuntimeError("truy vấn hỏng")
-        return [{"rank": 1}]
+        return _board({"rank": 1})
 
     tasks = [
         asyncio.create_task(cache.get(mock_db, competition, loader)) for _ in range(4)
@@ -226,7 +232,7 @@ async def test_failed_load_reaches_waiters_without_poisoning_the_cache(mock_db):
     assert all(isinstance(result, RuntimeError) for result in results)
 
     # Lỗi không nằm lại trong cache: lượt đọc sau thử lại từ đầu và thành công.
-    assert await cache.get(mock_db, competition, loader) == [{"rank": 1}]
+    assert await cache.get(mock_db, competition, loader) == _board({"rank": 1})
     assert calls == [1, 2]
 
 
@@ -237,7 +243,7 @@ async def test_invalidation_during_inflight_load_never_serves_or_stores_stale(mo
     đọc sau quyết định duyệt không được chờ chung lượt truy vấn cũ, và lượt cũ kết thúc muộn cũng
     không được ghi lại vào cache.
     """
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=60.0)
     competition = {"_id": ObjectId(), "primary_metric": "f1"}
     stale_started = asyncio.Event()
     release_stale = asyncio.Event()
@@ -249,9 +255,9 @@ async def test_invalidation_during_inflight_load_never_serves_or_stores_stale(mo
         if len(calls) == 1:
             stale_started.set()
             await release_stale.wait()
-            return [{"load": "stale"}]
+            return _board({"load": "stale"})
         await release_fresh.wait()
-        return [{"load": "fresh"}]
+        return _board({"load": "fresh"})
 
     # Lượt nạp cũ bị chặn giữa chừng; một người chờ chung vào hàng trước invalidate.
     stale_reader = asyncio.create_task(cache.get(mock_db, competition, loader))
@@ -271,27 +277,27 @@ async def test_invalidation_during_inflight_load_never_serves_or_stores_stale(mo
     assert calls == [1, 2]  # lượt nạp mới đã bắt đầu, hai người đọc mới chờ chung nó
 
     release_fresh.set()
-    assert await fresh_reader == [{"load": "fresh"}]
-    assert await fresh_waiter == [{"load": "fresh"}]
+    assert await fresh_reader == _board({"load": "fresh"})
+    assert await fresh_waiter == _board({"load": "fresh"})
     release_stale.set()
     # Người đọc bắt đầu trước invalidate vẫn nhận bản của thời điểm họ đọc, không bị treo.
-    assert await stale_reader == [{"load": "stale"}]
-    assert await pre_waiter == [{"load": "stale"}]
+    assert await stale_reader == _board({"load": "stale"})
+    assert await pre_waiter == _board({"load": "stale"})
 
     # Lượt cũ kết thúc sau invalidate không được ghi đè cache: lượt đọc kế tiếp vẫn là bản mới.
-    assert await cache.get(mock_db, competition, loader) == [{"load": "fresh"}]
+    assert await cache.get(mock_db, competition, loader) == _board({"load": "fresh"})
     assert calls == [1, 2]
 
 
 async def test_cache_keys_separate_databases_competitions_and_rank_direction():
     first_db = AsyncMongoMockClient().test_db
     second_db = AsyncMongoMockClient().test_db
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=60.0)
     loaded = []
 
     async def loader(db, competition):
         loaded.append(competition["_id"])
-        return [{"load": len(loaded)}]
+        return _board({"load": len(loaded)})
 
     competition_id = ObjectId()
     ascending = _v2_competition(competition_id, higher_is_better=False)
@@ -304,7 +310,7 @@ async def test_cache_keys_separate_databases_competitions_and_rank_direction():
     await cache.get(first_db, descending, loader)  # cùng DB, khác chiều -> nạp riêng
     assert len(loaded) == 3
 
-    assert await cache.get(first_db, ascending, loader) == [{"load": 1}]
+    assert await cache.get(first_db, ascending, loader) == _board({"load": 1})
     assert len(loaded) == 3
 
 
@@ -312,12 +318,12 @@ async def test_invalidation_leaves_other_databases_and_competitions_cached():
     """Invalidate một cuộc thi không đụng cache của cuộc thi khác hay DB khác."""
     first_db = AsyncMongoMockClient().test_db
     second_db = AsyncMongoMockClient().test_db
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=60.0)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=60.0)
     loaded = []
 
     async def loader(db, competition):
         loaded.append((db.name, competition["_id"]))
-        return [{"competition": competition["_id"]}]
+        return _board({"competition": competition["_id"]})
 
     target = {"_id": ObjectId(), "primary_metric": "f1"}
     other = {"_id": ObjectId(), "primary_metric": "f1"}
@@ -329,11 +335,11 @@ async def test_invalidation_leaves_other_databases_and_competitions_cached():
     cache.invalidate(target["_id"])
 
     # Cuộc thi khác trên cùng DB và trên DB khác vẫn nguyên cache, không nạp lại.
-    assert await cache.get(first_db, other, loader) == [{"competition": other["_id"]}]
-    assert await cache.get(second_db, other, loader) == [{"competition": other["_id"]}]
+    assert await cache.get(first_db, other, loader) == _board({"competition": other["_id"]})
+    assert await cache.get(second_db, other, loader) == _board({"competition": other["_id"]})
     assert len(loaded) == 3
     # Chỉ cuộc thi bị invalidate mới phải nạp lại.
-    assert await cache.get(first_db, target, loader) == [{"competition": target["_id"]}]
+    assert await cache.get(first_db, target, loader) == _board({"competition": target["_id"]})
     assert len(loaded) == 4
 
 
@@ -462,8 +468,8 @@ def test_leaderboard_refreshes_after_ttl(client, monkeypatch):
     competition_id = _competition(client, "cache-ttl")
     _submission(client, competition_id, competitor_id, 0.5, BASE)
 
-    cache = service._RankedEntriesCache(max_entries=8, ttl_seconds=0.5)
-    monkeypatch.setattr(service, "_ranked_entries_cache", cache)
+    cache = service._RankedBoardCache(max_entries=8, ttl_seconds=0.5)
+    monkeypatch.setattr(service, "_ranked_board_cache", cache)
 
     login_participant(client)
     board_url = f"/api/competitions/{competition_id}/leaderboard"

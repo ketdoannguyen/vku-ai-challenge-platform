@@ -31,10 +31,12 @@ import {
 import type { ContentSummary } from "../api/contents";
 import {
   formatMetric,
+  metricLabel,
   resultContract,
   type LeaderboardResponse,
   type ResultContract,
 } from "../api/results";
+import { NORM_RANKING_NOTE } from "../lib/normalization";
 import {
   CompetitionActionConfirmModal,
   CompetitionDeleteModal,
@@ -979,6 +981,14 @@ function ResultsPanel({ competition }: { competition: Competition }) {
   // Tab Kết quả đang mở thì bảng xếp hạng tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
   const refreshStatus = useAutoRefresh(true, silentRefresh, { intervalMs: RESULTS_AUTO_REFRESH_MS });
 
+  // Metadata norm đi cùng lần dựng bảng; admin luôn nhận đủ, vắng mặt nghĩa là cuộc thi tắt norm.
+  const norm = leaderboard?.normalization ?? null;
+  /** Nhãn và số thập phân của metric nguồn để đọc baseline/mẫu số đúng đơn vị điểm gốc. */
+  const sourceLabel = norm ? metricLabel(contract, norm.source_metric) ?? norm.source_metric : null;
+  const sourceDecimals = norm
+    ? contract.metrics.find((metric) => metric.key === norm.source_metric)?.decimals ?? 4
+    : 4;
+
   return (
     <div className="admin-results">
       <AutoRefreshNotice {...refreshStatus} />
@@ -1003,6 +1013,16 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             {exporting ? "Đang xuất..." : "Xuất Excel"}
           </button>
         </div>
+        {/* Tách "Điểm xếp hạng" khỏi "Metric nguồn" để admin không đọc nhầm cột metric gốc
+            là con số đang dùng để xếp hạng. */}
+        {norm && (
+          <p className="text-muted">
+            Điểm xếp hạng: Norm / {norm.max_score}. Metric nguồn {sourceLabel} với baseline{" "}
+            {formatMetric(norm.baseline, sourceDecimals)} · Điểm gốc tốt nhất hiện tại{" "}
+            {formatMetric(norm.reference_best, sourceDecimals)} · Bảng dựng lúc{" "}
+            {formatLocal(norm.calculated_at)}. {NORM_RANKING_NOTE}
+          </p>
+        )}
         {exportError !== null && (
           <div className="admin-section-error">
             <ErrorBox error={exportError} />
@@ -1023,15 +1043,21 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             aria-label="Bảng xếp hạng của cuộc thi"
           >
             <table className="table results-table">
-              {/* Cột metric theo hợp đồng kết quả; điểm chính là một trong số đó nên không in lặp. */}
-              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
+              {/* Norm bật thì norm là con số xếp hạng, cột metric nguồn xuống hàng đối chiếu;
+                  norm tắt giữ nguyên bảng cũ với điểm chính được nhấn trong cụm metric. */}
+              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{norm && <th scope="col" className="score-cell">Điểm norm (0–{norm.max_score})</th>}{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
                     <td><span className="rank-cell" data-rank={entry.rank}>{entry.rank}</span></td>
                     <td>{entry.display_name}</td>
+                    {norm && (
+                      <td className="score-cell primary-score">
+                        {formatMetric(entry.normalized_score, norm.decimals)}
+                      </td>
+                    )}
                     {contract.metrics.map((metric) => (
-                      <td key={metric.key} className={`score-cell${metric.key === contract.primary_metric ? " primary-score" : ""}`}>
+                      <td key={metric.key} className={`score-cell${metric.key === contract.primary_metric && !norm ? " primary-score" : ""}`}>
                         {formatMetric(entry.metrics[metric.key], metric.decimals)}
                       </td>
                     ))}
@@ -1047,6 +1073,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
       <AdminSubmissionsPanel
         competitionId={competition.id}
         resultContract={contract}
+        normalization={competition.normalization}
         title="Danh sách submissions"
         listLabel="Danh sách bài nộp của cuộc thi"
       />

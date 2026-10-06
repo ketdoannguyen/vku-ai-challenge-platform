@@ -18,7 +18,8 @@ from app.core.config import get_settings
 from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
-from app.scoring import contracts, evaluator_client, models
+from app.leaderboard import service as leaderboard_service
+from app.scoring import contracts, evaluator_client, models, normalization
 from app.scoring import service as scoring_service
 from app.scoring.errors import EvaluatorError, ScoringValidationError
 from app.scoring_attempts import service as attempts_service
@@ -223,6 +224,13 @@ async def _submit_scored(
             document["content_snapshot"] = snapshot
         if projection is not None:
             document["ai_review"] = projection
+        # Snapshot norm tạm phải có mặt trong document TRƯỚC khi upload: ghi được bài thì snapshot
+        # đi cùng ngay từ lượt insert, không có cửa sổ nào để lần ghi sau viết lại nó.
+        norm_snapshot = await service.normalization_snapshot(
+            db, competition, raw=scored.primary_score, now=now
+        )
+        if norm_snapshot is not None:
+            document["normalization_snapshot"] = norm_snapshot
         await _upload(
             prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
         )
@@ -253,6 +261,8 @@ async def _submit_scored(
         await service.release_quota_slot(db, membership, now)
         raise
     await ai_service.wake_worker(db, document, settings=settings, now=now)
+    # Bài vừa ghi đổi mặt bằng BXH của cả cuộc thi: bỏ bản đang cache để lượt xem kế tiếp thấy ngay.
+    leaderboard_service.invalidate_competition(competition["_id"])
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
@@ -260,11 +270,15 @@ async def _submit_scored(
         submission_id,
         submission_no,
     )
+    # Chấm v1 có thể lâu: admin vừa ẩn BXH/metric giữa chừng thì response phải theo trạng thái hiện
+    # tại, không lấy cờ hiển thị chụp từ đầu request.
+    current = await _competition_or_404(db, competition["_id"])
     return service.public_submission(
         document,
         max(quota - quota_used, 0),
-        ai_visible=ai_settings.participant_visible(competition),
-        contract=contracts.participant_contract(competition),
+        ai_visible=ai_settings.participant_visible(current),
+        contract=contracts.participant_contract(current),
+        normalization_visible=normalization.participant_visible(current),
     )
 
 
@@ -371,6 +385,7 @@ async def my_submissions(
         offset=offset,
         ai_visible=ai_settings.participant_visible(competition),
         contract=contracts.participant_contract(competition),
+        normalization_visible=normalization.participant_visible(competition),
     )
     return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 

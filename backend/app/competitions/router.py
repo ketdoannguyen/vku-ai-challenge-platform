@@ -13,6 +13,7 @@ from app.auth.dependencies import CurrentAccount, OptionalAccount
 from app.competitions import service
 from app.core.errors import api_error
 from app.leaderboard import service as leaderboard_service
+from app.scoring import normalization
 from app.submissions import service as submissions_service
 
 router = APIRouter(prefix="/api/competitions")
@@ -82,19 +83,33 @@ async def _my_stats(db, competition: dict, account_id, counts: dict) -> dict:
 
     Không tự tính lại thứ hạng: `leaderboard_response` giữ nguyên quy tắc tie-break, chiều metric
     và lọc metric ẩn của bảng. Bảng bị ẩn thì không trả hạng/điểm và không tốn lượt đọc bảng.
+    `best_score` là raw của đúng bài đại diện nên không hứa là raw tốt nhất của đội; norm hiện tại
+    nằm ở `best_normalized_score`, null khi cuộc thi không bật norm hoặc người xem không được xem.
     """
-    stats = {"rank": None, "rank_total": None, "best_score": None, "used_today": counts["today"]}
+    stats = {
+        "rank": None,
+        "rank_total": None,
+        "best_score": None,
+        "best_normalized_score": None,
+        "used_today": counts["today"],
+    }
     if not competition["leaderboard_visible"] or counts["eligible_count"] == 0:
         return stats
-    entries = await leaderboard_service.cached_ranked_entries(db, competition)
+    try:
+        board = await leaderboard_service.cached_ranked_board(db, competition)
+    except normalization.NormalizationError:
+        # Cấu hình norm hỏng (chỉ tới được bằng sửa tay ngoài API): thẻ vẫn phải mở được với số
+        # liệu null, còn BXH của chính cuộc thi đó vẫn thất bại ồn ào thay vì xếp theo luật sai.
+        return stats
     response = leaderboard_service.leaderboard_response(
-        competition, entries, current_account_id=account_id, limit=1
+        competition, board, current_account_id=account_id, limit=1
     )
     me = response["me"]
     if me is not None:
         stats["rank"] = me["rank"]
         stats["rank_total"] = response["total"]
         stats["best_score"] = me["primary_score"]
+        stats["best_normalized_score"] = me.get("normalized_score")
     return stats
 
 

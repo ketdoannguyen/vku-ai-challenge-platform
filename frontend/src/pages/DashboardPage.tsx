@@ -24,6 +24,7 @@ import {
   STATUS_LABEL,
   displayStatus,
   formatLocal,
+  normalizationOf,
   primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
@@ -931,6 +932,7 @@ function CompetitionCard({
   const pinned = c.pinned ?? false;
   // Chỉ đọc số liệu khi account đã xác nhận và membership đang hoạt động; còn lại hiện "-".
   const stats = canPersonalize && c.membership.active ? c.my_stats : undefined;
+  const norm = normalizationOf(c);
   const rankText =
     stats?.rank == null
       ? "-"
@@ -1027,9 +1029,12 @@ function CompetitionCard({
               <dd className="comp-personal-value">{rankText}</dd>
             </div>
             <div className="comp-personal-item">
-              <dt className="comp-personal-label">Điểm cao nhất</dt>
-              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. */}
-              <dd className="comp-personal-value">{formatMetric(stats?.best_score, 2)}</dd>
+              <dt className="comp-personal-label">{norm.enabled ? "Điểm norm" : "Điểm cao nhất"}</dt>
+              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. Cuộc thi
+                  bật norm lấy norm hiện tại từ BXH; norm bị ẩn thì để "-", không rơi về raw. */}
+              <dd className="comp-personal-value">
+                {formatMetric(norm.enabled ? stats?.best_normalized_score : stats?.best_score, 2)}
+              </dd>
             </div>
             <div className="comp-personal-item">
               <dt className="comp-personal-label">Đã nộp hôm nay</dt>

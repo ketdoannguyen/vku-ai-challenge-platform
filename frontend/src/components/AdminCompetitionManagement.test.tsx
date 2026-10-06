@@ -157,11 +157,14 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
   expect(titleOf(screen.getByLabelText(/Leaderboard hiển thị với thí sinh/))).toBe(
     "Chấm điểm & giới hạn",
   );
+  expect(titleOf(screen.getByLabelText(/Tính điểm chuẩn hóa/))).toBe(
+    "Chấm điểm & giới hạn",
+  );
   expect(titleOf(screen.getByRole("group", { name: "Tài nguyên tải về" }))).toBe(
     "Tài nguyên tải về",
   );
 
-  // Thứ tự DOM phải khớp thứ tự field cũ để tab order không đổi.
+  // Thứ tự DOM phải khớp thứ tự field cũ để tab order không đổi; baseline chỉ xuất hiện khi bật.
   const order = Array.from(
     dialog().querySelectorAll<HTMLElement>("[id^='comp-']"),
   ).map((node) => node.id);
@@ -173,6 +176,7 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
     "comp-end",
     "comp-quota",
     "comp-leaderboard",
+    "comp-normalization",
   ]);
 });
 
@@ -232,6 +236,8 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
     quota_per_day: 12,
     leaderboard_visible: false,
     resources: [{ label: "Dataset", url: "https://drive.google.com/drive/folders/abc" }],
+    // Không bật thì vẫn gửi cấu hình tắt tường minh để không còn baseline mồ côi.
+    normalization: { enabled: false, baseline: null },
   });
   // Không gửi primary_metric: field này chỉ là dấu vết dữ liệu v1, gửi lên là vô tình
   // ghi đè cấu hình chấm mà bộ chấm Python ở tab "Chấm điểm" đang sở hữu.
@@ -408,6 +414,117 @@ test("xác nhận clone nói rõ phạm vi sao chép đầy đủ và các phầ
   // POST clone vẫn không có body: server tự quyết định phạm vi sao chép.
   expect(calls[0].init?.body).toBeUndefined();
   expect(onSuccess.mock.calls[0][0]).toBe("clone");
+});
+
+test("bật chuẩn hóa: hiện baseline bắt buộc và gửi đúng payload", async () => {
+  mockApi((init) =>
+    init.method === "POST" ? { body: { ...BASE, id: "2" }, status: 201 } : { body: BASE, status: 200 },
+  );
+  renderForm();
+
+  // Chưa bật thì chưa có baseline; lời mô tả không mặc định F1 khi chưa có hợp đồng.
+  const toggle = screen.getByLabelText(/Tính điểm chuẩn hóa/);
+  expect(screen.queryByLabelText("Baseline chuẩn hóa")).toBeNull();
+  expect(screen.getByLabelText(/Tính điểm chuẩn hóa/).closest("label")).toHaveTextContent(
+    "lấy từ metric chính ở tab Chấm điểm",
+  );
+
+  fireEvent.click(toggle);
+  const baseline = screen.getByLabelText("Baseline chuẩn hóa") as HTMLInputElement;
+  expect(baseline).toHaveAttribute("type", "number");
+  expect(baseline).toHaveAttribute("step", "any");
+  // Không ép min 0: baseline 0/âm hợp lệ với metric tương ứng.
+  expect(baseline).not.toHaveAttribute("min");
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Test Cup" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "test-cup" } });
+  fireEvent.change(screen.getByLabelText("Bắt đầu"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
+  fireEvent.change(baseline, { target: { value: "0.6" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  await waitFor(() => expect(postedBodies("POST")).toHaveLength(1));
+  expect(postedBodies("POST")[0]).toMatchObject({
+    normalization: { enabled: true, baseline: 0.6 },
+  });
+});
+
+test("bật chuẩn hóa mà baseline trống thì chặn submit bằng alert tiếng Việt", async () => {
+  mockApi(() => ({ body: BASE, status: 200 }));
+  renderForm();
+
+  fireEvent.click(screen.getByLabelText(/Tính điểm chuẩn hóa/));
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Test Cup" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "test-cup" } });
+  fireEvent.change(screen.getByLabelText("Bắt đầu"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  // Kiểm ngay trên form, không phó mặc cho `required` của trình duyệt: thông báo khớp backend.
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Bật chuẩn hóa cần baseline là số hữu hạn.",
+  );
+  expect(postedBodies("POST")).toHaveLength(0);
+
+  // Điền lại baseline hợp lệ thì alert biến mất và POST đi bình thường.
+  fireEvent.change(screen.getByLabelText("Baseline chuẩn hóa"), { target: { value: "0.6" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+  await waitFor(() => expect(postedBodies("POST")).toHaveLength(1));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("sửa nháp đang bật norm: giữ giá trị đã lưu và mô tả đúng metric nguồn", async () => {
+  mockApi((init) =>
+    init.method === "PATCH" ? { body: BASE, status: 200 } : { body: BASE, status: 200 },
+  );
+  const draft: Competition = {
+    ...BASE,
+    normalization: { enabled: true, baseline: 0.4, version: 1 },
+  };
+  renderForm(draft);
+
+  expect(screen.getByLabelText(/Tính điểm chuẩn hóa/)).toBeChecked();
+  expect(screen.getByLabelText("Baseline chuẩn hóa")).toHaveValue(0.4);
+  // Metric nguồn lấy từ hợp đồng kết quả v1 (f1) kèm chiều xếp hạng, không phải chuỗi cứng.
+  expect(screen.getByLabelText(/Tính điểm chuẩn hóa/).closest("label")).toHaveTextContent(
+    "metric F1 (cao hơn là tốt hơn)",
+  );
+
+  // Tắt chuẩn hóa rồi lưu: gửi cấu hình tắt tường minh để không còn baseline mồ côi.
+  fireEvent.click(screen.getByLabelText(/Tính điểm chuẩn hóa/));
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Đổi tên" } });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu" }));
+
+  await waitFor(() => expect(postedBodies("PATCH")).toHaveLength(1));
+  expect(postedBodies("PATCH")[0]).toMatchObject({
+    name: "Đổi tên",
+    normalization: { enabled: false, baseline: null },
+  });
+});
+
+test("cuộc thi đã publish: cấu hình norm readonly kèm lý do và không gửi trong PATCH", async () => {
+  mockApi((init) =>
+    init.method === "PATCH" ? { body: BASE, status: 200 } : { body: BASE, status: 200 },
+  );
+  const published: Competition = {
+    ...BASE,
+    status: "published",
+    normalization: { enabled: true, baseline: 0.4, version: 1 },
+  };
+  renderForm(published);
+
+  expect(screen.getByLabelText(/Tính điểm chuẩn hóa/)).toBeDisabled();
+  expect(screen.getByLabelText("Baseline chuẩn hóa")).toBeDisabled();
+  expect(dialog()).toHaveTextContent(
+    "Cấu hình chuẩn hóa chỉ sửa được khi cuộc thi còn nháp",
+  );
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Đổi tên" } });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu" }));
+
+  await waitFor(() => expect(postedBodies("PATCH")).toHaveLength(1));
+  // Gửi lại field readonly sẽ làm hỏng các chỉnh sửa khác (backend khóa cấu hình đã publish).
+  expect(postedBodies("PATCH")[0]).not.toHaveProperty("normalization");
 });
 
 test("section 05 giữ nguyên hành vi thêm/xóa và trần 10 tài nguyên", () => {

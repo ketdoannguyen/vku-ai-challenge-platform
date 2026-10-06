@@ -17,6 +17,8 @@ from app.content import storage
 from app.core.config import get_settings
 from app.core.datetimes import as_utc, iso_z
 from app.core.slugs import SLUG_MAX, is_valid_slug
+from app.scoring import normalization
+from app.scoring.normalization import NormalizationRequest
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,7 @@ class CompetitionCreate(BaseModel):
     quota_per_day: int = 5
     leaderboard_visible: bool = True
     resources: list[CompetitionResource] = Field(default_factory=list)
+    normalization: NormalizationRequest | None = None
 
 
 class CompetitionUpdate(BaseModel):
@@ -69,6 +72,7 @@ class CompetitionUpdate(BaseModel):
     quota_per_day: int | None = None
     leaderboard_visible: bool | None = None
     resources: list[CompetitionResource] | None = None
+    normalization: NormalizationRequest | None = None
 
 
 def normalize_resources(resources: list) -> list[dict]:
@@ -137,6 +141,7 @@ async def insert_competition(db: AsyncIOMotorDatabase, data: CompetitionCreate, 
             "quota_per_day": data.quota_per_day,
             "leaderboard_visible": data.leaderboard_visible,
             "resources": normalize_resources(data.resources),
+            "normalization": normalization.config_payload(data.normalization),
             "created_by": created_by,
             "created_at": now,
             "updated_at": now,
@@ -160,6 +165,7 @@ def validate_create(data: CompetitionCreate) -> None:
     if not 0 <= data.quota_per_day <= _QUOTA_MAX:
         raise ValueError(f"Quota mỗi ngày phải từ 0 đến {_QUOTA_MAX}.")
     normalize_resources(data.resources)
+    normalization.config_payload(data.normalization)
 
 
 def validate_update(competition: dict, changes: dict) -> dict:
@@ -170,12 +176,19 @@ def validate_update(competition: dict, changes: dict) -> dict:
     for field in _EDITABLE_NEVER:
         if field in changes:
             raise ValueError("Không thể thay đổi slug/status/created_by.")
+    # `null` sẽ là đường ghi mơ hồ thứ hai; dạng chuẩn đã công bố để tắt là {enabled: false, baseline: null}.
+    if "normalization" in changes and changes["normalization"] is None:
+        raise ValueError(
+            'Không gửi normalization: null; dùng {"enabled": false, "baseline": null} để tắt chuẩn hóa.'
+        )
 
     updates = {k: v for k, v in changes.items() if v is not None}
     if status == "published":
         locked = [f for f in _LOCKED_WHEN_PUBLISHED if f in updates]
         if locked:
             raise ValueError("Cuộc thi đã publish, không thể đổi primary_metric.")
+        if "normalization" in updates:
+            raise ValueError("Cuộc thi đã publish, không thể đổi cấu hình chuẩn hóa.")
 
     if "name" in updates and not updates["name"].strip():
         raise ValueError("Tên cuộc thi không được để trống.")
@@ -188,6 +201,11 @@ def validate_update(competition: dict, changes: dict) -> dict:
     # Danh sách rỗng là hợp lệ và có nghĩa "xóa hết tài nguyên".
     if "resources" in updates:
         updates["resources"] = normalize_resources(updates["resources"])
+    if "normalization" in updates:
+        updates["normalization"] = normalization.config_payload(updates["normalization"])
+    # Metric nguồn của norm phải còn dùng được sau lượt sửa, kể cả khi đổi primary_metric (v1).
+    if "normalization" in updates or "primary_metric" in updates:
+        normalization.ensure_usable({**competition, **updates})
 
     # Body là aware còn giá trị lưu trong Mongo là naive - bắt buộc chuẩn hoá trước khi so.
     start = as_utc(updates.get("start_at", competition["start_at"]))
@@ -239,6 +257,7 @@ def _competition_core(competition: dict) -> dict:
         "leaderboard_visible": competition["leaderboard_visible"],
         "join_code_configured": bool(competition.get("join_code_hash")),
         "resources": public_resources(competition),
+        "normalization": normalization.config_view(competition),
     }
 
 

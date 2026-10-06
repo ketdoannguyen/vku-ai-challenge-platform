@@ -3,6 +3,7 @@ import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AI_PARTICIPANT_DISCLAIMER } from "../api/aiReview";
 import type { Competition } from "../api/competitions";
+import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import { setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
 
@@ -649,6 +650,79 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
   // Bài hợp lệ thấp điểm hơn giữ badge "Tốt nhất" và là điểm tốt nhất trong trang.
   expect(within(rows[2]).getByText("Tốt nhất")).toBeTruthy();
   expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.7000");
+});
+
+test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết được nhấn, bỏ pill 'tốt nhất' theo raw", async () => {
+  const artifacts = {
+    prediction: { filename: "prediction.csv", size_bytes: 128, available: true },
+    notebook: { filename: "notebook.ipynb", size_bytes: 4096, available: true },
+  };
+  mockResponse({
+    submissions: [
+      {
+        id: "s3",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.95, precision: 0.9, recall: 0.9 },
+        primary_score: 0.95,
+        created_at: "2026-09-16T10:00:00Z",
+        normalization_snapshot: { score: 42.5, calculated_at: "2026-09-16T10:00:05Z" },
+        artifacts,
+      },
+      {
+        id: "s2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.8, precision: 0.8, recall: 0.8 },
+        primary_score: 0.8,
+        created_at: "2026-09-16T09:00:00Z",
+        review: { status: "rejected", note: "Notebook sai kiến trúc." },
+        normalization_snapshot: { score: 12, calculated_at: "2026-09-16T09:00:05Z" },
+        artifacts,
+      },
+      {
+        // Dòng cũ thiếu snapshot: cột norm để "—", không tự bịa giá trị lịch sử.
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.7, precision: 0.7, recall: 0.7 },
+        primary_score: 0.7,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts,
+      },
+    ],
+    total: 3,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByText("#s3");
+
+  // Cột snapshot nằm cạnh cụm điểm; metric nguồn đổi nhãn "Điểm gốc" vì không còn là điểm xếp hạng.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Submission / thời gian",
+    "Tệp đã nộp",
+    "Trạng thái",
+    PROVISIONAL_NORM_LABEL,
+    "Điểm gốc · F1",
+    "Precision",
+    "Recall",
+  ]);
+
+  const rows = screen.getAllByRole("row");
+  expect(within(rows[1]).getByText("42.50")).toBeTruthy();
+  // Bài bị từ chối vẫn giữ snapshot khi có quyền xem, kèm nhắc là không còn tính vào BXH.
+  expect(within(rows[2]).getByText("12.00")).toBeTruthy();
+  expect(within(rows[2]).getByText("Không tính BXH")).toBeTruthy();
+  expect(within(rows[3]).getByText("—")).toBeTruthy();
+
+  // Snapshot có mẫu số khác nhau nên không suy "tốt nhất" từ raw; đường xem norm là bảng xếp hạng.
+  expect(screen.queryByText("Tốt nhất")).toBeNull();
+  expect(document.querySelector(".best-submission-row")).toBeNull();
+  expect(screen.queryByText(/Điểm tốt nhất trong trang/)).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "Điểm norm hiện tại xem ở bảng xếp hạng" }),
+  ).toBeTruthy();
 });
 
 test("điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn là tốt hơn", async () => {

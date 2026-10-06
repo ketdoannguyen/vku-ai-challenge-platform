@@ -286,6 +286,35 @@ test("submit hiển thị loading, vào hàng đợi rồi ra metrics và quota 
   expect(screen.getByText("Còn 4 lượt nộp hôm nay.")).toBeTruthy();
 });
 
+test("cuộc thi bật norm: norm tạm là điểm nổi bật, metric gốc xuống hàng phụ", async () => {
+  mockScoring(
+    queued(),
+    completed({
+      submission: {
+        ...SCORED,
+        normalization_snapshot: { score: 37.5, calculated_at: "2026-09-15T08:00:00Z" },
+      },
+    }),
+  );
+
+  renderPage({ ...COMPETITION, normalization: { enabled: true, baseline: 0.4, version: 1 } });
+  submitOnce();
+  expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
+  const normCard = document.querySelector<HTMLElement>('[data-metric="normalization"]');
+  expect(normCard).toHaveClass("primary");
+  expect(within(normCard as HTMLElement).getByText("Norm tạm lúc ghi nhận kết quả")).toBeTruthy();
+  expect(within(normCard as HTMLElement).getByText("37.50")).toBeTruthy();
+
+  // Điểm gốc và các metric vẫn xem được, nhưng không còn được nhấn là điểm chính.
+  const f1Card = document.querySelector<HTMLElement>('[data-metric="f1"]');
+  expect(f1Card).not.toHaveClass("primary");
+  expect(screen.queryByText("Chỉ số chính")).toBeNull();
+
+  // Chú thích nói rõ đây là ảnh chụp tạm kèm đường sang bảng xếp hạng để đối chiếu norm hiện tại.
+  expect(screen.getByText(/Con số tạm tính lúc/)).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Xem bảng xếp hạng để đối chiếu" })).toBeTruthy();
+});
+
 test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp thành công", async () => {
   const bodies: unknown[] = [];
   vi.stubGlobal(

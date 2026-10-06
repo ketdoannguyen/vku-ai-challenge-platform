@@ -460,6 +460,75 @@ test("bảng toàn cục gắn nhãn metric theo hợp đồng của từng cu�
   ).toHaveTextContent("0.9000");
 });
 
+/** Hợp đồng ba metric v1 dùng cho metadata của hai cuộc thi trong bài test norm. */
+const NORM_CONTRACT: ResultContract = {
+  metrics: [
+    { key: "f1", label: "F1", decimals: 4 },
+    { key: "precision", label: "Precision", decimals: 4 },
+    { key: "recall", label: "Recall", decimals: 4 },
+  ],
+  primary_metric: "f1",
+  higher_is_better: true,
+};
+
+test("bảng toàn cục: norm của từng dòng tra theo metadata cuộc thi, không lẫn giữa các hàng", async () => {
+  mockApi(() =>
+    jsonResponse({
+      ...pageOf([
+        row("s-norm", "Đội norm", {
+          normalization_snapshot: {
+            version: 1,
+            source_metric: "f1",
+            higher_is_better: true,
+            baseline: 0.5,
+            reference_best: 0.8,
+            score: 37.5,
+            calculated_at: "2026-09-15T09:00:00Z",
+          },
+        }),
+        // Cuộc thi chưa bật norm: dòng này giữ nguyên "Điểm chính", không mọc trường norm.
+        row("s-plain", "Đội thường", {
+          competition_id: "c2",
+          competition: { id: "c2", slug: "cup-2", name: "Cup 2" },
+        }),
+      ]),
+      competitions: [
+        {
+          id: "c1",
+          slug: "cup-1",
+          name: "Cup 1",
+          result_contract: NORM_CONTRACT,
+          normalization: { enabled: true, baseline: 0.5, version: 1 },
+        },
+        // c2 vắng `normalization` trong metadata: hiểu là đang tắt.
+        { id: "c2", slug: "cup-2", name: "Cup 2", result_contract: NORM_CONTRACT },
+      ],
+    }),
+  );
+  renderPage();
+  await screen.findByText("Đội norm");
+
+  const normItem = itemOf("Đội norm");
+  // Điểm chính của cuộc thi bật norm xuống thành điểm gốc; con số lịch sử là trường riêng.
+  expect(
+    fieldValue(normItem, "Điểm gốc").querySelector(".subm-result-primary-score"),
+  ).toHaveTextContent("0.9000");
+  const snapshot = fieldValue(normItem, "Norm tạm lúc ghi nhận kết quả");
+  expect(snapshot.querySelector(".subm-result-primary-score")).toHaveTextContent("37.50");
+  expect(snapshot.querySelector(".subm-score")?.getAttribute("title")).toBe(
+    "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
+  );
+
+  // Dòng của cuộc thi thường không bị kéo theo: nhãn cũ và không có trường norm nào.
+  const plainItem = itemOf("Đội thường");
+  expect(
+    fieldValue(plainItem, "Điểm chính").querySelector(".subm-result-primary-score"),
+  ).toHaveTextContent("0.9000");
+  expect(Array.from(plainItem.querySelectorAll("dt")).map((dt) => dt.textContent)).not.toContain(
+    "Norm tạm lúc ghi nhận kết quả",
+  );
+});
+
 test("hợp đồng không còn metric phụ nào thì cụm Kết quả là gạch mờ, không phải cụm rỗng", async () => {
   mockApi(() =>
     jsonResponse({

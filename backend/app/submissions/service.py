@@ -17,7 +17,7 @@ from app.content import storage
 from app.core.config import get_settings
 from app.core.datetimes import iso_z, utc_day_bounds, utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
-from app.scoring import contracts
+from app.scoring import contracts, normalization
 from app.scoring.models import OutputContract
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import NOTEBOOK_ARTIFACT, PREDICTION_ARTIFACT
@@ -301,6 +301,29 @@ async def my_stats_by_competition(
     return stats
 
 
+async def normalization_snapshot(db, competition: dict, *, raw, now: datetime) -> dict | None:
+    """Ảnh chụp norm tạm tại đúng lúc bài nộp được ghi nhận; `None` khi cuộc thi không bật norm.
+
+    Mặt bằng đọc trực tiếp từ các bài eligible - cố ý không đi qua cache BXH: cache có thể đang
+    giữ bản trước một bài vừa ghi, và mẫu số cũ sẽ chốt sai điểm tạm. Raw của chính bài đang ghi
+    được đưa vào mặt bằng; nếu không, bài đầu tiên vượt baseline sẽ không bao giờ đạt 50. Bản ghi
+    hỏng trong DB bị loại khỏi mặt bằng theo đúng chính sách của BXH, không quy về 0.
+    """
+    rule = normalization.active_rule(competition)
+    if rule is None:
+        return None
+    if not normalization.is_valid_score(raw):
+        raise normalization.NormalizationError(
+            "Điểm gốc không phải số hữu hạn nên không dựng được snapshot chuẩn hóa."
+        )
+    query = eligible_query({"competition_id": competition["_id"], "status": "completed"})
+    cursor = db[SUBMISSIONS_COLLECTION].find(query, {"primary_score": 1})
+    scores = [submission.get("primary_score") async for submission in cursor]
+    usable = [value for value in scores if normalization.is_valid_score(value)]
+    reference = normalization.reference_best([*usable, raw], rule.higher_is_better)
+    return normalization.snapshot_payload(rule, raw=raw, reference=reference, calculated_at=now)
+
+
 async def reserve_quota_slot(
     db, membership: dict, quota_per_day: int, now: datetime, *, attempt_id: str | None = None
 ) -> int | None:
@@ -443,6 +466,7 @@ def public_submission(
     *,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
+    normalization_visible: bool = False,
 ) -> dict:
     """`contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric."""
     result = {
@@ -458,18 +482,46 @@ def public_submission(
     }
     if contract is not None:
         contracts.apply_metric_visibility(result, contract)
+    result.update(
+        _snapshot_projection(
+            submission, contract=contract, normalization_visible=normalization_visible
+        )
+    )
     projection = ai_serializers.participant_projection(submission, ai_visible)
     if projection is not None:
         result["ai_review"] = projection
     return result
 
 
+def _snapshot_projection(
+    submission: dict, *, contract: OutputContract | None, normalization_visible: bool
+) -> dict:
+    """Snapshot norm tạm của bài nộp: chỉ xuất hiện khi có snapshot VÀ người xem được xem.
+
+    Admin (`contract` None) nhận đủ baseline/reference/version; thí sinh chỉ nhận điểm tạm và
+    thời điểm, và không nhận gì khi BXH hoặc metric nguồn đang bị ẩn.
+    """
+    snapshot = submission.get(normalization.SNAPSHOT_FIELD)
+    if snapshot is None:
+        return {}
+    if contract is None:
+        return {normalization.SNAPSHOT_FIELD: normalization.admin_snapshot(snapshot)}
+    if not normalization_visible:
+        return {}
+    return {normalization.SNAPSHOT_FIELD: normalization.participant_snapshot(snapshot)}
+
+
 def submission_history_item(
-    submission: dict, *, ai_visible: bool = False, contract: OutputContract | None = None
+    submission: dict,
+    *,
+    ai_visible: bool = False,
+    contract: OutputContract | None = None,
+    normalization_visible: bool = False,
 ) -> dict:
     """Return participant-safe history data without account or storage details.
 
-    `contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric.
+    `contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric. Snapshot norm
+    tạm là dữ liệu dẫn xuất: chỉ trả theo quyền xem hiện tại, không lấy từ cờ lúc nộp.
     """
     item = {
         "id": str(submission["_id"]),
@@ -501,6 +553,11 @@ def submission_history_item(
         }
     if contract is not None:
         contracts.apply_metric_visibility(item, contract)
+    item.update(
+        _snapshot_projection(
+            submission, contract=contract, normalization_visible=normalization_visible
+        )
+    )
     projection = ai_serializers.participant_projection(submission, ai_visible)
     if projection is not None:
         item["ai_review"] = projection
@@ -516,13 +573,19 @@ async def list_account_submissions(
     offset: int,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
+    normalization_visible: bool = False,
 ) -> tuple[list[dict], int]:
     query = {"competition_id": competition_id, "account_id": account_id}
     collection = db[SUBMISSIONS_COLLECTION]
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
     return [
-        submission_history_item(item, ai_visible=ai_visible, contract=contract)
+        submission_history_item(
+            item,
+            ai_visible=ai_visible,
+            contract=contract,
+            normalization_visible=normalization_visible,
+        )
         async for item in cursor
     ], total
 

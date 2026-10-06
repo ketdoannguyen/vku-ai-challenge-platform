@@ -23,6 +23,7 @@ import {
 import { ErrorBox, Loading } from "../components/ui";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
+import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 const PAGE_SIZE = 50;
@@ -207,11 +208,16 @@ export function MySubmissionsPage() {
   // Cột AI chỉ có nghĩa khi cuộc thi thật sự công khai kết luận cho thí sinh. Bật AI sau khi đã
   // có bài nộp khiến trang trộn hai loại dòng, nên điều kiện là "có ít nhất một dòng".
   const showsAi = data.submissions.some((submission) => submission.ai_review);
+  // Cùng cách với cột AI: chỉ dựng cột norm khi thật sự có dòng mang snapshot (backend đã lọc
+  // theo quyền xem). Không có snapshot nào thì không có gì để nói về norm ở trang này.
+  const showsNorm = data.submissions.some((submission) => submission.normalization_snapshot);
 
   // Bài tốt nhất trong trang hiện tại. Chiều so sánh lấy từ hợp đồng kết quả vì có cuộc thi lấy
   // metric nhỏ hơn làm điểm tốt (loss, RMSE), nên "điểm cao là nhất" chỉ đúng một chiều. Bài bị
-  // admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả.
-  const best = data.submissions.reduce<{ id: string; score: number } | null>(
+  // admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả. Cuộc thi xếp hạng theo
+  // norm thì bỏ hẳn phép so raw: snapshot của các bài có mẫu số khác nhau, "tốt nhất" ở đây chỉ
+  // còn nghĩa với điểm gốc.
+  const best = showsNorm ? null : data.submissions.reduce<{ id: string; score: number } | null>(
     (winner, submission) => {
       if (
         submission.status !== "completed" ||
@@ -280,6 +286,13 @@ export function MySubmissionsPage() {
                   {formatMetric(bestScoreVal, bestScoreDecimals)}
                 </strong>
               </span>
+            </>
+          )}
+          {/* Thay cho pill "tốt nhất" cũ: norm hiện tại nằm ở bảng xếp hạng, không suy từ lịch sử. */}
+          {showsNorm && (
+            <>
+              <span>•</span>
+              <Link to="../leaderboard">Điểm norm hiện tại xem ở bảng xếp hạng</Link>
             </>
           )}
         </div>
@@ -353,13 +366,16 @@ export function MySubmissionsPage() {
               {showsAi && (
                 <th scope="col" className="subm-col-ai">AI sơ bộ</th>
               )}
+              {showsNorm && <th scope="col" className="subm-col-num">{PROVISIONAL_NORM_LABEL}</th>}
               {displayMetrics.map((metric) => (
                 <th
                   key={metric.key}
                   scope="col"
                   className={metric.key === contract.primary_metric ? "subm-col-primary" : "subm-col-num"}
                 >
-                  {metric.key === contract.primary_metric ? `Điểm chính · ${metric.label}` : metric.label}
+                  {metric.key === contract.primary_metric
+                    ? `${showsNorm ? "Điểm gốc" : "Điểm chính"} · ${metric.label}`
+                    : metric.label}
                 </th>
               ))}
             </tr>
@@ -455,17 +471,34 @@ export function MySubmissionsPage() {
                       )}
                     </td>
                   )}
-                  {/* Điểm chính chỉ hiện trong cột metric chính, không nhân đôi giá trị. */}
+                  {/* Snapshot là ảnh chụp lúc ghi nhận kết quả, không phải norm hiện tại của BXH;
+                      bài bị từ chối vẫn giữ snapshot nhưng nói rõ là không còn tính vào BXH. */}
+                  {showsNorm && (
+                    <td className="subm-primary-score-cell score-cell primary-score">
+                      {submission.normalization_snapshot ? (
+                        <>
+                          {formatMetric(submission.normalization_snapshot.score, 2)}
+                          {submission.review?.status === "rejected" && (
+                            <span className="cell-secondary">Không tính BXH</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="cell-secondary">—</span>
+                      )}
+                    </td>
+                  )}
+                  {/* Điểm chính chỉ hiện trong cột metric chính, không nhân đôi giá trị. Có norm thì
+                      metric nguồn xuống cột "Điểm gốc" bình thường, không còn được nhấn. */}
                   {displayMetrics.map((metric) => (
                     <td
                       key={metric.key}
                       className={
-                        metric.key === contract.primary_metric
+                        metric.key === contract.primary_metric && !showsNorm
                           ? "subm-primary-score-cell score-cell primary-score"
                           : "subm-score-cell score-cell"
                       }
                     >
-                      {metric.key === contract.primary_metric ? (
+                      {metric.key === contract.primary_metric && !showsNorm ? (
                         <span className="subm-primary-score-value">
                           {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
                         </span>

@@ -8,7 +8,7 @@ source trên đĩa với hash đã lưu và đòi một lượt chạy thử cò
 
 from dataclasses import dataclass
 
-from app.scoring import csv_validation, models, revisions
+from app.scoring import csv_validation, models, normalization, revisions
 from app.scoring import service as scoring_service
 from app.scoring import storage as scoring_storage
 from app.scoring.errors import ScoringValidationError
@@ -22,7 +22,13 @@ class Readiness:
 
 
 def check_readiness(competition: dict) -> Readiness:
-    """Trả lý do chặn đầu tiên theo thứ tự: cấu hình → bộ chấm → ground truth → lượt chạy thử."""
+    """Trả lý do chặn đầu tiên theo thứ tự: chuẩn hóa → cấu hình → bộ chấm → ground truth → lượt chạy thử."""
+    try:
+        # Chuẩn hóa hỏng chặn trước tiên: publish xong mới phát hiện thì bảng xếp hạng không dựng
+        # được nguồn điểm, còn admin vẫn tưởng cuộc thi đang chạy bình thường.
+        normalization.ensure_usable(competition)
+    except normalization.NormalizationError as exc:
+        return Readiness(False, "NORMALIZATION_CONFIG_INVALID", str(exc))
     try:
         config = models.stored_config(competition)
     except Exception:

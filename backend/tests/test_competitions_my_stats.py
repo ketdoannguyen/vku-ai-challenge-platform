@@ -257,6 +257,7 @@ def test_active_member_without_submissions_gets_zeroed_stats(client):
         "rank": None,
         "rank_total": None,
         "best_score": None,
+        "best_normalized_score": None,
         "used_today": 0,
     }
 
@@ -283,6 +284,7 @@ def test_my_stats_matches_leaderboard_and_quota(client):
         "rank": board["me"]["rank"],
         "rank_total": board["total"],
         "best_score": board["me"]["primary_score"],
+        "best_normalized_score": None,  # cuộc thi không bật chuẩn hóa
         "used_today": 2,
     }
     assert stats["rank"] == 2
@@ -342,7 +344,13 @@ def test_hidden_leaderboard_returns_no_rank_without_reading_board(client):
     _login_participant(client)
     stats = _list_item(client, "stats-hidden-board")["my_stats"]
 
-    assert stats == {"rank": None, "rank_total": None, "best_score": None, "used_today": 1}
+    assert stats == {
+        "rank": None,
+        "rank_total": None,
+        "best_score": None,
+        "best_normalized_score": None,
+        "used_today": 1,
+    }
     # Bảng vẫn bị chặn ở endpoint riêng - thẻ danh sách không mở đường vòng.
     assert client.get(f"/api/competitions/{competition_id}/leaderboard").status_code == 403
 

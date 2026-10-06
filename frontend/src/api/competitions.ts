@@ -54,6 +54,21 @@ export interface QuotaStatus {
   resets_at: string;
 }
 
+/** Cấu hình chuẩn hóa 0-50 của cuộc thi; backend chỉ cho sửa khi cuộc thi còn nháp. */
+export interface NormalizationConfig {
+  enabled: boolean;
+  /** Mẫu số do admin nhập; `null` khi tắt. 0 và số âm vẫn hợp lệ với metric tương ứng. */
+  baseline: number | null;
+  version: number;
+}
+
+/** Cấu hình chuẩn hóa để render: response cũ chưa có field được coi là tắt. */
+export function normalizationOf(competition: {
+  normalization?: NormalizationConfig;
+}): NormalizationConfig {
+  return competition.normalization ?? { enabled: false, baseline: null, version: 1 };
+}
+
 export interface Competition {
   id: string;
   slug: string;
@@ -67,6 +82,8 @@ export interface Competition {
   quota_per_day: number;
   leaderboard_visible: boolean;
   join_code_configured: boolean;
+  /** Vắng mặt với response cũ trước khi có chuẩn hóa - hiểu là đang tắt. */
+  normalization?: NormalizationConfig;
   resources: CompetitionResource[];
   membership: Membership;
   submission_config: SubmissionConfig;
@@ -98,8 +115,10 @@ export interface MyStats {
   rank: number | null;
   /** Tổng số thí sinh có mặt trên bảng, cùng điều kiện `null` với `rank`. */
   rank_total: number | null;
-  /** Điểm chính tốt nhất; `null` ngoài các trường hợp trên còn khi metric chính bị ẩn. */
+  /** Điểm gốc của bài đại diện BXH - không hứa là raw tốt nhất của đội khi nhóm toàn 0. */
   best_score: number | null;
+  /** Norm hiện tại của bài đại diện; `null` khi cuộc thi không bật norm hoặc người xem không được xem. */
+  best_normalized_score: number | null;
   /** Số bài `completed` trong ngày UTC hiện tại - khớp `quota.used_today` trang chi tiết. */
   used_today: number;
 }
