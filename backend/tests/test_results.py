@@ -8,6 +8,7 @@ from bson import ObjectId
 from openpyxl import load_workbook
 
 from app.competitions.service import COMPETITIONS_COLLECTION
+from app.memberships.service import MEMBERSHIPS_COLLECTION
 from app.submissions.service import SUBMISSIONS_COLLECTION
 
 
@@ -99,11 +100,28 @@ def _submission(
     return submission_id
 
 
+def _insert_membership(client, competition_id: ObjectId, account_id: ObjectId) -> None:
+    """Quyền đọc nội dung cần membership đang hoạt động; luồng join thật đã có test_memberships.py lo."""
+    now = datetime.now(timezone.utc)
+    _run(
+        client.app.state.mongo.db[MEMBERSHIPS_COLLECTION].insert_one(
+            {
+                "competition_id": competition_id,
+                "account_id": account_id,
+                "active": True,
+                "joined_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+
+
 def test_my_submissions_is_scoped_paginated_newest_first_and_hides_paths(client):
     participant = _account(client, "thi.sinh@vku.vn")
     another_account_id = _create_account(client, "Đội Khác", "other@vku.vn")
     competition_id = _create_competition(client, "history-cup")
     other_competition_id = _create_competition(client, "other-cup")
+    _insert_membership(client, competition_id, participant["_id"])
     base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
     first_id = _submission(client, competition_id, participant["_id"], 0.5, base, filename="first.csv")
     latest_id = _submission(
@@ -147,6 +165,7 @@ def test_my_submissions_is_scoped_paginated_newest_first_and_hides_paths(client)
 def test_my_submissions_returns_safe_reason_for_compatible_failed_record(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "failed-history")
+    _insert_membership(client, competition_id, participant["_id"])
     failed_id = _submission(
         client,
         competition_id,
@@ -177,6 +196,7 @@ def test_leaderboard_uses_each_accounts_best_score_and_earlier_best_time(client)
     third_account_id = _create_account(client, "Đội Ba", "third@vku.vn")
     competition_id = _create_competition(client, "leaderboard-cup")
     other_competition_id = _create_competition(client, "leaderboard-other")
+    _insert_membership(client, competition_id, current["_id"])
     base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
 
     _submission(client, competition_id, current["_id"], 0.7, base)
@@ -217,6 +237,7 @@ def test_leaderboard_accepts_slug_like_its_sibling_endpoints(client):
     """Các endpoint anh em nhận slug; leaderboard không được là ngoại lệ trả 404 sai bản chất."""
     current = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "slug-leaderboard-cup")
+    _insert_membership(client, competition_id, current["_id"])
     base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
     _submission(client, competition_id, current["_id"], 0.9, base)
 
@@ -240,6 +261,7 @@ def test_leaderboard_unknown_slug_and_unknown_id_are_both_404(client):
 def test_hidden_leaderboard_denies_participant_but_admin_can_view(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "hidden-cup", leaderboard_visible=False)
+    _insert_membership(client, competition_id, participant["_id"])
     _submission(
         client,
         competition_id,
@@ -340,6 +362,7 @@ def test_admin_xlsx_export_has_rank_values_counts_and_formula_safe_names(client)
 def test_leaderboard_paginates_but_me_stays_global_and_participant_safe(client):
     current = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "paged-cup")
+    _insert_membership(client, competition_id, current["_id"])
     base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
     others = [
         _create_account(client, f"Đội {index}", f"paged{index}@vku.vn") for index in range(1, 5)
@@ -385,6 +408,7 @@ def test_leaderboard_paginates_but_me_stays_global_and_participant_safe(client):
 def test_leaderboard_me_is_null_without_completed_submission(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "spectator-cup")
+    _insert_membership(client, competition_id, participant["_id"])
     other_account_id = _create_account(client, "Đội Khác", "spectator-other@vku.vn")
     base = datetime(2026, 9, 15, 8, tzinfo=timezone.utc)
     _submission(client, competition_id, other_account_id, 0.9, base)

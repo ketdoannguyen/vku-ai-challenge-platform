@@ -15,7 +15,6 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type {
   AdminCompetition,
-  Competition,
   CompetitionResource,
 } from "../api/competitions";
 import {
@@ -31,10 +30,12 @@ import {
 import type { ContentSummary } from "../api/contents";
 import {
   formatMetric,
+  metricLabel,
   resultContract,
   type LeaderboardResponse,
   type ResultContract,
 } from "../api/results";
+import { NORM_RANKING_NOTE } from "../lib/normalization";
 import {
   CompetitionActionConfirmModal,
   CompetitionDeleteModal,
@@ -90,7 +91,7 @@ const SUMMARY_FACTS: ReadonlyArray<{
   label: string;
   Icon: IconComponent;
   mono?: boolean;
-  read: (competition: Competition) => ReactNode;
+  read: (competition: AdminCompetition) => ReactNode;
 }> = [
   { label: "Slug", Icon: IconTag, mono: true, read: (c) => c.slug },
   { label: "Bắt đầu", Icon: IconCalendar, read: (c) => formatLocal(c.start_at) },
@@ -903,7 +904,7 @@ export function AdminCompetitionDetailPage() {
 /** Nhịp tự làm mới ngầm khi tab Kết quả đang mở. */
 const RESULTS_AUTO_REFRESH_MS = 3_000;
 
-function ResultsPanel({ competition }: { competition: Competition }) {
+function ResultsPanel({ competition }: { competition: AdminCompetition }) {
   const contract = resultContract(competition.submission_config);
   const [leaderboard, setLeaderboard] = useState<LeaderboardResponse | null>(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
@@ -979,6 +980,14 @@ function ResultsPanel({ competition }: { competition: Competition }) {
   // Tab Kết quả đang mở thì bảng xếp hạng tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
   const refreshStatus = useAutoRefresh(true, silentRefresh, { intervalMs: RESULTS_AUTO_REFRESH_MS });
 
+  // Metadata norm đi cùng lần dựng bảng; admin luôn nhận đủ, vắng mặt nghĩa là cuộc thi tắt norm.
+  const norm = leaderboard?.normalization ?? null;
+  /** Nhãn và số thập phân của metric nguồn để đọc baseline/mẫu số đúng đơn vị điểm gốc. */
+  const sourceLabel = norm ? metricLabel(contract, norm.source_metric) ?? norm.source_metric : null;
+  const sourceDecimals = norm
+    ? contract.metrics.find((metric) => metric.key === norm.source_metric)?.decimals ?? 4
+    : 4;
+
   return (
     <div className="admin-results">
       <AutoRefreshNotice {...refreshStatus} />
@@ -1003,6 +1012,16 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             {exporting ? "Đang xuất..." : "Xuất Excel"}
           </button>
         </div>
+        {/* Tách "Điểm xếp hạng" khỏi "Metric nguồn" để admin không đọc nhầm cột metric gốc
+            là con số đang dùng để xếp hạng. */}
+        {norm && (
+          <p className="text-muted">
+            Điểm xếp hạng: Norm / {norm.max_score}. Metric nguồn {sourceLabel} với baseline{" "}
+            {formatMetric(norm.baseline, sourceDecimals)} · Điểm gốc tốt nhất hiện tại{" "}
+            {formatMetric(norm.reference_best, sourceDecimals)} · Bảng dựng lúc{" "}
+            {formatLocal(norm.calculated_at)}. {NORM_RANKING_NOTE}
+          </p>
+        )}
         {exportError !== null && (
           <div className="admin-section-error">
             <ErrorBox error={exportError} />
@@ -1023,15 +1042,21 @@ function ResultsPanel({ competition }: { competition: Competition }) {
             aria-label="Bảng xếp hạng của cuộc thi"
           >
             <table className="table results-table">
-              {/* Cột metric theo hợp đồng kết quả; điểm chính là một trong số đó nên không in lặp. */}
-              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
+              {/* Norm bật thì norm là con số xếp hạng, cột metric nguồn xuống hàng đối chiếu;
+                  norm tắt giữ nguyên bảng cũ với điểm chính được nhấn trong cụm metric. */}
+              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{norm && <th scope="col" className="score-cell">Điểm norm (0–{norm.max_score})</th>}{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
                     <td><span className="rank-cell" data-rank={entry.rank}>{entry.rank}</span></td>
                     <td>{entry.display_name}</td>
+                    {norm && (
+                      <td className="score-cell primary-score">
+                        {formatMetric(entry.normalized_score, norm.decimals)}
+                      </td>
+                    )}
                     {contract.metrics.map((metric) => (
-                      <td key={metric.key} className={`score-cell${metric.key === contract.primary_metric ? " primary-score" : ""}`}>
+                      <td key={metric.key} className={`score-cell${metric.key === contract.primary_metric && !norm ? " primary-score" : ""}`}>
                         {formatMetric(entry.metrics[metric.key], metric.decimals)}
                       </td>
                     ))}
@@ -1047,6 +1072,7 @@ function ResultsPanel({ competition }: { competition: Competition }) {
       <AdminSubmissionsPanel
         competitionId={competition.id}
         resultContract={contract}
+        normalization={competition.normalization}
         title="Danh sách submissions"
         listLabel="Danh sách bài nộp của cuộc thi"
       />
@@ -1444,7 +1470,7 @@ function ScoringPanel({
   competition,
   onCompetitionChanged,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   // Readiness của publish nằm ở state trang cha, nên panel phải báo lại sau mỗi lần đổi
   // config/ground truth - nếu không banner "Chưa thể publish" và nút Publish đứng hình.
   onCompetitionChanged: () => Promise<void>;
@@ -2301,7 +2327,6 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
                 <th scope="col">Thứ tự</th>
                 <th scope="col">Tiêu đề</th>
                 <th scope="col">Slug</th>
-                <th scope="col">Hiển thị</th>
                 <th scope="col">File</th>
                 <th scope="col">Thao tác</th>
               </tr>
@@ -2309,7 +2334,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="table-state">
+                  <td colSpan={5} className="table-state">
                     <Loading />
                   </td>
                 </tr>
@@ -2332,7 +2357,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
                 ))
               ) : error ? null : (
                 <tr>
-                  <td colSpan={6} className="table-state">
+                  <td colSpan={5} className="table-state">
                     Chưa có trang nội dung nào.
                   </td>
                 </tr>
@@ -2488,12 +2513,6 @@ function ContentRow({
           <code>{content.slug}</code>
         </td>
         <td>
-          <span className={`status-badge ${content.visibility === "members" ? "warning" : "neutral"}`}>
-            <span className="status-dot" />
-            {content.visibility === "members" ? "Chỉ thành viên" : "Mọi thí sinh"}
-          </span>
-        </td>
-        <td>
           {content.size_bytes !== null ? (
             <span className="status-badge success file-status-badge">
               <span>Đã upload</span>
@@ -2556,7 +2575,7 @@ function ContentRow({
       </tr>
       {rowError && (
         <tr>
-          <td colSpan={6} className="table-state error-cell">
+          <td colSpan={5} className="table-state error-cell">
             <span role="alert">{rowError}</span>
           </td>
         </tr>
@@ -2580,7 +2599,6 @@ function ContentFormModal({
   const [title, setTitle] = useState(content?.title ?? "");
   // Sửa trang cũng bám theo tiêu đề: đổi tiêu đề là đổi URL trang nội dung.
   const { slug, onTitleChange, onSlugChange } = useAutoSlug(content?.slug ?? "", true);
-  const [visibility, setVisibility] = useState<"public" | "members">(content?.visibility ?? "public");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -2588,7 +2606,7 @@ function ContentFormModal({
     e.preventDefault();
     setBusy(true);
     setError("");
-    const payload = { title, slug: slug.trim().toLowerCase(), visibility };
+    const payload = { title, slug: slug.trim().toLowerCase() };
     try {
       if (isEdit) {
         await api.patch(`/admin/competitions/${competitionId}/contents/${content.id}`, payload);
@@ -2642,20 +2660,6 @@ function ContentFormModal({
                 ? "Bám theo tiêu đề: sửa tiêu đề là đổi URL trang. Gõ tay để tự chọn slug khác."
                 : "Tự điền theo tiêu đề, gõ tay để đổi."}
             </small>
-          </div>
-          <div className="form-field">
-            <label className="field-label" htmlFor="content-visibility">
-              Hiển thị cho
-            </label>
-            <select
-              id="content-visibility"
-              className="input"
-              value={visibility}
-              onChange={(e) => setVisibility(e.target.value as "public" | "members")}
-            >
-              <option value="public">Mọi thí sinh</option>
-              <option value="members">Chỉ thành viên cuộc thi</option>
-            </select>
           </div>
         </div>
         {error && (
@@ -3403,7 +3407,7 @@ function JoinCodePanel({
   competition,
   onCompetitionChanged,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   onCompetitionChanged: () => Promise<void>;
 }) {
   const [codeConfigured, setCodeConfigured] = useState(competition.join_code_configured);
@@ -3524,7 +3528,7 @@ function JoinCodePanel({
   );
 }
 
-function MembersPanel({ competition }: { competition: Competition }) {
+function MembersPanel({ competition }: { competition: AdminCompetition }) {
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [total, setTotal] = useState(0);
   const [activeTotal, setActiveTotal] = useState(0);

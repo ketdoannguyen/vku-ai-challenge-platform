@@ -82,21 +82,26 @@ def ready_competition(
     slug: str = "submission-cup",
     quota: int = 5,
     ground_truth: bytes = SUBMISSION_GROUND_TRUTH,
+    normalization: dict | None = None,
 ) -> dict:
-    """Cuộc thi đã publish, đã cấu hình chấm điểm và participant đã join."""
+    """Cuộc thi đã publish, đã cấu hình chấm điểm và participant đã join.
+
+    `normalization` là cấu hình chuẩn hóa tùy chọn gửi ngay lúc tạo: chỉ sửa được khi cuộc thi còn
+    nháp nên bài test muốn bật chuẩn hóa phải chèn nó vào đây, không sửa sau khi publish được.
+    """
     now = datetime.now(timezone.utc)
     login(client)
-    created = client.post(
-        "/api/admin/competitions",
-        json={
-            "slug": slug,
-            "name": slug,
-            "start_at": (now - timedelta(days=1)).isoformat(),
-            "end_at": (now + timedelta(days=1)).isoformat(),
-            "primary_metric": "f1",
-            "quota_per_day": quota,
-        },
-    )
+    body = {
+        "slug": slug,
+        "name": slug,
+        "start_at": (now - timedelta(days=1)).isoformat(),
+        "end_at": (now + timedelta(days=1)).isoformat(),
+        "primary_metric": "f1",
+        "quota_per_day": quota,
+    }
+    if normalization is not None:
+        body["normalization"] = normalization
+    created = client.post("/api/admin/competitions", json=body)
     assert created.status_code == 201
     competition = created.json()
     assert publish_competition(
@@ -317,21 +322,22 @@ def publish_v2_competition(
     *,
     quota: int = 5,
     output_contract: dict | None = None,
+    normalization: dict | None = None,
 ) -> dict:
     """Cuộc thi v2 đã publish: đã xác minh bộ chấm bằng một lượt chạy thử, participant đã join."""
     now = datetime.now(timezone.utc)
     login(client)
-    created = client.post(
-        "/api/admin/competitions",
-        json={
-            "slug": slug,
-            "name": slug,
-            "start_at": (now - timedelta(days=1)).isoformat(),
-            "end_at": (now + timedelta(days=1)).isoformat(),
-            "primary_metric": "f1",
-            "quota_per_day": quota,
-        },
-    )
+    body = {
+        "slug": slug,
+        "name": slug,
+        "start_at": (now - timedelta(days=1)).isoformat(),
+        "end_at": (now + timedelta(days=1)).isoformat(),
+        "primary_metric": "f1",
+        "quota_per_day": quota,
+    }
+    if normalization is not None:
+        body["normalization"] = normalization
+    created = client.post("/api/admin/competitions", json=body)
     assert created.status_code == 201
     competition = created.json()
     assert put_scoring_v2(

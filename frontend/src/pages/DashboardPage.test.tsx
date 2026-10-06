@@ -565,7 +565,13 @@ test("trong lúc join thì tạm dừng tự làm mới; join xong thì dữ li�
 });
 
 /** Số liệu cá nhân backend tính sẵn trong `my_stats` của response danh sách. */
-const MY_STATS = { rank: 2, rank_total: 3, best_score: 0.9123, used_today: 2 };
+const MY_STATS = {
+  rank: 2,
+  rank_total: 3,
+  best_score: 0.9123,
+  best_normalized_score: null,
+  used_today: 2,
+};
 
 function cardOf(name: string): HTMLElement {
   return screen.getByRole("heading", { name, level: 3 }).closest("article")!;
@@ -592,6 +598,44 @@ test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
   const card = cardOf("Joined Cup");
 
   expect(within(card).getByText("0.92")).toBeTruthy();
+});
+
+test("cuộc thi bật norm: thẻ hiện 'Điểm norm' lấy từ my_stats, không hiện điểm gốc", async () => {
+  mockApi({
+    competitions: [
+      {
+        ...JOINED,
+        normalization: { enabled: true, baseline: 0.5, version: 1 },
+        my_stats: { ...MY_STATS, best_normalized_score: 34.56 },
+      },
+    ],
+  });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getByText("Điểm norm")).toBeTruthy();
+  expect(within(card).getByText("34.56")).toBeTruthy();
+  expect(within(card).queryByText("0.91")).toBeNull();
+});
+
+test("norm bị ẩn nhưng điểm gốc còn: thẻ để '-', không gắn nhãn 'Điểm norm' cho raw", async () => {
+  mockApi({
+    competitions: [
+      {
+        ...JOINED,
+        normalization: { enabled: true, baseline: 0.5, version: 1 },
+        my_stats: { ...MY_STATS, best_normalized_score: null },
+      },
+    ],
+  });
+  renderDashboard();
+  await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
+  const card = cardOf("Joined Cup");
+
+  expect(within(card).getByText("Điểm norm")).toBeTruthy();
+  expect(within(card).getByText("-")).toBeTruthy();
+  expect(within(card).queryByText("0.91")).toBeNull();
 });
 
 test("chưa tham gia: hàng số liệu vẫn hiện với ba dấu '-'", async () => {

@@ -1,5 +1,6 @@
 import type { AdminAiReview, ParticipantAiReview } from "./aiReview";
 import { api } from "./client";
+import type { NormalizationConfig } from "./competitions";
 
 /** Một metric trong hợp đồng kết quả: khóa tra kết quả, nhãn hiển thị và số thập phân. */
 export interface MetricDefinition {
@@ -87,6 +88,26 @@ export interface AdminReview {
   reviewed_by: { id: string; name: string; email: string };
 }
 
+/**
+ * Snapshot norm tạm ghi MỘT LẦN cùng bài nộp: con số lịch sử lúc ghi nhận kết quả, không phải
+ * norm hiện tại của bảng xếp hạng (mẫu số đã có thể đổi vì bài khác). Vắng mặt khi cuộc thi
+ * không bật norm hoặc người xem không có quyền xem dữ liệu dẫn xuất.
+ */
+export interface SubmissionNormSnapshot {
+  score: number;
+  /** Thời điểm chấm xong - không phải mốc tie-break của bảng xếp hạng. */
+  calculated_at: string;
+}
+
+/** Bản đầy đủ admin xem được: đủ baseline/mẫu số lúc ghi để hậu kiểm. */
+export interface AdminSubmissionNormSnapshot extends SubmissionNormSnapshot {
+  version: number;
+  source_metric: string;
+  higher_is_better: boolean;
+  baseline: number;
+  reference_best: number;
+}
+
 export interface SubmissionHistoryItem {
   id: string;
   competition_id: string;
@@ -100,6 +121,8 @@ export interface SubmissionHistoryItem {
   review?: ParticipantReview;
   /** Vắng mặt khi cuộc thi chưa bật AI, tắt AI, hoặc không công khai kết luận cho thí sinh. */
   ai_review?: ParticipantAiReview;
+  /** Endpoint admin ghi đè bằng shape đầy đủ; participant chỉ nhận `{score, calculated_at}`. */
+  normalization_snapshot?: SubmissionNormSnapshot;
 }
 
 export interface SubmissionsResponse {
@@ -146,12 +169,14 @@ export interface AdminSubmissionStats {
 
 /** Dòng submission phía admin: thêm định danh tài khoản mà endpoint participant cố ý bỏ. */
 export interface AdminSubmissionItem
-  extends Omit<SubmissionHistoryItem, "review" | "ai_review"> {
+  extends Omit<SubmissionHistoryItem, "review" | "ai_review" | "normalization_snapshot"> {
   account: { id: string; name: string; email: string };
   /** Khác participant: luôn có khoá, `null` khi bài chưa từng bị xét duyệt. */
   review: AdminReview | null;
   /** Khác participant: luôn có khoá, `null` khi cuộc thi chưa từng bật AI lúc nộp bài. */
   ai_review: AdminAiReview | null;
+  /** Khác participant: đầy đủ baseline/mẫu số lúc ghi để hậu kiểm. */
+  normalization_snapshot?: AdminSubmissionNormSnapshot;
 }
 
 /** Bảng toàn cục gắn thêm cuộc thi của từng dòng. */
@@ -166,6 +191,8 @@ export interface CompetitionContract {
   slug: string;
   name: string;
   result_contract: ResultContract;
+  /** Ở khóa riêng, không trộn vào hợp đồng evaluator; vắng mặt ở response cũ hiểu là đang tắt. */
+  normalization?: NormalizationConfig;
 }
 
 export interface AdminSubmissionsResponse {
@@ -181,6 +208,26 @@ export interface AdminSubmissionsResponse {
   competitions?: CompetitionContract[];
 }
 
+/**
+ * Metadata chuẩn hóa đi kèm một lần dựng bảng. Mọi entry và metadata trong cùng response phải
+ * thuộc cùng lần dựng đó - không tự suy mẫu số từ các entry đã chọn (nhóm toàn 0 có thể chọn
+ * bài sớm với raw thấp, `max(entry)` lúc đó không phải best thực).
+ */
+export interface NormalizationBoard {
+  version: number;
+  /** Metric lấy điểm gốc để chuẩn hóa, theo hợp đồng kết quả của cuộc thi. */
+  source_metric: string;
+  /** Chiều xếp hạng của metric nguồn; điểm norm luôn cao hơn là tốt hơn. */
+  higher_is_better: boolean;
+  baseline: number;
+  max_score: number;
+  decimals: number;
+  /** Điểm gốc tốt nhất toàn cuộc thi dùng làm mẫu số; `null` khi chưa có bài hợp lệ. */
+  reference_best: number | null;
+  /** Thời điểm build bảng; khác mốc tie-break (mốc đó là giờ nhận bài đại diện). */
+  calculated_at: string;
+}
+
 export interface LeaderboardEntry {
   /** Thứ hạng toàn cục, không đánh lại số theo trang. */
   rank: number;
@@ -194,6 +241,9 @@ export interface LeaderboardEntry {
   is_current_user?: boolean;
   /** Chỉ endpoint admin trả về; endpoint participant đã bỏ định danh. */
   account_id?: string;
+  /** Norm hiện tại - điểm xếp hạng chính khi cuộc thi bật chuẩn hóa. Vắng mặt khi norm tắt;
+   *  `null` khi người xem không được xem (bảng hoặc metric nguồn bị ẩn). */
+  normalized_score?: number | null;
 }
 
 /** Admin và export luôn nhận toàn bộ danh sách, không phân trang. */
@@ -203,6 +253,8 @@ export interface LeaderboardResponse {
   primary_metric: string | null;
   entries: LeaderboardEntry[];
   total: number;
+  /** Vắng mặt khi cuộc thi không bật chuẩn hóa; `null` khi thí sinh không được xem. */
+  normalization?: NormalizationBoard | null;
 }
 
 export interface ParticipantLeaderboardResponse extends LeaderboardResponse {

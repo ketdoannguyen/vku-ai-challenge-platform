@@ -125,7 +125,8 @@ def initial_projection(*, captured: bool, now: datetime) -> dict:
         "verdict": None if captured else constants.VERDICT_ERROR,
         "summary": None if captured else constants.PARTICIPANT_ERROR_SUMMARY,
         "participant_summary": None,
-        "source_warning_count": None,
+        "source_status": None,
+        "source_signal_version": None,
         "generation": 1,
         "run_id": uuid4().hex,
         "latest_review_id": None,
@@ -341,7 +342,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
                 "summary": cached["summary"],
                 "participant_summary": cached.get("participant_summary") or None,
                 "findings": cached.get("findings") or [],
-                "source_signals": cached.get("source_signals") or [],
+                # Cache cùng khoá version: sao chép nguyên assessment đã hậu kiểm, không tính lại.
+                "source_assessment": cached.get("source_assessment"),
                 "resources_configured": cached.get("resources_configured", 0),
                 # Vắng mặt = row cũ trước ADR-059; giữ None, không được đọc thành "không có".
                 "resources_in_notebook": cached.get("resources_in_notebook"),
@@ -387,8 +389,8 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
         final_verdict, verified, downgrades = verdict_module.verify_review(
             output, index=index, notebook=notebook
         )
-        source_signals = sources.verify_source_signals(
-            output.source_signals, notebook=notebook, resources=revision.get("resources") or []
+        source_assessment = sources.verify_source_assessment(
+            output.source_assessment, notebook=notebook, resources=revision.get("resources") or []
         )
         resources_in_notebook = [
             asdict(mention)
@@ -430,7 +432,7 @@ async def process_job(db, job: dict, *, client, settings, now: datetime | None =
             # Chuỗi rỗng từ model được quy về None: chỉ có một cách biểu diễn "không có gợi ý".
             "participant_summary": output.participant_summary or None,
             "findings": [asdict(finding) for finding in verified],
-            "source_signals": [asdict(signal) for signal in source_signals],
+            "source_assessment": asdict(source_assessment),
             "resources_configured": len(revision.get("resources") or []),
             "resources_in_notebook": resources_in_notebook,
             "notebook_stats": snapshot_stats(notebook),
@@ -503,8 +505,17 @@ async def apply_projection(db, *, submission_id, generation: int, run_id: str, r
                 # `.get()` chứ không phải `[...]`: đường reconcile và nhánh trùng khoá đều chạm
                 # những audit row ghi trước khi field này tồn tại.
                 "ai_review.participant_summary": review.get("participant_summary") or None,
-                "ai_review.source_warning_count": sum(
-                    bool(signal.get("warning")) for signal in review.get("source_signals") or []
+                # Trạng thái nguồn lấy từ assessment đã hậu kiểm, không đếm warning. Lượt lỗi và row
+                # cũ thiếu assessment set None - trạng thái của lượt trước không được sống lại.
+                "ai_review.source_status": (
+                    (review.get("source_assessment") or {}).get("status")
+                    if review.get("source_signal_version") == constants.SOURCE_SIGNAL_VERSION
+                    else None
+                ),
+                "ai_review.source_signal_version": (
+                    review.get("source_signal_version")
+                    if review.get("source_assessment") is not None
+                    else None
                 ),
                 "ai_review.latest_review_id": review["_id"],
                 "ai_review.updated_at": now,
@@ -666,7 +677,9 @@ async def request_manual_review(db, submission: dict, *, competition: dict, sett
                 "ai_review.summary": None,
                 # Không xoá thì gợi ý của lượt cũ sống dậy và có thể bị dùng để từ chối bài.
                 "ai_review.participant_summary": None,
-                "ai_review.source_warning_count": None,
+                # Trạng thái nguồn của lượt cũ cũng vậy: clear ngay khi chuyển QUEUED.
+                "ai_review.source_status": None,
+                "ai_review.source_signal_version": None,
                 "ai_review.latest_review_id": None,
                 "ai_review.generation": (current or 0) + 1,
                 "ai_review.run_id": uuid4().hex,

@@ -14,11 +14,13 @@ from app.ai_review import service as ai_service
 from app.ai_review import settings as ai_settings
 from app.auth.dependencies import CurrentAccount
 from app.competitions import service as competitions_service
+from app.competitions.access import require_read_access
 from app.core.config import get_settings
 from app.core.datetimes import as_utc
 from app.core.errors import api_error
 from app.memberships.service import get_membership
-from app.scoring import contracts, evaluator_client, models
+from app.leaderboard import service as leaderboard_service
+from app.scoring import contracts, evaluator_client, models, normalization
 from app.scoring import service as scoring_service
 from app.scoring.errors import EvaluatorError, ScoringValidationError
 from app.scoring_attempts import service as attempts_service
@@ -223,6 +225,13 @@ async def _submit_scored(
             document["content_snapshot"] = snapshot
         if projection is not None:
             document["ai_review"] = projection
+        # Snapshot norm tạm phải có mặt trong document TRƯỚC khi upload: ghi được bài thì snapshot
+        # đi cùng ngay từ lượt insert, không có cửa sổ nào để lần ghi sau viết lại nó.
+        norm_snapshot = await service.normalization_snapshot(
+            db, competition, raw=scored.primary_score, now=now
+        )
+        if norm_snapshot is not None:
+            document["normalization_snapshot"] = norm_snapshot
         await _upload(
             prediction_key, data, ARTIFACT_MEDIA_TYPES[PREDICTION_ARTIFACT], competition, account
         )
@@ -253,6 +262,8 @@ async def _submit_scored(
         await service.release_quota_slot(db, membership, now)
         raise
     await ai_service.wake_worker(db, document, settings=settings, now=now)
+    # Bài vừa ghi đổi mặt bằng BXH của cả cuộc thi: bỏ bản đang cache để lượt xem kế tiếp thấy ngay.
+    leaderboard_service.invalidate_competition(competition["_id"])
     logger.info(
         "Submission completed competition=%s account=%s submission=%s submission_no=%s",
         competition["_id"],
@@ -260,11 +271,15 @@ async def _submit_scored(
         submission_id,
         submission_no,
     )
+    # Chấm v1 có thể lâu: admin vừa ẩn BXH/metric giữa chừng thì response phải theo trạng thái hiện
+    # tại, không lấy cờ hiển thị chụp từ đầu request.
+    current = await _competition_or_404(db, competition["_id"])
     return service.public_submission(
         document,
         max(quota - quota_used, 0),
-        ai_visible=ai_settings.participant_visible(competition),
-        contract=contracts.participant_contract(competition),
+        ai_visible=ai_settings.participant_visible(current),
+        contract=contracts.participant_contract(current),
+        normalization_visible=normalization.participant_visible(current),
     )
 
 
@@ -361,8 +376,10 @@ async def my_submissions(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict:
+    """Lịch sử nộp bài của chính mình - thành viên đang hoạt động hoặc admin."""
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
+    await require_read_access(db, competition, account)
     submissions, total = await service.list_account_submissions(
         db,
         competition["_id"],
@@ -371,6 +388,7 @@ async def my_submissions(
         offset=offset,
         ai_visible=ai_settings.participant_visible(competition),
         contract=contracts.participant_contract(competition),
+        normalization_visible=normalization.participant_visible(competition),
     )
     return {"submissions": submissions, "total": total, "limit": limit, "offset": offset}
 
@@ -382,10 +400,12 @@ async def my_active_attempts(
     """Các lượt chưa kết thúc của chính mình.
 
     Trang nộp bài gọi endpoint này lúc mở lại: đóng tab hay mất mạng giữa chừng thì lượt vẫn còn,
-    thí sinh thấy lại đúng lượt đang chờ thay vì phải nộp lần nữa.
+    thí sinh thấy lại đúng lượt đang chờ thay vì phải nộp lần nữa. Thành viên đang hoạt động hoặc
+    admin - rời cuộc thi là mất quyền xem lượt của chính mình.
     """
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
+    await require_read_access(db, competition, account)
     now = datetime.now(timezone.utc)
     attempts = await attempts_store.list_active(db, competition["_id"], account["_id"])
     return {
@@ -405,6 +425,7 @@ async def my_attempt_status(
     """Trạng thái một lượt chấm: hàng đợi, đang chạy, kết quả hoặc lý do không thành công."""
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
+    await require_read_access(db, competition, account)
     attempt = await _own_attempt_or_404(db, competition, account, attempt_id)
     return await attempts_service.attempt_payload(
         db, attempt, competition=competition, account=account, now=datetime.now(timezone.utc)
@@ -443,9 +464,10 @@ async def download_notebook(
 async def _download_own(
     request: Request, competition_id: str, submission_id: str, account: dict, kind: str
 ) -> Response:
-    """Bài của chính mình tải được kể cả sau khi rời cuộc thi; bài của đội khác là 404."""
+    """Tải bài của chính mình; bài của người khác luôn là 404 kể cả admin."""
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
+    await require_read_access(db, competition, account)
     submission = await _own_submission_or_404(db, competition, account, submission_id)
     return await artifacts_reader.artifact_response(submission, competition, account, kind)
 

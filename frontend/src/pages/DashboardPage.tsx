@@ -14,7 +14,7 @@ import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import type {
-  Competition,
+  CompetitionSummary,
   CompetitionsResponse,
   Membership,
   PinResponse,
@@ -24,7 +24,7 @@ import {
   STATUS_LABEL,
   displayStatus,
   formatLocal,
-  primaryMetricLabel,
+  normalizationOf,
   statusClass,
 } from "../api/competitions";
 import { formatMetric } from "../api/results";
@@ -64,17 +64,17 @@ const PARTICIPATION: { id: ParticipationFilter; label: string }[] = [
 const nameCollator = new Intl.Collator("vi", { sensitivity: "base", numeric: true });
 
 /** So tên tiếng Việt rồi tới slug/id để mọi kiểu sort đều có tie-break tất định. */
-function compareByName(a: Competition, b: Competition): number {
+function compareByName(a: CompetitionSummary, b: CompetitionSummary): number {
   return nameCollator.compare(a.name, b.name) || a.slug.localeCompare(b.slug) || a.id.localeCompare(b.id);
 }
 
 /** Mốc hạn hợp lệ; ngày lỗi/thiếu trả null để bị đẩy xuống cuối nhóm thay vì phá thứ tự. */
-function endAtMillis(competition: Competition): number | null {
+function endAtMillis(competition: CompetitionSummary): number | null {
   const millis = Date.parse(competition.end_at);
   return Number.isNaN(millis) ? null : millis;
 }
 
-const COMPARATORS: Record<CompetitionSort, (a: Competition, b: Competition) => number> = {
+const COMPARATORS: Record<CompetitionSort, (a: CompetitionSummary, b: CompetitionSummary) => number> = {
   name: compareByName,
   /**
    * Cuộc thi đang mở lên trước và gần hạn nhất đứng đầu; đã kết thúc xếp sau, mới đóng gần đây
@@ -100,9 +100,9 @@ const COMPARATORS: Record<CompetitionSort, (a: Competition, b: Competition) => n
 
 /** Ghim luôn đứng trước, rồi mới tới kiểu sắp xếp đang chọn (lọc/tìm kiếm đã chạy trước đó). */
 function comparePinnedFirst(
-  a: Competition,
-  b: Competition,
-  comparator: (first: Competition, second: Competition) => number,
+  a: CompetitionSummary,
+  b: CompetitionSummary,
+  comparator: (first: CompetitionSummary, second: CompetitionSummary) => number,
 ): number {
   return Number(b.pinned ?? false) - Number(a.pinned ?? false) || comparator(a, b);
 }
@@ -903,7 +903,7 @@ function CompetitionCard({
   onMembershipChange,
   onJoinEngaged,
 }: {
-  competition: Competition;
+  competition: CompetitionSummary;
   /** Theme lấy theo vị trí trong lưới đang render - không lấy từ trạng thái cuộc thi. */
   theme: CardTheme;
   /** Mốc giờ dùng chung của cả trang - mỗi thẻ không tự mở timer riêng. */
@@ -931,6 +931,7 @@ function CompetitionCard({
   const pinned = c.pinned ?? false;
   // Chỉ đọc số liệu khi account đã xác nhận và membership đang hoạt động; còn lại hiện "-".
   const stats = canPersonalize && c.membership.active ? c.my_stats : undefined;
+  const norm = normalizationOf(c);
   const rankText =
     stats?.rank == null
       ? "-"
@@ -1011,7 +1012,7 @@ function CompetitionCard({
           <div className="comp-telemetry">
             <div className="comp-telemetry-item">
               <span className="comp-telemetry-label">Chỉ số đánh giá</span>
-              <span className="comp-telemetry-value">{primaryMetricLabel(c)}</span>
+              <span className="comp-telemetry-value">{c.primary_metric_label ?? "Chưa cấu hình"}</span>
             </div>
             <div className="comp-telemetry-item">
               <span className="comp-telemetry-label">Hạn mức nộp</span>
@@ -1027,9 +1028,12 @@ function CompetitionCard({
               <dd className="comp-personal-value">{rankText}</dd>
             </div>
             <div className="comp-personal-item">
-              <dt className="comp-personal-label">Điểm cao nhất</dt>
-              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. */}
-              <dd className="comp-personal-value">{formatMetric(stats?.best_score, 2)}</dd>
+              <dt className="comp-personal-label">{norm.enabled ? "Điểm norm" : "Điểm cao nhất"}</dt>
+              {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. Cuộc thi
+                  bật norm lấy norm hiện tại từ BXH; norm bị ẩn thì để "-", không rơi về raw. */}
+              <dd className="comp-personal-value">
+                {formatMetric(norm.enabled ? stats?.best_normalized_score : stats?.best_score, 2)}
+              </dd>
             </div>
             <div className="comp-personal-item">
               <dt className="comp-personal-label">Đã nộp hôm nay</dt>

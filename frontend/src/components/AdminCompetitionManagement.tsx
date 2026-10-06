@@ -1,14 +1,17 @@
 import { useState, type FormEvent, type ReactNode, type RefObject } from "react";
 import { api } from "../api/client";
-import type { AdminCompetition, Competition, CompetitionResource } from "../api/competitions";
+import type { AdminCompetition, CompetitionResource } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   MAX_COMPETITION_RESOURCES,
   isoToLocalInput,
   localInputToIso,
+  primaryMetricLabel,
 } from "../api/competitions";
+import { resultContract } from "../api/results";
 import { useAutoSlug } from "../hooks/useAutoSlug";
 import { cleanCompetitionResources } from "../lib/competitionResources";
+import { cleanNormalization } from "../lib/normalization";
 import { SLUG_MAX } from "../lib/slug";
 import { ConfirmModal, Modal } from "./Modal";
 
@@ -173,13 +176,13 @@ function IconMailCheck({ className }: { className?: string }) {
 type SectionTone = "blue" | "red" | "yellow";
 
 /** Icon và tone trang trí cho từng chế độ tham gia - không đọc trạng thái nghiệp vụ nào khác. */
-const JOIN_MODE_TONE: Record<Competition["join_mode"], SectionTone> = {
+const JOIN_MODE_TONE: Record<AdminCompetition["join_mode"], SectionTone> = {
   open: "blue",
   code: "red",
   invite_only: "yellow",
 };
 
-const JOIN_MODE_ICON: Record<Competition["join_mode"], ReactNode> = {
+const JOIN_MODE_ICON: Record<AdminCompetition["join_mode"], ReactNode> = {
   open: <IconUsersRound />,
   code: <IconKeyRound />,
   invite_only: <IconMailCheck />,
@@ -226,10 +229,10 @@ export function CompetitionActionConfirmModal({
   returnFocusRef,
 }: {
   action: CompetitionAction;
-  competition: Competition;
+  competition: AdminCompetition;
   onSuccess: (
     action: CompetitionAction,
-    clonedCompetition?: Competition,
+    clonedCompetition?: AdminCompetition,
   ) => void | Promise<void>;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -238,7 +241,7 @@ export function CompetitionActionConfirmModal({
 
   async function confirm() {
     if (action === "clone") {
-      const clone = await api.post<Competition>(
+      const clone = await api.post<AdminCompetition>(
         `/admin/competitions/${competition.id}/clone`,
       );
       await onSuccess(action, clone);
@@ -269,7 +272,7 @@ export function CompetitionDeleteModal({
   onClose,
   returnFocusRef,
 }: {
-  competition: Competition;
+  competition: AdminCompetition;
   onDeleted: () => void | Promise<void>;
   onClose: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -357,6 +360,24 @@ export function CompetitionDeleteModal({
   );
 }
 
+/** Chuỗi `primaryMetricLabel` trả về khi chưa có metric nguồn (nháp v2 chưa khai báo hợp đồng). */
+const NO_SOURCE_METRIC = "Chưa cấu hình";
+
+/**
+ * Mô tả nguồn điểm chuẩn hóa theo hợp đồng đang cấu hình. Nháp v2 chưa khai báo metric thì nói rõ
+ * lấy từ tab Chấm điểm, không mặc định F1.
+ */
+function normalizationSourceHint(competition?: AdminCompetition): string {
+  const label = competition ? primaryMetricLabel(competition) : null;
+  if (!competition || !label || label === NO_SOURCE_METRIC) {
+    return "Điểm xếp hạng là norm 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.";
+  }
+  const direction = resultContract(competition.submission_config).higher_is_better
+    ? "cao hơn là tốt hơn"
+    : "thấp hơn là tốt hơn";
+  return `Điểm xếp hạng là norm 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.`;
+}
+
 /** Dùng chung create/edit. Create: nhập mọi field. Edit: slug/status khóa (backend enforce). */
 export function CompetitionFormModal({
   competition,
@@ -364,7 +385,7 @@ export function CompetitionFormModal({
   onSaved,
   returnFocusRef,
 }: {
-  competition?: Competition;
+  competition?: AdminCompetition;
   onClose: () => void;
   onSaved: (competition: AdminCompetition) => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
@@ -385,7 +406,7 @@ export function CompetitionFormModal({
   const [endAt, setEndAt] = useState(
     competition ? isoToLocalInput(competition.end_at) : "",
   );
-  const [joinMode, setJoinMode] = useState<Competition["join_mode"]>(
+  const [joinMode, setJoinMode] = useState<AdminCompetition["join_mode"]>(
     competition?.join_mode ?? "open",
   );
   const [quota, setQuota] = useState(
@@ -394,16 +415,27 @@ export function CompetitionFormModal({
   const [leaderboardVisible, setLeaderboardVisible] = useState(
     competition?.leaderboard_visible ?? true,
   );
+  const [normEnabled, setNormEnabled] = useState(
+    competition?.normalization?.enabled ?? false,
+  );
+  const [baseline, setBaseline] = useState(
+    competition?.normalization?.baseline != null
+      ? String(competition.normalization.baseline)
+      : "",
+  );
   const [resources, setResources] = useState<CompetitionResource[]>(
     competition?.resources ?? [],
   );
   const [dateError, setDateError] = useState("");
+  const [normError, setNormError] = useState("");
   const [resourceError, setResourceError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const title = isEdit
     ? `Sửa cuộc thi - ${competition.slug}`
     : "Tạo cuộc thi";
+  // Cấu hình norm chỉ sửa được khi cuộc thi còn nháp; bản clone là nháp mới nên sửa được như thường.
+  const normLocked = isEdit && competition.status !== "draft";
 
   function updateResource(index: number, patch: Partial<CompetitionResource>) {
     setResources((rows) =>
@@ -414,6 +446,7 @@ export function CompetitionFormModal({
   async function submit(event: FormEvent) {
     event.preventDefault();
     setDateError("");
+    setNormError("");
     setResourceError("");
     setError("");
 
@@ -421,6 +454,12 @@ export function CompetitionFormModal({
     const end = new Date(endAt);
     if (end <= start) {
       setDateError("Thời gian kết thúc phải sau thời gian bắt đầu.");
+      return;
+    }
+
+    const cleanedNormalization = cleanNormalization(normEnabled, baseline);
+    if (!cleanedNormalization.ok) {
+      setNormError(cleanedNormalization.message);
       return;
     }
 
@@ -447,6 +486,9 @@ export function CompetitionFormModal({
       quota_per_day: Number(quota),
       leaderboard_visible: leaderboardVisible,
       resources: resourcesPayload,
+      // Cuộc thi đã publish/closed bị backend khóa cấu hình norm: bỏ hẳn field để không làm
+      // hỏng các chỉnh sửa khác (JSON.stringify bỏ qua giá trị undefined).
+      normalization: normLocked ? undefined : cleanedNormalization.normalization,
     };
 
     try {
@@ -584,7 +626,7 @@ export function CompetitionFormModal({
             <fieldset className="ac-join-fieldset">
               <legend className="ac-required sr-only">Cách tham gia</legend>
               <div className="ac-join-options">
-                {(Object.keys(JOIN_MODE_LABEL) as Competition["join_mode"][]).map(
+                {(Object.keys(JOIN_MODE_LABEL) as AdminCompetition["join_mode"][]).map(
                   (mode) => (
                     <label
                       key={mode}
@@ -661,6 +703,56 @@ export function CompetitionFormModal({
                 </span>
               </label>
             </div>
+
+            <div className="ac-leaderboard-field">
+              <label htmlFor="comp-normalization">
+                <input
+                  id="comp-normalization"
+                  type="checkbox"
+                  checked={normEnabled}
+                  onChange={(event) => setNormEnabled(event.target.checked)}
+                  disabled={normLocked}
+                />
+                <span>
+                  <strong>Tính điểm chuẩn hóa (0–50)</strong>
+                  <small>{normalizationSourceHint(competition)}</small>
+                </span>
+              </label>
+            </div>
+
+            {normEnabled && (
+              <div className="ac-form-field">
+                <label className="ac-required" htmlFor="comp-baseline">
+                  Baseline chuẩn hóa
+                </label>
+                <input
+                  id="comp-baseline"
+                  className="ac-form-control ac-form-mono"
+                  type="number"
+                  step="any"
+                  value={baseline}
+                  onChange={(event) => setBaseline(event.target.value)}
+                  disabled={normLocked}
+                />
+                <small>
+                  Bài không vượt baseline (kể cả bằng) được 0 điểm norm. Baseline
+                  0 hoặc âm vẫn hợp lệ với metric tương ứng.
+                </small>
+              </div>
+            )}
+
+            {normLocked && (
+              <p className="ac-resource-hint">
+                Cấu hình chuẩn hóa chỉ sửa được khi cuộc thi còn nháp. Muốn đổi
+                baseline, hãy clone cuộc thi thành bản nháp mới.
+              </p>
+            )}
+
+            {normError && (
+              <div className="ac-date-error" role="alert">
+                {normError}
+              </div>
+            )}
           </FormSection>
 
           {!isEdit && (

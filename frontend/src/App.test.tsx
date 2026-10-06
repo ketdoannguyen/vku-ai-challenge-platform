@@ -1,4 +1,4 @@
-/** App: ranh giới công khai (ADR-014) - khách đọc được danh sách/chi tiết, trang cần danh tính thì chặn. */
+/** App: khách thấy danh sách và landing khóa; nội dung trong cuộc thi chỉ mở cho thành viên, trang cần danh tính thì chặn. */
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -6,6 +6,7 @@ import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 
+/** Payload giới thiệu công khai: khách chỉ thấy phần này, không có resources/submission_config. */
 const COMPETITION = {
   id: "1",
   slug: "ai-challenge-2026",
@@ -19,8 +20,17 @@ const COMPETITION = {
   quota_per_day: 5,
   leaderboard_visible: true,
   join_code_configured: false,
-  resources: [],
+  primary_metric_label: "F1",
   membership: { active: false, joined_at: null },
+  access: { allowed: false, reason: "login_required" },
+};
+
+/** Chi tiết đầy đủ backend trả sau khi đăng nhập và đã là thành viên. */
+const MEMBER_COMPETITION = {
+  ...COMPETITION,
+  membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  access: { allowed: true, reason: null },
+  resources: [],
   submission_config: {
     ready: false,
     id_column: null,
@@ -28,12 +38,13 @@ const COMPETITION = {
     average: null,
     pos_label: null,
     max_upload_mb: 10,
+    max_notebook_mb: 20,
   },
 };
 
 const CONTENTS = {
   contents: [
-    { id: "a", slug: "problem", title: "Đề bài", order: 10, visibility: "public", size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "a", slug: "problem", title: "Đề bài", order: 10, size_bytes: 10, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -41,6 +52,9 @@ const ACCOUNT = { id: "9", email: "team1@vku.vn", name: "Đội 1", role: "parti
 
 /** Phiên ẩn danh: `/auth/me` 401; các tuyến công khai trả dữ liệu bình thường. */
 function mockGuestApi() {
+  // Sau khi đăng nhập trong test, chi tiết cuộc thi phải trả payload thành viên - nếu vẫn
+  // trả landing khóa thì không test được luồng "đăng nhập xong quay lại đúng trang".
+  let loggedIn = false;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
@@ -48,10 +62,15 @@ function mockGuestApi() {
       const body = (value: unknown, status = 200) =>
         new Response(JSON.stringify(value), { status, headers: { "Content-Type": "application/json" } });
       if (url.endsWith("/auth/me")) return body({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, 401);
-      if (url.endsWith("/api/auth/login")) return body(ACCOUNT);
+      if (url.endsWith("/api/auth/login")) {
+        loggedIn = true;
+        return body(ACCOUNT);
+      }
       if (url.endsWith("/api/competitions")) return body({ competitions: [COMPETITION] });
       if (url.includes("/contents")) return body(CONTENTS);
-      if (url.endsWith("/api/competitions/ai-challenge-2026")) return body(COMPETITION);
+      if (url.endsWith("/api/competitions/ai-challenge-2026")) {
+        return body(loggedIn ? MEMBER_COMPETITION : COMPETITION);
+      }
       return body({ error: { code: "NOT_FOUND", message: "Không tìm thấy." } }, 404);
     }),
   );
@@ -84,10 +103,13 @@ test("khách vào / thấy danh sách cuộc thi, không bị đẩy về /login
   expect(main).not.toHaveClass("app-main-about");
 });
 
-test("khách vào chi tiết cuộc thi thấy nội dung công khai và lời mời đăng nhập", async () => {
+test("khách vào chi tiết cuộc thi thấy landing khóa kèm lời mời đăng nhập", async () => {
   mockGuestApi();
   renderAt("/competitions/ai-challenge-2026");
   expect(await screen.findByRole("heading", { level: 1, name: "AI Challenge 2026" })).toBeTruthy();
+  expect(
+    await screen.findByText("Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung."),
+  ).toBeTruthy();
   expect(screen.getByRole("link", { name: "Đăng nhập để tham gia" })).toBeTruthy();
 });
 
@@ -98,24 +120,35 @@ test("nút quay lại ở /login đưa khách về dashboard", async () => {
   expect(await screen.findByRole("heading", { level: 1, name: "Cuộc thi" })).toBeTruthy();
 });
 
-test("khách vào trang nộp bài bị đẩy về /login", async () => {
+test("khách vào URL nộp bài: gate đóng ở shell, không lộ form nộp", async () => {
   mockGuestApi();
   renderAt("/competitions/ai-challenge-2026/submit");
-  expect(await screen.findByLabelText("Mật khẩu")).toBeTruthy();
-  await waitFor(() => expect(screen.queryByRole("heading", { level: 1, name: "Cuộc thi" })).toBeNull());
+  expect(
+    await screen.findByText("Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: "Nộp bài dự đoán" })).toBeNull();
 });
 
-test("khách mở trang Hướng dẫn của cuộc thi, không bị đẩy về /login", async () => {
+test("khách mở URL Hướng dẫn của cuộc thi: chỉ thấy landing khóa, không bị đẩy về /login", async () => {
   mockGuestApi();
   renderAt("/competitions/ai-challenge-2026/huong-dan");
-  expect(await screen.findByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 })).toBeTruthy();
+  expect(
+    await screen.findByText("Vui lòng đăng nhập và tham gia cuộc thi để xem nội dung."),
+  ).toBeTruthy();
   expect(screen.queryByLabelText("Mật khẩu")).toBeNull();
-  expect(document.title).toBe("Hướng dẫn - AI Challenge");
+  // Nội dung hướng dẫn chỉ mở khi đã tham gia.
+  expect(screen.queryByRole("heading", { name: "Hướng dẫn nộp bài", level: 2 })).toBeNull();
 });
 
 test("đăng nhập xong quay lại đúng trang nộp bài đã bị chặn", async () => {
   mockGuestApi();
   renderAt("/competitions/ai-challenge-2026/submit");
+  // Lối đăng nhập trên landing khóa giữ URL đích; header cũng có link "Đăng nhập" nên
+  // phải khoanh vùng đúng link trong landing khóa.
+  const locked = (await screen.findByText("Nội dung cuộc thi dành cho thành viên"))
+    .closest(".comp-locked-card") as HTMLElement;
+  fireEvent.click(within(locked).getByRole("link", { name: "Đăng nhập" }));
+
   await userEvent.type(await screen.findByLabelText("Email"), ACCOUNT.email);
   await userEvent.type(screen.getByLabelText("Mật khẩu"), "matkhau1234");
   await userEvent.click(screen.getByRole("button", { name: "Đăng nhập" }));

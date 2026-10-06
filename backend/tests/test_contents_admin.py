@@ -35,7 +35,7 @@ def _competition(client, slug="content-cup"):
 
 
 def _create_content(client, cid, **overrides):
-    body = {"title": "Đề bài", "slug": "problem", "visibility": "public"}
+    body = {"title": "Đề bài", "slug": "problem"}
     body.update(overrides)
     return client.post(f"/api/admin/competitions/{cid}/contents", json=body)
 
@@ -51,11 +51,10 @@ def test_create_list_update_and_delete_content(client, isolated_data_dir):
     competition = _competition(client)
     cid = competition["id"]
     first = _create_content(client, cid)
-    second = _create_content(
-        client, cid, title="Rules", slug="rules", order=5, visibility="members"
-    )
+    second = _create_content(client, cid, title="Rules", slug="rules", order=5)
     assert first.status_code == 201
     assert first.json()["order"] == 10
+    assert "visibility" not in first.json()
     assert second.status_code == 201
 
     listed = client.get(f"/api/admin/competitions/{cid}/contents").json()["contents"]
@@ -64,7 +63,7 @@ def test_create_list_update_and_delete_content(client, isolated_data_dir):
     content_id = first.json()["id"]
     updated = client.patch(
         f"/api/admin/competitions/{cid}/contents/{content_id}",
-        json={"title": "Bài toán", "visibility": "members", "order": 20},
+        json={"title": "Bài toán", "order": 20},
     )
     assert updated.status_code == 200
     assert updated.json()["title"] == "Bài toán"
@@ -96,7 +95,6 @@ def test_content_validation_and_slug_collision(client):
         {"title": " ", "slug": "x"},
         {"title": "X", "slug": "Bad Slug"},
         {"title": "X", "slug": "x", "order": -1},
-        {"title": "X", "slug": "x", "visibility": "private"},
     ):
         response = client.post(f"/api/admin/competitions/{cid}/contents", json=body)
         assert response.status_code == 422

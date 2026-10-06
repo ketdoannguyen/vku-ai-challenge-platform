@@ -184,6 +184,17 @@ def test_submission_requires_auth_and_active_membership(client):
     assert no_membership.json()["error"]["code"] == "MEMBERSHIP_REQUIRED"
 
 
+def test_admin_without_membership_cannot_submit(client):
+    """Admin miễn membership ở mọi route đọc nhưng POST vẫn đòi tham gia: quota và số thứ tự bài
+    nằm trên document membership (ADR-060)."""
+    competition = ready_competition(client, slug="admin-submit-boundary")
+    login(client)  # admin, không có membership trong cuộc thi này
+    blocked = submit(client, competition["id"], b"id,prediction\n1,1\n2,1\n3,0\n4,0\n")
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "MEMBERSHIP_REQUIRED"
+    assert submission_documents(client) == []
+
+
 def test_submission_enforces_status_start_and_deadline(client):
     valid = b"id,prediction\n1,1\n2,1\n3,0\n4,0\n"
     closed = ready_competition(client, slug="closed-cup")

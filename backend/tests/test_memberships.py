@@ -411,9 +411,12 @@ def test_participant_leave_keeps_history_and_requires_admin_to_return(client):
     assert _membership_count(client) == 1
     assert client.get("/api/competitions/open-cup").json()["membership"]["active"] is False
 
-    # Lịch sử được bảo toàn: kết quả và thứ hạng vẫn còn sau khi rời.
-    leaderboard = client.get(f"/api/competitions/{competition['id']}/leaderboard").json()
-    assert [row["display_name"] for row in leaderboard["entries"]] == ["Thí Sinh"]
+    # Mất quyền đọc nội dung: BXH bị khóa với thành viên đã rời...
+    denied = client.get(f"/api/competitions/{competition['id']}/leaderboard")
+    assert denied.status_code == 403
+    assert denied.json()["error"]["code"] == "MEMBERSHIP_INACTIVE"
+    # ...nhưng dữ liệu được bảo toàn, không có gì bị xóa khỏi DB.
+    assert _submission_count(client, competition["id"]) == 1
 
     # Tự vào lại bị chặn - phải nhờ Ban Tổ chức kích hoạt.
     blocked = client.post("/api/competitions/open-cup/join", json={})
@@ -429,6 +432,11 @@ def test_participant_leave_keeps_history_and_requires_admin_to_return(client):
     assert reactivated.json()["reactivated"] is True
     # Kích hoạt lại không được reset joined_at - đó là mốc tham gia gốc.
     assert reactivated.json()["member"]["joined_at"][:23] == before["members"][0]["joined_at"][:23]
+
+    # Kích hoạt lại khôi phục quyền đọc cùng dữ liệu cũ.
+    _login_participant(client)
+    leaderboard = client.get(f"/api/competitions/{competition['id']}/leaderboard").json()
+    assert [row["display_name"] for row in leaderboard["entries"]] == ["Thí Sinh"]
 
 
 def test_leave_requires_login_and_existing_membership(client):

@@ -1,32 +1,57 @@
-"""Đối chiếu URL notebook không được coi host Drive bất kỳ là tài nguyên BTC."""
+"""Hậu kiểm đánh giá nguồn và dữ kiện phụ quét tài nguyên BTC - không gọi mạng.
+
+Model trả MỘT `source_assessment` cho cả notebook; ở đây khoá lại phần backend chắc được: vị trí
+trích dẫn có thật trong CODE cell, snippet dựng lại từ notebook, vị trí bị loại giữ kèm mã lý do, và
+bảng hạ trạng thái. URL Drive chỉ quyết định "có tài nguyên BTC để đối chiếu hay không"; riêng
+`find_resource_mentions` là dữ kiện phụ cho admin, không bao giờ quyết định trạng thái nguồn.
+"""
 
 import pytest
 
-from app.ai_review.models import ModelSourceSignal
+from app.ai_review import constants
+from app.ai_review.models import ModelEvidence, ModelSourceAssessment
 from app.ai_review.notebook import normalize_notebook
-from app.ai_review.sources import ResourceMention, drive_identity, find_resource_mentions, verify_source_signals
+from app.ai_review.sources import (
+    ResourceMention,
+    drive_identity,
+    find_resource_mentions,
+    verify_source_assessment,
+)
 from tests.helpers import notebook_bytes
 
-
-def review(code, resources=(), *, cell=1, start_line=1, end_line=1):
-    notebook = normalize_notebook(notebook_bytes(cells=[
-        {"cell_type": "code", "source": [f"{line}\n" for line in code]}
-    ]), max_chars=100_000)
-    signal = ModelSourceSignal(cell=cell, start_line=start_line, end_line=end_line, reason="Có lệnh tải dataset")
-    return verify_source_signals([signal], notebook=notebook, resources=list(resources))
+RESOURCE = {"label": "Dataset BTC", "url": "https://drive.google.com/file/d/GOOD1234567890abcdef/view"}
+DEFAULT_CELLS = (("code", ["import pandas as pd", "df = pd.read_csv('train.csv')"]),)
+# Cell 1 vừa ngân sách, cell 2 dài hơn phần còn lại: normalize cắt từ cell 2 trở đi.
+TRUNCATED_CELLS = (("code", ["import pandas as pd"]), ("code", ["x = " + "1" * 500]))
 
 
-def scan(cells, resources):
-    notebook = normalize_notebook(notebook_bytes(cells=[
-        {"cell_type": kind, "source": [f"{line}\n" for line in lines]}
-        for kind, lines in cells
-    ]), max_chars=100_000)
-    return find_resource_mentions(notebook, list(resources))
+def normalized(cells=DEFAULT_CELLS, *, max_chars=100_000):
+    return normalize_notebook(
+        notebook_bytes(cells=[
+            {"cell_type": kind, "source": [f"{line}\n" for line in lines]}
+            for kind, lines in cells
+        ]),
+        max_chars=max_chars,
+    )
+
+
+def assess(status, evidence=(), reason="Đề xuất của model."):
+    return ModelSourceAssessment(
+        status=status,
+        reason=reason,
+        evidence=[ModelEvidence(cell=c, start_line=s, end_line=e) for c, s, e in evidence],
+    )
+
+
+def verify(assessment, *, cells=DEFAULT_CELLS, resources=(RESOURCE,), max_chars=100_000):
+    return verify_source_assessment(
+        assessment, notebook=normalized(cells, max_chars=max_chars), resources=list(resources)
+    )
 
 
 @pytest.mark.parametrize("url", [
     "https://drive.google.com/file/d/FILE123/view",
-    "https://drive.google.com/uc?export=download&id=FILE123",
+    "http://drive.google.com/uc?export=download&id=FILE123",
     "https://drive.google.com/open?id=FILE123",
     "https://docs.google.com/spreadsheets/d/FILE123/edit",
 ])
@@ -41,224 +66,169 @@ def test_forms_and_multi_account_links_keep_their_real_ids():
     assert drive_identity("https://drive.google.com/file/u/0/d/FILE123/view") == ("file", "FILE123")
 
 
-def test_http_link_with_the_same_drive_id_is_recognized():
-    signal = review(["gdown.download('http://drive.google.com/uc?id=FILE123')"], [
-        {"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}
-    ])[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+def test_a_missing_assessment_is_not_evaluated_with_its_own_code():
+    result = verify(None)
+
+    assert result.status == constants.SOURCE_STATUS_NOT_EVALUATED
+    assert result.model_status is None
+    assert result.reason == ""
+    assert result.evidence == []
+    assert result.rejected_evidence == []
+    assert result.validation_codes == [constants.SOURCE_ASSESSMENT_MISSING]
 
 
-def test_exact_file_is_not_warned():
-    signals = review(["df = pd.read_csv('https://drive.google.com/uc?id=FILE123')"], [
-        {"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}
-    ])
-    assert signals[0].match == "MATCHED_RESOURCE"
-    assert signals[0].warning is False
-    assert signals[0].urls[0]["resource_label"] == "Dataset"
+@pytest.mark.parametrize("resources", [
+    [],
+    [{"label": "Web", "url": "https://example.org/dataset.zip"}],
+    # Drive link không có ID hợp lệ: không phải tài nguyên đối chiếu được.
+    [{"label": "Drive cá nhân", "url": "https://drive.google.com/file/d/"}],
+])
+def test_without_a_usable_btc_resource_the_proposal_is_not_evaluated(resources):
+    result = verify(assess("ALIGNED", [(1, 1, 1)]), resources=resources)
+
+    # Đề xuất gốc còn nguyên trong dấu vết; thứ bị hạ là kết luận.
+    assert result.model_status == "ALIGNED"
+    assert result.status == constants.SOURCE_STATUS_NOT_EVALUATED
+    assert result.reason == "Đề xuất của model."
+    assert result.validation_codes == [constants.SOURCE_RESOURCES_MISSING]
+    # Không có gì để đối chiếu thì cũng không kiểm trích dẫn: vị trí đúng cũng không được ghi nhận.
+    assert result.evidence == []
 
 
-def test_other_drive_file_is_not_automatically_official():
-    signals = review(["gdown.download('https://drive.google.com/file/d/OTHER/view')"], [
-        {"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}
-    ])
-    assert signals[0].match == "EXTERNAL_SOURCE"
-    assert signals[0].warning is True
+def test_the_snippet_is_rebuilt_from_the_notebook_not_taken_from_the_model():
+    lying = ModelSourceAssessment(
+        status="ALIGNED",
+        reason="Pipeline lấy dữ liệu từ nguồn BTC.",
+        evidence=[ModelEvidence(cell=1, start_line=1, end_line=2, snippet="BỊA RA")],
+    )
+
+    result = verify(lying)
+
+    assert result.status == constants.SOURCE_STATUS_ALIGNED
+    assert result.validation_codes == []
+    [evidence] = result.evidence
+    assert (evidence["cell"], evidence["start_line"], evidence["end_line"]) == (1, 1, 2)
+    assert "BỊA RA" not in evidence["snippet"]
+    assert "import pandas as pd" in evidence["snippet"]
+    assert "df = pd.read_csv('train.csv')" in evidence["snippet"]
 
 
-def test_shared_folder_cannot_prove_membership_of_file():
-    resource = [{"label": "Folder", "url": "https://drive.google.com/drive/folders/ROOT123"}]
-    assert review(["gdown.download_folder('https://drive.google.com/drive/folders/ROOT123')"], resource)[0].warning is False
-    signal = review(["gdown.download('https://drive.google.com/file/d/FILE123/view')"], resource)[0]
-    assert signal.match == "FOLDER_MEMBERSHIP_UNVERIFIED"
-    assert signal.warning is True
+def test_external_with_a_real_position_stays_external():
+    result = verify(assess("EXTERNAL", [(1, 1, 2)]))
+
+    assert result.status == constants.SOURCE_STATUS_EXTERNAL
+    assert result.model_status == "EXTERNAL"
+    assert result.validation_codes == []
 
 
-def test_gdown_id_matches_official_file():
-    signal = review(["gdown.download(id='FILE123')"], [
-        {"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}
-    ])[0]
-    assert signal.warning is False
+def test_unclear_may_cite_nothing_and_stays_unclear():
+    result = verify(assess("UNCLEAR"))
+
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.evidence == []
+    assert result.rejected_evidence == []
+    assert result.validation_codes == []
 
 
-def test_gdown_folder_id_matches_official_folder():
-    signal = review(["gdown.download_folder(id='ROOT123')"], [
-        {"label": "Folder", "url": "https://drive.google.com/drive/folders/ROOT123"}
-    ])[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.urls[0]["resource_label"] == "Folder"
-    assert signal.warning is False
+def test_a_citation_to_a_missing_cell_is_kept_as_evidence_of_the_rejection():
+    result = verify(assess("ALIGNED", [(7, 1, 1)]))
 
-
-def test_local_read_and_repeated_official_url_do_not_add_warning():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    code = [
-        "local = pd.read_csv('train.csv')",
-        "train = pd.read_csv('https://drive.google.com/uc?id=FILE123')",
-        "test = pd.read_csv('https://drive.google.com/uc?id=FILE123')",
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.model_status == "ALIGNED"
+    assert result.evidence == []
+    assert result.rejected_evidence == [
+        {"cell": 7, "start_line": 1, "end_line": 1,
+         "code": constants.SOURCE_EVIDENCE_CELL_NOT_FOUND}
     ]
-    signal = review(code, resource, end_line=len(code))[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_INVALID]
 
 
-def test_unrelated_static_api_call_does_not_downgrade_official_dataset():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    code = [
-        "requests.get('https://api.example.org/inference')",
-        "gdown.download(id='FILE123')",
+def test_cell_existence_is_checked_before_the_range():
+    """Cell 7 không tồn tại: mã phải là CELL_NOT_FOUND, không phải RANGE_INVALID - backend không được
+    đọc dòng của cell không có trong notebook đã gửi."""
+    result = verify(assess("EXTERNAL", [(7, 99, 99)]))
+
+    assert result.rejected_evidence[0]["code"] == constants.SOURCE_EVIDENCE_CELL_NOT_FOUND
+
+
+def test_a_citation_to_a_markdown_cell_is_not_code():
+    cells = (("markdown", ["Ghi chú kèm link"]), ("code", ["print(1)"]))
+    result = verify(assess("ALIGNED", [(1, 1, 1)]), cells=cells)
+
+    assert result.rejected_evidence == [
+        {"cell": 1, "start_line": 1, "end_line": 1,
+         "code": constants.SOURCE_EVIDENCE_CELL_NOT_CODE}
     ]
-    signal = review(code, resource, end_line=len(code))[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
 
 
-def test_multiple_calls_do_not_hide_unverified_sources():
-    signals = review([
-        "gdown.download('https://drive.google.com/file/d/FILE123/view'); gdown.download(other_id)"
-    ], [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}])
-    assert signals[0].match == "UNVERIFIED_SOURCE"
-    assert signals[0].warning is True
+@pytest.mark.parametrize(("start_line", "end_line"), [(3, 2), (1, 9)])
+def test_out_of_bounds_ranges_are_rejected_with_the_range_code(start_line, end_line):
+    # Notebook mặc định: cell 1 có đúng 2 dòng.
+    result = verify(assess("EXTERNAL", [(1, start_line, end_line)]))
 
-
-def test_non_drive_host_and_absent_resources_are_warned():
-    signal = review(["df = pd.read_csv('https://data.example.org/train.csv')"])[0]
-    assert signal.match == "EXTERNAL_SOURCE"
-    assert signal.warning is True
-
-
-def test_fake_drive_hostname_is_not_treated_as_official():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    signal = review(["gdown.download('https://drive.google.com.evil.org/file/d/FILE123/view')"], resource)[0]
-    assert signal.match == "EXTERNAL_SOURCE"
-
-
-def test_dynamic_url_is_unverified_but_local_read_is_not_flagged():
-    assert review(["df = pd.read_csv('/data/train.csv')"]) == []
-    signal = review(["requests.get(dataset_url)"])[0]
-    assert signal.match == "UNVERIFIED_SOURCE"
-    assert signal.warning is True
-    assert review(["df = pd.read_csv(dataset_url)"])[0].match == "UNVERIFIED_SOURCE"
-
-
-def test_dynamic_inference_api_and_model_archive_are_not_dataset_signals():
-    assert review(["requests.get(inference_api_url)"]) == []
-    assert review(["requests.get('https://example.org/models/checkpoint.zip')"]) == []
-    assert review(["requests.get('https://example.org/models/checkpoint.bin')"]) == []
-
-
-def test_incomplete_range_does_not_include_inline_comment_url():
-    resources = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    code = [
-        "requests.get('https://drive.google.com/uc?id=FILE123', headers={  # https://outside.example/train.csv",
-        "    'Authorization': token,",
-        "})",
+    assert result.rejected_evidence == [
+        {"cell": 1, "start_line": start_line, "end_line": end_line,
+         "code": constants.SOURCE_EVIDENCE_RANGE_INVALID}
     ]
-    signal = review(code, resources)[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_INVALID]
 
 
-def test_text_describing_a_download_is_not_an_id_argument():
-    resources = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    code = [
-        'notes = "example: gdown.download(id=\'OTHER\')"',
-        "gdown.download(id='FILE123')",
-    ]
-    signal = review(code, resources, end_line=len(code))[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+def test_mixed_evidence_keeps_the_valid_positions_and_names_the_rejected_ones():
+    result = verify(assess("ALIGNED", [(1, 1, 1), (7, 1, 1)]))
+
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.model_status == "ALIGNED"
+    assert [item["cell"] for item in result.evidence] == [1]
+    assert [item["cell"] for item in result.rejected_evidence] == [7]
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_PARTIALLY_INVALID]
 
 
-def test_id_text_in_another_argument_is_not_a_dataset_id():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    signal = review(["gdown.download(id='FILE123', quiet='note: id=\"OTHER\"')"], resource)[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+def test_external_survives_partial_rejection_with_a_warning():
+    """Một dấu hiệu dùng nguồn ngoài có thật là đủ cho EXTERNAL; trích dẫn sai chỉ còn là cảnh báo
+    để BTC đọc, không tự nâng kết luận lên chắc hơn."""
+    result = verify(assess("EXTERNAL", [(1, 1, 1), (7, 1, 1)]))
+
+    assert result.status == constants.SOURCE_STATUS_EXTERNAL
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_PARTIALLY_INVALID]
 
 
-def test_gdown_cli_url_matches_official_resource():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    signal = review(["!gdown https://drive.google.com/uc?id=FILE123"], resource)[0]
-    assert signal.match == "MATCHED_RESOURCE"
-    assert signal.warning is False
+def test_aligned_without_any_citation_is_downgraded_to_unclear():
+    result = verify(assess("ALIGNED"))
+
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.model_status == "ALIGNED"
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_MISSING]
 
 
-def test_gdown_cli_id_outside_resources_warns():
-    signal = review(["!gdown --id OTHER123"])[0]
-    assert signal.match == "EXTERNAL_SOURCE"
+def test_all_rejected_evidence_is_not_reported_as_missing_evidence():
+    result = verify(assess("ALIGNED", [(7, 1, 1), (1, 5, 6)]))
+
+    assert result.status == constants.SOURCE_STATUS_UNCLEAR
+    assert result.evidence == []
+    assert len(result.rejected_evidence) == 2
+    assert result.validation_codes == [constants.SOURCE_EVIDENCE_INVALID]
 
 
-def test_gdown_bare_file_id_matches_official_file():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    assert review(["!gdown FILE123"], resource)[0].match == "MATCHED_RESOURCE"
-    assert review(["gdown.download('FILE123')"], resource)[0].match == "MATCHED_RESOURCE"
+def test_a_truncated_notebook_downgrades_aligned_but_keeps_external_as_a_warning():
+    aligned = verify(assess("ALIGNED", [(1, 1, 1)]), cells=TRUNCATED_CELLS, max_chars=200)
+    assert aligned.status == constants.SOURCE_STATUS_UNCLEAR
+    assert aligned.validation_codes == [constants.SOURCE_NOTEBOOK_TRUNCATED]
+
+    external = verify(assess("EXTERNAL", [(1, 1, 1)]), cells=TRUNCATED_CELLS, max_chars=200)
+    assert external.status == constants.SOURCE_STATUS_EXTERNAL
+    assert external.validation_codes == [constants.SOURCE_NOTEBOOK_TRUNCATED]
 
 
-def test_gdown_cli_folder_id_matches_official_folder():
-    resource = [{"label": "Folder", "url": "https://drive.google.com/drive/folders/ROOT123"}]
-    assert review(["!gdown --folder --id ROOT123"], resource)[0].match == "MATCHED_RESOURCE"
-    assert review(["!gdown --folder ROOT123"], resource)[0].match == "MATCHED_RESOURCE"
+def test_a_citation_into_the_omitted_part_is_cell_not_found():
+    result = verify(assess("EXTERNAL", [(2, 1, 1)]), cells=TRUNCATED_CELLS, max_chars=200)
+
+    assert result.rejected_evidence[0]["code"] == constants.SOURCE_EVIDENCE_CELL_NOT_FOUND
+    assert constants.SOURCE_NOTEBOOK_TRUNCATED in result.validation_codes
 
 
-def test_remote_object_store_dataset_read_is_not_local():
-    for code in ["pd.read_csv('s3://bucket/train.csv')", "pd.read_parquet('gs://bucket/train.parquet')",
-                 "pd.read_csv('ftp://data.example.org/train.csv')"]:
-        signal = review([code])[0]
-        assert signal.match == "EXTERNAL_SOURCE"
-        assert signal.warning is True
-
-
-def test_fstring_description_does_not_count_as_download():
-    assert review(['notes = f"try gdown.download(id=\'OTHER\')"']) == []
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    signal = review(["gdown.download(id='FILE123', note=f\"id='OTHER'\")"], resource)[0]
-    assert signal.match == "MATCHED_RESOURCE"
-
-
-def test_dynamic_fstring_dataset_link_is_not_silently_dropped():
-    signal = review(["requests.get(f'https://data.example.org/{name}/train.csv')"])[0]
-    assert signal.match == "UNVERIFIED_SOURCE"
-
-
-def test_dataset_url_in_request_header_is_not_treated_as_source():
-    assert review(["requests.get('https://api.example.org/inference', headers={'X-Ref': 'https://data.example.org/train.csv'})"]) == []
-    signal = review(["requests.get(dataset_url, proxies={'https': 'http://127.0.0.1:8080'})"])[0]
-    assert signal.match == "UNVERIFIED_SOURCE"
-
-
-def test_shell_continuation_with_official_link_matches():
-    resource = [{"label": "Dataset", "url": "https://drive.google.com/file/d/FILE123/view"}]
-    code = ["!wget \\", "    https://drive.google.com/uc?id=FILE123"]
-    signal = review(code, resource, end_line=len(code))[0]
-    assert signal.match == "MATCHED_RESOURCE"
-
-
-def test_local_path_argument_does_not_override_external_url_in_adjacent_call():
-    code = ["pd.read_csv('/data/train.csv')", "pd.read_csv('https://data.example.org/train.csv')"]
-    signal = review(code, end_line=len(code))[0]
-    assert signal.match == "EXTERNAL_SOURCE"
-
-
-def test_limit_and_deduplicate_id_entries():
-    code = [f"gdown.download(id='OTHER{i}')" for i in range(8)]
-    signal = review(code, end_line=len(code))[0]
-    assert len(signal.urls) == 5
-
-
-def test_markdown_comments_and_invalid_ranges_do_not_generate_warnings():
-    assert review(["# wget https://outside.example/data.csv"]) == []
-    assert review(["x = 1  # wget https://outside.example/data.csv"]) == []
-    assert review(["df = pd.read_csv('train.csv')  # https://outside.example/data.csv"]) == []
-    assert review(["!pip install gdown"]) == []
-    assert review(["requests.get('https://outside.example/data.csv')"], cell=2) == []
-    assert review(["requests.get('https://outside.example/data.csv')"], start_line=2) == []
-
-
-def test_no_model_supplied_url_is_trusted():
-    signal = review(["requests.get('https://outside.example/data.csv')"])[0]
-    assert signal.urls[0]["url"] == "https://outside.example/data.csv"
-    assert "requests.get" in signal.snippet
+def scan(cells, resources):
+    return find_resource_mentions(normalized(cells), list(resources))
 
 
 OFFICIAL_FILE = {"label": "Dataset BTC", "url": "https://drive.google.com/file/d/FILE1234567890abcdefghij/view"}
@@ -302,14 +272,3 @@ def test_resource_scan_ignores_short_bare_id_substrings():
         [short],
     )
     assert mentions == [ResourceMention(label="Ngắn", cells=[1])]
-
-
-def test_mounted_drive_literal_path_is_flagged_not_dropped():
-    code = [
-        "from google.colab import drive",
-        "drive.mount('/content/drive')",
-        "df = pd.read_csv('/content/drive/MyDrive/Fashion/train.csv')",
-    ]
-    signal = review(code, end_line=len(code))[0]
-    assert signal.match == "UNVERIFIED_SOURCE"
-    assert signal.warning is True

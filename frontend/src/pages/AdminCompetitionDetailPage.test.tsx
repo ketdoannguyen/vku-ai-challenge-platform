@@ -40,8 +40,8 @@ const COMPETITION = {
 
 const CONTENTS = {
   contents: [
-    { id: "c1", slug: "problem", title: "Đề bài", order: 10, visibility: "public", size_bytes: 128, updated_at: "2026-09-15T00:00:00Z" },
-    { id: "c2", slug: "rules", title: "Rules", order: 20, visibility: "members", size_bytes: null, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "c1", slug: "problem", title: "Đề bài", order: 10, size_bytes: 128, updated_at: "2026-09-15T00:00:00Z" },
+    { id: "c2", slug: "rules", title: "Rules", order: 20, size_bytes: null, updated_at: "2026-09-15T00:00:00Z" },
   ],
 };
 
@@ -167,7 +167,6 @@ const AI_REVIEW_SETTINGS = {
         title: "Thể lệ",
         slug: "rules",
         order: 1,
-        visibility: "public",
         included: true,
         reason: "OK",
       },
@@ -303,7 +302,9 @@ test("tab Nội dung render table theo order + trạng thái file", async () => 
   expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("5 lượt/ngày");
   expect(screen.getByText("Chưa có file")).toBeTruthy();
   expect(screen.getByText("Đã upload")).toBeTruthy();
-  expect(screen.getByText("Chỉ thành viên")).toBeTruthy();
+  // Không còn cột/badge hiển thị "public vs members": mọi tài liệu đều chỉ thành viên active đọc được.
+  expect(screen.queryByText("Hiển thị")).toBeNull();
+  expect(screen.queryByText("Chỉ thành viên")).toBeNull();
 });
 
 test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter mở được picker", async () => {
@@ -1208,6 +1209,8 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   const leaderboard = screen.getByRole("region", { name: "Bảng xếp hạng của cuộc thi" });
   expect(leaderboard).toHaveAttribute("tabindex", "0");
   expect(within(leaderboard).getByRole("table")).toBeTruthy();
+  // Cuộc thi không bật norm: bảng giữ nguyên cột metric, không mọc thêm cột norm.
+  expect(screen.queryByText(/Điểm norm/)).toBeNull();
   // Danh sách bài nộp thì không: thẻ tự dồn cột nên không còn vùng cuộn nào để tab vào.
   const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
   expect(submissions).not.toHaveAttribute("tabindex");
@@ -1228,6 +1231,112 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
     expect(paged).toBeTruthy();
     expect(new URL(paged!.url, "http://localhost").searchParams.get("sort")).toBe("created_at");
   });
+});
+
+test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric nguồn xuống hàng phụ", async () => {
+  const normCompetition = {
+    ...COMPETITION,
+    normalization: { enabled: true, baseline: 0.5, version: 1 },
+  };
+  mockApi((url) => {
+    if (url.endsWith("/leaderboard")) {
+      return {
+        body: {
+          competition_id: COMPETITION.id,
+          primary_metric: "f1",
+          total: 1,
+          normalization: {
+            version: 1,
+            source_metric: "f1",
+            higher_is_better: true,
+            baseline: 0.5,
+            max_score: 50,
+            decimals: 2,
+            reference_best: 0.9,
+            calculated_at: "2026-09-15T08:00:00Z",
+          },
+          entries: [
+            {
+              rank: 1,
+              account_id: "u1",
+              display_name: "Thí Sinh",
+              primary_score: 0.9,
+              normalized_score: 50,
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              best_submission_id: "s1",
+              best_submission_at: "2026-09-15T09:00:00Z",
+              total_submissions: 2,
+            },
+          ],
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/submissions")) {
+      return {
+        body: {
+          submissions: [
+            {
+              id: "s1",
+              competition_id: COMPETITION.id,
+              status: "completed",
+              metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+              primary_score: 0.9,
+              created_at: "2026-09-15T09:00:00Z",
+              artifacts: { prediction: null, notebook: null },
+              account: { id: "u1", name: "Thí Sinh", email: "thi.sinh@vku.vn" },
+              review: null,
+              ai_review: null,
+              normalization_snapshot: {
+                version: 1,
+                source_metric: "f1",
+                higher_is_better: true,
+                baseline: 0.5,
+                reference_best: 0.8,
+                score: 37.5,
+                calculated_at: "2026-09-15T09:00:00Z",
+              },
+            },
+          ],
+          total: 1,
+          limit: 50,
+          offset: 0,
+        },
+        status: 200,
+      };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: normCompetition, status: 200 };
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Kết quả" }));
+  const leaderboard = await screen.findByRole("region", { name: "Bảng xếp hạng của cuộc thi" });
+  const table = within(leaderboard).getByRole("table");
+  // Norm là điểm xếp hạng: cột riêng đứng ngay sau đội; F1 gốc còn đó nhưng hết được nhấn.
+  const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
+  expect(headers).toEqual(["Hạng", "Đội", "Điểm norm (0–50)", "F1", "Precision", "Recall", "Số bài"]);
+  const normCell = within(table).getByText("50.00");
+  expect(normCell.className).toContain("primary-score");
+  expect(within(table).getByText("0.9000").className).not.toContain("primary-score");
+  // Summary tách điểm xếp hạng khỏi metric nguồn, kèm mẫu số và luật hòa điểm.
+  expect(screen.getByText(/Điểm xếp hạng: Norm \/ 50\./)).toBeTruthy();
+  expect(screen.getByText(/Metric nguồn F1 với baseline 0\.5000/)).toBeTruthy();
+  expect(screen.getByText(/Điểm gốc tốt nhất hiện tại 0\.9000/)).toBeTruthy();
+  expect(screen.getByText(/Bảng dựng lúc/)).toBeTruthy();
+  expect(screen.getByText(/nộp sớm hơn đứng trước/)).toBeTruthy();
+  // Danh sách submissions khóa cuộc thi nhận cờ norm qua prop: nhãn sort và trường điểm gốc
+  // không còn gọi là "Điểm chính"; snapshot tạm là trường riêng có tooltip hậu kiểm.
+  const sortSelect = screen.getByLabelText("Sắp xếp theo");
+  expect(within(sortSelect).getByRole("option", { name: "Điểm gốc" })).toBeTruthy();
+  const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
+  const card = within(submissions).getByRole("listitem");
+  expect(within(card).getByText("Điểm gốc")).toBeTruthy();
+  expect(within(card).getByText("Norm tạm lúc ghi nhận kết quả")).toBeTruthy();
+  const snapshot = within(card).getByText("37.50");
+  expect(snapshot.closest(".subm-score")?.getAttribute("title")).toBe(
+    "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
+  );
 });
 
 test("tab Kết quả khóa bảng bài nộp vào cuộc thi đang mở", async () => {

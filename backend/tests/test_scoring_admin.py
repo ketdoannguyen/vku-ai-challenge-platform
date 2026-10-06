@@ -147,13 +147,21 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
     _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")
     public = client.get("/api/competitions/scoring-cup")
     assert public.status_code == 200
-    # Participant chưa join vẫn thấy cấu hình, nhưng pos_label (nhãn dương thật) bị giấu.
-    assert public.json()["submission_config"] == {
+    # Chưa tham gia: chỉ còn landing khóa, không lộ cấu hình bài nộp.
+    assert public.json()["access"] == {"allowed": False, "reason": "membership_required"}
+    assert "submission_config" not in public.json()
+    assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404
+
+    assert client.post("/api/competitions/scoring-cup/join", json={}).status_code == 200
+    member = client.get("/api/competitions/scoring-cup").json()
+    # Thành viên đang hoạt động thấy đủ cấu hình, kể cả pos_label (nhãn dương thật).
+    assert member["submission_config"] == {
         "ready": True,
         "version": 1,
         "id_column": "id",
         "prediction_column": "prediction",
         "average": "binary",
+        "pos_label": "1",
         "max_upload_mb": 10,
         "max_notebook_mb": 20,
         "primary_metric": "f1",
@@ -169,14 +177,13 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
             "visible_metrics": None,
         },
     }
-    assert client.get(f"/api/competitions/{cid}/ground-truth").status_code == 404
 
     expected.unlink()
     outside = isolated_data_dir / "outside.csv"
     outside.write_bytes(b"id,label\n1,0\n2,1\n")
     expected.symlink_to(outside)
-    public_after_symlink = client.get("/api/competitions/scoring-cup")
-    assert public_after_symlink.json()["submission_config"]["ready"] is False
+    member_after_symlink = client.get("/api/competitions/scoring-cup")
+    assert member_after_symlink.json()["submission_config"]["ready"] is False
     _login(client)
     admin_after_symlink = client.get(f"/api/admin/competitions/{cid}/scoring")
     assert admin_after_symlink.json()["ready"] is False
@@ -197,7 +204,8 @@ def test_pos_label_revealed_only_to_active_member(client, isolated_data_dir):
     assert client.post(f"/api/admin/competitions/{cid}/publish").status_code == 200
 
     _login(client, "thi.sinh@vku.vn", "thisinhmatkhau1")
-    assert "pos_label" not in client.get("/api/competitions/scoring-cup").json()["submission_config"]
+    # Chưa tham gia: không có cấu hình bài nộp nào để lộ nhãn dương.
+    assert "submission_config" not in client.get("/api/competitions/scoring-cup").json()
 
     assert client.post("/api/competitions/scoring-cup/join", json={}).status_code == 200
     assert client.get("/api/competitions/scoring-cup").json()["submission_config"]["pos_label"] == "1"
@@ -206,7 +214,9 @@ def test_pos_label_revealed_only_to_active_member(client, isolated_data_dir):
         await client.app.state.mongo.db[MEMBERSHIPS_COLLECTION].update_many({}, {"$set": {"active": False}})
 
     asyncio.run(deactivate())
-    assert "pos_label" not in client.get("/api/competitions/scoring-cup").json()["submission_config"]
+    revoked = client.get("/api/competitions/scoring-cup").json()
+    assert revoked["access"] == {"allowed": False, "reason": "membership_inactive"}
+    assert "submission_config" not in revoked
 
 
 def test_ground_truth_requires_valid_config_and_keeps_invalid_file_out(client, isolated_data_dir):

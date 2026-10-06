@@ -7,7 +7,6 @@ export interface ContentSummary {
   slug: string;
   title: string;
   order: number;
-  visibility: "public" | "members";
   size_bytes: number | null;
   updated_at: string;
 }

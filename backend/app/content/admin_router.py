@@ -35,12 +35,7 @@ async def create_content(
     request: Request,
     admin: AdminAccount,
 ) -> dict:
-    _validate_content(
-        title=body.title,
-        slug=body.slug,
-        order=body.order,
-        visibility=body.visibility,
-    )
+    _validate_content(title=body.title, slug=body.slug, order=body.order)
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
     try:

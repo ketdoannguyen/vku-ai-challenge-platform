@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
-import type { AdminCompetition, AdminCompetitionsResponse, Competition } from "../api/competitions";
+import type { AdminCompetition, AdminCompetitionsResponse } from "../api/competitions";
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
@@ -25,7 +25,7 @@ import { useAutoRefresh } from "../hooks/useAutoRefresh";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const PAGE_SIZE = 5;
-type StatusFilter = "all" | Competition["status"];
+type StatusFilter = "all" | AdminCompetition["status"];
 
 const FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "Tất cả" },
@@ -160,9 +160,9 @@ export function AdminCompetitionsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Competition | null>(null);
-  const [confirming, setConfirming] = useState<{ action: CompetitionAction; competition: Competition } | null>(null);
-  const [deleting, setDeleting] = useState<Competition | null>(null);
+  const [editing, setEditing] = useState<AdminCompetition | null>(null);
+  const [confirming, setConfirming] = useState<{ action: CompetitionAction; competition: AdminCompetition } | null>(null);
+  const [deleting, setDeleting] = useState<AdminCompetition | null>(null);
   // Modal mở từ menu ba chấm: menu unmount ngay khi chọn item nên Modal không thấy
   // được nút trigger là "focus trước đó" - nhớ ref của row để trả focus về đúng chỗ.
   const editReturnFocus = useRef<HTMLButtonElement | null>(null);

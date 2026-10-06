@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Competition } from "../api/competitions";
+import type { CompetitionDetail } from "../api/competitions";
 import { setDocumentHidden } from "../test/timers";
 import { LeaderboardPage } from "./LeaderboardPage";
 
@@ -18,19 +18,39 @@ async function advance(ms: number) {
   });
 }
 
-const COMPETITION = {
+const COMPETITION: CompetitionDetail = {
   id: "64a000000000000000000001",
   slug: "results-cup",
   name: "Results Cup",
+  short_description: "",
+  status: "published",
+  start_at: "2026-01-01T00:00:00Z",
+  end_at: "2027-01-01T00:00:00Z",
+  join_mode: "open",
   primary_metric: "f1",
+  quota_per_day: 5,
   leaderboard_visible: true,
-} as Competition;
+  join_code_configured: false,
+  primary_metric_label: "F1",
+  membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
+  access: { allowed: true, reason: null },
+  resources: [],
+  submission_config: {
+    ready: true,
+    id_column: "id",
+    prediction_column: "prediction",
+    average: "binary",
+    pos_label: "1",
+    max_upload_mb: 10,
+    max_notebook_mb: 20,
+  },
+};
 
 /**
  * Cuộc thi v2 khai báo metric riêng. `primary_metric` của document vẫn là "f1" (field v1 còn sót
  * lại) nên test này chứng minh bảng đọc hợp đồng chứ không đọc field cũ đó.
  */
-const V2_COMPETITION: Competition = {
+const V2_COMPETITION: CompetitionDetail = {
   ...COMPETITION,
   submission_config: {
     ready: true,
@@ -48,7 +68,7 @@ const V2_COMPETITION: Competition = {
 };
 
 /** Bản nháp v2 chưa khai báo metric: hợp đồng rỗng, không metric nào là chỉ số chính. */
-const V2_DRAFT_COMPETITION: Competition = {
+const V2_DRAFT_COMPETITION: CompetitionDetail = {
   ...COMPETITION,
   submission_config: {
     ready: false,
@@ -61,11 +81,14 @@ const V2_DRAFT_COMPETITION: Competition = {
   },
 };
 
-function renderPage(competition: Competition = COMPETITION) {
+/** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
+const reportAccessLost = vi.fn();
+
+function renderPage(competition: CompetitionDetail = COMPETITION) {
   return render(
     <MemoryRouter initialEntries={["/competitions/results-cup/leaderboard"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition, contents: [] }} />}>
+        <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/leaderboard" element={<LeaderboardPage />} />
         </Route>
       </Routes>
@@ -80,8 +103,8 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function mockResponse(body: unknown) {
-  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body)));
+function mockResponse(body: unknown, status = 200) {
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(body, status)));
 }
 
 /** Fetch phân trang thật; `gateOffset` giữ response của một trang lại để kiểm tra lúc đang tải. */
@@ -146,6 +169,7 @@ function entry(rank: number, name: string, overrides: Record<string, unknown> = 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  reportAccessLost.mockClear();
   vi.useRealTimers();
   setDocumentHidden(false);
 });
@@ -181,6 +205,93 @@ test("leaderboard visible hiển thị rank, score và highlight current user", 
   expect(screen.getByText(/Xếp theo F1 tốt nhất/)).toBeTruthy();
 });
 
+/** Metadata norm của một lần dựng bảng; test nào cần thì chèn vào payload trang. */
+const NORM_BOARD = {
+  version: 1,
+  source_metric: "f1",
+  higher_is_better: true,
+  baseline: 0.5,
+  max_score: 50,
+  decimals: 2,
+  reference_best: 0.9,
+  calculated_at: "2026-09-15T08:00:00Z",
+};
+
+test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn ở cột phụ", async () => {
+  mockResponse(
+    page({
+      total: 2,
+      normalization: NORM_BOARD,
+      entries: [
+        entry(1, "Đội Sớm", { normalized_score: 50 }),
+        entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+      ],
+      me: entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+    }),
+  );
+
+  renderPage();
+
+  expect(await screen.findByText("Đội Sớm")).toBeTruthy();
+  // Cột norm đứng trước các metric của hợp đồng và nêu rõ thang 0–50.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "Điểm norm (0–50)",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+
+  const top = screen.getByText("Đội Sớm").closest("tr") as HTMLElement;
+  // Điểm xếp hạng là norm 2 chữ số; cột F1 của cùng dòng không còn được nhấn là điểm chính.
+  expect(within(top).getByText("50.00")).toHaveClass("primary-score");
+  expect(within(top).getByText("0.9900")).not.toHaveClass("primary-score");
+
+  // Quy tắc tie-break nói bằng ngôn ngữ norm, kèm mẫu số và thời điểm dựng bảng.
+  expect(
+    screen.getByText(/Bằng norm: bài hợp lệ đạt điểm đó được nộp sớm hơn đứng trước/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/Baseline F1 0\.5000 · Điểm gốc tốt nhất hiện tại 0\.9000 · Bảng dựng lúc/),
+  ).toBeTruthy();
+
+  // Dải cá nhân dùng norm hiện tại từ bảng, không phải điểm gốc.
+  const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(within(meStrip).getByText("Điểm norm")).toBeTruthy();
+  expect(within(meStrip).getByText("12.50")).toBeTruthy();
+});
+
+test("norm bị ẩn (metadata null): giữ nguyên giao diện điểm gốc", async () => {
+  mockResponse(
+    page({
+      total: 1,
+      normalization: null,
+      entries: [entry(1, "Đội Sớm", { normalized_score: null })],
+      me: entry(1, "Đội Sớm", { is_current_user: true, normalized_score: null }),
+    }),
+  );
+
+  renderPage();
+
+  expect(await screen.findByText("Đội Sớm")).toBeTruthy();
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Hạng",
+    "Đội / tài khoản",
+    "F1",
+    "Precision",
+    "Recall",
+    "Đạt lúc",
+  ]);
+  // Không rò mẫu số của người khác khi quyền xem đã bị thu hồi.
+  expect(screen.queryByText(/Baseline/)).toBeNull();
+  expect(screen.queryByText("Điểm norm")).toBeNull();
+  const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
+  expect(within(meStrip).getByText("Điểm chính")).toBeTruthy();
+  expect(within(meStrip).getByText("0.9900")).toBeTruthy();
+});
+
 test("leaderboard hidden hiển thị thông báo và không gọi API", async () => {
   vi.useFakeTimers();
   const fetchMock = vi.fn();
@@ -190,6 +301,16 @@ test("leaderboard hidden hiển thị thông báo và không gọi API", async (
   // Chưa công bố thì cả vòng tự làm mới ngầm cũng không được chạy.
   await advance(AUTO_REFRESH_MS * 5);
   expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("mất quyền đọc cuộc thi: báo shell khóa gate thay vì hiện lỗi tải bảng", async () => {
+  mockResponse({ error: { code: "UNAUTHORIZED", message: "Chưa đăng nhập." } }, 401);
+
+  renderPage();
+
+  await waitFor(() => expect(reportAccessLost).toHaveBeenCalledWith("login_required"));
+  // Lỗi phân quyền không phải lỗi tải: không hiện băng báo lỗi, shell sẽ thay cả trang.
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("leaderboard visible nhưng chưa có điểm hiển thị empty state", async () => {
@@ -551,9 +672,12 @@ test("bảng bị ẩn giữa chừng: 403 xoá điểm đã tải thay vì đ�
 
   hidden = true;
   await advance(AUTO_REFRESH_MS);
-  // Quyền xem đã mất: điểm cũ không được nằm lại trên màn hình.
+  // Bảng vừa bị ẩn: điểm cũ không được nằm lại trên màn hình. Shell sẽ phát hiện qua lượt
+  // làm mới của chính nó và thay bằng thẻ "chưa công bố", nên trang bảng không báo lỗi.
   expect(screen.queryByText("Người 1")).toBeNull();
-  expect(screen.getByRole("alert")).toHaveTextContent("Bảng xếp hạng hiện chưa được công bố.");
+  expect(screen.queryByRole("alert")).toBeNull();
+  // Ẩn bảng không phải mất quyền đọc cuộc thi - không được khóa cả gate.
+  expect(reportAccessLost).not.toHaveBeenCalled();
 
   // 403 là lỗi quyền: vòng tự làm mới dừng hẳn, không quay lại hỏi nữa.
   const calls = urls.length;

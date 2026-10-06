@@ -3,7 +3,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
-import type { Competition, JoinResponse, LeaveResponse, Membership } from "../api/competitions";
+import type {
+  CompetitionSummary,
+  JoinResponse,
+  LeaveResponse,
+  Membership,
+} from "../api/competitions";
 import { useOptionalAuth } from "../auth/AuthContext";
 import { returnToFromLocation } from "../auth/returnTo";
 import { ConfirmModal, Modal } from "./Modal";
@@ -76,7 +81,7 @@ export function JoinControl({
   showEnter = true,
   onEngagedChange,
 }: {
-  competition: Competition;
+  competition: CompetitionSummary;
   onMembershipChange: (membership: Membership) => void;
   /** Danh sách chỉ mời vào cuộc thi; rời cuộc thi là thao tác ở trang chi tiết. */
   showLeave?: boolean;
@@ -171,16 +176,9 @@ export function JoinControl({
     );
   }
 
-  if (competition.join_mode === "invite_only") {
-    return (
-      <span className="join-state">
-        <span className="join-state-note">Chỉ dành cho tài khoản được mời.</span>
-      </span>
-    );
-  }
-
-  // Đặt sau các nhánh "đã kết thúc"/"chỉ theo lời mời": đăng nhập không mở được khoá
-  // ở hai trường hợp đó, nên chỉ thay đúng hai nhánh thực sự gọi API tham gia.
+  // Đặt sau hai nhánh "đã kết thúc"/"hết hạn" (những cuộc thi đó không còn nút tham gia để mở;
+  // landing khóa ở trang chi tiết lo lối đăng nhập cho khách), nhưng trước nhánh "chỉ theo lời
+  // mời": người đã được BTC thêm membership phải đăng nhập được để xác thực và đọc nội dung.
   if (isGuest) {
     return (
       <span className="join-state">
@@ -192,6 +190,14 @@ export function JoinControl({
           Đăng nhập để tham gia
           <IconArrow />
         </Link>
+      </span>
+    );
+  }
+
+  if (competition.join_mode === "invite_only") {
+    return (
+      <span className="join-state">
+        <span className="join-state-note">Chỉ dành cho tài khoản được mời.</span>
       </span>
     );
   }
@@ -208,7 +214,7 @@ function OpenJoin({
   onMembershipChange,
   onEngagedChange,
 }: {
-  competition: Competition;
+  competition: CompetitionSummary;
   onMembershipChange: (membership: Membership) => void;
   onEngagedChange?: (engaged: boolean) => void;
 }) {
@@ -253,7 +259,7 @@ function CodeJoin({
   onMembershipChange,
   onEngagedChange,
 }: {
-  competition: Competition;
+  competition: CompetitionSummary;
   onMembershipChange: (membership: Membership) => void;
   onEngagedChange?: (engaged: boolean) => void;
 }) {

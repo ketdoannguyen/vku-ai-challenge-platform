@@ -13,6 +13,7 @@ import pytest
 from bson import ObjectId
 
 from app.ai_review import constants, queue, service
+from app.competitions.service import COMPETITIONS_COLLECTION
 from app.content.service import CONTENTS_COLLECTION
 from app.core.config import get_settings
 from app.submissions.service import SUBMISSIONS_COLLECTION
@@ -83,7 +84,7 @@ def _add_rules(client, competition_id: str) -> None:
     login(client)
     created = client.post(
         f"/api/admin/competitions/{competition_id}/contents",
-        json={"title": "Thể lệ", "slug": "rules", "visibility": "public"},
+        json={"title": "Thể lệ", "slug": "rules"},
     )
     assert created.status_code == 201, created.text
     uploaded = client.put(
@@ -114,6 +115,21 @@ def enable_ai(
             "api_key": API_KEY,
         },
     )
+
+
+def _set_resources(client, slug: str) -> None:
+    """Gắn một tài nguyên BTC vào cuộc thi trước lúc nộp để snapshot chụp được nó."""
+
+    async def write():
+        await _db(client)[COMPETITIONS_COLLECTION].update_one(
+            {"slug": slug},
+            {"$set": {"resources": [
+                {"label": "Dataset BTC",
+                 "url": "https://drive.google.com/file/d/GOOD1234567890abcdef/view"}
+            ]}},
+        )
+
+    asyncio.run(write())
 
 
 @pytest.fixture()
@@ -317,15 +333,19 @@ def test_admin_list_carries_the_compact_projection(client, competition):
     assert item["ai_review"]["state"] == constants.AI_STATE_COMPLETED
     assert item["ai_review"]["verdict"] == constants.VERDICT_CLEAR
     assert item["ai_review"]["run_id"]
-    assert item["ai_review"]["source_warning_count"] == 0
+    # Lượt này không kèm đánh giá nguồn: trạng thái có version hợp lệ nhưng nói đúng "chưa đánh
+    # giá được", không mặc định sạch.
+    assert item["ai_review"]["source_status"] == constants.SOURCE_STATUS_NOT_EVALUATED
+    assert item["ai_review"]["source_signal_version"] == constants.SOURCE_SIGNAL_VERSION
 
 
-def test_admin_pending_review_has_no_source_warning_count_yet(client, competition):
+def test_admin_pending_review_has_no_source_status_yet(client, competition):
     assert enable_ai(client, competition["id"]).status_code == 200
     submit_as_participant(client, competition["id"])
 
     item = _admin_list(client, competition["id"])["submissions"][0]
-    assert item["ai_review"]["source_warning_count"] is None
+    assert item["ai_review"]["source_status"] is None
+    assert item["ai_review"]["source_signal_version"] is None
 
 
 def test_every_ai_filter_value_is_independent_from_scoring_and_human_review(client, competition):
@@ -343,6 +363,96 @@ def test_every_ai_filter_value_is_independent_from_scoring_and_human_review(clie
     # Trục AI không được kéo theo trục chấm điểm hay trục duyệt của BTC.
     assert len(_admin_list(client, competition["id"], status="completed")["submissions"]) == 2
     assert len(_admin_list(client, competition["id"], review="accepted")["submissions"]) == 2
+
+
+def test_the_source_filters_read_the_verified_assessment_status(client, competition):
+    assert enable_ai(client, competition["id"]).status_code == 200
+    _set_resources(client, competition["slug"])
+    submit_as_participant(client, competition["id"])
+    run_worker(client, handler({**CLEAR_OUTPUT, "source_assessment": {
+        "status": "EXTERNAL",
+        "reason": "Code đọc dữ liệu từ nguồn ngoài.",
+        "evidence": [{"cell": 1, "start_line": 1, "end_line": 1}],
+    }}))
+
+    listed = _admin_list(client, competition["id"], ai_review="source_external")["submissions"]
+    assert len(listed) == 1
+    assert _admin_list(client, competition["id"], ai_review="source_unclear")["submissions"] == []
+    assert _admin_list(client, competition["id"], ai_review="source_not_evaluated")["submissions"] == []
+
+
+def test_an_aligned_assessment_with_broken_citations_lands_in_source_unclear(client, competition):
+    assert enable_ai(client, competition["id"]).status_code == 200
+    _set_resources(client, competition["slug"])
+    submit_as_participant(client, competition["id"])
+    run_worker(client, handler({**CLEAR_OUTPUT, "source_assessment": {
+        "status": "ALIGNED",
+        "reason": "Toàn pipeline nối về nguồn BTC.",
+        # Cell 9 không tồn tại trong notebook đã gửi: trích dẫn bị loại, ALIGNED hạ xuống UNCLEAR.
+        "evidence": [{"cell": 9, "start_line": 1, "end_line": 1}],
+    }}))
+
+    assert len(_admin_list(client, competition["id"], ai_review="source_unclear")["submissions"]) == 1
+    assert _admin_list(client, competition["id"], ai_review="source_external")["submissions"] == []
+
+
+def test_a_legacy_row_with_zero_warnings_is_still_not_evaluated(client, competition):
+    """Row COMPLETED do code cũ ghi - kể cả khi đếm cảnh báo bằng 0 - chưa từng được đánh giá theo
+    phiên bản mới, nên thuộc `source_not_evaluated` chứ không được coi là đã xác minh."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submit_as_participant(client, competition["id"])
+
+    async def degrade():
+        await _db(client)[SUBMISSIONS_COLLECTION].update_one(
+            {},
+            {
+                "$unset": {"ai_review.source_status": "", "ai_review.source_signal_version": ""},
+                "$set": {
+                    "ai_review.state": constants.AI_STATE_COMPLETED,
+                    "ai_review.verdict": constants.VERDICT_CLEAR,
+                    "ai_review.source_warning_count": 0,
+                },
+            },
+        )
+
+    asyncio.run(degrade())
+
+    items = _admin_list(client, competition["id"], ai_review="source_not_evaluated")["submissions"]
+    assert len(items) == 1
+    # Version lạc hậu không được hiển thị như một kết luận nguồn còn hiệu lực.
+    assert items[0]["ai_review"]["source_status"] is None
+    assert items[0]["ai_review"]["source_signal_version"] is None
+    assert _admin_list(client, competition["id"], ai_review="source_external")["submissions"] == []
+
+
+def test_a_source_status_from_an_older_version_is_not_trusted(client, competition):
+    """Rollback: status sót lại từ phiên bản nguồn khác không được sống lại như kết quả mới -
+    cả bộ lọc lẫn projection đều phải coi row đó là chưa đánh giá."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    submit_as_participant(client, competition["id"])
+
+    async def stale():
+        await _db(client)[SUBMISSIONS_COLLECTION].update_one(
+            {},
+            {
+                "$set": {
+                    "ai_review.state": constants.AI_STATE_COMPLETED,
+                    "ai_review.verdict": constants.VERDICT_CLEAR,
+                    "ai_review.source_status": constants.SOURCE_STATUS_ALIGNED,
+                    "ai_review.source_signal_version": "dataset-source-v2",
+                }
+            },
+        )
+
+    asyncio.run(stale())
+
+    items = _admin_list(client, competition["id"], ai_review="source_not_evaluated")["submissions"]
+    assert len(items) == 1
+    assert items[0]["ai_review"]["source_status"] is None
+    # Version vẫn hiện để admin biết dữ liệu chưa hậu kiểm lại, nhưng không kèm status nào.
+    assert items[0]["ai_review"]["source_signal_version"] == "dataset-source-v2"
+    assert _admin_list(client, competition["id"], ai_review="source_external")["submissions"] == []
+    assert _admin_list(client, competition["id"], ai_review="source_unclear")["submissions"] == []
 
 
 def test_a_legacy_submission_is_the_only_thing_under_none(client, competition):
@@ -431,6 +541,55 @@ def test_an_audit_row_from_before_hybrid_bd_still_serializes(client, competition
     assert versions["rule_ref"] is None
     assert versions["verifier"] is None
     assert versions["prompt"] == constants.PROMPT_VERSION
+
+
+def test_the_history_serves_the_new_assessment_and_keeps_old_signals_readable(
+    client, competition
+):
+    """Hai thế hệ audit row cùng đọc được: row mới trả assessment, row cũ vẫn giữ nguyên
+    `source_signals` - lịch sử không bị viết lại và endpoint không 500."""
+    assert enable_ai(client, competition["id"]).status_code == 200
+    _set_resources(client, competition["slug"])
+    submitted = submit_as_participant(client, competition["id"]).json()
+    run_worker(client, handler({**CLEAR_OUTPUT, "source_assessment": {
+        "status": "UNCLEAR",
+        "reason": "Chưa nối được nguồn gốc của tệp.",
+        "evidence": [],
+    }}))
+
+    fresh = _detail(client, submitted["id"])["history"][0]
+    assert fresh["source_assessment"]["status"] == constants.SOURCE_STATUS_UNCLEAR
+    assert fresh["source_assessment"]["model_status"] == constants.SOURCE_STATUS_UNCLEAR
+    assert fresh["source_signals"] == []
+
+    legacy_signals = [
+        {
+            "cell": 1,
+            "start_line": 1,
+            "end_line": 1,
+            "snippet": "1 print('hi')",
+            "reason": "đọc dữ liệu cục bộ",
+            "match": "UNVERIFIED_SOURCE",
+            "urls": [],
+            "warning": True,
+        }
+    ]
+
+    async def degrade():
+        await _db(client)[service.REVIEWS_COLLECTION].update_one(
+            {},
+            {
+                "$unset": {"source_assessment": "", "source_signal_version": ""},
+                "$set": {"source_signals": legacy_signals},
+            },
+        )
+
+    asyncio.run(degrade())
+
+    old = _detail(client, submitted["id"])["history"][0]
+    assert old["source_assessment"] is None
+    assert old["source_signals"] == legacy_signals
+    assert old["versions"]["source_signal"] is None
 
 
 def test_the_admin_sees_the_participant_summary_in_the_list_and_the_history(client, competition):
@@ -524,6 +683,9 @@ def test_rerun_clears_the_participant_summary_of_the_superseded_run(client, comp
     stored = document(client, SUBMISSIONS_COLLECTION, {})["ai_review"]
     assert stored["state"] == constants.AI_STATE_QUEUED
     assert stored["participant_summary"] is None
+    # Trạng thái nguồn của lượt cũ cũng phải chết theo: lượt mới chưa có đánh giá nào.
+    assert stored["source_status"] is None
+    assert stored["source_signal_version"] is None
 
 
 def test_rerun_is_refused_while_a_review_is_still_queued(client, competition):

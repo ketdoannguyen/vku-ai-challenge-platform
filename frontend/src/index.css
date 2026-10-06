@@ -3740,6 +3740,91 @@ button.resource-link:disabled {
   margin-top: var(--space-md);
 }
 
+/* Landing khóa: masthead giới thiệu vẫn hiện, phần bên trong thay bằng khối này.
+   Cùng công thức với `.lb-locked-card` để hai trạng thái hạn chế đọc như một hệ. */
+.comp-locked-card {
+  width: 100%;
+  border-radius: var(--radius-2xl);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--vku-blue-600);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+  padding: 40px 24px;
+}
+
+@media (min-width: 40rem) {
+  .comp-locked-card {
+    padding: 56px 40px;
+  }
+}
+
+.comp-locked-content {
+  max-width: 48rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.comp-locked-content .vku-accent {
+  margin-bottom: var(--space-lg);
+}
+
+/* Khoá = trạng thái hạn chế, nên khối icon dùng vàng highlight thay vì xanh hành động. */
+.comp-locked-emblem {
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-2xl);
+  background: var(--vku-yellow-100);
+  border: 1px solid var(--vku-yellow-500);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  color: var(--vku-yellow-800);
+}
+
+.comp-locked-title {
+  font-family: var(--font-display);
+  font-size: var(--text-h2);
+  font-weight: 600;
+  line-height: var(--leading-h2);
+  letter-spacing: var(--tracking-h2);
+  color: var(--text);
+  margin: 0;
+  max-width: 36rem;
+}
+
+.comp-locked-lead {
+  font-size: var(--text-body-lg);
+  color: var(--text-muted);
+  margin: 14px 0 0;
+  max-width: 32rem;
+  line-height: 1.6;
+}
+
+.comp-locked-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  margin-top: 28px;
+}
+
+.comp-locked-actions .join-state {
+  justify-content: center;
+}
+
+@media (min-width: 36rem) {
+  .comp-locked-actions {
+    flex-direction: row;
+    justify-content: center;
+    width: auto;
+  }
+}
+
 /* =============================================================================
    Markdown prose - lớp trình bày VKU dùng chung cho MỌI nội dung Markdown.
 
@@ -7279,6 +7364,14 @@ button.resource-link:disabled {
 /* Đối chiếu nguồn dataset: cùng ngôn ngữ trình bày với finding nhưng là mục độc lập với kết luận
    thể lệ - trạng thái tổng hợp của đoạn code, lời giải thích của server, rồi từng nguồn bên dưới. */
 .ai-source-signals {
+  margin-top: var(--space-md);
+  padding-top: var(--space-sm);
+  border-top: 1px solid var(--border);
+}
+
+/* Khối "AI đối chiếu thể lệ": cùng nhịp phân cách với khối nguồn để hai câu hỏi khác nhau không
+   bị đọc thành một mục. */
+.ai-detail-section {
   margin-top: var(--space-md);
   padding-top: var(--space-sm);
   border-top: 1px solid var(--border);
@@ -10827,7 +10920,8 @@ button:focus-visible {
   .empty-state h2,
   .modal-title,
   .ov-title,
-  .lb-locked-title {
+  .lb-locked-title,
+  .comp-locked-title {
     font-size: var(--text-h2-desktop);
   }
 

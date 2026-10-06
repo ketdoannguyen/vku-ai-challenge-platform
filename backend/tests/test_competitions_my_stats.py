@@ -142,28 +142,18 @@ def _list_item(client, slug: str) -> dict:
     return items[slug]
 
 
-def test_guest_and_non_member_list_has_no_my_stats(client):
+def test_guest_and_non_member_list_has_no_personal_fields(client):
+    """Số liệu cá nhân chỉ dành cho thành viên đang hoạt động."""
     _create_competition(client, "stats-open")
-    # Người đã đăng nhập nhưng chưa join không nhận key này.
     _login_participant(client)
-    assert "my_stats" not in _list_item(client, "stats-open")
-
-    client.post("/api/auth/logout")
-    assert "my_stats" not in _list_item(client, "stats-open")
-
-
-def test_non_member_gets_zero_count_guest_gets_no_key(client):
-    """`my_submission_count` dành cho mọi account đã đăng nhập, `my_stats` vẫn chỉ cho thành viên."""
-    _create_competition(client, "stats-count-open")
-    _login_participant(client)
-    item = _list_item(client, "stats-count-open")
-    assert item["my_submission_count"] == 0
+    item = _list_item(client, "stats-open")
     assert "my_stats" not in item
-
-    client.post("/api/auth/logout")
-    item = _list_item(client, "stats-count-open")
     assert "my_submission_count" not in item
+
+    client.post("/api/auth/logout")
+    item = _list_item(client, "stats-open")
     assert "my_stats" not in item
+    assert "my_submission_count" not in item
 
 
 def test_my_submission_count_includes_rejected_and_failed_records(client):
@@ -199,7 +189,8 @@ def test_my_submission_count_includes_rejected_and_failed_records(client):
     assert item["my_stats"]["used_today"] == 2
 
 
-def test_my_submission_count_survives_leaving_and_closing(client):
+def test_inactive_member_gets_no_personal_fields_even_with_history(client):
+    """Rời/bị vô hiệu hóa: lịch sử vẫn nằm trong DB nhưng thẻ không còn số liệu cá nhân nào."""
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "stats-count-closed")
     _insert_membership(client, competition_id, participant["_id"], active=False)
@@ -212,13 +203,12 @@ def test_my_submission_count_survives_leaving_and_closing(client):
     _login_participant(client)
     item = _list_item(client, "stats-count-closed")
 
-    # Thành viên đã rời không còn hạng/điểm nhưng lịch sử nộp bài vẫn được đếm, kể cả khi đã đóng.
     assert item["status"] == "closed"
-    assert item["my_submission_count"] == 1
+    assert "my_submission_count" not in item
     assert "my_stats" not in item
 
 
-def test_my_submission_count_with_history_but_no_membership(client):
+def test_member_with_history_but_no_membership_gets_no_personal_fields(client):
     participant = _account(client, "thi.sinh@vku.vn")
     competition_id = _create_competition(client, "stats-count-no-member")
     _submission(
@@ -228,7 +218,7 @@ def test_my_submission_count_with_history_but_no_membership(client):
     _login_participant(client)
     item = _list_item(client, "stats-count-no-member")
 
-    assert item["my_submission_count"] == 1
+    assert "my_submission_count" not in item
     assert "my_stats" not in item
 
 
@@ -236,7 +226,9 @@ def test_my_submission_count_isolated_per_account_and_competition(client):
     participant = _account(client, "thi.sinh@vku.vn")
     other_id = _create_account(client, "Đội Khác", "stats-count-other@vku.vn")
     cup_one = _create_competition(client, "stats-count-one")
-    _create_competition(client, "stats-count-two")
+    cup_two = _create_competition(client, "stats-count-two")
+    _insert_membership(client, cup_one, participant["_id"])
+    _insert_membership(client, cup_two, participant["_id"])
     base = _today_start() + timedelta(minutes=1)
     _submission(client, cup_one, participant["_id"], 0.8, base)
     _submission(client, cup_one, participant["_id"], 0.7, base + timedelta(minutes=1))
@@ -253,12 +245,15 @@ def test_active_member_without_submissions_gets_zeroed_stats(client):
     _insert_membership(client, competition_id, participant["_id"])
 
     _login_participant(client)
-    assert _list_item(client, "stats-empty")["my_stats"] == {
+    item = _list_item(client, "stats-empty")
+    assert item["my_stats"] == {
         "rank": None,
         "rank_total": None,
         "best_score": None,
+        "best_normalized_score": None,
         "used_today": 0,
     }
+    assert item["my_submission_count"] == 0
 
 
 def test_my_stats_matches_leaderboard_and_quota(client):
@@ -283,6 +278,7 @@ def test_my_stats_matches_leaderboard_and_quota(client):
         "rank": board["me"]["rank"],
         "rank_total": board["total"],
         "best_score": board["me"]["primary_score"],
+        "best_normalized_score": None,  # cuộc thi không bật chuẩn hóa
         "used_today": 2,
     }
     assert stats["rank"] == 2
@@ -342,7 +338,13 @@ def test_hidden_leaderboard_returns_no_rank_without_reading_board(client):
     _login_participant(client)
     stats = _list_item(client, "stats-hidden-board")["my_stats"]
 
-    assert stats == {"rank": None, "rank_total": None, "best_score": None, "used_today": 1}
+    assert stats == {
+        "rank": None,
+        "rank_total": None,
+        "best_score": None,
+        "best_normalized_score": None,
+        "used_today": 1,
+    }
     # Bảng vẫn bị chặn ở endpoint riêng - thẻ danh sách không mở đường vòng.
     assert client.get(f"/api/competitions/{competition_id}/leaderboard").status_code == 403
 

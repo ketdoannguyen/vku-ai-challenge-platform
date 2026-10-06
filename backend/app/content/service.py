@@ -10,21 +10,18 @@ from app.core.datetimes import iso_z
 from app.core.slugs import is_valid_slug
 
 CONTENTS_COLLECTION = "competition_contents"
-VISIBILITIES = ("public", "members")
 
 
 class ContentCreate(BaseModel):
     title: str
     slug: str
     order: int | None = None
-    visibility: str = "public"
 
 
 class ContentUpdate(BaseModel):
     title: str | None = None
     slug: str | None = None
     order: int | None = None
-    visibility: str | None = None
 
 
 class ReorderItem(BaseModel):
@@ -76,7 +73,6 @@ async def insert_content(db, competition_id, data: ContentCreate) -> dict:
         "title": data.title.strip(),
         "slug": data.slug,
         "order": order,
-        "visibility": data.visibility,
         "markdown_path": f"competitions/{competition_id}/content/{oid}.md",
         "size_bytes": None,
         "created_at": now,
@@ -86,15 +82,13 @@ async def insert_content(db, competition_id, data: ContentCreate) -> dict:
     return document
 
 
-def validate_values(title=None, slug=None, order=None, visibility=None) -> None:
+def validate_values(title=None, slug=None, order=None) -> None:
     if title is not None and not title.strip():
         raise ValueError("Tiêu đề nội dung không được để trống.")
     if slug is not None and not is_valid_slug(slug):
         raise ValueError("Slug nội dung chỉ gồm a-z, 0-9 và dấu gạch ngang.")
     if order is not None and not 0 <= order <= 9999:
         raise ValueError("Thứ tự phải từ 0 đến 9999.")
-    if visibility is not None and visibility not in VISIBILITIES:
-        raise ValueError("Visibility phải là public hoặc members.")
 
 
 def public_content(content: dict, include_markdown: str | None = None) -> dict:
@@ -103,7 +97,6 @@ def public_content(content: dict, include_markdown: str | None = None) -> dict:
         "slug": content["slug"],
         "title": content["title"],
         "order": content["order"],
-        "visibility": content["visibility"],
         "size_bytes": content.get("size_bytes"),
         "updated_at": iso_z(content["updated_at"]),
     }

@@ -402,15 +402,16 @@ export function App() {
         tabIndex={-1}
       >
         <Routes>
-          {/* Danh sách và chi tiết cuộc thi đọc công khai (ADR-014); chỉ các trang
-              gắn với danh tính mới chặn. */}
+          {/* Danh sách chỉ trả thẻ giới thiệu; nội dung bên trong cuộc thi do shell
+              xác nhận quyền đọc (thành viên đang hoạt động hoặc admin). RequireAuth
+              vẫn là lớp phụ cho các trang gắn với danh tính. */}
           <Route path="/" element={<DashboardPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<SignupPage />} />
           <Route path="/competitions/:slug" element={<CompetitionDetailPage />}>
             <Route index element={<CompetitionOverview />} />
             <Route path="content/:contentSlug" element={<CompetitionContentPanel />} />
-            {/* Hướng dẫn nộp bài là kiến thức chung, đọc được trước khi đăng nhập. */}
+            {/* Hướng dẫn nộp bài nằm trong shell nên cũng chỉ đọc được khi đã có quyền đọc cuộc thi. */}
             <Route path="huong-dan" element={<CompetitionGuidePage />} />
             <Route
               path="submit"

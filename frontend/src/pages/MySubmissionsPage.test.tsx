@@ -2,7 +2,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AI_PARTICIPANT_DISCLAIMER } from "../api/aiReview";
-import type { Competition } from "../api/competitions";
+import type { CompetitionDetail } from "../api/competitions";
+import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import { setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
 
@@ -19,7 +20,7 @@ async function advance(ms: number) {
   });
 }
 
-const COMPETITION: Competition = {
+const COMPETITION: CompetitionDetail = {
   id: "64a000000000000000000001",
   slug: "results-cup",
   name: "Results Cup",
@@ -33,6 +34,8 @@ const COMPETITION: Competition = {
   leaderboard_visible: true,
   resources: [],
   join_code_configured: false,
+  primary_metric_label: "F1",
+  access: { allowed: true, reason: null },
   membership: { active: true, joined_at: "2026-09-15T00:00:00Z" },
   // Cuộc thi v1: response chưa có result_contract nên trang mô tả lại thành f1/precision/recall, 4 chữ số.
   submission_config: {
@@ -51,11 +54,14 @@ function pagerStatus(): HTMLElement {
   return within(document.querySelector(".subm-pagination-footer") as HTMLElement).getByRole("status");
 }
 
-function renderPage(competition: Competition = COMPETITION) {
+/** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
+const reportAccessLost = vi.fn();
+
+function renderPage(competition: CompetitionDetail = COMPETITION) {
   return render(
     <MemoryRouter initialEntries={["/competitions/results-cup/submissions"]}>
       <Routes>
-        <Route element={<Outlet context={{ competition, contents: [] }} />}>
+        <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/submissions" element={<MySubmissionsPage />} />
         </Route>
       </Routes>
@@ -120,6 +126,7 @@ function mockPagedFetch({ total = 120, gateOffset }: { total?: number; gateOffse
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  reportAccessLost.mockClear();
   vi.useRealTimers();
   setDocumentHidden(false);
 });
@@ -269,7 +276,7 @@ test("Xem CSV mở trình xem qua route của chính cuộc thi và đóng trả
 });
 
 /** Cuộc thi v2 khai báo metric riêng: nhãn cột và số thập phân phải lấy từ hợp đồng, không phải bộ ba cố định. */
-const V2_COMPETITION: Competition = {
+const V2_COMPETITION: CompetitionDetail = {
   ...COMPETITION,
   submission_config: {
     ...COMPETITION.submission_config,
@@ -351,7 +358,7 @@ test("bài cũ thiếu metric chính vẫn hiện dấu gạch trước metric p
 });
 
 test("bản nháp v2 chưa khai báo metric: ẩn cụm chỉ số thay vì hiện null/undefined", async () => {
-  const draft: Competition = {
+  const draft: CompetitionDetail = {
     ...COMPETITION,
     submission_config: {
       ...COMPETITION.submission_config,
@@ -651,9 +658,82 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
   expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.7000");
 });
 
+test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết được nhấn, bỏ pill 'tốt nhất' theo raw", async () => {
+  const artifacts = {
+    prediction: { filename: "prediction.csv", size_bytes: 128, available: true },
+    notebook: { filename: "notebook.ipynb", size_bytes: 4096, available: true },
+  };
+  mockResponse({
+    submissions: [
+      {
+        id: "s3",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.95, precision: 0.9, recall: 0.9 },
+        primary_score: 0.95,
+        created_at: "2026-09-16T10:00:00Z",
+        normalization_snapshot: { score: 42.5, calculated_at: "2026-09-16T10:00:05Z" },
+        artifacts,
+      },
+      {
+        id: "s2",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.8, precision: 0.8, recall: 0.8 },
+        primary_score: 0.8,
+        created_at: "2026-09-16T09:00:00Z",
+        review: { status: "rejected", note: "Notebook sai kiến trúc." },
+        normalization_snapshot: { score: 12, calculated_at: "2026-09-16T09:00:05Z" },
+        artifacts,
+      },
+      {
+        // Dòng cũ thiếu snapshot: cột norm để "—", không tự bịa giá trị lịch sử.
+        id: "s1",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.7, precision: 0.7, recall: 0.7 },
+        primary_score: 0.7,
+        created_at: "2026-09-15T09:00:00Z",
+        artifacts,
+      },
+    ],
+    total: 3,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage();
+  await screen.findByText("#s3");
+
+  // Cột snapshot nằm cạnh cụm điểm; metric nguồn đổi nhãn "Điểm gốc" vì không còn là điểm xếp hạng.
+  expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    "Submission / thời gian",
+    "Tệp đã nộp",
+    "Trạng thái",
+    PROVISIONAL_NORM_LABEL,
+    "Điểm gốc · F1",
+    "Precision",
+    "Recall",
+  ]);
+
+  const rows = screen.getAllByRole("row");
+  expect(within(rows[1]).getByText("42.50")).toBeTruthy();
+  // Bài bị từ chối vẫn giữ snapshot khi có quyền xem, kèm nhắc là không còn tính vào BXH.
+  expect(within(rows[2]).getByText("12.00")).toBeTruthy();
+  expect(within(rows[2]).getByText("Không tính BXH")).toBeTruthy();
+  expect(within(rows[3]).getByText("—")).toBeTruthy();
+
+  // Snapshot có mẫu số khác nhau nên không suy "tốt nhất" từ raw; đường xem norm là bảng xếp hạng.
+  expect(screen.queryByText("Tốt nhất")).toBeNull();
+  expect(document.querySelector(".best-submission-row")).toBeNull();
+  expect(screen.queryByText(/Điểm tốt nhất trong trang/)).toBeNull();
+  expect(
+    screen.getByRole("link", { name: "Điểm norm hiện tại xem ở bảng xếp hạng" }),
+  ).toBeTruthy();
+});
+
 test("điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn là tốt hơn", async () => {
   // Cuộc thi v2 khai `higher_is_better: false`: bài loss thấp nhất mới là bài tốt nhất.
-  const lossCompetition: Competition = {
+  const lossCompetition: CompetitionDetail = {
     ...COMPETITION,
     submission_config: {
       ...COMPETITION.submission_config,
@@ -917,6 +997,40 @@ test("làm mới ngầm giữ nguyên trang đang xem và focus của nút phân
   expect(urls.at(-1)).toContain("offset=50");
   expect(screen.getByText("#s-50")).toBeTruthy();
   expect(document.activeElement).toBe(next);
+});
+
+test("membership bị vô hiệu hóa giữa chừng: xoá lịch sử đã tải và báo shell thay vì giữ bài cũ", async () => {
+  let revoked = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const offset = Number(new URL(String(input), "http://localhost").searchParams.get("offset") ?? 0);
+      if (revoked && offset === 50) {
+        return jsonResponse(
+          {
+            error: {
+              code: "MEMBERSHIP_INACTIVE",
+              message: "Quyền tham gia cuộc thi đã bị vô hiệu hóa.",
+            },
+          },
+          403,
+        );
+      }
+      return jsonResponse(submissionsPage(offset, 120));
+    }),
+  );
+
+  renderPage();
+  expect(await screen.findByText("#s-0")).toBeTruthy();
+
+  revoked = true;
+  fireEvent.click(screen.getByRole("button", { name: "Trang sau" }));
+
+  await waitFor(() => expect(reportAccessLost).toHaveBeenCalledWith("membership_inactive"));
+  // Bài cũ của chính mình cũng không được nằm lại trên màn hình, và đây là mất quyền
+  // chứ không phải lỗi tải nên không hiện băng báo lỗi.
+  expect(screen.queryByText("#s-0")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("mất quyền giữa chừng: 403 dừng tự làm mới và báo rõ", async () => {

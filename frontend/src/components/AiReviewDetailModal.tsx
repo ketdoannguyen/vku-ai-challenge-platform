@@ -19,10 +19,13 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatLocal } from "../api/competitions";
 import {
+  AI_SOURCE_LEGACY_LABEL,
+  AI_SOURCE_STATUS_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
   FINDING_STATUS_LABEL,
   FINDING_VERIFICATION_LABEL,
+  SOURCE_CODE_LABEL,
   SOURCE_MATCH_LABEL,
   SOURCE_URL_MATCH_LABEL,
   fetchAiReviewDetail,
@@ -31,7 +34,9 @@ import {
   type AiFinding,
   type AiReviewDetail,
   type AiReviewRecord,
+  type AiSourceAssessment,
   type AiSourceMatch,
+  type AiSourceStatus,
   type FindingStatus,
   type FindingVerification,
 } from "../api/aiReview";
@@ -81,6 +86,18 @@ const SOURCE_MATCH_TONE: Record<AiSourceMatch, "neutral" | "warning"> = {
   FOLDER_MEMBERSHIP_UNVERIFIED: "warning",
   EXTERNAL_SOURCE: "warning",
   UNVERIFIED_SOURCE: "warning",
+};
+
+/**
+ * Tone của pill trạng thái nguồn (phiên bản assessment). "Phù hợp" trung tính cùng lý do với badge
+ * `VERIFIED`: khớp nguồn BTC là mặc định lành mạnh, không phải kết luận. `NOT_EVALUATED` để muted -
+ * thiếu dữ kiện không được trông giống một phán quyết.
+ */
+const SOURCE_ASSESSMENT_TONE: Record<AiSourceStatus, "neutral" | "warning" | "closed"> = {
+  ALIGNED: "neutral",
+  EXTERNAL: "warning",
+  UNCLEAR: "warning",
+  NOT_EVALUATED: "closed",
 };
 
 /**
@@ -471,97 +488,228 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
         </p>
       )}
 
-      <SourceSignalsSection record={record} />
+      <SourceSection record={record} />
 
-      {record.findings.length > 0 ? (
-        <ul className="ai-finding-list">
-          {record.findings.map((finding, index) => (
-            <FindingItem key={`${record.id}-${index}`} finding={finding} />
+      <section className="ai-detail-section">
+        <h4 className="ai-section-heading">AI đối chiếu thể lệ</h4>
+        {record.findings.length > 0 ? (
+          <ul className="ai-finding-list">
+            {record.findings.map((finding, index) => (
+              <FindingItem key={`${record.id}-${index}`} finding={finding} />
+            ))}
+          </ul>
+        ) : (
+          noFindingCopy && <p className="ai-finding-empty">{noFindingCopy}</p>
+        )}
+      </section>
+    </section>
+  );
+}
+
+/**
+ * Khối nguồn dataset của một lượt, chọn theo dữ liệu của chính row đó.
+ *
+ * Row từ phiên bản assessment dùng đánh giá nguồn toàn notebook; row cũ giữ nguyên cách đọc
+ * `source_signals` để tra lịch sử, kèm nhãn nói rõ chưa được đánh giá theo phiên bản mới. Lượt lỗi
+ * không có đánh giá nguồn nên khối này ẩn hẳn thay vì hiện trạng thái thiếu dữ kiện.
+ */
+function SourceSection({ record }: { record: AiReviewRecord }) {
+  if (record.verdict === "ERROR") return null;
+  const assessment = record.source_assessment ?? null;
+  if (assessment) return <SourceAssessmentSection assessment={assessment} record={record} />;
+  return <LegacySourceSection record={record} />;
+}
+
+/**
+ * Câu "AI đề xuất gì, vì sao chưa dùng được" khi hậu kiểm hạ đề xuất; `null` khi không có gì bị hạ.
+ * Bằng chứng chưa đủ nêu đúng các mã hậu kiểm đã sinh ra việc hạ cấp, không tự diễn giải thêm.
+ */
+function downgradeCopy(assessment: AiSourceAssessment): string | null {
+  const proposed = assessment.model_status;
+  if (proposed === null || proposed === assessment.status) return null;
+  const causes = assessment.validation_codes
+    .map((code) => SOURCE_CODE_LABEL[code])
+    .filter(Boolean)
+    .join("; ");
+  if (assessment.status === "NOT_EVALUATED") {
+    return `AI đề xuất “${AI_SOURCE_STATUS_LABEL[proposed]}”; chưa dùng được vì ${causes || "thiếu dữ kiện hậu kiểm"}.`;
+  }
+  return `AI đề xuất “${AI_SOURCE_STATUS_LABEL[proposed]}”; bằng chứng chưa đủ vì ${causes || "chưa kiểm chứng được trích dẫn nào"}.`;
+}
+
+/**
+ * Đánh giá nguồn của row mới, theo thứ tự: trạng thái sau hậu kiểm → câu hạ cấp (nếu có) → lý do
+ * của AI → bằng chứng hợp lệ → vị trí bị loại và thông báo hậu kiểm → dữ kiện phụ.
+ *
+ * Chữ của AI luôn ghi rõ tác giả; kết quả hậu kiểm của server đứng tách khỏi phần đó. Dữ kiện phụ
+ * (link/ID BTC xuất hiện trong code) để BTC tra cứu, không phải huy hiệu xác nhận nguồn.
+ */
+function SourceAssessmentSection({
+  assessment,
+  record,
+}: {
+  assessment: AiSourceAssessment;
+  record: AiReviewRecord;
+}) {
+  const copy = downgradeCopy(assessment);
+  // Có câu hạ cấp nghĩa là mọi mã đã được diễn giải ngay trong câu đó - danh sách thông báo để
+  // trống, không lặp lại. Không có câu hạ cấp thì mã lạ (chưa có bản dịch) bị ẩn thay vì đổ chuỗi
+  // kỹ thuật ra màn hình tác nghiệp.
+  const notices = (copy ? [] : assessment.validation_codes)
+    .map((code) => SOURCE_CODE_LABEL[code])
+    .filter(Boolean);
+  const mentions = record.resources_in_notebook ?? null;
+  const showScan = mentions !== null && (record.resources_configured ?? 0) > 0;
+
+  return (
+    <section className="ai-source-signals">
+      <h4 className="ai-section-heading">AI đánh giá nguồn</h4>
+      <p>
+        AI đọc code tĩnh. Hệ thống kiểm vị trí trích dẫn, không xác nhận notebook đã chạy hoặc dữ
+        liệu thực tế đã tải.
+      </p>
+      <div className="ai-finding-head">
+        <span className={`status-badge ${SOURCE_ASSESSMENT_TONE[assessment.status]}`}>
+          {AI_SOURCE_STATUS_LABEL[assessment.status]}
+        </span>
+      </div>
+      {copy && <p className="ai-downgrade">{copy}</p>}
+      {assessment.reason && <p className="ai-source-reason">AI ghi nhận: {assessment.reason}</p>}
+      {assessment.evidence.map((evidence, index) => (
+        <figure key={index} className="ai-evidence">
+          <figcaption className="ai-evidence-meta">
+            Dòng {evidence.start_line}–{evidence.end_line} · Cell {evidence.cell}
+          </figcaption>
+          <pre>{evidence.snippet}</pre>
+        </figure>
+      ))}
+      {assessment.evidence.length === 0 && (
+        <p className="ai-source-note">
+          {assessment.rejected_evidence.length > 0
+            ? "Không trích dẫn nào của AI khớp được với notebook."
+            : "AI không kèm trích dẫn nào cho đánh giá này."}
+        </p>
+      )}
+      {assessment.rejected_evidence.length > 0 && (
+        <>
+          <p className="ai-source-note">Trích dẫn AI nêu nhưng không dùng được:</p>
+          <ul className="ai-source-links">
+            {assessment.rejected_evidence.map((item, index) => (
+              <li key={index}>
+                <span className="ai-source-locator">
+                  Cell {item.cell} · Dòng {item.start_line}–{item.end_line}
+                </span>
+                <span className="ai-source-resource">{SOURCE_CODE_LABEL[item.code] ?? ""}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {notices.length > 0 && <p className="ai-source-note">Hậu kiểm: {notices.join("; ")}.</p>}
+      {showScan && (
+        <>
+          <p className="ai-source-note">
+            Dữ kiện phụ — link/ID tài nguyên BTC xuất hiện trong code cell (không quyết định trạng
+            thái nguồn):
+          </p>
+          {mentions.map((mention, index) => (
+            <p className="ai-source-result" key={`${record.id}-scan-${index}`}>
+              {mention.label} (cell {formatCells(mention.cells)}).
+            </p>
           ))}
-        </ul>
-      ) : (
-        noFindingCopy && <p className="ai-finding-empty">{noFindingCopy}</p>
+          {mentions.length === 0 && (
+            <p className="ai-source-note">
+              {record.notebook_stats?.truncated
+                ? "Không thấy link/ID tài nguyên BTC trong các code cell đã kiểm tra; notebook bị cắt nên chưa thể kết luận cho toàn bộ."
+                : "Không thấy link/ID tài nguyên BTC trong code cell của notebook."}
+            </p>
+          )}
+        </>
       )}
     </section>
   );
 }
 
 /**
- * Đối chiếu nguồn dataset của một lượt: dữ kiện quét toàn notebook (tài nguyên BTC xuất hiện ở CODE
- * cell nào, ADR-059), rồi với mỗi đoạn code có lệnh tải dữ liệu, hiện trạng thái tổng hợp, lời giải
- * thích của server, từng URL/ID ghi nhận được, và chữ của model tách riêng.
- * Mục này độc lập với kết luận thể lệ (ADR-055): nó nói dấu hiệu trong code, không phải vi phạm,
- * và "không khớp" không đồng nghĩa nguồn đến từ ngoài cuộc thi.
+ * Cách đọc nguồn của row trước phiên bản assessment: dữ kiện quét toàn notebook (ADR-059), rồi với
+ * mỗi đoạn code có lệnh tải dữ liệu, hiện trạng thái tổng hợp, lời giải thích của server, từng
+ * URL/ID ghi nhận được và chữ của model. Giữ để tra lịch sử; lượt mới không bao giờ chạy bộ nhận
+ * diện này. Nhãn "chưa đánh giá theo phiên bản mới" đứng trên cùng, kể cả khi row không có tín hiệu:
+ * thiếu dữ kiện không được đọc thành nguồn sạch.
  */
-function SourceSignalsSection({ record }: { record: AiReviewRecord }) {
+function LegacySourceSection({ record }: { record: AiReviewRecord }) {
   const signals = record.source_signals ?? [];
   // `null`/`undefined` = row cũ chưa có dữ kiện quét; khác hẳn mảng rỗng nghĩa là "quét rồi, không thấy".
   const mentions = record.resources_in_notebook ?? null;
   const showScan = mentions !== null && (record.resources_configured ?? 0) > 0;
-  if (signals.length === 0 && !showScan) return null;
   return (
     <section className="ai-source-signals">
-      <h4>Nguồn dataset trong notebook</h4>
-      <p>Đây là dấu hiệu trong code, không chứng minh notebook đã chạy và không phải kết luận vi phạm thể lệ.</p>
-      {record.resources_configured === 0 && (
-        <p>Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu.</p>
-      )}
-      {showScan &&
-        mentions.map((mention, index) => (
-          <p className="ai-source-result" key={`${record.id}-scan-${index}`}>
-            Link/ID tài nguyên BTC xuất hiện trong code cell: {mention.label} (cell{" "}
-            {formatCells(mention.cells)}).
-          </p>
-        ))}
-      {showScan && mentions.length === 0 && (
-        <p className="ai-source-note">
-          {record.notebook_stats?.truncated
-            ? "Không thấy link/ID tài nguyên BTC trong các code cell đã kiểm tra; notebook bị cắt nên chưa thể kết luận cho toàn bộ."
-            : "Không có link/ID tài nguyên BTC nào trong code cell của notebook."}
-        </p>
-      )}
-      {signals.length > 0 && (
-        <ul className="ai-finding-list">
-          {signals.map((signal, index) => (
-            <li className="ai-finding" key={`${record.id}-source-${index}`}>
-              <div className="ai-finding-head">
-                <span className={`status-badge ${SOURCE_MATCH_TONE[signal.match]}`}>
-                  {SOURCE_MATCH_LABEL[signal.match]}
-                </span>
-                <span className="ai-source-locator">
-                  Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}
-                </span>
-              </div>
-              <p className="ai-source-result">{SOURCE_MATCH_EXPLANATION[signal.match]}</p>
-              {signal.reason && <p className="ai-source-reason">AI ghi nhận: {signal.reason}</p>}
-              {signal.urls.length === 0 ? (
-                <p className="ai-source-note">
-                  Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.
-                </p>
-              ) : (
-                <ul className="ai-source-links">
-                  {signal.urls.map((item, urlIndex) => (
-                    <li key={urlIndex}>
-                      <span className={`status-badge ${SOURCE_MATCH_TONE[item.match]}`}>
-                        {SOURCE_URL_MATCH_LABEL[item.match]}
-                      </span>
-                      <code>{item.url.startsWith("id=") ? `ID: ${item.url.slice(3)}` : item.url}</code>
-                      {item.resource_label && (
-                        <span className="ai-source-resource">· {item.resource_label}</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {signal.urls.length >= SOURCE_URLS_SHOWN && (
-                <p className="ai-source-note">
-                  Danh sách hiển thị tối đa {SOURCE_URLS_SHOWN} nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.
-                </p>
-              )}
-              <pre>{signal.snippet}</pre>
-            </li>
-          ))}
-        </ul>
+      <h4 className="ai-section-heading">Nguồn dataset trong notebook</h4>
+      <p className="ai-source-note">{AI_SOURCE_LEGACY_LABEL}.</p>
+      {signals.length === 0 && !showScan ? null : (
+        <>
+          <p>Đây là dấu hiệu trong code, không chứng minh notebook đã chạy và không phải kết luận vi phạm thể lệ.</p>
+          {record.resources_configured === 0 && (
+            <p>Lượt này không có link tài nguyên BTC nào trong bản thể lệ đã chụp để đối chiếu.</p>
+          )}
+          {showScan &&
+            mentions.map((mention, index) => (
+              <p className="ai-source-result" key={`${record.id}-scan-${index}`}>
+                Link/ID tài nguyên BTC xuất hiện trong code cell: {mention.label} (cell{" "}
+                {formatCells(mention.cells)}).
+              </p>
+            ))}
+          {showScan && mentions.length === 0 && (
+            <p className="ai-source-note">
+              {record.notebook_stats?.truncated
+                ? "Không thấy link/ID tài nguyên BTC trong các code cell đã kiểm tra; notebook bị cắt nên chưa thể kết luận cho toàn bộ."
+                : "Không có link/ID tài nguyên BTC nào trong code cell của notebook."}
+            </p>
+          )}
+          {signals.length > 0 && (
+            <ul className="ai-finding-list">
+              {signals.map((signal, index) => (
+                <li className="ai-finding" key={`${record.id}-source-${index}`}>
+                  <div className="ai-finding-head">
+                    <span className={`status-badge ${SOURCE_MATCH_TONE[signal.match]}`}>
+                      {SOURCE_MATCH_LABEL[signal.match]}
+                    </span>
+                    <span className="ai-source-locator">
+                      Cell {signal.cell} · Dòng {signal.start_line}–{signal.end_line}
+                    </span>
+                  </div>
+                  <p className="ai-source-result">{SOURCE_MATCH_EXPLANATION[signal.match]}</p>
+                  {signal.reason && <p className="ai-source-reason">AI ghi nhận: {signal.reason}</p>}
+                  {signal.urls.length === 0 ? (
+                    <p className="ai-source-note">
+                      Không có URL/ID tĩnh trong đoạn code để đối chiếu tự động.
+                    </p>
+                  ) : (
+                    <ul className="ai-source-links">
+                      {signal.urls.map((item, urlIndex) => (
+                        <li key={urlIndex}>
+                          <span className={`status-badge ${SOURCE_MATCH_TONE[item.match]}`}>
+                            {SOURCE_URL_MATCH_LABEL[item.match]}
+                          </span>
+                          <code>{item.url.startsWith("id=") ? `ID: ${item.url.slice(3)}` : item.url}</code>
+                          {item.resource_label && (
+                            <span className="ai-source-resource">· {item.resource_label}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {signal.urls.length >= SOURCE_URLS_SHOWN && (
+                    <p className="ai-source-note">
+                      Danh sách hiển thị tối đa {SOURCE_URLS_SHOWN} nguồn mỗi đoạn code; trạng thái tổng hợp phía trên xét mọi nguồn máy chủ ghi nhận.
+                    </p>
+                  )}
+                  <pre>{signal.snippet}</pre>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
     </section>
   );
@@ -617,7 +765,7 @@ function HistoryItem({ record }: { record: AiReviewRecord }) {
               ))}
             </ul>
           )}
-          <SourceSignalsSection record={record} />
+          <SourceSection record={record} />
         </div>
       </details>
     </li>
