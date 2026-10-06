@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, expect, test, vi } from "vitest";
 import { AI_PARTICIPANT_DISCLAIMER } from "../api/aiReview";
-import type { CompetitionDetail } from "../api/competitions";
+import type { CompetitionDetail, ParticipantTrackView } from "../api/competitions";
 import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
 import { setDocumentHidden } from "../test/timers";
 import { MySubmissionsPage } from "./MySubmissionsPage";
@@ -49,6 +49,12 @@ const COMPETITION: CompetitionDetail = {
   },
 };
 
+/** Artifact đủ hai tệp cho các dòng không phải đối tượng kiểm tra của test. */
+const ROW_ARTIFACTS = {
+  prediction: { filename: "prediction.csv", size_bytes: 128, available: true },
+  notebook: { filename: "notebook.ipynb", size_bytes: 4096, available: true },
+};
+
 /** Vùng thông báo của dải phân trang - trang còn live region riêng cho phản hồi sao chép ID. */
 function pagerStatus(): HTMLElement {
   return within(document.querySelector(".subm-pagination-footer") as HTMLElement).getByRole("status");
@@ -57,9 +63,12 @@ function pagerStatus(): HTMLElement {
 /** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
 const reportAccessLost = vi.fn();
 
-function renderPage(competition: CompetitionDetail = COMPETITION) {
+function renderPage(
+  competition: CompetitionDetail = COMPETITION,
+  entry = "/competitions/results-cup/submissions",
+) {
   return render(
-    <MemoryRouter initialEntries={["/competitions/results-cup/submissions"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/submissions" element={<MySubmissionsPage />} />
@@ -238,7 +247,7 @@ test("hiển thị history newest-first với nút tải artifact, status và me
   expect(within(rows[2]).getAllByRole("button")).toHaveLength(3);
   expect(within(rows[2]).queryByRole("button", { name: "Xem Notebook" })).toBeNull();
   expect(within(rows[2]).queryByRole("button", { name: "Tải Notebook" })).toBeNull();
-  expect(rows[2].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
+  expect(rows[2].querySelector(".score-pill")).toHaveTextContent("-");
 });
 
 test("Xem CSV mở trình xem qua route của chính cuộc thi và đóng trả focus", async () => {
@@ -328,9 +337,9 @@ test("cuộc thi v2 hiện metric, nhãn và số thập phân theo hợp đồn
   expect(cells.map((cell) => cell.textContent)).toEqual(["0.91", "1200"]);
   // Số chính có khung riêng, số phụ không có; không thêm cột điểm trùng lặp.
   expect(cells[0].className).toContain("primary-score");
-  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("0.91");
+  expect(cells[0].querySelector(".score-pill")).toHaveTextContent("0.91");
   expect(cells[1].className).not.toContain("primary-score");
-  expect(cells[1].querySelector(".subm-primary-score-value")).toBeNull();
+  expect(cells[1].querySelector(".score-pill")).toBeNull();
   expect(document.querySelector(".subm-summary-score")?.textContent).toBe("0.91");
 });
 
@@ -354,7 +363,7 @@ test("bài cũ thiếu metric chính vẫn hiện dấu gạch trước metric p
 
   const cells = Array.from(screen.getAllByRole("row")[1].querySelectorAll(".score-cell"));
   expect(cells.map((cell) => cell.textContent)).toEqual(["-", "1200"]);
-  expect(cells[0].querySelector(".subm-primary-score-value")).toHaveTextContent("-");
+  expect(cells[0].querySelector(".score-pill")).toHaveTextContent("-");
 });
 
 test("bản nháp v2 chưa khai báo metric: ẩn cụm chỉ số thay vì hiện null/undefined", async () => {
@@ -659,10 +668,8 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
 });
 
 test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết được nhấn, bỏ pill 'tốt nhất' theo raw", async () => {
-  const artifacts = {
-    prediction: { filename: "prediction.csv", size_bytes: 128, available: true },
-    notebook: { filename: "notebook.ipynb", size_bytes: 4096, available: true },
-  };
+  // Payload có snapshot nghĩa là cuộc thi đang bật chuẩn hóa: cột norm chỉ dựng khi quyền xem
+  // theo metadata hiện tại còn đủ (bật chuẩn hóa, BXH hiện, metric chính hiện).
   mockResponse({
     submissions: [
       {
@@ -673,7 +680,7 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
         primary_score: 0.95,
         created_at: "2026-09-16T10:00:00Z",
         normalization_snapshot: { score: 42.5, calculated_at: "2026-09-16T10:00:05Z" },
-        artifacts,
+        artifacts: ROW_ARTIFACTS,
       },
       {
         id: "s2",
@@ -684,7 +691,7 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
         created_at: "2026-09-16T09:00:00Z",
         review: { status: "rejected", note: "Notebook sai kiến trúc." },
         normalization_snapshot: { score: 12, calculated_at: "2026-09-16T09:00:05Z" },
-        artifacts,
+        artifacts: ROW_ARTIFACTS,
       },
       {
         // Dòng cũ thiếu snapshot: cột norm để "—", không tự bịa giá trị lịch sử.
@@ -694,14 +701,14 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
         metrics: { f1: 0.7, precision: 0.7, recall: 0.7 },
         primary_score: 0.7,
         created_at: "2026-09-15T09:00:00Z",
-        artifacts,
+        artifacts: ROW_ARTIFACTS,
       },
     ],
     total: 3,
     limit: 50,
     offset: 0,
   });
-  renderPage();
+  renderPage({ ...COMPETITION, normalization: { enabled: true, baseline: 0.4, version: 1 } });
   await screen.findByText("#s3");
 
   // Cột snapshot nằm cạnh cụm điểm; metric nguồn đổi nhãn "Điểm gốc" vì không còn là điểm xếp hạng.
@@ -722,6 +729,12 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
   expect(within(rows[2]).getByText("Không tính BXH")).toBeTruthy();
   expect(within(rows[3]).getByText("—")).toBeTruthy();
 
+  // Hai cột điểm dùng đúng khung nổi bật như bảng xếp hạng: xanh cho norm, vàng cho điểm gốc.
+  expect(within(rows[1]).getByText("42.50")).toHaveClass("score-pill", "norm");
+  expect(within(rows[1]).getByText("0.9500")).toHaveClass("score-pill");
+  // Ảnh chụp lúc nộp phải được nói rõ là điểm chấm tạm, không phải norm hiện tại.
+  expect(screen.getByText("Điểm norm trong bảng là điểm chấm tạm lúc nộp bài.")).toBeTruthy();
+
   // Snapshot có mẫu số khác nhau nên không suy "tốt nhất" từ raw; đường xem norm là bảng xếp hạng.
   expect(screen.queryByText("Tốt nhất")).toBeNull();
   expect(document.querySelector(".best-submission-row")).toBeNull();
@@ -729,6 +742,119 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
   expect(
     screen.getByRole("link", { name: "Điểm norm hiện tại xem ở bảng xếp hạng" }),
   ).toBeTruthy();
+});
+
+test("quyền xem norm bị thu hồi giữa chừng: cột norm trong state cũ biến mất kèm lý do", async () => {
+  mockResponse({
+    submissions: [
+      {
+        id: "s9",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+        primary_score: 0.9,
+        created_at: "2026-09-16T09:00:00Z",
+        // Payload đã tải còn snapshot, nhưng metadata hiện tại đã ẩn metric nguồn (điều kiện M).
+        normalization_snapshot: { score: 42.5, calculated_at: "2026-09-16T09:00:05Z" },
+        artifacts: ROW_ARTIFACTS,
+      },
+    ],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage({
+    ...COMPETITION,
+    normalization: { enabled: true, baseline: 0.4, version: 1 },
+    primary_metric_label: null,
+  });
+  await screen.findByText("#s9");
+
+  expect(screen.queryByRole("columnheader", { name: PROVISIONAL_NORM_LABEL })).toBeNull();
+  expect(screen.queryByText("42.50")).toBeNull();
+  expect(screen.getByText("Điểm chuẩn hóa bị ẩn theo cấu hình hiển thị điểm")).toBeTruthy();
+  // Norm xuống khỏi màn hình thì metric nguồn trở lại nhãn "Điểm chính".
+  expect(screen.getByRole("columnheader", { name: "Điểm chính · F1" })).toBeTruthy();
+});
+
+/** Cuộc thi dual: capability norm khác nhau theo nhánh, dòng lịch sử mang nhánh của mình. */
+function dualCompetition(): CompetitionDetail {
+  const visible: ParticipantTrackView = {
+    start_at: "2026-01-01T00:00:00Z",
+    end_at: "2027-01-01T00:00:00Z",
+    quota_per_day: 5,
+    window_state: "open",
+    results_released: true,
+    resources: [],
+    can_submit: true,
+    blocked_reason: null,
+    submission_ready: true,
+    normalization_visible: true,
+    normalization_hidden_reason: null,
+  };
+  return {
+    ...COMPETITION,
+    mode: "public_private",
+    tracks: {
+      public: visible,
+      // Nhánh Private đã release nhưng master BXH vừa bị tắt: lý do là BXH ẩn, không phải chưa công bố.
+      private: {
+        ...visible,
+        normalization_visible: false,
+        normalization_hidden_reason: "leaderboard_hidden",
+      },
+    },
+  };
+}
+
+test("dual: quyền xem norm theo từng nhánh - nhánh bị che mất cột, đổi nhánh còn quyền thì hiện lại", async () => {
+  const snapshot = { score: 37.5, calculated_at: "2026-09-16T09:00:05Z" };
+  mockResponse({
+    submissions: [
+      {
+        id: "s-pub",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        track: "public",
+        metrics: { f1: 0.8, precision: 0.8, recall: 0.8 },
+        primary_score: 0.8,
+        created_at: "2026-09-16T08:00:00Z",
+        normalization_snapshot: { ...snapshot, score: 20 },
+        artifacts: ROW_ARTIFACTS,
+      },
+      {
+        id: "s-pri",
+        competition_id: COMPETITION.id,
+        status: "completed",
+        track: "private",
+        metrics: { f1: 0.9, precision: 0.9, recall: 0.9 },
+        primary_score: 0.9,
+        created_at: "2026-09-16T09:00:00Z",
+        normalization_snapshot: snapshot,
+        artifacts: ROW_ARTIFACTS,
+      },
+    ],
+    total: 2,
+    limit: 50,
+    offset: 0,
+  });
+  renderPage(dualCompetition(), "/competitions/results-cup/submissions?track=private");
+  await screen.findByText("#s-pri");
+
+  // Tiêu đề nêu đúng nhánh đang xem, cùng cách gọi tên với bảng xếp hạng.
+  expect(screen.getByRole("heading", { name: "Bài đã nộp Private" })).toBeTruthy();
+  // Nhánh đang xem bị che: cột snapshot của nhánh biến mất dù dòng Private trong payload còn số.
+  expect(screen.queryByRole("columnheader", { name: PROVISIONAL_NORM_LABEL })).toBeNull();
+  expect(screen.queryByText("37.50")).toBeNull();
+  // Đã release nhưng master tắt: copy nói đúng lý do BXH, không đổ cho "chưa công bố".
+  expect(screen.getByText("BXH đang được BTC ẩn; điểm chuẩn hóa chưa được hiển thị")).toBeTruthy();
+
+  // Đổi sang nhánh còn quyền: cột norm hiện lại từ chính payload đã tải, không cần request mới.
+  fireEvent.click(screen.getByRole("button", { name: "Public" }));
+  expect(await screen.findByRole("columnheader", { name: PROVISIONAL_NORM_LABEL })).toBeTruthy();
+  expect(screen.getByText("20.00")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Bài đã nộp Public" })).toBeTruthy();
+  expect(screen.queryByText("BXH đang được BTC ẩn; điểm chuẩn hóa chưa được hiển thị")).toBeNull();
 });
 
 test("điểm tốt nhất theo chiều của hợp đồng: metric nhỏ hơn là tốt hơn", async () => {

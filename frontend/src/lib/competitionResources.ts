@@ -56,7 +56,7 @@ export function cleanCompetitionResources(
     if (!isSafeResourceUrl(resource.url)) {
       return {
         ok: false,
-        message: "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+        message: "Link tài nguyên phải là URL https hợp lệ.",
       };
     }
   }

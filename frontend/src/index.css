@@ -2197,6 +2197,20 @@ select.input {
   border-top: 1px solid #e8edf3;
 }
 
+/* Cuộc thi hai nhánh: mỗi nhánh một dòng, nhãn đứng cạnh số thay vì xếp dọc ba ô. */
+.comp-personal-tracks {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.comp-personal-track {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
 /* Nhãn và số canh giữa trong từng ô, cả ô cấu hình lẫn hàng số liệu cá nhân. */
 .comp-telemetry-item,
 .comp-personal-item {
@@ -3000,6 +3014,23 @@ select.input {
   font-variant-numeric: tabular-nums;
 }
 
+/* Dual: lịch và hạn mức ghi theo từng nhánh, chữ nhỏ hơn dòng giá trị thường. */
+.comp-fact-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.comp-fact-line {
+  font-size: var(--text-label);
+  line-height: 1.5;
+}
+
+.comp-fact-line-track {
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
 /* Tab bar dạng pill nổi của S04: p-1 bg-surface-container-low rounded-lg */
 .comp-tabs {
   display: flex;
@@ -3503,6 +3534,183 @@ button.resource-link:disabled {
   color: var(--text-secondary);
   font-size: var(--text-body-sm);
   font-style: italic;
+}
+
+/* --- Dual: thẻ nhánh Public/Private (.track-*) --- */
+/* Hai nhánh là hai lựa chọn độc lập: thẻ cạnh nhau trên desktop và xếp dọc trên mobile
+   (auto-fit). Trạng thái cửa sổ luôn có chữ; chấm màu chỉ là phụ trợ. */
+.track-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-md);
+}
+
+.track-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+
+/* Tên nhánh giữ màu nhận diện: Public xanh, Private đỏ. */
+.track-card.public .track-card-name {
+  color: var(--vku-blue-700);
+}
+
+.track-card.private .track-card-name {
+  color: var(--vku-red-700);
+}
+
+/* Viền thẻ nói trạng thái cửa sổ nộp: đang nhận bài xanh, chưa mở vàng chờ, đã đóng xám đậm. */
+.track-card.open {
+  border-color: var(--success-border);
+}
+
+.track-card.scheduled {
+  border-color: var(--warning-border);
+}
+
+.track-card.closed {
+  border-color: var(--border-strong);
+}
+
+.track-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.track-card-name {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-heading-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.track-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: 500;
+}
+
+.track-window-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+
+/* Chữ trạng thái đổi màu theo cửa sổ; "đã đóng" giữ màu phụ mặc định. */
+.track-window.open {
+  color: var(--success);
+}
+
+.track-window.scheduled {
+  color: var(--warning);
+}
+
+.track-window.open .track-window-dot {
+  background: var(--success-bright);
+}
+
+.track-window.scheduled .track-window-dot {
+  background: var(--warning);
+}
+
+.track-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.track-card-facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.track-card-facts dt {
+  color: var(--text-muted);
+  font-size: var(--text-body-sm);
+}
+
+.track-card-facts dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Nút hành động kéo hết bề ngang thẻ và canh giữa - nút nhỏ lệch trái nhìn chông chênh. */
+.track-card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-sm);
+  margin-top: auto;
+}
+
+.track-card-blocked {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body-sm);
+  font-style: italic;
+  text-align: center;
+}
+
+/* --- Dual: màn chọn nhánh và dải nhánh đang nộp (.sub-track-*) --- */
+/* Màn chọn nhánh của trang Nộp bài: một cột, thẻ nhánh dùng chung .track-cards. */
+.sub-track-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+/* Dải định vị nhánh đang nộp ngay trên form: nhánh, cửa sổ, hạn nộp và lối đổi nhánh. */
+.sub-track-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--vku-blue-600);
+  border-radius: var(--radius-lg);
+  background: var(--surface-subtle);
+}
+
+.sub-track-strip-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm) var(--space-md);
+}
+
+.sub-track-deadline {
+  color: var(--text-muted);
+  font-size: var(--text-body-sm);
+}
+
+.sub-track-strip-side {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 /* --- Hướng dẫn nộp bài (.guide) --- */
@@ -4659,6 +4867,14 @@ button.resource-link:disabled {
   margin-bottom: 0;
 }
 
+/* Dual: một ô checklist mang hai badge (Public/Private) thay vì một badge chung. */
+.scoring-checklist-tracks {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 /* Nút lưu đặt ngay cuối card định dạng: sửa xong hai bảng cột là bấm được luôn,
    không phải cuộn ngược lên hàng tiêu đề. */
 .scoring-schema-footer {
@@ -5645,20 +5861,42 @@ button.resource-link:disabled {
 .subm-head {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-md);
   margin-bottom: var(--space-md);
 }
 
-@media (min-width: 48rem) {
-  .subm-head {
-    flex-direction: row;
-    align-items: flex-end;
-    justify-content: space-between;
-  }
+/* Hàng trên giữ eyebrow và nút đổi nhánh như bảng xếp hạng; hàng dưới là tiêu đề và telemetry. */
+.subm-head-top,
+.subm-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.subm-head-top {
+  align-items: center;
+}
+
+.subm-head-top .dash-filter {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--text-label);
 }
 
 .subm-head-copy {
+  min-width: 0;
+  flex: 1 1 26rem;
   max-width: 42rem;
+}
+
+/* Cột phải của tiêu đề trang Bài đã nộp: thẻ hạn ngạch của nhánh đang xem. */
+.subm-head-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .subm-eyebrow {
@@ -5932,7 +6170,9 @@ button.resource-link:disabled {
   white-space: nowrap;
 }
 
+/* Bề rộng cố định để nút xem/tải của CSV và Notebook thẳng cột giữa các dòng bảng. */
 .artifact-link-kind {
+  width: 64px;
   color: var(--vku-blue-800);
   font-size: var(--text-label);
   font-weight: 700;
@@ -6154,17 +6394,6 @@ button.resource-link:disabled {
   white-space: nowrap;
 }
 
-/* Điểm chính dùng khung vàng như trang admin; cỡ chữ giữ nguyên theo ô bảng. */
-.subm-primary-score-value {
-  display: inline-block;
-  padding: 2px 10px;
-  border: 1px solid var(--vku-yellow-600);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(135deg, var(--vku-yellow-50), var(--vku-yellow-100));
-  color: var(--vku-yellow-800);
-  font-weight: 700;
-}
-
 .subm-pagination-footer {
   display: flex;
   flex-direction: column;
@@ -6197,34 +6426,48 @@ button.resource-link:disabled {
 .lb-head {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-md);
   margin-bottom: var(--space-md);
 }
 
-@media (min-width: 64rem) {
-  .lb-head {
-    flex-direction: row;
-    align-items: flex-end;
-    justify-content: space-between;
-  }
+.lb-head-top,
+.lb-head-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.lb-head-top {
+  align-items: center;
 }
 
 .lb-head-copy {
-  max-width: 44rem;
+  min-width: 0;
+  flex: 1 1 26rem;
+}
+
+.lb-head-top .dash-filter {
+  height: 36px;
+  padding: 0 14px;
+  font-size: var(--text-label);
 }
 
 .lb-head-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .lb-eyebrow {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin: 0 0 6px;
   font-family: var(--font-sans);
   font-size: var(--text-mono-xs);
   text-transform: uppercase;
@@ -6242,6 +6485,68 @@ button.resource-link:disabled {
   color: var(--text-muted);
   font-size: var(--text-body-md);
   line-height: 1.6;
+}
+
+.lb-norm-summary {
+  display: grid;
+  gap: 12px;
+  max-width: 46rem;
+}
+
+.lb-norm-formula {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-label);
+  line-height: 1.5;
+}
+
+.lb-norm-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+}
+
+/* Ba ô số liệu mẫu số tô theo bộ màu VKU: xanh baseline, vàng điểm gốc, đỏ giới hạn thang. */
+.lb-norm-facts > div {
+  --norm-tone-bg: var(--surface-subtle);
+  --norm-tone-border: var(--border);
+  --norm-tone-ink: var(--text);
+  padding: 8px 12px;
+  border: 1px solid var(--norm-tone-border);
+  border-radius: var(--radius-lg);
+  background: var(--norm-tone-bg);
+}
+
+.lb-norm-facts > div[data-tone="blue"] {
+  --norm-tone-bg: linear-gradient(135deg, var(--vku-blue-50), var(--vku-blue-100));
+  --norm-tone-border: var(--vku-blue-500);
+  --norm-tone-ink: var(--vku-blue-800);
+}
+
+.lb-norm-facts > div[data-tone="yellow"] {
+  --norm-tone-bg: linear-gradient(135deg, var(--vku-yellow-50), var(--vku-yellow-100));
+  --norm-tone-border: var(--vku-yellow-600);
+  --norm-tone-ink: var(--vku-yellow-800);
+}
+
+.lb-norm-facts > div[data-tone="red"] {
+  --norm-tone-bg: linear-gradient(135deg, var(--vku-red-50), var(--vku-red-100));
+  --norm-tone-border: var(--vku-red-500);
+  --norm-tone-ink: var(--vku-red-800);
+}
+
+.lb-norm-facts dt {
+  color: var(--norm-tone-ink);
+  font-size: var(--text-label-xs);
+}
+
+.lb-norm-facts dd {
+  margin: 2px 0 0;
+  color: var(--norm-tone-ink);
+  font-size: var(--text-label);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .lb-sync-bar {
@@ -6316,6 +6621,30 @@ button.resource-link:disabled {
 .lb-table .lb-col-time {
   width: 180px;
   text-align: right;
+}
+
+.lb-table .lb-score-cell {
+  background: var(--surface-subtle);
+  border-left: 1px solid var(--border);
+}
+
+/* Pill điểm nổi bật dùng chung BXH và Bài đã nộp: vàng cho điểm gốc, xanh cho norm. */
+.score-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border: 1px solid var(--vku-yellow-600);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--vku-yellow-50), var(--vku-yellow-100));
+  color: var(--vku-yellow-800);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.score-pill.norm {
+  border-color: var(--vku-blue-500);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-700);
 }
 
 .lb-table th {
@@ -6460,6 +6789,16 @@ button.resource-link:disabled {
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+.lb-me-facts .lb-me-score dd {
+  color: var(--vku-blue-700);
+  font-weight: 700;
+}
+
+.lb-me-facts .lb-me-source-score dd {
+  color: var(--vku-yellow-800);
+  font-weight: 700;
 }
 
 .lb-me-offpage {
@@ -6749,6 +7088,14 @@ button.resource-link:disabled {
   height: 34px;
   padding: 0 16px;
   border-radius: var(--radius-md);
+}
+
+/* Cụm bên phải của đầu thẻ kết quả: badge nhánh đứng cạnh nút xuất. */
+.results-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
 }
 
 /* Bộ lọc tự áp dụng nên không còn ô nút "Lọc": mỗi bộ lọc một cột, nút xóa đứng cuối. */
@@ -7178,6 +7525,26 @@ button.resource-link:disabled {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
+}
+
+/* Hai tiêu đề phán quyết của AI trong thẻ kết quả - "AI đối chiếu thể lệ" và "AI đánh giá nguồn" -
+   là thứ admin phải đọc trước tiên, nên chúng nổi hơn các tiêu đề mục khác: chữ đậm và lớn hơn,
+   kèm vạch nhấn bên trái. Các mục phụ (lịch sử, mục nguồn của row cũ) giữ nguyên kiểu nhẹ. */
+.ai-section-heading-strong {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.ai-section-heading-strong::before {
+  content: "";
+  width: 4px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--vku-blue-500);
 }
 
 .ai-result-disclaimer {
@@ -7644,9 +8011,10 @@ button.resource-link:disabled {
    cụt. Bo góc cho tầng dưới được xử lý riêng ở `.subm-card-tier-detail`.
 
    Cả thẻ một nền trắng với đúng MỘT vạch nhấn: vạch 4px ở lề trái, màu là mức nặng nhất trong
-   ba trục phán quyết. Ngoài vạch đó, tầng nhận diện còn một dải tint rất nhạt chạy từ lề trái
-   vào 35% bề ngang - nó chỉ kéo mắt về phía vạch chứ không tô kín thẻ, nên thẻ vẫn đọc ra là
-   "trắng" và tín hiệu mức nặng vẫn nằm trọn ở vạch. */
+   các trục phán quyết - chấm điểm, kết luận thể lệ của AI, đánh giá nguồn và xét duyệt. Ngoài
+   vạch đó, tầng nhận diện còn một dải tint rất nhạt chạy từ lề trái vào 35% bề ngang - nó chỉ
+   kéo mắt về phía vạch chứ không tô kín thẻ, nên thẻ vẫn đọc ra là "trắng" và tín hiệu mức nặng
+   vẫn nằm trọn ở vạch. */
 .subm-card {
   --card-accent: var(--border);
   --card-tint: var(--surface);
@@ -7658,10 +8026,11 @@ button.resource-link:disabled {
   transition: border-color 0.14s ease, box-shadow 0.14s ease;
 }
 
-/* Mức nặng nhất trong ba trục: đỏ > vàng > xanh. Cố ý không lấy trục "chính": một bài bị AI gắn
-   cờ nhưng người chưa xét duyệt vẫn cần được nhìn thấy. Ba màu lấy đúng thang của thẻ thống kê
-   `.admin-account-stat` bên dưới nên hai chỗ đọc ra cùng một nghĩa; dải tint lấy đúng ba tông
-   nhạt của chúng. */
+/* Mức nặng nhất trong các trục: đỏ > vàng > xanh. Nguồn chưa xác minh hoặc có dấu hiệu dùng
+   nguồn ngoài cũng là vàng, kể cả khi AI không thấy vi phạm thể lệ. Cố ý không lấy trục "chính":
+   một bài bị AI gắn cờ nhưng người chưa xét duyệt vẫn cần được nhìn thấy. Ba màu lấy đúng thang
+   của thẻ thống kê `.admin-account-stat` bên dưới nên hai chỗ đọc ra cùng một nghĩa; dải tint lấy
+   đúng ba tông nhạt của chúng. */
 .subm-card-danger {
   --card-accent: var(--vku-red-600);
   --card-tint: var(--vku-red-50);
@@ -8069,7 +8438,8 @@ button.resource-link:disabled {
 }
 
 /* Câu nhắc chỉ xuất hiện khi bảng thật sự có cột AI, nằm ngay dưới bảng. */
-.subm-ai-note {
+.subm-ai-note,
+.subm-norm-note {
   margin: 10px 0 0;
   font-size: var(--text-body-sm);
 }
@@ -10391,7 +10761,7 @@ button.resource-link:disabled {
   line-height: 1.45;
 }
 
-/* Danh sách link tài nguyên: mỗi dòng là một cặp tên + URL Drive. */
+/* Danh sách link tài nguyên: mỗi dòng là một cặp tên + URL. */
 .ac-resource-fieldset {
   display: flex;
   flex-direction: column;
@@ -10402,7 +10772,7 @@ button.resource-link:disabled {
   border: 0;
 }
 
-/* Ràng buộc Google Drive là info note vàng, không phải paragraph trôi nổi. */
+/* Ràng buộc link tài nguyên là info note vàng, không phải paragraph trôi nổi. */
 .ac-resource-hint {
   margin: 0;
   padding: 12px 14px;
@@ -10449,6 +10819,188 @@ button.resource-link:disabled {
   margin: 0;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+.ac-resource-group-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* Tóm tắt lỗi đầu form: được focus khi submit thất bại, nội dung trùng với lỗi inline. */
+.ac-form-error-summary {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--danger-border);
+  border-left: 3px solid var(--danger);
+  border-radius: 10px;
+  background: var(--danger-soft-30);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ac-form-error-summary:focus {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
+.ac-form-error-summary-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ac-form-error-summary ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* Hai hình thức nên lưới hai cột; `.ac-join-options` gốc là ba cột cho cách tham gia. */
+.ac-mode-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* Lưới lịch hai nhánh: một cột nhãn dòng + hai cột PUBLIC/PRIVATE thẳng hàng. */
+.ac-track-grid {
+  display: grid;
+  grid-template-columns: 132px repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: center;
+}
+
+/* Đầu lưới và từng hàng chỉ là nhóm logic: xả vào lưới cha để mọi cột thẳng hàng. */
+.ac-track-grid-head,
+.ac-track-grid-row {
+  display: contents;
+}
+
+.ac-track-grid-head > span {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ac-track-grid-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Timeline hai hàng: nhãn + khoảng ngày ở dòng trên, thanh thời gian ở dòng dưới. */
+.ac-track-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: 10px;
+  background: var(--surface-container-low);
+}
+
+.ac-track-timeline-row {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: center;
+}
+
+.ac-track-timeline-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ac-track-timeline-range {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.ac-track-timeline-track {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--vku-border-soft);
+}
+
+.ac-track-timeline-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
+  border-radius: 999px;
+}
+
+.ac-track-timeline-bar[data-track="public"] {
+  background: var(--vku-blue-500);
+}
+
+.ac-track-timeline-bar[data-track="private"] {
+  background: var(--vku-yellow-600);
+}
+
+/* Tóm tắt lịch/chính sách readonly của cuộc thi dual trong form sửa. */
+.ac-track-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ac-track-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: 10px;
+  background: var(--surface-container-low);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.ac-track-summary-row strong {
+  color: var(--vku-ink);
+  font-weight: 600;
+}
+
+/* Hai lựa chọn chính sách công bố xếp dọc: nhãn dài, không vừa card ngang. */
+.ac-policy-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ac-policy-options > label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--vku-border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--vku-ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ac-policy-options > label.selected {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, var(--vku-blue-100) 0%, var(--surface) 100%);
+  box-shadow: 0 0 0 3px rgba(9, 105, 232, 0.07);
+}
+
+.ac-policy-options input {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--accent);
 }
 
 .ac-form-error {
@@ -10699,6 +11251,12 @@ button.resource-link:disabled {
 
   .ac-join-options {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* Lưới lịch hai nhánh: thu cột nhãn để hai ô ngày còn đủ chỗ nhập. */
+  .ac-track-grid {
+    grid-template-columns: 96px repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 }
 
@@ -11417,6 +11975,68 @@ button:focus-visible {
   .admin-detail-grid {
     grid-template-columns: minmax(0, 1.65fr) minmax(20rem, 0.85fr);
   }
+}
+
+/* --- Tab Nhánh thi: danh sách hai nhánh với lịch, quota và nút gia hạn/mở lại. --- */
+.admin-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-track-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-lg);
+}
+
+/* Tên nhánh bên trái, badge cửa sổ bên phải; nhánh chính thức đã ghi rõ trong tên. */
+.admin-track-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.admin-track-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+/* Khối lịch trong item đã có viền riêng; bỏ khoảng lề dọc để item không bị rỗng hai đầu. */
+.admin-track-item .scoring-metadata {
+  margin: 0;
+}
+
+.admin-track-note {
+  margin: var(--space-sm) 0 0;
+}
+
+.admin-track-subtitle {
+  margin: var(--space-md) 0 var(--space-xs);
+  color: var(--text);
+  font-size: var(--text-body-sm);
+  font-weight: 600;
+}
+
+/* Nhóm "Gia hạn nhánh này khi mở lại" trong modal mở lại: một fieldset trọn khối. */
+.admin-track-reopen {
+  margin: 0 0 var(--space-md);
+  padding: var(--space-sm) var(--space-md) var(--space-md);
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-lg);
+}
+
+.admin-track-reopen .text-muted {
+  margin: var(--space-xs) 0;
 }
 
 /* --- CTA của module --- */
@@ -12430,6 +13050,16 @@ button:focus-visible {
 .admin-detail-fact dd.mono {
   font-family: var(--font-mono);
   color: var(--text-muted);
+}
+
+/* Dòng phụ trong ô facts (trạng thái cửa sổ nhận bài, quota): nhỏ hơn, không tranh
+   trọng lượng với giá trị chính. */
+.admin-detail-fact-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 @media (min-width: 48rem) {

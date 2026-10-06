@@ -18,9 +18,10 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 
 from app.ai_review import constants
+from app.competitions import tracks as competition_tracks
+from app.competitions.service import COMPETITIONS_COLLECTION, public_resources
 from app.content import storage as content_storage
 from app.content.service import CONTENTS_COLLECTION
-from app.competitions.service import COMPETITIONS_COLLECTION, public_resources
 
 REVISIONS_COLLECTION = "competition_content_revisions"
 MAX_CAPTURE_ATTEMPTS = 3
@@ -114,19 +115,34 @@ async def content_source_view(db, competition_id, *, settings) -> dict:
     }
 
 
-async def read_resources(db, competition_id) -> list[dict]:
+async def read_resources(db, competition_id, *, track: str | None = None) -> list[dict]:
+    """Tài nguyên BTC hiệu lực của một lượt chụp: danh sách chung + danh sách riêng của nhánh.
+
+    Nhánh chỉ lộ tài nguyên riêng từ giờ mở của nó, và snapshot luôn được chụp trong cửa sổ nộp,
+    nên danh sách ở đây đúng bằng những gì thí sinh đã thấy lúc bấm Nút. `track=None` là cuộc thi
+    single - giữ nguyên danh sách chung như trước.
+    """
     competition = await db[COMPETITIONS_COLLECTION].find_one({"_id": competition_id})
-    return [dict(item) for item in public_resources(competition or {})]
+    resources = public_resources(competition or {})
+    if track is not None:
+        resources = [*resources, *competition_tracks.track_resources(competition or {}, track)]
+    return [dict(item) for item in resources]
 
 
-async def capture_revision(db, competition_id, *, settings) -> CapturedRevision:
-    """Chụp revision bất biến; raise `SnapshotError` với mã lỗi ổn định khi không chụp được."""
+async def capture_revision(db, competition_id, *, track: str | None = None, settings) -> CapturedRevision:
+    """Chụp revision bất biến; raise `SnapshotError` với mã lỗi ổn định khi không chụp được.
+
+    Hash phủ tài nguyên hiệu lực của nhánh, nên cùng nội dung thể lệ nhưng hai danh sách tài nguyên
+    khác nhau sinh hai revision khác nhau - cache AI không bao giờ phục vụ lại kết luận của một ngữ
+    cảnh tài nguyên khác. Hai nhánh trùng cả nội dung lẫn tài nguyên dùng chung một revision, đúng
+    vì ngữ cảnh gửi model là như nhau.
+    """
     for _ in range(MAX_CAPTURE_ATTEMPTS):
         before = await read_content_metadata(db, competition_id)
-        resources = await read_resources(db, competition_id)
+        resources = await read_resources(db, competition_id, track=track)
         captured = _capture_pages(before, settings)
         after = await read_content_metadata(db, competition_id)
-        after_resources = await read_resources(db, competition_id)
+        after_resources = await read_resources(db, competition_id, track=track)
         if _metadata_signature(before) == _metadata_signature(after) and resources == after_resources:
             return await _persist(db, competition_id, captured, resources)
     raise SnapshotError(

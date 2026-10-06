@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 
 from app.auth.dependencies import AdminAccount
 from app.competitions import service as competitions_service
+from app.competitions import tracks as competition_tracks
 from app.competitions.admin_router import _get_competition_or_404
 from app.content import storage
 from app.core.config import get_settings
@@ -31,7 +32,12 @@ from app.scoring import (
 )
 from app.scoring import storage as scoring_storage
 from app.scoring.errors import EvaluatorError, ScoringValidationError
-from app.scoring.readiness import blocked_reason, check_readiness, verified
+from app.scoring.readiness import (
+    blocked_reason,
+    check_readiness,
+    stored_verification,
+    verified,
+)
 from app.submissions.service import has_completed_submission
 
 logger = logging.getLogger(__name__)
@@ -139,20 +145,27 @@ async def upload_ground_truth(
     admin: AdminAccount,
     file: UploadFile = File(...),
     expected_revision: int | None = Form(None),
+    track: str | None = Form(None),
 ) -> dict:
     if Path(file.filename or "").suffix.lower() != ".csv":
         raise api_error(422, "INVALID_FILE_TYPE", "Chỉ chấp nhận ground truth có đuôi .csv.")
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
+    track = _resolve_track(competition, track)
     await _ensure_unlocked(db, competition)
     data = await _read_limited(file)
     config_v2 = models.stored_config_or_none(competition)
     if config_v2 is not None:
         _require_revision(config_v2.revision, expected_revision)
-        await _store_v2_ground_truth(db, competition, config_v2, data, expected_revision, admin)
+        await _store_v2_ground_truth(db, competition, config_v2, data, expected_revision, track, admin)
     else:
-        await _store_v1_ground_truth(db, competition, data, admin)
-    logger.info("Admin %s uploaded ground truth competition=%s", admin["email"], competition["_id"])
+        await _store_v1_ground_truth(db, competition, data, track, admin)
+    logger.info(
+        "Admin %s uploaded ground truth competition=%s track=%s",
+        admin["email"],
+        competition["_id"],
+        track or "single",
+    )
     return await _scoring_view(db, await _reload(db, competition))
 
 
@@ -163,16 +176,19 @@ async def test_scoring(
     admin: AdminAccount,
     file: UploadFile = File(...),
     expected_revision: int | None = Form(None),
+    track: str | None = Form(None),
 ) -> dict:
     """Chạy bộ chấm với ground truth thật và một bài nộp thử của admin.
 
     Chỉ khi chạy được trọn vẹn và (nếu đã khai báo metric) khớp đúng hợp đồng thì lượt chạy này mới
-    được ghi lại làm bằng chứng xác minh - đó là điều kiện publish.
+    được ghi lại làm bằng chứng xác minh - đó là điều kiện publish. Dual ghi bằng chứng theo từng
+    nhánh: test Public chỉ xác nhận readiness Public.
     """
     if Path(file.filename or "").suffix.lower() != ".csv":
         raise api_error(422, "INVALID_FILE_TYPE", "Chỉ chấp nhận file submission thử có đuôi .csv.")
     db = request.app.state.mongo.db
     competition = await _get_competition_or_404(db, competition_id)
+    track = _resolve_track(competition, track)
     await _ensure_unlocked(db, competition)
     config = models.stored_config_or_none(competition)
     if config is None:
@@ -183,7 +199,7 @@ async def test_scoring(
         # Bản nháp mới có schema chưa có source; nói đúng việc cần làm thay vì lỗi đọc file.
         raise api_error(422, "EVALUATOR_REQUIRED", "Cần lưu source bộ chấm trước khi chạy thử.")
     source = _read_source(config)
-    ground_truth_data = _read_ground_truth(competition)
+    ground_truth_data = _read_ground_truth(competition, track)
     submission_data = await _read_limited(file)
     evaluation = await _run_evaluator(
         competition,
@@ -201,12 +217,14 @@ async def test_scoring(
         expected_revision=expected_revision,
         tested_submission_sha256=revisions.sha256_bytes(submission_data),
         ground_truth_data=ground_truth_data,
+        track=track,
         admin=admin,
     )
     logger.info(
-        "Admin %s test-ran evaluator competition=%s metrics=%s",
+        "Admin %s test-ran evaluator competition=%s track=%s metrics=%s",
         admin["email"],
         competition["_id"],
+        track or "single",
         observed,
     )
     updated = await _reload(db, competition)
@@ -221,6 +239,13 @@ async def test_scoring(
     }
 
 
+def _resolve_track(competition: dict, track: str | None) -> str | None:
+    try:
+        return competition_tracks.resolve_track(competition, track)
+    except competition_tracks.TrackError as exc:
+        raise api_error(422, exc.code, exc.message)
+
+
 async def _save_v1(db, competition: dict, body: service.ScoringConfig, admin: AdminAccount) -> dict:
     # Body v1 trên cuộc thi đã có cấu hình v2 hợp lệ sẽ xoá cấu hình đó và đổi cách chấm của mọi bài
     # nộp sau (bài cũ vẫn giữ metric v2), nên đổi đời cấu hình phải là việc làm có chủ ý, không phải
@@ -233,9 +258,17 @@ async def _save_v1(db, competition: dict, body: service.ScoringConfig, admin: Ad
         )
     try:
         service.validate_config(body)
-        if competition.get("ground_truth"):
+        # GT hiện có phải còn đọc được dưới cấu hình mới - kiểm từng bản GT đang có mặt.
+        candidates = (
+            list(competition_tracks.TRACKS)
+            if competition_tracks.is_dual(competition)
+            else [None]
+        )
+        for candidate in candidates:
+            if not competition_tracks.track_ground_truth(competition, candidate):
+                continue
             try:
-                data = scoring_storage.read_ground_truth(competition)
+                data = scoring_storage.read_ground_truth(competition, candidate)
             except (KeyError, OSError, ValueError):
                 raise ScoringValidationError(
                     "GROUND_TRUTH_INVALID", "Ground truth hiện tại không đọc được."
@@ -355,7 +388,20 @@ def _ensure_source_kept(
         )
 
 
-async def _store_v1_ground_truth(db, competition: dict, data: bytes, admin: AdminAccount) -> None:
+def _ground_truth_sets(track: str | None, metadata: dict) -> dict:
+    """Metadata GT đi vào đúng chỗ của nhánh; dual không ghi vào field cấp cuộc thi.
+
+    Đổi GT của một nhánh xoá luôn bằng chứng chạy thử của nhánh đó: bằng chứng cũ không còn nói
+    về cấu hình đang có, và để nó nằm lại chỉ gây hiểu nhầm trên thẻ GT.
+    """
+    if track is None:
+        return {"ground_truth": metadata}
+    return {f"tracks.{track}.ground_truth": metadata, f"tracks.{track}.verification": None}
+
+
+async def _store_v1_ground_truth(
+    db, competition: dict, data: bytes, track: str | None, admin: AdminAccount
+) -> None:
     config = service.config_from_competition(competition)
     if config is None:
         raise api_error(
@@ -368,20 +414,34 @@ async def _store_v1_ground_truth(db, competition: dict, data: bytes, admin: Admi
     except ScoringValidationError as exc:
         raise api_error(422, exc.code, exc.message)
 
-    try:
-        path = scoring_storage.ground_truth_path(competition)
-    except (KeyError, ValueError):
-        raise api_error(422, "GROUND_TRUTH_INVALID", "Đường dẫn ground truth không hợp lệ.")
-    _write_file(path, data, competition)
+    if track is None:
+        try:
+            path = scoring_storage.ground_truth_path(competition)
+        except (KeyError, ValueError):
+            raise api_error(422, "GROUND_TRUTH_INVALID", "Đường dẫn ground truth không hợp lệ.")
+        _write_file(path, data, competition)
+        path_value = path.relative_to(Path(get_settings().data_dir).resolve()).as_posix()
+        sha256 = None
+    else:
+        # Nhánh của cuộc thi dual: tên file gắn track + hash, hai bản GT không thể đè nhau.
+        sha256 = revisions.sha256_bytes(data)
+        try:
+            path_value = scoring_storage.write_ground_truth(
+                competition, data, sha256=sha256, track=track
+            )
+        except OSError:
+            logger.exception("Không ghi được ground truth competition=%s", competition["_id"])
+            raise api_error(500, "FILE_WRITE_FAILED", "Không thể lưu ground truth.")
     metadata = {
-        "path": path.relative_to(Path(get_settings().data_dir).resolve()).as_posix(),
+        "path": path_value,
         "row_count": ground_truth.row_count,
         "columns": list(ground_truth.columns),
         "uploaded_at": revisions.utc_now(),
+        **({"sha256": sha256} if sha256 else {}),
     }
     await db[competitions_service.COMPETITIONS_COLLECTION].update_one(
         {"_id": competition["_id"]},
-        {"$set": {"ground_truth": metadata, "updated_at": revisions.utc_now()}},
+        {"$set": {**_ground_truth_sets(track, metadata), "updated_at": revisions.utc_now()}},
     )
 
 
@@ -391,6 +451,7 @@ async def _store_v2_ground_truth(
     config: models.ScoringConfigV2,
     data: bytes,
     expected_revision: int | None,
+    track: str | None,
     admin: AdminAccount,
 ) -> None:
     try:
@@ -400,7 +461,7 @@ async def _store_v2_ground_truth(
 
     sha256 = revisions.sha256_bytes(data)
     try:
-        path = scoring_storage.write_ground_truth(competition, data, sha256=sha256)
+        path = scoring_storage.write_ground_truth(competition, data, sha256=sha256, track=track)
     except OSError:
         logger.exception("Không ghi được ground truth competition=%s", competition["_id"])
         raise api_error(500, "FILE_WRITE_FAILED", "Không thể lưu ground truth.")
@@ -417,9 +478,14 @@ async def _store_v2_ground_truth(
         db,
         competition,
         expected_revision=expected_revision,
-        sets={"scoring_config": updated.model_dump(mode="json"), "ground_truth": metadata},
+        sets={"scoring_config": updated.model_dump(mode="json"), **_ground_truth_sets(track, metadata)},
     )
-    logger.info("Admin %s uploaded ground truth v2 competition=%s", admin["email"], competition["_id"])
+    logger.info(
+        "Admin %s uploaded ground truth v2 competition=%s track=%s",
+        admin["email"],
+        competition["_id"],
+        track or "single",
+    )
 
 
 async def _store_verification(
@@ -431,34 +497,39 @@ async def _store_verification(
     expected_revision: int | None,
     tested_submission_sha256: str,
     ground_truth_data: bytes,
+    track: str | None,
     admin: AdminAccount,
 ) -> None:
-    metadata = competition.get("ground_truth") or {}
+    metadata = competition_tracks.track_ground_truth(competition, track) or {}
     sets: dict = {}
     if not metadata.get("sha256"):
         # Ground truth tải lên từ đời cấu hình trước: ghim hash ngay tại đây để dấu vân tay đủ đầu vào.
-        sets["ground_truth"] = {
-            **metadata,
-            "sha256": revisions.sha256_bytes(ground_truth_data),
-        }
+        sets.update(
+            _ground_truth_sets(track, {**metadata, "sha256": revisions.sha256_bytes(ground_truth_data)})
+        )
+    verification = models.Verification(
+        state="passed",
+        execution_fingerprint=evaluation.execution_fingerprint,
+        config_fingerprint=evaluation.config_fingerprint,
+        observed_keys=sorted(evaluation.metrics),
+        tested_submission_sha256=tested_submission_sha256,
+        tested_at=revisions.utc_now(),
+        tested_by=admin["email"],
+    )
     stored = config.model_copy(
         update={
             # Môi trường đã chạy thật được ghim vào cấu hình; lượt chấm sau so với đúng nó.
             "evaluator": config.evaluator.model_copy(
                 update={"runtime_id": evaluation.runtime_id}
             ),
-            "verification": models.Verification(
-                state="passed",
-                execution_fingerprint=evaluation.execution_fingerprint,
-                config_fingerprint=evaluation.config_fingerprint,
-                observed_keys=sorted(evaluation.metrics),
-                tested_submission_sha256=tested_submission_sha256,
-                tested_at=revisions.utc_now(),
-                tested_by=admin["email"],
-            ),
+            # Single giữ bằng chứng trong config như cũ; dual lưu theo nhánh vì GT là phần của
+            # dấu vân tay nhánh đó.
+            "verification": verification if track is None else config.verification,
         }
     )
     sets["scoring_config"] = stored.model_dump(mode="json")
+    if track is not None:
+        sets[f"tracks.{track}.verification"] = verification.model_dump(mode="json")
     await _update(db, competition, expected_revision=expected_revision, sets=sets)
 
 
@@ -586,39 +657,80 @@ async def _scoring_view(db, competition: dict) -> dict:
         "primary_metric": ranking[0] if ranking else None,
         "higher_is_better": ranking[1] if ranking else None,
         "result_contract": contracts.contract_payload(competition),
-        "quota_per_day": competition["quota_per_day"],
+        "quota_per_day": competition.get("quota_per_day"),
         "max_upload_mb": get_settings().max_upload_mb,
         "source_limit_kb": models.MAX_SOURCE_BYTES // 1024,
     }
+    if competition_tracks.is_dual(competition):
+        # Bộ chấm là của chung; GT, bằng chứng và readiness tách theo nhánh.
+        view["mode"] = competition_tracks.MODE_DUAL
+        view["tracks"] = {
+            track: _track_scoring_view(competition, config, track)
+            for track in competition_tracks.TRACKS
+        }
     return view
 
 
+def _track_scoring_view(competition: dict, config: models.ScoringConfigV2 | None, track: str) -> dict:
+    readiness = check_readiness(competition, track=track)
+    return {
+        "ground_truth": _ground_truth_metadata(
+            competition_tracks.track_ground_truth(competition, track)
+        ),
+        "ready": readiness.ready,
+        "not_ready_reason": blocked_reason(readiness),
+        "verified": bool(config is not None and verified(competition, config, track=track)),
+        "verification": _verification_payload(stored_verification(competition, config, track)),
+    }
+
+
 def _v2_view(competition: dict, config: models.ScoringConfigV2) -> dict:
-    verification = config.verification
+    if competition_tracks.is_dual(competition):
+        # Bằng chứng của dual nằm theo từng nhánh (xem `tracks`); ở cấp chung chỉ trả trạng thái tổng.
+        return {
+            "revision": config.revision,
+            "input_schema": config.input_schema.model_dump(mode="json"),
+            "evaluator": _evaluator_view(config),
+            "output_contract": (
+                config.output_contract.model_dump(mode="json") if config.output_contract else None
+            ),
+            "verified": all(
+                verified(competition, config, track=track)
+                for track in competition_tracks.TRACKS
+            ),
+            "verification": None,
+        }
     return {
         "revision": config.revision,
         "input_schema": config.input_schema.model_dump(mode="json"),
-        "evaluator": {
-            "name": config.evaluator.name,
-            "source_sha256": config.evaluator.source_sha256,
-            "runtime_id": config.evaluator.runtime_id,
-            "source_code": _read_source(config, required=False),
-        },
+        "evaluator": _evaluator_view(config),
         "output_contract": (
             config.output_contract.model_dump(mode="json") if config.output_contract else None
         ),
         "verified": verified(competition, config),
-        "verification": (
-            None
-            if verification is None
-            else {
-                "tested_at": iso_z(verification.tested_at) if verification.tested_at else None,
-                "tested_by": verification.tested_by,
-                "observed_keys": verification.observed_keys,
-                "execution_fingerprint": verification.execution_fingerprint,
-                "config_fingerprint": verification.config_fingerprint,
-            }
-        ),
+        "verification": _verification_payload(config.verification),
+    }
+
+
+def _evaluator_view(config: models.ScoringConfigV2) -> dict:
+    return {
+        "name": config.evaluator.name,
+        "source_sha256": config.evaluator.source_sha256,
+        "runtime_id": config.evaluator.runtime_id,
+        "source_code": _read_source(config, required=False),
+    }
+
+
+def _verification_payload(verification: models.Verification | None) -> dict | None:
+    """Bằng chứng chạy thử ở dạng API; model đã qua `stored_verification` nên timestamp là datetime."""
+    if verification is None:
+        return None
+    return {
+        "tested_at": iso_z(verification.tested_at) if verification.tested_at else None,
+        "tested_by": verification.tested_by,
+        "observed_keys": verification.observed_keys,
+        "execution_fingerprint": verification.execution_fingerprint,
+        "config_fingerprint": verification.config_fingerprint,
     }
 
 
@@ -631,9 +743,9 @@ def _read_source(config: models.ScoringConfigV2, *, required: bool = True) -> st
         return ""
 
 
-def _read_ground_truth(competition: dict) -> bytes:
+def _read_ground_truth(competition: dict, track: str | None) -> bytes:
     try:
-        return scoring_storage.read_ground_truth(competition)
+        return scoring_storage.read_ground_truth(competition, track)
     except (KeyError, OSError, ValueError):
         raise api_error(
             422, "GROUND_TRUTH_REQUIRED", "Cần tải lên ground truth trước khi chạy thử."
@@ -672,6 +784,10 @@ async def _ensure_unlocked(db, competition: dict) -> None:
 
 
 async def _is_locked(db, competition: dict) -> bool:
+    if competition_tracks.is_dual(competition):
+        # Dual khóa cấu hình chấm và cả hai GT ngay tại lượt publish; mở lại không gỡ khóa.
+        # Không cho chạy Public trước rồi nạp GT Private khi cuộc thi đã chạy.
+        return competition.get("scoring_locked_at") is not None
     return competition["status"] == "closed" or await has_completed_submission(
         db, competition["_id"]
     )

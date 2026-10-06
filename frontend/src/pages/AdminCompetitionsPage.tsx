@@ -8,8 +8,11 @@ import type { AdminCompetition, AdminCompetitionsResponse } from "../api/competi
 import {
   JOIN_MODE_LABEL,
   STATUS_LABEL,
+  TRACKS,
+  TRACK_LABEL,
   displayStatus,
   formatLocal,
+  isDual,
   primaryMetricLabel,
   statusClass,
 } from "../api/competitions";
@@ -646,7 +649,14 @@ function CompetitionRow({
       <td>
         <div className="ac-metric-cell">
           <strong>{primaryMetricLabel(c)}</strong>
-          <span>{c.quota_per_day} lượt/ngày</span>
+          {/* Dual không có quota cấp cuộc thi: quota nằm ở từng nhánh, đọc thẳng từ đó. */}
+          <span>
+            {isDual(c)
+              ? `${TRACKS.map(
+                  (track) => `${TRACK_LABEL[track]} ${c.tracks?.[track]?.quota_per_day ?? "—"}`,
+                ).join(" · ")} lượt/ngày`
+              : `${c.quota_per_day} lượt/ngày`}
+          </span>
         </div>
       </td>
       <td className="ac-count-cell">

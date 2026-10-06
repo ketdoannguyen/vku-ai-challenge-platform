@@ -2,7 +2,8 @@
 
 Model trả MỘT `source_assessment` cho cả notebook; ở đây khoá lại phần backend chắc được: vị trí
 trích dẫn có thật trong CODE cell, snippet dựng lại từ notebook, vị trí bị loại giữ kèm mã lý do, và
-bảng hạ trạng thái. URL Drive chỉ quyết định "có tài nguyên BTC để đối chiếu hay không"; riêng
+bảng hạ trạng thái. Định danh tài nguyên BTC - Drive qua ID, link ngoài (S3, máy chủ riêng) qua
+host + path - chỉ quyết định "có tài nguyên BTC để đối chiếu hay không"; riêng
 `find_resource_mentions` là dữ kiện phụ cho admin, không bao giờ quyết định trạng thái nguồn.
 """
 
@@ -13,8 +14,8 @@ from app.ai_review.models import ModelEvidence, ModelSourceAssessment
 from app.ai_review.notebook import normalize_notebook
 from app.ai_review.sources import (
     ResourceMention,
-    drive_identity,
     find_resource_mentions,
+    resource_identity,
     verify_source_assessment,
 )
 from tests.helpers import notebook_bytes
@@ -56,14 +57,41 @@ def verify(assessment, *, cells=DEFAULT_CELLS, resources=(RESOURCE,), max_chars=
     "https://docs.google.com/spreadsheets/d/FILE123/edit",
 ])
 def test_same_file_has_same_identity(url):
-    assert drive_identity(url) == ("file", "FILE123")
+    assert resource_identity(url) == ("file", "FILE123")
 
 
 def test_forms_and_multi_account_links_keep_their_real_ids():
-    assert drive_identity("https://docs.google.com/forms/d/e/FORM_A/viewform") == ("file", "FORM_A")
-    assert drive_identity("https://docs.google.com/forms/d/e/FORM_B/viewform") == ("file", "FORM_B")
-    assert drive_identity("https://docs.google.com/spreadsheets/u/0/d/FILE123/edit") == ("file", "FILE123")
-    assert drive_identity("https://drive.google.com/file/u/0/d/FILE123/view") == ("file", "FILE123")
+    assert resource_identity("https://docs.google.com/forms/d/e/FORM_A/viewform") == ("file", "FORM_A")
+    assert resource_identity("https://docs.google.com/forms/d/e/FORM_B/viewform") == ("file", "FORM_B")
+    assert resource_identity("https://docs.google.com/spreadsheets/u/0/d/FILE123/edit") == ("file", "FILE123")
+    assert resource_identity("https://drive.google.com/file/u/0/d/FILE123/view") == ("file", "FILE123")
+
+
+@pytest.mark.parametrize(("url", "identity"), [
+    # Tham số ký sẵn (presigned) đổi theo từng lượt tải nhưng vẫn là cùng một object.
+    ("https://bucket.s3.amazonaws.com/btc/dataset.zip?X-Amz-Signature=abc&X-Amz-Expires=900",
+     ("url", "bucket.s3.amazonaws.com/btc/dataset.zip")),
+    ("https://bucket.s3.amazonaws.com/btc/dataset.zip?X-Amz-Signature=xyz",
+     ("url", "bucket.s3.amazonaws.com/btc/dataset.zip")),
+    ("https://S3.Example.COM/btc/dataset.zip", ("url", "s3.example.com/btc/dataset.zip")),
+    # Dấu / cuối đường dẫn không tạo định danh khác.
+    ("https://cdn.example.com/btc/", ("url", "cdn.example.com/btc")),
+    ("https://cdn.example.com/btc", ("url", "cdn.example.com/btc")),
+    # Drive thiếu ID hợp lệ vẫn đối chiếu được ở dạng URL thường, không bị coi là không có tài nguyên.
+    ("https://drive.google.com/file/d/", ("url", "drive.google.com/file/d")),
+])
+def test_external_links_have_a_normalized_url_identity(url, identity):
+    assert resource_identity(url) == identity
+
+
+@pytest.mark.parametrize("url", [
+    "ftp://example.org/dataset.zip",
+    "https://user:pass@example.org/dataset.zip",
+    "javascript:alert(1)",
+    "",
+])
+def test_urls_that_are_not_plain_links_have_no_identity(url):
+    assert resource_identity(url) is None
 
 
 def test_a_missing_assessment_is_not_evaluated_with_its_own_code():
@@ -79,9 +107,8 @@ def test_a_missing_assessment_is_not_evaluated_with_its_own_code():
 
 @pytest.mark.parametrize("resources", [
     [],
-    [{"label": "Web", "url": "https://example.org/dataset.zip"}],
-    # Drive link không có ID hợp lệ: không phải tài nguyên đối chiếu được.
-    [{"label": "Drive cá nhân", "url": "https://drive.google.com/file/d/"}],
+    # URL không phải link http(s) đối chiếu được (dữ liệu cũ/hỏng): coi như không có tài nguyên.
+    [{"label": "FTP", "url": "ftp://example.org/dataset.zip"}],
 ])
 def test_without_a_usable_btc_resource_the_proposal_is_not_evaluated(resources):
     result = verify(assess("ALIGNED", [(1, 1, 1)]), resources=resources)
@@ -93,6 +120,16 @@ def test_without_a_usable_btc_resource_the_proposal_is_not_evaluated(resources):
     assert result.validation_codes == [constants.SOURCE_RESOURCES_MISSING]
     # Không có gì để đối chiếu thì cũng không kiểm trích dẫn: vị trí đúng cũng không được ghi nhận.
     assert result.evidence == []
+
+
+def test_an_external_link_is_a_comparable_resource():
+    """S3 và máy chủ riêng là tài nguyên hợp lệ như Drive: có link là đánh giá nguồn chạy bình thường."""
+    resources = [{"label": "S3", "url": "https://bucket.s3.amazonaws.com/btc/dataset.zip"}]
+
+    result = verify(assess("ALIGNED", [(1, 1, 2)]), resources=resources)
+
+    assert result.status == constants.SOURCE_STATUS_ALIGNED
+    assert result.validation_codes == []
 
 
 def test_the_snippet_is_rebuilt_from_the_notebook_not_taken_from_the_model():
@@ -247,13 +284,41 @@ def test_resource_scan_matches_url_variants_and_bare_id_of_configured_resources(
     assert mentions == [ResourceMention(label="Dataset BTC", cells=[2, 4])]
 
 
-def test_resource_scan_skips_markdown_cells_and_unconfigured_drive_links():
+def test_resource_scan_skips_markdown_cells_and_unconfigured_links():
     mentions = scan(
         [
             ("markdown", ["https://drive.google.com/file/d/FILE1234567890abcdefghij/view"]),
             ("code", ["df = pd.read_csv('https://drive.google.com/uc?id=OTHER1234567890abcdefghij')"]),
         ],
         [OFFICIAL_FILE],
+    )
+    assert mentions == []
+
+
+S3_ARCHIVE = {"label": "Dữ liệu S3", "url": "https://bucket.s3.amazonaws.com/btc/dataset.zip"}
+
+
+def test_resource_scan_matches_external_links_of_configured_resources():
+    mentions = scan(
+        [
+            ("markdown", ["Tài nguyên: https://bucket.s3.amazonaws.com/btc/dataset.zip"]),
+            ("code", ["urlretrieve('https://bucket.s3.amazonaws.com/btc/dataset.zip?X-Amz-Signature=abc', 'x')"]),
+            ("code", ['URL = "https://bucket.s3.amazonaws.com/btc/dataset.zip"']),
+            ("code", ['df = pd.read_csv("https://bucket.s3.amazonaws.com/btc/test.csv")']),
+        ],
+        [S3_ARCHIVE],
+    )
+    assert mentions == [ResourceMention(label="Dữ liệu S3", cells=[2, 3])]
+
+
+def test_resource_scan_does_not_match_other_paths_on_the_same_host():
+    mentions = scan(
+        [
+            ("code", ['urlretrieve("https://bucket.s3.amazonaws.com/btc/other.zip", "x")']),
+            # Tên khác chỉ *chứa* định danh BTC như tiền tố: không phải cùng tài nguyên.
+            ("code", ['read("https://bucket.s3.amazonaws.com/btc/dataset.zip.bak")']),
+        ],
+        [S3_ARCHIVE],
     )
     assert mentions == []
 

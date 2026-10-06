@@ -1,6 +1,6 @@
 import type { AdminAiReview, ParticipantAiReview } from "./aiReview";
 import { api } from "./client";
-import type { NormalizationConfig } from "./competitions";
+import type { NormalizationConfig, Track } from "./competitions";
 
 /** Một metric trong hợp đồng kết quả: khóa tra kết quả, nhãn hiển thị và số thập phân. */
 export interface MetricDefinition {
@@ -116,6 +116,15 @@ export interface SubmissionHistoryItem {
   primary_score: number | null;
   created_at: string;
   artifacts: SubmissionArtifacts;
+  /** Dual: nhánh bài nộp thuộc về; cuộc thi một nhánh không trả khóa này. */
+  track?: Track | null;
+  /**
+   * Dual: `hidden` khi kết quả đã chấm nhưng chưa được công bố - metrics rỗng và điểm `null`,
+   * khác hẳn bài chưa chấm hay điểm 0. Cuộc thi một nhánh không trả khóa này.
+   */
+  result_visibility?: "hidden" | "visible";
+  /** Lý do bị che khi `hidden`; đủ ổn định để UI đối chiếu. */
+  visibility_reason?: "private_unpublished";
   error?: { code: string; message: string };
   /** Chỉ có mặt khi bài đang bị từ chối; endpoint admin ghi đè bằng shape đầy đủ. */
   review?: ParticipantReview;
@@ -138,10 +147,10 @@ export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], st
   failed: "Lỗi chấm điểm",
 };
 
-/** Nhãn badge cho dòng đã từng bị xét duyệt; `null` (chưa xét) hiển thị là "Hợp lệ". */
+/** Nhãn kết quả duyệt; bài chưa có quyết định được duyệt mặc định ở danh sách. */
 export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
-  accepted: "Đã khôi phục",
-  rejected: "Không chấp nhận",
+  accepted: "Duyệt",
+  rejected: "Không duyệt",
 };
 
 /**
@@ -171,6 +180,8 @@ export interface AdminSubmissionStats {
 export interface AdminSubmissionItem
   extends Omit<SubmissionHistoryItem, "review" | "ai_review" | "normalization_snapshot"> {
   account: { id: string; name: string; email: string };
+  /** Dual: nhánh bài nộp thuộc về; cuộc thi một nhánh không trả khóa này. */
+  track?: Track | null;
   /** Khác participant: luôn có khoá, `null` khi bài chưa từng bị xét duyệt. */
   review: AdminReview | null;
   /** Khác participant: luôn có khoá, `null` khi cuộc thi chưa từng bật AI lúc nộp bài. */
@@ -249,6 +260,8 @@ export interface LeaderboardEntry {
 /** Admin và export luôn nhận toàn bộ danh sách, không phân trang. */
 export interface LeaderboardResponse {
   competition_id: string;
+  /** Dual: nhánh của bảng đang xem; cuộc thi một nhánh không trả khóa này. */
+  track?: Track | null;
   /** Khóa metric chính theo hợp đồng kết quả; `null` khi cuộc thi chưa khai báo metric nào. */
   primary_metric: string | null;
   entries: LeaderboardEntry[];
@@ -271,6 +284,29 @@ export type ReviewPayload =
   | { status: "accepted" };
 
 /**
+ * Số lượt chấm theo trạng thái của một nhánh (hoặc cả cuộc thi single), không theo bộ lọc của
+ * bảng đang xem. `failed` gộp cả lượt quá hạn; `in_flight` là các lượt chưa kết thúc.
+ */
+export interface SubmissionScopeStats {
+  total: number;
+  completed: number;
+  failed: number;
+  in_flight: number;
+}
+
+/**
+ * Số liệu phạm vi nhánh cho trang công bố Private. Nhánh bắt buộc với cuộc thi dual; cuộc thi
+ * single không có nhánh nên gọi không kèm `track`.
+ */
+export function fetchSubmissionScopeStats(
+  competitionId: string,
+  track: Track | null,
+): Promise<SubmissionScopeStats> {
+  const scope = track ? `?track=${track}` : "";
+  return api.get(`/admin/competitions/${competitionId}/submissions/stats${scope}`);
+}
+
+/**
  * Xét duyệt hậu kiểm một bài đã chấm điểm. Không chấm lại, không hoàn lượt nộp.
  * Luôn gọi endpoint toàn cục, kể cả khi bảng đang khóa vào một cuộc thi.
  */
@@ -289,12 +325,15 @@ export function fetchMySubmissions(
   return api.get(`/competitions/${competitionId}/submissions/me?limit=${limit}&offset=${offset}`);
 }
 
+/** `track` bắt buộc với cuộc thi dual - backend từ chối khi thiếu, và hai bảng không dùng chung. */
 export function fetchLeaderboard(
   competitionId: string,
   limit: number,
   offset: number,
+  track?: Track | null,
 ): Promise<ParticipantLeaderboardResponse> {
-  return api.get(`/competitions/${competitionId}/leaderboard?limit=${limit}&offset=${offset}`);
+  const scope = track ? `&track=${track}` : "";
+  return api.get(`/competitions/${competitionId}/leaderboard?limit=${limit}&offset=${offset}${scope}`);
 }
 
 /**

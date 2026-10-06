@@ -10,16 +10,18 @@ của tầng dữ liệu (`ArtifactStorageUnavailable`) để router quyết đ�
 
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from bson import ObjectId
 
 from app.ai_review import settings as ai_settings
+from app.competitions import admission as admission_gate
+from app.competitions import tracks as competition_tracks
 from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.memberships.service import MEMBERSHIPS_COLLECTION
-from app.scoring import contracts, normalization
+from app.scoring import contracts
 from app.scoring_attempts import store
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import (
@@ -35,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 EXPIRED_CODE = "SUBMISSION_EXPIRED"
 EXPIRED_MESSAGE = "Bài nộp quá hạn chờ chấm nên không bị tính lượt. Bạn hãy nộp lại."
+# Lệnh đóng quản trị hủy lượt đã nhận nhưng chưa chấm; lượt bị hủy không bị tính vào hạn mức.
+CANCELLED_CODE = "SUBMISSION_CANCELLED"
+CANCELLED_MESSAGE = "Cuộc thi đã đóng nên lượt nộp này không được chấm. Lượt không bị tính."
 GENERIC_MESSAGE = "Không thể chấm điểm bài nộp này."
 SUBMISSION_RULE_MESSAGE = (
     "CSV không đáp ứng quy tắc nộp bài của cuộc thi. "
@@ -43,7 +48,7 @@ SUBMISSION_RULE_MESSAGE = (
 QUEUE_FULL_MESSAGE = "Hàng đợi chấm điểm đang đầy. Bạn thử lại sau ít phút nhé."
 # Câu chữ của những mã này là thứ thí sinh phải đọc để biết đường làm tiếp: file sai thì sửa file,
 # quá hạn thì nộp lại. Mọi mã khác là lỗi hệ thống, quy về một câu chung.
-SAFE_ERROR_CODES = scoring_flow.STUDENT_ERROR_CODES | {EXPIRED_CODE}
+SAFE_ERROR_CODES = scoring_flow.STUDENT_ERROR_CODES | {EXPIRED_CODE, CANCELLED_CODE}
 
 
 def staging_prefix(competition_slug, attempt_id) -> str:
@@ -73,21 +78,31 @@ async def admit(
     idempotency_key: str,
     received_at: datetime,
     now: datetime,
+    track: str | None = None,
 ) -> dict:
     """Nhận một lượt nộp mới vào hàng đợi, hoặc trả lại lượt cũ nếu key này đã dùng.
 
     Hạn 60 giây tính từ `received_at` - mốc API bắt đầu nhận request - chứ không phải từ lúc file
     đã nằm trên server: thời gian upload cũng là thời gian thí sinh phải chờ.
+
+    Dual giữ suất quota của đúng nhánh rồi qua cổng admission trước khi file vào kho tạm: lượt
+    nằm trong hàng đợi luôn có snapshot admission trong intent, nên worker không phải đoán lại
+    cửa sổ theo đồng hồ hiện tại.
     """
     fingerprint = payload_fingerprint(data, notebook_data)
     existing = await store.find_by_key(db, competition["_id"], account["_id"], idempotency_key)
     if existing is not None:
-        return _replayed(existing, fingerprint)
+        return _replayed(existing, fingerprint, track=track)
 
     settings = get_settings()
     attempt_id = ObjectId()
     quota_used = await submissions_service.reserve_quota_slot(
-        db, membership, competition["quota_per_day"], now, attempt_id=str(attempt_id)
+        db,
+        membership,
+        competition_tracks.track_quota(competition, track),
+        now,
+        track=track,
+        attempt_id=str(attempt_id),
     )
     if quota_used is None:
         raise api_error(429, "SUBMISSION_QUOTA_EXCEEDED", "Bạn đã dùng hết lượt nộp bài hôm nay.")
@@ -105,18 +120,22 @@ async def admit(
             deadline_at=received_at + timedelta(seconds=settings.scoring_deadline_seconds),
             now=now,
             capacity=settings.scoring_queue_capacity,
+            track=track,
         )
     except store.AttemptExists as exc:
         # Đua với chính client: hai request cùng key thì nhường lượt đã có và trả lại suất vừa giữ.
         await submissions_service.release_quota_slot(
-            db, membership, now, attempt_id=str(attempt_id)
+            db, membership, now, track=track, attempt_id=str(attempt_id)
         )
-        return _replayed(exc.attempt, fingerprint)
+        return _replayed(exc.attempt, fingerprint, track=track)
     except store.QueueFull:
         await submissions_service.release_quota_slot(
-            db, membership, now, attempt_id=str(attempt_id)
+            db, membership, now, track=track, attempt_id=str(attempt_id)
         )
         raise api_error(503, "SCORING_QUEUE_FULL", QUEUE_FULL_MESSAGE)
+
+    if track is not None:
+        await _pin_admission(db, attempt, track=track)
 
     try:
         await _stage(
@@ -142,13 +161,105 @@ async def admit(
     return await store.get(db, attempt_id)
 
 
-def _replayed(attempt: dict, fingerprint: str) -> dict:
-    """Cùng idempotency key: trả lại đúng lượt cũ, trừ khi đó là một bài nộp khác."""
-    if attempt.get("payload_sha256") != fingerprint:
-        raise api_error(
-            409, "IDEMPOTENCY_KEY_REUSED", "Mã định danh này đã dùng cho một bài nộp khác."
-        )
+def _replayed(attempt: dict, fingerprint: str, *, track: str | None) -> dict:
+    """Cùng idempotency key: trả lại đúng lượt cũ, trừ khi đó là một bài nộp khác.
+
+    Dual đối chiếu thêm nhánh vì một lần nhấn Nút không thể vừa Public vừa Private; xung đột ở
+    cuộc thi dual mang mã riêng theo hợp đồng, single giữ nguyên mã cũ.
+    """
+    conflict = attempt.get("payload_sha256") != fingerprint or (
+        track is not None and attempt.get("track") != track
+    )
+    if conflict:
+        code = "IDEMPOTENCY_CONFLICT" if track is not None else "IDEMPOTENCY_KEY_REUSED"
+        raise api_error(409, code, "Mã định danh này đã dùng cho một bài nộp khác.")
     return attempt
+
+
+async def admit_inline(
+    db,
+    *,
+    competition: dict,
+    account: dict,
+    membership: dict,
+    data: bytes,
+    notebook_data: bytes,
+    csv_filename: str | None,
+    notebook_filename: str | None,
+    idempotency_key: str,
+    received_at: datetime,
+    now: datetime,
+    track: str,
+) -> tuple[dict, bool]:
+    """Nhận một lượt dual-v1 chấm ngay trong request; trả `(lượt, replayed)`.
+
+    Cùng thứ tự với đường queue: giữ quota, ghi intent inline, rồi qua cổng admission - lượt chỉ
+    được chấm sau khi snapshot admission nằm trong intent. `replayed=True` nghĩa là key này đã có
+    lượt từ trước, người gọi phải trả lại lượt cũ thay vì chấm lần hai.
+    """
+    fingerprint = payload_fingerprint(data, notebook_data)
+    existing = await store.find_by_key(db, competition["_id"], account["_id"], idempotency_key)
+    if existing is not None:
+        return _replayed(existing, fingerprint, track=track), True
+
+    settings = get_settings()
+    attempt_id = ObjectId()
+    quota_used = await submissions_service.reserve_quota_slot(
+        db,
+        membership,
+        competition_tracks.track_quota(competition, track),
+        now,
+        track=track,
+        attempt_id=str(attempt_id),
+    )
+    if quota_used is None:
+        raise api_error(429, "SUBMISSION_QUOTA_EXCEEDED", "Bạn đã dùng hết lượt nộp bài hôm nay.")
+    try:
+        attempt = await store.admit_inline(
+            db,
+            attempt_id=attempt_id,
+            competition_id=competition["_id"],
+            account_id=account["_id"],
+            membership_id=membership["_id"],
+            idempotency_key=idempotency_key,
+            payload_sha256=fingerprint,
+            deadline_at=received_at + timedelta(seconds=settings.scoring_deadline_seconds),
+            now=now,
+            track=track,
+        )
+    except store.AttemptExists as exc:
+        await submissions_service.release_quota_slot(
+            db, membership, now, track=track, attempt_id=str(attempt_id)
+        )
+        return _replayed(exc.attempt, fingerprint, track=track), True
+    await _pin_admission(db, attempt, track=track)
+    # Đọc lại như đường queue: dict trả về phải mang snapshot admission vừa ghim, không phải bản
+    # trước khi qua cổng.
+    return await store.get(db, attempt_id), False
+
+
+async def _pin_admission(db, attempt: dict, *, track: str) -> None:
+    """Chốt admission của một lượt dual; cửa đã đóng thì lượt bị đóng ngay và quota được hoàn.
+
+    Cổng đọc giờ tại đúng thao tác DB chứ không dùng mốc từ đầu request: upload và chờ quota nằm
+    giữa hai thời điểm đó. Trượt lượt ghi snapshot nghĩa là reconciler hoặc lệnh đóng đã kết thúc
+    intent trước - lượt không được chấm, và người đóng cũng đã hoàn suất.
+    """
+    now = datetime.now(timezone.utc)
+    admission = await admission_gate.confirm(db, attempt["competition_id"], track, now=now)
+    if admission is None:
+        code, message = await admission_gate.closed_reason(
+            db, attempt["competition_id"], track, now=now
+        )
+        await fail(db, attempt, code=code, message=message, now=now)
+        raise api_error(422, code, message)
+    if not await store.set_admission(db, attempt, admission=admission, now=now):
+        current = await store.get(db, attempt["_id"]) or attempt
+        error = public_error(current.get("error")) or {
+            "code": "SUBMISSION_CLOSED",
+            "message": "Cuộc thi hiện không nhận bài nộp.",
+        }
+        raise api_error(422, error["code"], error["message"])
 
 
 async def _stage(
@@ -246,7 +357,7 @@ async def refund(db, attempt: dict, *, now: datetime) -> None:
     if membership is None:
         return
     await submissions_service.release_quota_slot(
-        db, membership, now, attempt_id=str(attempt["_id"])
+        db, membership, now, track=attempt.get("track"), attempt_id=str(attempt["_id"])
     )
     await store.clear_quota_claim(db, attempt, now=now)
 
@@ -268,7 +379,14 @@ async def attempt_payload(
         "error": public_error(attempt.get("error")),
         "submission": None,
     }
-    if attempt["status"] in store.HOLDING_SLOT_STATUSES:
+    if attempt.get("track") is not None:
+        # Nhánh của lượt: biên nhận phải nói đúng nhánh đang chờ, single không có khóa này.
+        payload["track"] = attempt["track"]
+    if (
+        attempt["status"] in store.HOLDING_SLOT_STATUSES
+        and attempt.get("execution_kind") != store.EXECUTION_INLINE
+    ):
+        # Lượt inline chấm ngay trong request nên không có vị trí nào trong hàng đợi để báo.
         payload["queue_position"] = await store.queue_position(db, attempt)
     if attempt["status"] == store.STATUS_COMPLETED:
         submission = await db[submissions_service.SUBMISSIONS_COLLECTION].find_one(
@@ -277,12 +395,10 @@ async def attempt_payload(
         if submission is not None:
             payload["submission"] = submissions_service.public_submission(
                 submission,
-                await remaining_quota(db, competition, account, now),
+                await remaining_quota(db, competition, account, now, track=attempt.get("track")),
+                competition=competition,
                 ai_visible=ai_settings.participant_visible(competition),
                 contract=contracts.participant_contract(competition),
-                # `competition` được người gọi đọc mới ở mỗi lượt poll, nên quyền xem snapshot
-                # luôn là quyền hiện tại.
-                normalization_visible=normalization.participant_visible(competition),
             )
     return payload
 
@@ -303,9 +419,14 @@ def public_error(error: dict | None) -> dict | None:
     return {"code": code, "message": GENERIC_MESSAGE}
 
 
-async def remaining_quota(db, competition: dict, account: dict, now: datetime) -> int:
-    """Lượt còn lại trong ngày UTC, đếm theo bài đã chấm xong - cùng nguồn với mọi chỗ hiển thị khác."""
+async def remaining_quota(
+    db, competition: dict, account: dict, now: datetime, *, track: str | None = None
+) -> int:
+    """Lượt còn lại trong ngày UTC của đúng nhánh, đếm theo bài đã chấm xong.
+
+    Cùng nguồn với mọi chỗ hiển thị khác, nên số trên thẻ nhánh và số trong receipt không lệch.
+    """
     used = await submissions_service.completed_today_count(
-        db, competition["_id"], account["_id"], now
+        db, competition["_id"], account["_id"], now, track=track
     )
-    return max(competition["quota_per_day"] - used, 0)
+    return max(competition_tracks.track_quota(competition, track) - used, 0)

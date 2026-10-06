@@ -5,7 +5,7 @@
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { AdminCompetition } from "../api/competitions";
+import { formatLocal, type AdminCompetition } from "../api/competitions";
 import { CompetitionActionConfirmModal, CompetitionFormModal } from "./AdminCompetitionManagement";
 
 const BASE: AdminCompetition = {
@@ -38,12 +38,51 @@ const BASE: AdminCompetition = {
 };
 
 const SECTION_TITLES = [
+  "Hình thức đánh giá",
   "Thông tin cơ bản",
   "Thời gian",
   "Cách tham gia",
   "Chấm điểm & giới hạn",
   "Tài nguyên tải về",
 ];
+
+/** Fixture cuộc thi hai nhánh: lịch/quota nằm ở từng track, quota cấp cuộc thi không tồn tại. */
+const DUAL_BASE: AdminCompetition = {
+  ...BASE,
+  mode: "public_private",
+  tracks: {
+    public: {
+      start_at: "2026-10-01T00:00:00Z",
+      end_at: "2026-10-10T00:00:00Z",
+      quota_per_day: 10,
+      window_state: "open",
+      results_released: false,
+      resources: [],
+      ground_truth: null,
+      verified: false,
+      ready: false,
+      not_ready_reason: null,
+      admission_seq: 0,
+    },
+    private: {
+      start_at: "2026-10-05T00:00:00Z",
+      end_at: "2026-10-20T00:00:00Z",
+      quota_per_day: 3,
+      window_state: "open",
+      results_released: false,
+      result_policy: "manual",
+      publish_condition: "admin_decides",
+      results_published_at: null,
+      resources: [],
+      ground_truth: null,
+      verified: false,
+      ready: false,
+      not_ready_reason: null,
+      admission_seq: 0,
+    },
+  },
+  control_revision: 3,
+};
 
 /** Ghi lại body của các request POST/PATCH để assert payload. */
 function mockApi(respond: (init: RequestInit) => { body: unknown; status: number }) {
@@ -107,7 +146,7 @@ test("dialog có tên 'Tạo cuộc thi', focus ban đầu ở ô Tên và Escap
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
-test("body chia đúng 5 section theo thứ tự, mỗi section có số thứ tự decorative", () => {
+test("body chia đúng 6 section theo thứ tự, mỗi section có số thứ tự decorative", () => {
   mockApi(() => ({ body: BASE, status: 200 }));
   renderForm();
 
@@ -119,16 +158,24 @@ test("body chia đúng 5 section theo thứ tự, mỗi section có số thứ t
   const numbers = Array.from(
     dialog().querySelectorAll<HTMLElement>(".ac-form-section-num"),
   );
-  expect(numbers.map((node) => node.textContent)).toEqual(["01", "02", "03", "04", "05"]);
+  expect(numbers.map((node) => node.textContent)).toEqual([
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+  ]);
   // Số thứ tự và icon là trang trí: không được lọt vào tên section.
   for (const node of numbers) expect(node).toHaveAttribute("aria-hidden", "true");
 });
 
-test("nhịp màu section là blue/red/yellow/blue/yellow", () => {
+test("nhịp màu section là yellow/blue/red/yellow/blue/yellow", () => {
   mockApi(() => ({ body: BASE, status: 200 }));
   renderForm();
 
   expect(sections().map((section) => section.dataset.tone)).toEqual([
+    "yellow",
     "blue",
     "red",
     "yellow",
@@ -144,6 +191,9 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
   const titleOf = (control: HTMLElement) =>
     within(sectionOf(control)).getByRole("heading", { level: 3 }).textContent;
 
+  expect(titleOf(screen.getByRole("group", { name: "Hình thức đánh giá" }))).toBe(
+    "Hình thức đánh giá",
+  );
   expect(titleOf(screen.getByLabelText("Tên cuộc thi"))).toBe("Thông tin cơ bản");
   expect(titleOf(screen.getByLabelText("Slug"))).toBe("Thông tin cơ bản");
   expect(titleOf(screen.getByLabelText("Mô tả ngắn"))).toBe("Thông tin cơ bản");
@@ -279,12 +329,12 @@ test("dialog tạo mới dùng validation tài nguyên chung và không phát PO
   fireEvent.click(screen.getByRole("button", { name: "+ Thêm tài nguyên" }));
   fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), { target: { value: "Dataset" } });
   fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
-    target: { value: "https://example.com/data.csv" },
+    target: { value: "http://example.com/data.csv" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+    "Link tài nguyên phải là URL https hợp lệ.",
   );
   expect(postedBodies("POST")).toHaveLength(0);
 });
@@ -335,7 +385,7 @@ test("sửa cuộc thi published: slug bị khoá, tài nguyên chuyển sang ta
   expect(screen.getByLabelText(/Slug/)).toBeDisabled();
   expect(screen.queryByLabelText("Chỉ số chính")).toBeNull();
   expect(screen.queryByRole("group", { name: "Tài nguyên tải về" })).toBeNull();
-  expect(sections()).toHaveLength(4);
+  expect(sections()).toHaveLength(5);
 
   fireEvent.change(screen.getByLabelText("Tên cuộc thi"), {
     target: { value: "Đổi tên" },
@@ -376,8 +426,8 @@ test("shell: header/footer là anh em trực tiếp của body, không bị bọ
   expect(body.contains(footer)).toBe(false);
 
   // Mọi section nằm trong body, không section nào lọt ra ngoài.
-  expect(body.querySelectorAll(".ac-form-section")).toHaveLength(5);
-  expect(root.querySelectorAll(".ac-form-section")).toHaveLength(5);
+  expect(body.querySelectorAll(".ac-form-section")).toHaveLength(6);
+  expect(root.querySelectorAll(".ac-form-section")).toHaveLength(6);
 });
 
 test("xác nhận clone nói rõ phạm vi sao chép đầy đủ và các phần không chép", async () => {
@@ -531,7 +581,7 @@ test("cuộc thi đã publish: cấu hình norm readonly kèm lý do và không 
   expect(postedBodies("PATCH")[0]).not.toHaveProperty("normalization");
 });
 
-test("section 05 giữ nguyên hành vi thêm/xóa và trần 10 tài nguyên", () => {
+test("section 06 giữ nguyên hành vi thêm/xóa và trần 10 tài nguyên", () => {
   mockApi(() => ({ body: BASE, status: 200 }));
   renderForm();
 
@@ -546,4 +596,201 @@ test("section 05 giữ nguyên hành vi thêm/xóa và trần 10 tài nguyên", 
   fireEvent.click(within(group).getByRole("button", { name: "Xóa tài nguyên 1" }));
   expect(within(group).queryByLabelText("Tên tài nguyên 10")).toBeNull();
   expect(add).toBeEnabled();
+});
+
+test("chọn Public / Private: hiện lịch hai nhánh + timeline và POST payload dual, overlap hợp lệ", async () => {
+  mockApi((init) =>
+    init.method === "POST" ? { body: { ...BASE, id: "2" }, status: 201 } : { body: BASE, status: 200 },
+  );
+  renderForm();
+
+  const group = screen.getByRole("group", { name: "Hình thức đánh giá" });
+  const [singleRadio, dualRadio] = within(group).getAllByRole("radio") as HTMLInputElement[];
+  expect(singleRadio.checked).toBe(true);
+  expect(screen.getByLabelText("Bắt đầu")).toBeTruthy();
+
+  fireEvent.click(dualRadio);
+  expect(dualRadio.checked).toBe(true);
+  // Lịch cấp cuộc thi biến mất: dual dùng lịch từng nhánh, quota từng nhánh.
+  expect(screen.queryByLabelText("Bắt đầu")).toBeNull();
+  expect(screen.queryByLabelText(/Giới hạn nộp bài/)).toBeNull();
+  expect(dialog()).toHaveTextContent("PUBLIC");
+  expect(dialog()).toHaveTextContent("PRIVATE");
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Cup Hai Nhanh" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "cup-hai-nhanh" } });
+  // Hai khoảng giao nhau (Public 01–05/11, Private 03–08/11) là hợp lệ, không có checkbox "song song".
+  fireEvent.change(screen.getByLabelText("Public mở nhận bài"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Public đóng nhận bài"), { target: { value: "2026-11-05T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private mở nhận bài"), { target: { value: "2026-11-03T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private đóng nhận bài"), { target: { value: "2026-11-08T08:00" } });
+  fireEvent.change(screen.getByLabelText("Public lượt mỗi ngày"), { target: { value: "10" } });
+  fireEvent.change(screen.getByLabelText("Private lượt mỗi ngày"), { target: { value: "3" } });
+
+  // Timeline hai hàng vẽ cả hai nhánh trên cùng thang thời gian.
+  expect(dialog().querySelectorAll(".ac-track-timeline-bar")).toHaveLength(2);
+
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  await waitFor(() => expect(postedBodies("POST")).toHaveLength(1));
+  expect(postedBodies("POST")[0]).toEqual({
+    name: "Cup Hai Nhanh",
+    slug: "cup-hai-nhanh",
+    short_description: "",
+    mode: "public_private",
+    join_mode: "open",
+    leaderboard_visible: true,
+    resources: [],
+    normalization: { enabled: false, baseline: null },
+    public_track: {
+      start_at: new Date("2026-11-01T08:00").toISOString(),
+      end_at: new Date("2026-11-05T08:00").toISOString(),
+      quota_per_day: 10,
+      resources: [],
+    },
+    private_track: {
+      start_at: new Date("2026-11-03T08:00").toISOString(),
+      end_at: new Date("2026-11-08T08:00").toISOString(),
+      quota_per_day: 3,
+      resources: [],
+      result_policy: "manual",
+      publish_condition: "admin_decides",
+    },
+  });
+  // Không có lịch cấp cuộc thi trong payload dual.
+  expect(postedBodies("POST")[0]).not.toHaveProperty("start_at");
+  expect(postedBodies("POST")[0]).not.toHaveProperty("quota_per_day");
+});
+
+test("dual: chọn hiện điểm ngay thì ẩn điều kiện và gửi mặc định admin_decides", async () => {
+  mockApi((init) =>
+    init.method === "POST" ? { body: { ...BASE, id: "2" }, status: 201 } : { body: BASE, status: 200 },
+  );
+  renderForm();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Public \/ Private/ }));
+  // Mặc định giữ kín nên có dropdown điều kiện; đổi sang hiện ngay thì điều kiện biến mất.
+  expect(screen.getByLabelText("Điều kiện công bố")).toBeTruthy();
+  fireEvent.change(screen.getByLabelText("Điều kiện công bố"), {
+    target: { value: "after_closed_and_scored" },
+  });
+  fireEvent.click(screen.getByRole("radio", { name: /Hiện điểm ngay sau chấm/ }));
+  expect(screen.queryByLabelText("Điều kiện công bố")).toBeNull();
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Cup Hai Nhanh" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "cup-hai-nhanh" } });
+  fireEvent.change(screen.getByLabelText("Public mở nhận bài"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Public đóng nhận bài"), { target: { value: "2026-11-05T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private mở nhận bài"), { target: { value: "2026-11-03T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private đóng nhận bài"), { target: { value: "2026-11-08T08:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  await waitFor(() => expect(postedBodies("POST")).toHaveLength(1));
+  expect(postedBodies("POST")[0]).toMatchObject({
+    private_track: {
+      result_policy: "immediate",
+      publish_condition: "admin_decides",
+    },
+  });
+});
+
+test("dual: lịch nhánh sai thứ tự chặn submit, lỗi inline và tóm tắt lỗi được focus", async () => {
+  mockApi(() => ({ body: BASE, status: 200 }));
+  renderForm();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Public \/ Private/ }));
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Cup Hai Nhanh" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "cup-hai-nhanh" } });
+  fireEvent.change(screen.getByLabelText("Public mở nhận bài"), { target: { value: "2026-11-05T08:00" } });
+  fireEvent.change(screen.getByLabelText("Public đóng nhận bài"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private mở nhận bài"), { target: { value: "2026-11-03T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private đóng nhận bài"), { target: { value: "2026-11-08T08:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  const message = "Nhánh Public: thời gian bắt đầu phải trước thời gian kết thúc.";
+  expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  expect(postedBodies("POST")).toHaveLength(0);
+  // Tóm tắt lỗi nằm trong section lịch và nhận focus để admin không bỏ sót mục nào.
+  const summary = screen.getByRole("group", { name: "Cần kiểm tra lại" });
+  expect(summary).toHaveTextContent(message);
+  await waitFor(() => expect(document.activeElement).toBe(summary));
+
+  // Sửa lại thứ tự thì lỗi biến mất và POST đi bình thường.
+  fireEvent.change(screen.getByLabelText("Public mở nhận bài"), { target: { value: "2026-10-30T08:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+  await waitFor(() => expect(postedBodies("POST")).toHaveLength(1));
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("dual create: tài nguyên sai ở nhóm Private báo lỗi kèm tên nhóm", async () => {
+  mockApi(() => ({ body: BASE, status: 200 }));
+  renderForm();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Public \/ Private/ }));
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Cup Hai Nhanh" } });
+  fireEvent.change(screen.getByLabelText("Slug"), { target: { value: "cup-hai-nhanh" } });
+  fireEvent.change(screen.getByLabelText("Public mở nhận bài"), { target: { value: "2026-11-01T08:00" } });
+  fireEvent.change(screen.getByLabelText("Public đóng nhận bài"), { target: { value: "2026-11-05T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private mở nhận bài"), { target: { value: "2026-11-03T08:00" } });
+  fireEvent.change(screen.getByLabelText("Private đóng nhận bài"), { target: { value: "2026-11-08T08:00" } });
+
+  const group = screen.getByRole("group", { name: "Tài nguyên tải về" });
+  expect(within(group).getByText("Dùng chung cho cả hai nhánh")).toBeTruthy();
+  const addButtons = within(group).getAllByRole("button", { name: "+ Thêm tài nguyên" });
+  expect(addButtons).toHaveLength(3);
+  fireEvent.click(addButtons[2]);
+  fireEvent.change(within(group).getByLabelText("Tên tài nguyên Private 1"), {
+    target: { value: "Đáp án" },
+  });
+  fireEvent.change(within(group).getByLabelText("Link tài nguyên Private 1"), {
+    target: { value: "http://example.com/gt.csv" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Tạo" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Tài nguyên Private: Link tài nguyên phải là URL https hợp lệ.",
+  );
+  expect(postedBodies("POST")).toHaveLength(0);
+});
+
+test("sửa cuộc thi dual: hình thức khoá có giải thích, lịch/quota readonly và PATCH không gửi lịch", async () => {
+  mockApi((init) =>
+    init.method === "PATCH" ? { body: DUAL_BASE, status: 200 } : { body: DUAL_BASE, status: 200 },
+  );
+  const { onSaved } = renderForm(DUAL_BASE);
+
+  // Mode chốt lúc tạo: radio bị khoá kèm lý do, không có toggle gây diễn giải lại dữ liệu.
+  const modeGroup = screen.getByRole("group", { name: "Hình thức đánh giá" });
+  for (const radio of within(modeGroup).getAllByRole("radio")) {
+    expect(radio).toBeDisabled();
+  }
+  expect(dialog()).toHaveTextContent("Hình thức đánh giá được chốt lúc tạo cuộc thi");
+
+  // Lịch hai nhánh chỉ đọc, kèm con trỏ sang "Gia hạn / Mở lại"; không còn input ngày cấp cuộc thi.
+  const publicWindow = DUAL_BASE.tracks!.public;
+  expect(dialog()).toHaveTextContent(
+    `${formatLocal(publicWindow.start_at)} → ${formatLocal(publicWindow.end_at)}`,
+  );
+  expect(dialog()).toHaveTextContent("10 lượt/ngày");
+  expect(dialog()).toHaveTextContent("3 lượt/ngày");
+  expect(dialog()).toHaveTextContent("Lịch nhánh đổi qua “Gia hạn” hoặc “Mở lại”");
+  expect(screen.queryByLabelText("Public mở nhận bài")).toBeNull();
+  expect(screen.queryByLabelText(/Giới hạn nộp bài/)).toBeNull();
+  // Chính sách công bố cũng chỉ đọc ở form này.
+  expect(dialog()).toHaveTextContent("Giữ kín đến khi BTC công bố");
+  expect(dialog()).toHaveTextContent("Điều kiện: Admin tự quyết định thời điểm");
+
+  fireEvent.change(screen.getByLabelText("Tên cuộc thi"), { target: { value: "Đổi tên" } });
+  fireEvent.click(screen.getByRole("button", { name: "Lưu" }));
+
+  await waitFor(() => expect(postedBodies("PATCH")).toHaveLength(1));
+  expect(postedBodies("PATCH")[0]).toEqual({
+    name: "Đổi tên",
+    slug: "ai-challenge-2026",
+    short_description: "",
+    join_mode: "open",
+    leaderboard_visible: true,
+    normalization: { enabled: false, baseline: null },
+  });
+  await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
 });

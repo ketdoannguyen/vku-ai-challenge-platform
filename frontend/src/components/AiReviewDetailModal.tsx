@@ -88,14 +88,10 @@ const SOURCE_MATCH_TONE: Record<AiSourceMatch, "neutral" | "warning"> = {
   UNVERIFIED_SOURCE: "warning",
 };
 
-/**
- * Tone của pill trạng thái nguồn (phiên bản assessment). "Phù hợp" trung tính cùng lý do với badge
- * `VERIFIED`: khớp nguồn BTC là mặc định lành mạnh, không phải kết luận. `NOT_EVALUATED` để muted -
- * thiếu dữ kiện không được trông giống một phán quyết.
- */
-const SOURCE_ASSESSMENT_TONE: Record<AiSourceStatus, "neutral" | "warning" | "closed"> = {
-  ALIGNED: "neutral",
-  EXTERNAL: "warning",
+/** Màu pill nguồn theo đánh giá AI; thiếu dữ kiện vẫn giữ trạng thái trung tính. */
+const SOURCE_ASSESSMENT_TONE: Record<AiSourceStatus, "success" | "danger" | "warning" | "closed"> = {
+  ALIGNED: "success",
+  EXTERNAL: "danger",
   UNCLEAR: "warning",
   NOT_EVALUATED: "closed",
 };
@@ -113,7 +109,7 @@ const SOURCE_MATCH_EXPLANATION: Record<AiSourceMatch, string> = {
   EXTERNAL_SOURCE:
     "Có ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp trong bản thể lệ đã chụp tại thời điểm nộp. Không trùng không đồng nghĩa nguồn đến từ ngoài cuộc thi.",
   FOLDER_MEMBERSHIP_UNVERIFIED:
-    "Có nguồn Drive chưa trùng tài nguyên BTC cấp; vì tài nguyên BTC gồm thư mục Drive, chỉ từ notebook không thể xác minh tệp riêng nằm trong thư mục đó.",
+    "Có nguồn chưa trùng tài nguyên BTC cấp; vì tài nguyên BTC có thể gồm thư mục, chỉ từ notebook không thể xác minh tệp riêng nằm trong thư mục đó.",
   UNVERIFIED_SOURCE:
     "Có nguồn tải trong đoạn code không phải URL/ID tĩnh nên máy chủ không đối chiếu tự động được.",
 };
@@ -491,7 +487,7 @@ function ResultCard({ heading, record }: { heading: string; record: AiReviewReco
       <SourceSection record={record} />
 
       <section className="ai-detail-section">
-        <h4 className="ai-section-heading">AI đối chiếu thể lệ</h4>
+        <h4 className="ai-section-heading ai-section-heading-strong">AI đối chiếu thể lệ</h4>
         {record.findings.length > 0 ? (
           <ul className="ai-finding-list">
             {record.findings.map((finding, index) => (
@@ -563,11 +559,7 @@ function SourceAssessmentSection({
 
   return (
     <section className="ai-source-signals">
-      <h4 className="ai-section-heading">AI đánh giá nguồn</h4>
-      <p>
-        AI đọc code tĩnh. Hệ thống kiểm vị trí trích dẫn, không xác nhận notebook đã chạy hoặc dữ
-        liệu thực tế đã tải.
-      </p>
+      <h4 className="ai-section-heading ai-section-heading-strong">AI đánh giá nguồn</h4>
       <div className="ai-finding-head">
         <span className={`status-badge ${SOURCE_ASSESSMENT_TONE[assessment.status]}`}>
           {AI_SOURCE_STATUS_LABEL[assessment.status]}

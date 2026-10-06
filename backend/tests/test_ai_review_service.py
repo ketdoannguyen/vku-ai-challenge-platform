@@ -676,26 +676,63 @@ async def test_throttling_and_provider_errors_are_retried(mock_db, ai_env, statu
         b'{"choices": [{"message": {"content": "{\\"verdict\\": \\"CLEAR\\", \\"summary\\": \\"x\\", \\"findings\\": [], \\"source_assessment\\": {\\"status\\": \\"ALIGNED\\", \\"reason\\": \\"y\\", \\"confidence\\": 0.9}}"}}]}',
     ],
 )
-async def test_unusable_model_output_is_an_error_row_without_retry(mock_db, ai_env, body):
+async def test_unusable_model_output_is_retried_twice_before_the_error_row(mock_db, ai_env, body):
+    """Output hỏng là lỗi ngẫu nhiên theo lượt gọi: job quay lại hàng đợi thêm hai lượt
+    (`AI_REVIEW_MAX_ATTEMPTS=3`), chỉ hết lượt mới chốt audit row ERROR (ADR-063)."""
     submission = await seed(mock_db)
+    start = datetime.now(timezone.utc)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=body)
 
-    _, outcome = await run(mock_db, handler)
+    # Mỗi lượt claim phải nhảy qua khoảng backoff mà lượt trước vừa đặt.
+    for attempt in range(2):
+        _, outcome = await run(mock_db, handler, now=start + timedelta(minutes=attempt))
+        assert outcome == service.OUTCOME_RETRY
+        # Lượt thử lại không sinh audit row: lịch sử chỉ có một dòng, và nó là dòng ERROR cuối cùng.
+        assert (await reviews(mock_db)) == []
+        assert (await job_of(mock_db, submission["_id"]))["status"] == constants.JOB_QUEUED
+
+    _, outcome = await run(mock_db, handler, now=start + timedelta(minutes=2))
 
     assert outcome == service.OUTCOME_FAILED
-    assert (await job_of(mock_db, submission["_id"]))["attempts"] == 1
+    assert (await job_of(mock_db, submission["_id"]))["attempts"] == 3
     assert (await reviews(mock_db))[0]["error"]["code"] == constants.AI_RESPONSE_INVALID
+
+
+async def test_output_that_recovers_on_a_retry_completes_without_an_error_row(mock_db, ai_env):
+    """Lượt đầu model trả JSON hỏng, lượt thử lại trả kết quả hợp lệ: pipeline hoàn tất bình
+    thường - đúng thứ tự động retry sinh ra để hấp thụ."""
+    submission = await seed(mock_db)
+    start = datetime.now(timezone.utc)
+    calls: list = []
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        content = "khong phai json" if len(calls) == 1 else json.dumps(CLEAR_OUTPUT)
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    _, first = await run(mock_db, flaky, now=start)
+    _, second = await run(mock_db, flaky, now=start + timedelta(minutes=1))
+
+    assert (first, second) == (service.OUTCOME_RETRY, service.OUTCOME_COMPLETED)
+    assert len(calls) == 2
+    review = (await reviews(mock_db))[0]
+    assert review["status"] == constants.REVIEW_STATUS_COMPLETED
+    assert review["attempts"] == 2
+    stored = await submission_of(mock_db, submission["_id"])
+    assert stored["ai_review"]["state"] == constants.AI_STATE_COMPLETED
 
 
 async def test_an_error_row_never_reuses_the_sentence_written_for_a_real_verdict(mock_db, ai_env):
     await seed(mock_db)
+    start = datetime.now(timezone.utc)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"<html>gateway</html>")
 
-    await run(mock_db, handler)
+    for attempt in range(3):
+        await run(mock_db, handler, now=start + timedelta(minutes=attempt))
     review = (await reviews(mock_db))[0]
     assert review["summary"] == constants.PARTICIPANT_ERROR_SUMMARY
     assert review["verdict"] == constants.VERDICT_ERROR

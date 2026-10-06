@@ -7,6 +7,7 @@ sau khi bài đã vào hàng. Dùng chung một hàm nghĩa là cùng phép ki�
 import logging
 from dataclasses import dataclass
 
+from app.competitions import tracks as competition_tracks
 from app.core.errors import api_error
 from app.scoring import csv_validation, execution, models, output_validation, revisions
 from app.scoring import service as scoring_service
@@ -36,9 +37,11 @@ class Scored:
     scoring_ref: dict | None = None
 
 
-def score_v1(competition: dict, config: scoring_service.ScoringConfig, data: bytes) -> Scored:
+def score_v1(
+    competition: dict, config: scoring_service.ScoringConfig, data: bytes, *, track: str | None = None
+) -> Scored:
     """Bộ chấm cố định của v1: backend tự tính f1/precision/recall từ cột prediction."""
-    ground_truth_data = read_ground_truth(competition)
+    ground_truth_data = read_ground_truth(competition, track)
     ground_truth = scoring_service.load_ground_truth(ground_truth_data, config)
     result = scoring_service.score_submission(
         data, ground_truth, config, competition["primary_metric"]
@@ -51,15 +54,18 @@ async def score_v2(
     config: models.ScoringConfigV2,
     data: bytes,
     *,
+    track: str | None = None,
     client_timeout: float | None = None,
 ) -> Scored:
     """Bộ chấm Python của admin: backend kiểm dữ liệu, gọi runner rồi đối chiếu hợp đồng metric.
 
-    `client_timeout` cho worker hàng đợi cắt lượt gọi theo thời gian còn lại của hạn 60 giây; API
-    chấm v1 và lượt chạy thử của admin không truyền nên dùng trần mặc định.
+    `track` chọn đúng ground truth của nhánh đang chấm; bộ chấm dùng chung nên dấu vết phải ghi
+    cả nhánh để hậu kiểm biết điểm sinh từ GT nào. `client_timeout` cho worker hàng đợi cắt lượt
+    gọi theo thời gian còn lại của hạn 60 giây; API chấm v1 và lượt chạy thử của admin không
+    truyền nên dùng trần mặc định.
     """
     source = read_evaluator_source(competition, config)
-    ground_truth_data = read_ground_truth(competition)
+    ground_truth_data = read_ground_truth(competition, track)
     evaluation = await execution.evaluate(
         config,
         source=source,
@@ -69,34 +75,38 @@ async def score_v2(
     )
     if config.output_contract is None:
         raise ScoringValidationError("SCORING_TEST_REQUIRED", "Cuộc thi chưa khai báo metric.")
+    scoring_ref = {
+        "version": 2,
+        "revision": config.revision,
+        "config_fingerprint": evaluation.config_fingerprint,
+        "source_sha256": config.evaluator.source_sha256,
+        "ground_truth_sha256": revisions.sha256_bytes(ground_truth_data),
+        "submission_sha256": revisions.sha256_bytes(data),
+        "runtime_id": evaluation.runtime_id,
+    }
+    if track is not None:
+        # Single giữ nguyên hình dạng vết cũ; dual ghim thêm nhánh để biết điểm sinh từ GT nào.
+        scoring_ref["track"] = track
     return Scored(
         metrics=evaluation.metrics,
         primary_score=output_validation.primary_score(
             evaluation.metrics, config.output_contract
         ),
-        scoring_ref={
-            "version": 2,
-            "revision": config.revision,
-            "config_fingerprint": evaluation.config_fingerprint,
-            "source_sha256": config.evaluator.source_sha256,
-            "ground_truth_sha256": revisions.sha256_bytes(ground_truth_data),
-            "submission_sha256": revisions.sha256_bytes(data),
-            "runtime_id": evaluation.runtime_id,
-        },
+        scoring_ref=scoring_ref,
     )
 
 
 def validate_submission_csv(
-    competition: dict, config: models.ScoringConfigV2, data: bytes
+    competition: dict, config: models.ScoringConfigV2, data: bytes, *, track: str | None = None
 ) -> None:
     """Kiểm file thí sinh ngay tại API, trước khi lượt vào hàng đợi.
 
     File sai là lỗi thí sinh sửa được, nên phải trả lời ngay chứ không bắt em chờ hết hàng đợi mới
     biết; đổi lại lượt không chiếm chỗ chờ và không giữ suất quota nào. Worker vẫn kiểm lại lần nữa
-    bằng chính hàm này trước khi chấm.
+    bằng chính hàm này trước khi chấm; `track` chọn đúng schema/GT của nhánh.
     """
     truth = csv_validation.load_ground_truth(
-        read_ground_truth(competition), config.input_schema.ground_truth
+        read_ground_truth(competition, track), config.input_schema.ground_truth
     )
     csv_validation.prepare_submission(data, config.input_schema.submission, truth)
 
@@ -115,15 +125,17 @@ def read_evaluator_source(competition: dict, config: models.ScoringConfigV2) -> 
     return source
 
 
-def read_ground_truth(competition: dict) -> bytes:
-    """Ground truth đang dùng; khác bản đã xác minh lúc publish cũng là cuộc thi không còn sẵn sàng."""
+def read_ground_truth(competition: dict, track: str | None = None) -> bytes:
+    """Ground truth đang dùng của đúng nhánh; khác bản đã xác minh cũng là cuộc thi không sẵn sàng."""
     try:
-        data = scoring_storage.read_ground_truth(competition)
+        data = scoring_storage.read_ground_truth(competition, track)
     except (KeyError, OSError, ValueError):
         raise scoring_not_ready()
-    stored_sha = (competition.get("ground_truth") or {}).get("sha256")
+    stored_sha = (competition_tracks.track_ground_truth(competition, track) or {}).get("sha256")
     if stored_sha and stored_sha != revisions.sha256_bytes(data):
-        logger.error("Ground truth changed competition=%s", competition["_id"])
+        logger.error(
+            "Ground truth changed competition=%s track=%s", competition["_id"], track
+        )
         raise scoring_not_ready()
     return data
 

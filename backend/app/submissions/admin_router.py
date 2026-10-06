@@ -18,6 +18,7 @@ from app.ai_review import constants as ai_constants
 from app.ai_review import service as ai_service
 from app.ai_review import serializers as ai_serializers
 from app.auth.dependencies import AdminAccount
+from app.competitions import tracks as competition_tracks
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
 from app.core.datetimes import iso_z
@@ -54,6 +55,7 @@ async def list_submissions(
     status: str | None = None,
     review: str | None = None,
     ai_review: str = ai_constants.FILTER_AI_ALL,
+    track: str | None = None,
     sort: str = service.DEFAULT_SORT,
     order: str = service.DEFAULT_ORDER,
     limit: int = Query(50, ge=1, le=200),
@@ -73,6 +75,12 @@ async def list_submissions(
     )
 
     query: dict = {"competition_id": competition["_id"]}
+    if track is not None:
+        # Lọc nhánh là tùy chọn ở bảng admin: bỏ trống nghĩa là xem cả hai nhánh, mỗi dòng mang
+        # `track` của nó. Cuộc thi single không có nhánh nào để lọc.
+        if not competition_tracks.is_dual(competition) or track not in competition_tracks.TRACKS:
+            raise api_error(422, "INVALID_TRACK", "Nhánh không hợp lệ; chỉ có public hoặc private.")
+        query["track"] = track
     await _apply_filters(db, query, q, status, review, ai_review)
     total = await db[service.SUBMISSIONS_COLLECTION].count_documents(query)
     submissions = await service.list_admin_submissions(
@@ -99,6 +107,24 @@ async def list_submissions(
         "sort": sort,
         "order": order,
     }
+
+
+@router.get("/{competition_id}/submissions/stats")
+async def submission_scope_stats(
+    competition_id: str,
+    request: Request,
+    admin: AdminAccount,
+    track: str | None = None,
+) -> dict:
+    """Số lượt chấm theo trạng thái của một nhánh (hoặc cả cuộc thi single).
+
+    Trang công bố Private đọc số liệu này để admin thấy còn bài đang chạy trước khi bấm công bố;
+    nhánh bắt buộc với cuộc thi dual như mọi bề mặt một-population khác.
+    """
+    db = request.app.state.mongo.db
+    competition = await _competition_or_404(db, competition_id)
+    resolved = _scoped_track(competition, track)
+    return await service.scope_stats(db, competition["_id"], track=resolved)
 
 
 @global_router.get("/submissions")
@@ -377,31 +403,54 @@ async def _apply_filters(
         query["account_id"] = {"$in": account_ids}
 
 
+def _scoped_track(competition: dict, track: str | None) -> str | None:
+    """Nhánh của một thao tác admin: cuộc thi dual bắt buộc chỉ rõ, single không có nhánh.
+
+    Không có mặc định "cả hai nhánh": bảng xếp hạng và file export là dữ liệu của đúng một
+    population, đoán nhánh là trộn hai bảng mà không ai xin.
+    """
+    try:
+        return competition_tracks.resolve_track(competition, track)
+    except competition_tracks.TrackError as exc:
+        raise api_error(422, exc.code, exc.message)
+
+
 @router.get("/{competition_id}/leaderboard")
 async def admin_leaderboard(
-    competition_id: str, request: Request, admin: AdminAccount
+    competition_id: str, request: Request, admin: AdminAccount, track: str | None = None
 ) -> dict:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
-    board = await leaderboard_service.cached_ranked_board(db, competition)
+    resolved_track = _scoped_track(competition, track)
+    board = await leaderboard_service.cached_ranked_board(db, competition, track=resolved_track)
     return leaderboard_service.admin_leaderboard_response(competition, board)
 
 
 @router.get("/{competition_id}/export.xlsx")
 async def export_results(
-    competition_id: str, request: Request, admin: AdminAccount
+    competition_id: str, request: Request, admin: AdminAccount, track: str | None = None
 ) -> Response:
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
+    resolved_track = _scoped_track(competition, track)
     # Export cố ý bỏ cache: file tải về phải khớp dữ liệu tại đúng thời điểm admin bấm.
-    board = await leaderboard_service.ranked_board(db, competition)
-    content = _build_workbook(competition, board)
+    board = await leaderboard_service.ranked_board(db, competition, track=resolved_track)
+    released = competition_tracks.results_visible(competition, resolved_track)
+    content = _build_workbook(
+        competition, board, track=resolved_track, released=released
+    )
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    filename = f"{competition['slug']}-results-{timestamp}.xlsx"
+    # Tên file nói rõ nhánh và trạng thái công bố: bản chưa release là bản tạm, không phải kết quả
+    # chính thức - người cầm file phải thấy điều đó mà không cần mở cuộc thi.
+    scope = f"-{resolved_track}" if resolved_track else ""
+    state = "" if released else "-provisional"
+    filename = f"{competition['slug']}{scope}{state}-results-{timestamp}.xlsx"
     logger.info(
-        "Results exported admin=%s competition=%s entries=%s",
+        "Results exported admin=%s competition=%s track=%s released=%s entries=%s",
         admin["email"],
         competition["_id"],
+        resolved_track,
+        released,
         len(board.entries),
     )
     return Response(
@@ -506,18 +555,27 @@ def _competition_contracts(competitions: dict) -> list[dict]:
     ]
 
 
-def _build_workbook(competition: dict, board: leaderboard_service.RankedBoard) -> bytes:
+def _build_workbook(
+    competition: dict,
+    board: leaderboard_service.RankedBoard,
+    *,
+    track: str | None = None,
+    released: bool = True,
+) -> bytes:
     """Một cột cho mỗi metric trong hợp đồng kết quả, cùng thứ hạng và số liệu như UI.
 
     Cuộc thi bật chuẩn hóa có thêm cột **Norm hiện tại** ngay sau điểm gốc - đây là điểm xếp hạng
     thật của bảng, lấy từ đúng lần build ra `rank` nên không thể lệch nhau. Snapshot tạm của bài
-    nộp không bao giờ lên cột này.
+    nộp không bao giờ lên cột này. `track`/`released` chỉ đi vào tên sheet để bản Private chưa
+    công bố tự nói mình là bản tạm.
     """
     contract = contracts.result_contract(competition)
     metadata = board.normalization_metadata
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Results"
+    if track is not None:
+        sheet.title = f"Results {track}" + ("" if released else " (provisional)")
     header = ["Rank", "Account ID", "Team name", "Best score"]
     if metadata is not None:
         header.append(f"Norm hiện tại (0–{metadata['max_score']})")

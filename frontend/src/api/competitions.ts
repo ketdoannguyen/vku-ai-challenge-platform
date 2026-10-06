@@ -63,6 +63,132 @@ export interface NormalizationConfig {
   version: number;
 }
 
+/** Lý do dữ liệu chuẩn hóa chưa được xem; backend trả như trạng thái capability, không phải lỗi. */
+export type NormalizationHiddenReason =
+  | "normalization_disabled"
+  | "private_unpublished"
+  | "leaderboard_hidden"
+  | "source_metric_hidden";
+
+/** Hình thức đánh giá: một luồng nộp bài, hay hai nhánh Public/Private trong cùng cuộc thi. */
+export type CompetitionMode = "single" | "public_private";
+
+/** Nhánh của cuộc thi dual. `private` là nguồn xếp hạng chính thức, `public` là tham chiếu. */
+export type Track = "public" | "private";
+
+export const TRACKS: readonly Track[] = ["public", "private"];
+export const TRACK_LABEL: Record<Track, string> = { public: "Public", private: "Private" };
+export const OFFICIAL_TRACK: Track = "private";
+
+export const MODE_LABEL: Record<CompetitionMode, string> = {
+  single: "Thông thường",
+  public_private: "Public / Private",
+};
+
+/** Trạng thái cửa sổ nhận bài của một nhánh, do backend suy từ giờ server. */
+export type TrackWindowState = "scheduled" | "open" | "closed";
+
+export const TRACK_WINDOW_LABEL: Record<TrackWindowState, string> = {
+  scheduled: "Chưa mở",
+  open: "Đang mở",
+  closed: "Đã đóng",
+};
+
+/** Nhãn cửa sổ nhận bài dưới mắt thí sinh; khác trang quản trị ở trạng thái đang mở. */
+export const PARTICIPANT_WINDOW_LABEL: Record<TrackWindowState, string> = {
+  scheduled: "Chưa mở",
+  open: "Đang nhận bài",
+  closed: "Đã đóng",
+};
+
+/** Lý do một nhánh chưa nộp được - backend trả `blocked_reason`, không suy từ đồng hồ máy khách. */
+export const TRACK_BLOCKED_MESSAGE: Record<string, string> = {
+  competition_closed: "Cuộc thi đã kết thúc nên không nhận thêm bài nộp.",
+  membership_required: "Bấm “Tham gia cuộc thi” ở khối phía trên để bắt đầu nộp bài.",
+  not_open: "Nhánh này chưa mở nhận bài.",
+  deadline_passed: "Nhánh này đã hết hạn nộp bài.",
+};
+
+/** Chính sách công bố kết quả Private (chỉ đặt trước lần công bố đầu tiên). */
+export type ResultPolicy = "immediate" | "manual";
+export type PublishCondition = "admin_decides" | "after_closed_and_scored";
+
+export const RESULT_POLICY_LABEL: Record<ResultPolicy, string> = {
+  immediate: "Hiện điểm ngay sau chấm",
+  manual: "Giữ kín đến khi BTC công bố",
+};
+
+export const PUBLISH_CONDITION_LABEL: Record<PublishCondition, string> = {
+  admin_decides: "Admin tự quyết định thời điểm",
+  after_closed_and_scored: "Sau khi đóng nhận bài và chấm xong",
+};
+
+/** Phần nhánh mà mọi payload đều thấy: lịch, quota, cửa sổ và trạng thái công bố. */
+export interface TrackView {
+  start_at: string;
+  end_at: string;
+  quota_per_day: number;
+  window_state: TrackWindowState;
+  results_released: boolean;
+  /** Chỉ có ở nhánh Private. */
+  result_policy?: ResultPolicy;
+  publish_condition?: PublishCondition;
+  results_published_at?: string | null;
+}
+
+/** Nhánh dưới mắt thí sinh ở trang chi tiết: thêm tài nguyên, quyền nộp và quota của chính mình. */
+export interface ParticipantTrackView extends TrackView {
+  /** Tài nguyên riêng của nhánh; rỗng trước giờ mở của chính nhánh đó. */
+  resources: CompetitionResource[];
+  /** Backend quyết quyền nộp nhánh này - FE không tự suy từ đồng hồ máy khách. */
+  can_submit: boolean;
+  blocked_reason:
+    | "competition_closed"
+    | "membership_required"
+    | "not_open"
+    | "deadline_passed"
+    | null;
+  /** Bộ chấm/GT của đúng nhánh đã sẵn sàng nhận bài. */
+  submission_ready: boolean;
+  /**
+   * Capability chuẩn hóa của nhánh: `false` nghĩa là mọi dữ liệu norm (norm live, snapshot lịch
+   * sử, metadata BXH) đang bị che với nhánh này. Vắng mặt với response cũ chưa có field.
+   */
+  normalization_visible?: boolean;
+  /** Lý do đang chặn khi `normalization_visible` là false; `null` khi norm đang xem được. */
+  normalization_hidden_reason?: NormalizationHiddenReason | null;
+  /** Chỉ có khi người xem là thành viên đang hoạt động của cuộc thi đã publish. */
+  quota?: QuotaStatus;
+}
+
+export interface TrackGroundTruth {
+  row_count: number;
+  columns: string[];
+  /** Chỉ trang quản trị trả checksum - dùng để cảnh báo hai nhánh trùng dữ liệu. */
+  sha256?: string;
+  uploaded_at: string | null;
+}
+
+/** Nhánh dưới mắt admin: thêm tài nguyên, ground truth, verification, readiness và admission. */
+export interface AdminTrackView extends TrackView {
+  resources: CompetitionResource[];
+  ground_truth: TrackGroundTruth | null;
+  verified: boolean;
+  ready: boolean;
+  not_ready_reason: PublishBlockedReason | null;
+  admission_seq: number;
+  results_published_by?: string | null;
+}
+
+/** Vết thay đổi quản trị gần nhất trên cuộc thi dual; không phải audit ledger đầy đủ. */
+export interface AdminChange {
+  by: string;
+  at: string | null;
+  action: string;
+  reason: string | null;
+  revision: number;
+}
+
 /** Metadata giới thiệu dùng chung cho payload thí sinh lẫn admin. */
 export interface CompetitionMetadata {
   id: string;
@@ -70,15 +196,42 @@ export interface CompetitionMetadata {
   name: string;
   short_description: string;
   status: "draft" | "published" | "closed";
+  /** Vắng mặt với response cũ trước tính năng dual - hiểu là `single`. */
+  mode?: CompetitionMode;
   start_at: string;
   end_at: string;
   join_mode: "open" | "code" | "invite_only";
   primary_metric: "f1" | "precision" | "recall";
-  quota_per_day: number;
+  /** Quota cấp cuộc thi chỉ tồn tại ở single; cuộc thi dual trả `null` vì quota nằm ở từng nhánh. */
+  quota_per_day: number | null;
   leaderboard_visible: boolean;
   join_code_configured: boolean;
   /** Vắng mặt với response cũ trước khi có chuẩn hóa - hiểu là đang tắt. */
   normalization?: NormalizationConfig;
+  /** Hai nhánh khi dual; `null`/vắng mặt với cuộc thi thông thường. */
+  tracks?: Record<Track, TrackView> | null;
+}
+
+/** `true` khi cuộc thi có hai nhánh; response cũ không có `mode` là single. */
+export function isDual(competition: Pick<CompetitionMetadata, "mode">): boolean {
+  return competition.mode === "public_private";
+}
+
+/** Nhánh đọc từ query string; giá trị lạ bị bỏ qua thay vì đoán. */
+export function parseTrack(value: string | null): Track | null {
+  return value === "public" || value === "private" ? value : null;
+}
+
+/** Nhãn trạng thái kết quả đã chấm nhưng chưa được công bố (Private chưa release). */
+export const UNPUBLISHED_RESULT_LABEL = "Đã chấm xong — chờ công bố";
+
+/**
+ * Câu chữ "chờ công bố" theo cấu hình công bố của nhánh Private; mặc định là admin tự quyết.
+ */
+export function unpublishedNote(competition: Pick<CompetitionMetadata, "tracks">): string {
+  return competition.tracks?.private?.publish_condition === "after_closed_and_scored"
+    ? "BTC công bố sau khi đóng nhận bài và hoàn tất xử lý bài đã nhận."
+    : "Thời điểm công bố do BTC quyết định.";
 }
 
 /** Cấu hình chuẩn hóa để render: response cũ chưa có field được coi là tắt. */
@@ -117,6 +270,8 @@ export interface CompetitionSummary extends CompetitionMetadata {
   quota?: QuotaStatus;
   /** Số liệu cá nhân trên thẻ danh sách; vắng mặt ngoài thành viên đang hoạt động. */
   my_stats?: MyStats;
+  /** Số liệu cá nhân tách theo nhánh (dual); dual không có số gộp. */
+  my_stats_by_track?: Record<Track, MyStats>;
   /** Ghim riêng của account đang đăng nhập; guest luôn false. Chỉ public list trả về. */
   pinned?: boolean;
   /** Tổng bài của account hiện tại; chỉ trả khi membership đang hoạt động, không xoá dữ liệu gốc. */
@@ -128,6 +283,8 @@ export interface CompetitionDetail extends CompetitionSummary {
   access: { allowed: true; reason: null };
   resources: CompetitionResource[];
   submission_config: SubmissionConfig;
+  /** Dual: hai nhánh kèm tài nguyên riêng, quyền nộp và quota của chính mình. */
+  tracks?: Record<Track, ParticipantTrackView> | null;
 }
 
 /** Landing khóa: chỉ còn phần giới thiệu khi chưa có membership đang hoạt động. */
@@ -205,6 +362,14 @@ export interface AdminCompetition extends CompetitionMetadata {
   publish_blocked_reason?: PublishBlockedReason | null;
   /** Trần upload theo môi trường; optional để frontend mới vẫn chạy với backend cũ. */
   upload_limits?: UploadLimits;
+  /** Nhánh dưới mắt admin; dual luôn có, single là `null`. */
+  tracks?: Record<Track, AdminTrackView> | null;
+  /** Revision điều khiển của cuộc thi dual - gửi kèm mọi lượt ghi lịch/chính sách/công bố. */
+  control_revision?: number;
+  stop_generation?: number;
+  /** Đã khóa cấu hình chấm/GT từ lúc publish (dual); reopen không gỡ khóa. */
+  scoring_locked?: boolean;
+  last_change?: AdminChange | null;
 }
 
 /** Trần dung lượng upload (MiB) do backend cấu hình qua env, dùng để render hint. */
@@ -307,11 +472,11 @@ export function localInputToIso(value: string): string {
 }
 
 const RESOURCE_URL_MAX = 2048;
-const RESOURCE_HOSTS = ["drive.google.com", "docs.google.com"];
 
 /**
  * Lọc lại URL tài nguyên ngay trước khi render: backend đã validate, nhưng dữ liệu
  * legacy hoặc ghi trực tiếp vào DB vẫn không được phép tạo thành link sống.
+ * Mọi link https đều nhận (S3, máy chủ riêng, Drive...) - không giới hạn host.
  */
 export function isSafeResourceUrl(value: string): boolean {
   if (!value || value.length > RESOURCE_URL_MAX) return false;
@@ -321,11 +486,8 @@ export function isSafeResourceUrl(value: string): boolean {
   } catch {
     return false;
   }
-  if (parsed.protocol !== "https:") return false;
-  if (parsed.username || parsed.password) return false;
-  const host = parsed.hostname.toLowerCase();
-  return RESOURCE_HOSTS.some(
-    (allowed) => host === allowed || host.endsWith(`.${allowed}`),
+  return (
+    parsed.protocol === "https:" && !parsed.username && !parsed.password
   );
 }
 

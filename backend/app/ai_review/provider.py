@@ -6,7 +6,8 @@ Hai thứ được thực thi ở tầng này chứ không tin caller:
 - redirect không bao giờ được đi theo, và body bị cắt theo số byte thực đọc được chứ không theo header.
 
 `ProviderError.retryable` là nguồn duy nhất quyết định retry: lỗi cấu hình, xác thực, redirect và
-output hỏng đều terminal, chỉ lỗi mạng/tải nhất thời mới được thử lại.
+output bị cắt vì trần token (trần của mình, thử lại y nguyên request là hỏng y nguyên) đều terminal;
+lỗi mạng/tải nhất thời VÀ body sai hợp đồng (lỗi ngẫu nhiên theo từng lượt gọi) được thử lại.
 """
 
 import json
@@ -240,10 +241,13 @@ def _extract(body: bytes, max_tokens: int) -> tuple[str, dict | None]:
         # Thiếu `finish_reason` không phải lỗi: nhiều gateway không trả field này.
         finish_reason = choice.get("finish_reason")
     except (ValueError, KeyError, IndexError, TypeError) as exc:
+        # Body sai hợp đồng là lỗi ngẫu nhiên theo lượt gọi (đo trên provider thật 2026-10-06: 13-31%
+        # lượt tùy cửa sổ, probe lại chính ca đó ra output hợp lệ), nên thử lại được - khác
+        # `AI_OUTPUT_TRUNCATED` bên dưới.
         raise ProviderError(
             constants.AI_RESPONSE_INVALID,
             "Provider trả về body không đúng hợp đồng.",
-            retryable=False,
+            retryable=True,
         ) from exc
     # Kiểm trước `content`: khi hết token, provider có thể trả content rỗng/null, và lúc đó "hết
     # ngân sách" mới là điều cần nói - không phải "body sai hợp đồng".
@@ -258,7 +262,7 @@ def _extract(body: bytes, max_tokens: int) -> tuple[str, dict | None]:
         raise ProviderError(
             constants.AI_RESPONSE_INVALID,
             "Provider trả về nội dung không phải chuỗi.",
-            retryable=False,
+            retryable=True,
         )
     usage = payload.get("usage")
     if not isinstance(usage, dict):

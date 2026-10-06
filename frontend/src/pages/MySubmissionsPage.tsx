@@ -1,12 +1,23 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { Link, useOutletContext } from "react-router-dom";
+import { Link, useOutletContext, useSearchParams } from "react-router-dom";
 import {
   AI_PARTICIPANT_DISCLAIMER,
   AI_STATE_LABEL,
   AI_VERDICT_LABEL,
   AI_VERDICT_TONE,
 } from "../api/aiReview";
-import { accessLostReason, formatLocal } from "../api/competitions";
+import {
+  TRACKS,
+  TRACK_LABEL,
+  UNPUBLISHED_RESULT_LABEL,
+  accessLostReason,
+  formatLocal,
+  isDual,
+  parseTrack,
+  unpublishedNote,
+  type CompetitionDetail,
+  type Track,
+} from "../api/competitions";
 import {
   fetchMySubmissions,
   formatMetric,
@@ -23,13 +34,29 @@ import {
 import { ErrorBox, Loading } from "../components/ui";
 import { AutoRefreshNotice } from "../components/AutoRefreshNotice";
 import { useAutoRefresh } from "../hooks/useAutoRefresh";
-import { PROVISIONAL_NORM_LABEL } from "../lib/normalization";
+import {
+  currentNormHiddenReason,
+  hiddenNormNote,
+  PROVISIONAL_NORM_LABEL,
+} from "../lib/normalization";
 import type { CompetitionContext } from "./CompetitionDetailPage";
 
 const PAGE_SIZE = 50;
 
 /** Nhịp tự làm mới ngầm khi tab đang mở. */
 const AUTO_REFRESH_MS = 3_000;
+
+/**
+ * Hạn ngạch hiển thị trên thẻ telemetry. Cuộc thi dual không có quota cấp cuộc thi: số phải lấy
+ * theo nhánh đang xem, và là quota thật của chính thí sinh nên vẫn hiện dù nhánh đó chưa công bố.
+ */
+function quotaBadgeValue(competition: CompetitionDetail, track: Track, dual: boolean): string {
+  if (!dual) return `${competition.quota_per_day} lượt/ngày`;
+  const view = competition.tracks?.[track];
+  if (view?.quota) return `Còn ${view.quota.remaining}/${view.quota.per_day} lượt`;
+  if (view && view.quota_per_day > 0) return `${view.quota_per_day} lượt/ngày`;
+  return "Không nhận bài nộp";
+}
 
 export function MySubmissionsPage() {
   const { competition, reportAccessLost } = useOutletContext<CompetitionContext>();
@@ -39,6 +66,11 @@ export function MySubmissionsPage() {
   const displayMetrics = primaryMetric
     ? [primaryMetric, ...contract.metrics.filter((metric) => metric.key !== contract.primary_metric)]
     : contract.metrics;
+  // Dual: endpoint lịch sử cố ý trả cả hai nhánh trong một danh sách nên bộ lọc nhánh là lớp xem
+  // trên trang đang tải - đổi nhánh không phát thêm request và không mất dòng đã tải.
+  const dual = isDual(competition);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const track: Track = (dual ? parseTrack(searchParams.get("track")) : null) ?? "public";
   const [data, setData] = useState<SubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -167,6 +199,63 @@ export function MySubmissionsPage() {
     intervalMs: AUTO_REFRESH_MS,
   });
 
+  /**
+   * Đầu trang dùng chung cho nhánh rỗng lẫn bảng dữ liệu: nút đổi nhánh nằm cùng hàng eyebrow
+   * như bảng xếp hạng, còn tiêu đề nêu rõ nhánh đang xem.
+   */
+  const header = (
+    <div className="subm-head">
+      <div className="subm-head-top">
+        <div className="subm-eyebrow">
+          <span>Lịch sử đánh giá</span>
+          <span>•</span>
+          <span className="results-slug">{competition.slug}</span>
+        </div>
+        {/* Dual: chọn nhánh đang xem. */}
+        {dual && (
+          <div className="dash-filters" role="group" aria-label="Lọc lịch sử theo nhánh">
+            {TRACKS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                className="dash-filter"
+                aria-pressed={item === track}
+                onClick={() => setSearchParams({ track: item })}
+              >
+                {TRACK_LABEL[item]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="subm-head-main">
+        <div className="subm-head-copy">
+          <h2 className="subm-title">Bài đã nộp{dual ? ` ${TRACK_LABEL[track]}` : ""}</h2>
+          <p className="subm-lead text-muted">
+            Lịch sử của riêng bạn, mới nhất hiển thị trước.
+          </p>
+        </div>
+        <div className="subm-head-side">
+          <div className="subm-telemetry-badge">
+            <div className="subm-telemetry-item">
+              <span className="subm-telemetry-label">
+                {dual ? `Hạn ngạch · ${TRACK_LABEL[track]}` : "Hạn ngạch"}
+              </span>
+              <span className="subm-telemetry-val">{quotaBadgeValue(competition, track, dual)}</span>
+            </div>
+            <div className="subm-telemetry-divider" />
+            <div className="subm-telemetry-item">
+              <span className="subm-telemetry-label">Trạng thái</span>
+              <span className="subm-telemetry-val subm-telemetry-ok">
+                Tự động chấm điểm
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
   if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
   if (error && !data) {
@@ -184,12 +273,7 @@ export function MySubmissionsPage() {
   if (!data?.submissions.length) {
     return (
       <section className="subm-page">
-        <div className="subm-head">
-          <div className="subm-head-copy">
-            <h2 className="subm-title">Bài đã nộp</h2>
-            <p className="subm-lead text-muted">Lịch sử của riêng bạn, mới nhất hiển thị trước.</p>
-          </div>
-        </div>
+        {header}
         <AutoRefreshNotice {...refreshStatus} />
         <div className="empty-state">
           <div className="empty-state-icon" aria-hidden="true">
@@ -213,19 +297,33 @@ export function MySubmissionsPage() {
   const shownFrom = data.offset + 1;
   const shownTo = Math.min(data.offset + PAGE_SIZE, data.total);
   const hasNext = data.offset + PAGE_SIZE < data.total;
+  // Dual: bộ lọc nhánh chỉ lọc trên trang đang tải; cuộc thi một nhánh giữ nguyên toàn bộ dòng.
+  const rows = dual
+    ? data.submissions.filter((submission) => submission.track === track)
+    : data.submissions;
+  /** Nhánh còn lại - lối thoát khi trang đang tải không có dòng nào của nhánh đang xem. */
+  const otherTrack: Track = track === "public" ? "private" : "public";
+  // Dòng đã chấm nhưng chưa công bố: khác hẳn chưa chấm, lỗi hay điểm 0 nên phải nói riêng.
+  const showsHidden = rows.some((submission) => submission.result_visibility === "hidden");
   // Cột AI chỉ có nghĩa khi cuộc thi thật sự công khai kết luận cho thí sinh. Bật AI sau khi đã
-  // có bài nộp khiến trang trộn hai loại dòng, nên điều kiện là "có ít nhất một dòng".
-  const showsAi = data.submissions.some((submission) => submission.ai_review);
-  // Cùng cách với cột AI: chỉ dựng cột norm khi thật sự có dòng mang snapshot (backend đã lọc
-  // theo quyền xem). Không có snapshot nào thì không có gì để nói về norm ở trang này.
-  const showsNorm = data.submissions.some((submission) => submission.normalization_snapshot);
+  // có bài nộp khiến trang trộn hai loại dòng, nên điều kiện là "có ít nhất một dòng đang xem".
+  const showsAi = rows.some((submission) => submission.ai_review);
+  // Quyền xem norm đọc từ metadata HIỆN TẠI của nhánh đang xem, không từ payload đã tải: BXH bị
+  // tắt giữa chừng thì snapshot còn nằm trong state cũ cũng không được render.
+  const normHidden = currentNormHiddenReason(competition, dual ? track : null);
+  const hasSnapshotRows = rows.some((submission) => submission.normalization_snapshot);
+  // Cùng cách với cột AI: chỉ dựng cột norm khi có dòng mang snapshot VÀ nhánh còn quyền xem.
+  const showsNorm = !normHidden && hasSnapshotRows;
+  // Có con số vừa bị thu hồi khỏi màn hình thì nói đúng lý do đang chặn thay vì bỏ im lặng.
+  const droppedNormNote = normHidden && hasSnapshotRows ? hiddenNormNote(normHidden) : null;
 
-  // Bài tốt nhất trong trang hiện tại. Chiều so sánh lấy từ hợp đồng kết quả vì có cuộc thi lấy
+  // Bài tốt nhất trong các dòng đang xem. Chiều so sánh lấy từ hợp đồng kết quả vì có cuộc thi lấy
   // metric nhỏ hơn làm điểm tốt (loss, RMSE), nên "điểm cao là nhất" chỉ đúng một chiều. Bài bị
-  // admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả. Cuộc thi xếp hạng theo
-  // norm thì bỏ hẳn phép so raw: snapshot của các bài có mẫu số khác nhau, "tốt nhất" ở đây chỉ
-  // còn nghĩa với điểm gốc.
-  const best = showsNorm ? null : data.submissions.reduce<{ id: string; score: number } | null>(
+  // admin từ chối vẫn đã chấm điểm nhưng không còn được tính vào kết quả; bài chưa công bố không
+  // mang điểm nên tự rơi khỏi phép chọn - dòng bị ẩn không bao giờ được gắn "Tốt nhất". Cuộc thi
+  // xếp hạng theo norm thì bỏ hẳn phép so raw: snapshot của các bài có mẫu số khác nhau, "tốt
+  // nhất" ở đây chỉ còn nghĩa với điểm gốc.
+  const best = showsNorm ? null : rows.reduce<{ id: string; score: number } | null>(
     (winner, submission) => {
       if (
         submission.status !== "completed" ||
@@ -250,40 +348,14 @@ export function MySubmissionsPage() {
 
   return (
     <section className="subm-page">
-      {/* Tiêu đề trang và tóm tắt */}
-      <div className="subm-head">
-        <div className="subm-head-copy">
-          <div className="subm-eyebrow">
-            <span>Lịch sử đánh giá</span>
-            <span>•</span>
-            <span className="results-slug">{competition.slug}</span>
-          </div>
-          <h2 className="subm-title">Bài đã nộp</h2>
-          <p className="subm-lead text-muted">
-            Lịch sử của riêng bạn, mới nhất hiển thị trước.
-          </p>
-        </div>
-
-        <div className="subm-telemetry-badge">
-          <div className="subm-telemetry-item">
-            <span className="subm-telemetry-label">Hạn ngạch</span>
-            <span className="subm-telemetry-val">{competition.quota_per_day} lượt/ngày</span>
-          </div>
-          <div className="subm-telemetry-divider" />
-          <div className="subm-telemetry-item">
-            <span className="subm-telemetry-label">Trạng thái</span>
-            <span className="subm-telemetry-val subm-telemetry-ok">
-              Tự động chấm điểm
-            </span>
-          </div>
-        </div>
-      </div>
+      {header}
 
       {/* Toolbar tóm tắt & thao tác */}
       <div className="subm-toolbar">
         <div className="subm-summary-pills">
           <span>
             Tổng cộng <strong>{data.total}</strong> bài nộp
+            {dual && " (cả hai nhánh)"}
           </span>
           {bestScoreVal != null && (
             <>
@@ -300,7 +372,9 @@ export function MySubmissionsPage() {
           {showsNorm && (
             <>
               <span>•</span>
-              <Link to="../leaderboard">Điểm norm hiện tại xem ở bảng xếp hạng</Link>
+              <Link to={dual ? `../leaderboard?track=${track}` : "../leaderboard"}>
+                Điểm norm hiện tại xem ở bảng xếp hạng
+              </Link>
             </>
           )}
         </div>
@@ -321,7 +395,8 @@ export function MySubmissionsPage() {
             </svg>
             <span>Làm mới</span>
           </button>
-          <Link to="../submit" className="btn btn-sm">
+          {/* Mang nhánh đang xem sang trang nộp bài: người dùng đã chọn nhánh một lần rồi. */}
+          <Link to={dual ? `../submit?track=${track}` : "../submit"} className="btn btn-sm">
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -357,6 +432,23 @@ export function MySubmissionsPage() {
         </>
       )}
 
+      {/* Nhánh Private đã chấm nhưng chưa công bố: giải thích một lần cho cả bảng, câu chữ theo
+          cấu hình công bố của cuộc thi thay vì hứa một mốc thời gian cụ thể. */}
+      {showsHidden && (
+        <div className="status-banner busy" role="status">
+          <span>
+            Có bài nhánh Private đã chấm xong nhưng chưa được công bố. {unpublishedNote(competition)}
+          </span>
+        </div>
+      )}
+
+      {/* Quyền xem norm của nhánh vừa bị thu hồi: cột norm biến mất kèm đúng lý do đang chặn. */}
+      {droppedNormNote && (
+        <p className="subm-ai-note text-muted" role="status">
+          {droppedNormNote}
+        </p>
+      )}
+
       {/* Bảng kết quả: metric chính đứng đầu cụm chỉ số, các metric phụ giữ thứ tự hợp đồng. */}
       <div
         className="subm-table-wrap table-wrap"
@@ -389,7 +481,28 @@ export function MySubmissionsPage() {
             </tr>
           </thead>
           <tbody>
-            {data.submissions.map((submission) => {
+            {rows.length === 0 && (
+              // Trang đang tải có bài nhưng không thuộc nhánh đang xem: lịch sử trả cả hai nhánh
+              // trong một danh sách, nên nói thẳng và cho lối đổi nhánh thay vì bảng trống.
+              <tr>
+                <td colSpan={3 + (showsAi ? 1 : 0) + (showsNorm ? 1 : 0) + displayMetrics.length}>
+                  <div className="empty-state">
+                    <p>Không có bài nộp nhánh {TRACK_LABEL[track]} trong phần đang hiển thị.</p>
+                    <p className="text-muted">
+                      Trang này chỉ có bài nhánh {TRACK_LABEL[otherTrack]}.
+                    </p>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setSearchParams({ track: otherTrack })}
+                    >
+                      Xem nhánh {TRACK_LABEL[otherTrack]}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {rows.map((submission) => {
               const isBest = submission.id === bestSubmissionId;
               return (
                 <tr key={submission.id} className={isBest ? "best-submission-row" : undefined}>
@@ -436,14 +549,19 @@ export function MySubmissionsPage() {
                     />
                   </td>
                   <td>
-                    {/* Trạng thái chấm điểm vẫn là "Đã chấm điểm"; quyết định của admin là badge riêng. */}
-                    <span
-                      className={`status-badge ${
-                        submission.status === "completed" ? "success" : "danger"
-                      }`}
-                    >
-                      {SUBMISSION_STATUS_LABEL[submission.status]}
-                    </span>
+                    {/* Chưa công bố không phải "Đã chấm điểm" theo nghĩa có điểm xem được, nên có
+                        nhãn riêng; quyết định của admin vẫn là badge độc lập như trước. */}
+                    {submission.result_visibility === "hidden" ? (
+                      <span className="status-badge neutral">{UNPUBLISHED_RESULT_LABEL}</span>
+                    ) : (
+                      <span
+                        className={`status-badge ${
+                          submission.status === "completed" ? "success" : "danger"
+                        }`}
+                      >
+                        {SUBMISSION_STATUS_LABEL[submission.status]}
+                      </span>
+                    )}
                     {submission.review && (
                       <span className="status-badge danger">Không chấp nhận</span>
                     )}
@@ -485,7 +603,9 @@ export function MySubmissionsPage() {
                     <td className="subm-primary-score-cell score-cell primary-score">
                       {submission.normalization_snapshot ? (
                         <>
-                          {formatMetric(submission.normalization_snapshot.score, 2)}
+                          <span className="score-pill norm">
+                            {formatMetric(submission.normalization_snapshot.score, 2)}
+                          </span>
                           {submission.review?.status === "rejected" && (
                             <span className="cell-secondary">Không tính BXH</span>
                           )}
@@ -496,18 +616,18 @@ export function MySubmissionsPage() {
                     </td>
                   )}
                   {/* Điểm chính chỉ hiện trong cột metric chính, không nhân đôi giá trị. Có norm thì
-                      metric nguồn xuống cột "Điểm gốc" bình thường, không còn được nhấn. */}
+                      metric nguồn xuống cột "Điểm gốc" và giữ nguyên khung như bảng xếp hạng. */}
                   {displayMetrics.map((metric) => (
                     <td
                       key={metric.key}
                       className={
-                        metric.key === contract.primary_metric && !showsNorm
+                        metric.key === contract.primary_metric
                           ? "subm-primary-score-cell score-cell primary-score"
                           : "subm-score-cell score-cell"
                       }
                     >
-                      {metric.key === contract.primary_metric && !showsNorm ? (
-                        <span className="subm-primary-score-value">
+                      {metric.key === contract.primary_metric ? (
+                        <span className="score-pill">
                           {formatMetric(submission.metrics?.[metric.key], metric.decimals)}
                         </span>
                       ) : (
@@ -523,6 +643,12 @@ export function MySubmissionsPage() {
       </div>
 
       {showsAi && <p className="subm-ai-note text-muted">{AI_PARTICIPANT_DISCLAIMER}</p>}
+      {/* Cột norm là ảnh chụp lúc nộp, không phải norm hiện tại: nói một câu ngay dưới bảng. */}
+      {showsNorm && (
+        <p className="subm-norm-note text-muted">
+          Điểm norm trong bảng là điểm chấm tạm lúc nộp bài.
+        </p>
+      )}
 
       {/* Phân trang */}
       {data.total > PAGE_SIZE && (
@@ -530,6 +656,12 @@ export function MySubmissionsPage() {
           <div role="status">
             {busy ? (
               "Đang cập nhật…"
+            ) : dual ? (
+              // Bộ lọc nhánh không đổi phân trang của server: nói rõ dòng đang xem thuộc trang nào.
+              <>
+                Đang xem <strong>{rows.length}</strong> bài nhánh <strong>{TRACK_LABEL[track]}</strong>{" "}
+                · trang {shownFrom}–{shownTo} / {data.total} bài nộp
+              </>
             ) : (
               <>Đã hiển thị <strong>{shownFrom}–{shownTo}</strong> trong số <strong>{data.total}</strong> bài nộp</>
             )}

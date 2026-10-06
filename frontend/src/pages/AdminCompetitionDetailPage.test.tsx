@@ -521,7 +521,7 @@ test("tab Tài nguyên giữ draft khi chuyển tab và cho hủy thay đổi", 
   expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
 });
 
-test("tab Tài nguyên chặn link ngoài Drive và hỗ trợ xóa toàn bộ", async () => {
+test("tab Tài nguyên chặn link không phải https và hỗ trợ xóa toàn bộ", async () => {
   const current = {
     ...COMPETITION,
     resources: [
@@ -539,11 +539,11 @@ test("tab Tài nguyên chặn link ngoài Drive và hỗ trợ xóa toàn bộ",
   fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
 
   fireEvent.change(screen.getByLabelText("Link tài nguyên 1"), {
-    target: { value: "https://example.com/data.csv" },
+    target: { value: "http://example.com/data.csv" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
   expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Link tài nguyên phải là https://drive.google.com hoặc https://docs.google.com.",
+    "Link tài nguyên phải là URL https hợp lệ.",
   );
   expect(calls.some((call) => call.init?.method === "PATCH")).toBe(false);
 
@@ -1332,7 +1332,7 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
   const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
   const card = within(submissions).getByRole("listitem");
   expect(within(card).getByText("Điểm gốc")).toBeTruthy();
-  expect(within(card).getByText("Norm tạm lúc ghi nhận kết quả")).toBeTruthy();
+  expect(within(card).getByText("Norm score tạm")).toBeTruthy();
   const snapshot = within(card).getByText("37.50");
   expect(snapshot.closest(".subm-score")?.getAttribute("title")).toBe(
     "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
@@ -3307,4 +3307,334 @@ test("lượt làm mới ngầm của bảng xếp hạng lỗi thì giữ bản
   await advance(1);
   expect(leaderboardCalls()).toBe(3);
   expect(screen.getByText("Thí Sinh")).toBeTruthy();
+});
+
+/** ---------- Cuộc thi dual: tab Nhánh thi ---------- */
+
+/** Một nhánh dưới mắt admin; đủ khóa để tab Nhánh thi dựng được card lịch và công bố. */
+function dualTrack(overrides: Record<string, unknown>) {
+  return {
+    resources: [],
+    ground_truth: { row_count: 4, columns: ["id", "label"], uploaded_at: "2026-09-15T00:00:00Z" },
+    verified: true,
+    ready: true,
+    not_ready_reason: null,
+    admission_seq: 0,
+    ...overrides,
+  };
+}
+
+/** Cuộc thi hai nhánh đang chạy: cả hai cửa mở, Private giữ kín theo policy admin_decides. */
+const DUAL = {
+  ...COMPETITION,
+  mode: "public_private",
+  quota_per_day: null,
+  control_revision: 7,
+  stop_generation: 0,
+  scoring_locked: false,
+  last_change: null,
+  tracks: {
+    public: dualTrack({
+      start_at: "2026-10-01T00:00:00Z",
+      end_at: "2026-10-20T00:00:00Z",
+      quota_per_day: 5,
+      window_state: "open",
+      results_released: false,
+    }),
+    private: dualTrack({
+      start_at: "2026-10-01T00:00:00Z",
+      end_at: "2026-11-01T00:00:00Z",
+      quota_per_day: 10,
+      window_state: "open",
+      results_released: false,
+      result_policy: "manual",
+      publish_condition: "admin_decides",
+      results_published_at: null,
+    }),
+  },
+};
+
+/** Mock đủ endpoint của tab Nhánh thi: cuộc thi dual, số lượt chấm Private và nội dung. */
+function mockTracksTab(
+  competition: unknown = DUAL,
+  stats: { total: number; completed: number; failed: number; in_flight: number } = {
+    total: 4,
+    completed: 3,
+    failed: 1,
+    in_flight: 0,
+  },
+) {
+  mockApi((url) => {
+    if (url.includes("/submissions/stats")) return { body: stats, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: competition, status: 200 };
+  });
+}
+
+/** Mở tab Nhánh thi và chờ lượt chấm Private về - nút công bố đọc trạng thái xử lý từ số liệu này. */
+async function openTracksTab() {
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Nhánh thi" }));
+  await screen.findByText("Lượt chấm nhánh Private");
+}
+
+/** Cuộc thi dual đã kết thúc, Private đã công bố và đóng cửa - trạng thái của một lượt mở lại. */
+const DUAL_CLOSED_RELEASED = {
+  ...DUAL,
+  status: "closed",
+  tracks: {
+    ...DUAL.tracks,
+    private: {
+      ...DUAL.tracks.private,
+      end_at: "2026-09-30T00:00:00Z",
+      window_state: "closed",
+      results_released: true,
+      results_published_at: "2026-09-30T08:00:00Z",
+      results_published_by: "admin@vku.vn",
+    },
+  },
+};
+
+test("dual: policy admin_decides cho công bố khi Private còn nhận bài, xác nhận đúng lời và gọi POST", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/publish-results") && init?.method === "POST") {
+      return { body: { ...DUAL, control_revision: 8 }, status: 200 };
+    }
+    if (url.includes("/submissions/stats")) {
+      return { body: { total: 4, completed: 3, failed: 1, in_flight: 0 }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: DUAL, status: 200 };
+  });
+  await openTracksTab();
+
+  const publishButton = screen.getByRole("button", { name: "Công bố kết quả Private" });
+  expect(publishButton).not.toBeDisabled();
+  fireEvent.click(publishButton);
+
+  const dialog = screen.getByRole("dialog", { name: "Công bố kết quả Private" });
+  expect(within(dialog).getByText(/Private vẫn đang nhận bài và có thể còn bài đang chấm\./)).toBeTruthy();
+  expect(within(dialog).getByText(/dữ liệu đã công bố không thể trở lại bí mật\./)).toBeTruthy();
+  // Chưa xác nhận thì chưa gọi API.
+  expect(calls.some((call) => call.url.endsWith("/publish-results"))).toBe(false);
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Công bố" }));
+  await waitFor(() => {
+    expect(
+      calls.some((call) => call.url.endsWith("/publish-results") && call.init?.method === "POST"),
+    ).toBe(true);
+  });
+  const body = JSON.parse(String(calls.find((call) => call.url.endsWith("/publish-results"))?.init?.body));
+  expect(body).toEqual({ expected_revision: 7 });
+  expect(await screen.findByText("Đã công bố kết quả Private.")).toBeTruthy();
+});
+
+test("dual: điều kiện after_closed_and_scored chặn công bố khi cửa còn mở và nói rõ lý do", async () => {
+  const strict = {
+    ...DUAL,
+    tracks: {
+      ...DUAL.tracks,
+      private: { ...DUAL.tracks.private, publish_condition: "after_closed_and_scored" },
+    },
+  };
+  mockTracksTab(strict);
+  await openTracksTab();
+
+  const publishButton = screen.getByRole("button", { name: "Công bố kết quả Private" });
+  expect(publishButton).toBeDisabled();
+  expect(publishButton.getAttribute("title")).toBe(
+    "Private vẫn đang trong thời gian nhận bài; chưa công bố được.",
+  );
+  expect(
+    screen.getByText("Private vẫn đang trong thời gian nhận bài; chưa công bố được."),
+  ).toBeTruthy();
+
+  // Đường thoát nằm ngay cạnh: admin đổi điều kiện thay vì bị kẹt ở điều kiện chặt.
+  fireEvent.click(screen.getByRole("button", { name: "Đổi điều kiện để công bố sớm" }));
+  expect(screen.getByRole("dialog", { name: "Chính sách công bố kết quả Private" })).toBeTruthy();
+});
+
+test("dual: điều kiện chặt chặn khi cửa đã đóng nhưng còn bài đang xử lý", async () => {
+  const strict = {
+    ...DUAL,
+    tracks: {
+      ...DUAL.tracks,
+      private: {
+        ...DUAL.tracks.private,
+        end_at: "2026-09-30T00:00:00Z",
+        window_state: "closed",
+        publish_condition: "after_closed_and_scored",
+      },
+    },
+  };
+  mockTracksTab(strict, { total: 5, completed: 3, failed: 0, in_flight: 2 });
+  await openTracksTab();
+  await screen.findByText("Đang xử lý");
+
+  const publishButton = screen.getByRole("button", { name: "Công bố kết quả Private" });
+  expect(publishButton).toBeDisabled();
+  expect(publishButton.getAttribute("title")).toBe(
+    "Private còn bài đã nhận đang xử lý; chưa công bố được.",
+  );
+});
+
+test("dual: xung đột revision khi lưu lịch nhánh hiện lỗi backend, tải lại dữ liệu và giữ nguyên lịch vừa nhập", async () => {
+  let detailLoads = 0;
+  mockApi((url, init) => {
+    if (url.endsWith("/tracks/private/schedule") && init?.method === "PATCH") {
+      return {
+        body: {
+          error: {
+            code: "COMPETITION_REVISION_CONFLICT",
+            message: "Cuộc thi vừa được thay đổi ở phiên khác.",
+          },
+        },
+        status: 409,
+      };
+    }
+    if (url.includes("/submissions/stats")) {
+      return { body: { total: 0, completed: 0, failed: 0, in_flight: 0 }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    detailLoads += 1;
+    return { body: detailLoads === 1 ? DUAL : { ...DUAL, control_revision: 8 }, status: 200 };
+  });
+  await openTracksTab();
+
+  // Hai nút "Gia hạn" theo thứ tự TRACKS; nhánh Private là nút thứ hai.
+  fireEvent.click(screen.getAllByRole("button", { name: "Gia hạn" })[1]);
+  const dialog = screen.getByRole("dialog", { name: "Gia hạn nhánh Private" });
+  fireEvent.change(within(dialog).getByLabelText("Đóng nhận bài"), {
+    target: { value: "2026-12-01T00:00" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("Lý do"), {
+    target: { value: "Gia hạn nhận bài." },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lưu lịch mới" }));
+
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Cuộc thi vừa được thay đổi ở phiên khác.");
+  expect(alert.textContent).toContain("Dữ liệu vừa được tải lại; kiểm tra lịch hiện tại rồi lưu lại.");
+  // Tải lại dữ liệu để lượt thử sau dùng revision mới, nhưng không đóng modal hay xoá lịch đang nhập.
+  expect(detailLoads).toBeGreaterThan(1);
+  expect((within(dialog).getByLabelText("Đóng nhận bài") as HTMLInputElement).value).toBe(
+    "2026-12-01T00:00",
+  );
+});
+
+test("dual: mở lại cuộc thi đã công bố Private kèm lịch nhánh mới và đúng lời xác nhận", async () => {
+  mockApi((url, init) => {
+    if (url.endsWith("/reopen") && init?.method === "POST") {
+      return { body: { ...DUAL_CLOSED_RELEASED, status: "published" }, status: 200 };
+    }
+    if (url.includes("/submissions/stats")) {
+      return { body: { total: 6, completed: 6, failed: 0, in_flight: 0 }, status: 200 };
+    }
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: DUAL_CLOSED_RELEASED, status: 200 };
+  });
+  renderPage();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Mở lại" }));
+  const dialog = screen.getByRole("dialog", { name: "Mở lại cuộc thi" });
+  // Chưa đổi lịch thì nhánh Private vẫn đóng, lời hẹn nhận bài chưa được phép xuất hiện.
+  expect(screen.queryByText(/Private sẽ nhận bài đến/)).toBeNull();
+
+  const changePrivate = dialog.querySelector<HTMLInputElement>("#reopen-private-change");
+  expect(changePrivate).not.toBeNull();
+  fireEvent.click(changePrivate as HTMLInputElement);
+  fireEvent.change(dialog.querySelector("#reopen-private-end") as HTMLInputElement, {
+    target: { value: "2026-12-31T00:00" },
+  });
+
+  expect(screen.getByText(/Private sẽ nhận bài đến \d{2}\/\d{2}\/\d{4} \d{2}:\d{2}\./)).toBeTruthy();
+  expect(screen.getByText(/Điểm và BXH đã công bố tiếp tục hiển thị/)).toBeTruthy();
+  expect(screen.getByText(/Các lượt đã dùng hôm nay không được hoàn lại\./)).toBeTruthy();
+
+  fireEvent.change(dialog.querySelector("#reopen-reason") as HTMLInputElement, {
+    target: { value: "Gia hạn để nhận thêm bài Private." },
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Mở lại" }));
+  await waitFor(() => {
+    expect(calls.some((call) => call.url.endsWith("/reopen") && call.init?.method === "POST")).toBe(true);
+  });
+  const body = JSON.parse(String(calls.find((call) => call.url.endsWith("/reopen"))?.init?.body));
+  expect(body.expected_revision).toBe(7);
+  expect(body.reason).toBe("Gia hạn để nhận thêm bài Private.");
+  expect(body.tracks.public).toBeNull();
+  expect(body.tracks.private.quota_per_day).toBe(10);
+  expect(body.tracks.private.end_at).toBe(new Date("2026-12-31T00:00").toISOString());
+  expect(await screen.findByText("Đã mở lại cuộc thi.")).toBeTruthy();
+});
+
+test("dual: hộp thoại công bố giữ focus trong dialog, Escape đóng và trả focus về nút mở", async () => {
+  mockTracksTab(DUAL);
+  await openTracksTab();
+
+  const publishButton = screen.getByRole("button", { name: "Công bố kết quả Private" });
+  publishButton.focus();
+  fireEvent.click(publishButton);
+
+  const dialog = screen.getByRole("dialog", { name: "Công bố kết quả Private" });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Đóng" }));
+
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Công bố kết quả Private" })).toBeNull();
+  expect(publishButton).toHaveFocus();
+});
+
+test("dual: hàng chờ ground truth hai nhánh tải tuần tự, lượt sau dùng revision vừa tăng", async () => {
+  const DUAL_SCORING = {
+    ...SCORING,
+    ready: false,
+    scoring: null,
+    config: null,
+    ground_truth: null,
+    mode: "public_private",
+    tracks: {
+      public: { ground_truth: null, ready: false, not_ready_reason: null, verified: false, verification: null },
+      private: { ground_truth: null, ready: false, not_ready_reason: null, verified: false, verification: null },
+    },
+  };
+  const SAVED = { ...DUAL_SCORING, scoring: { ...SCORING.scoring, revision: 1 } };
+  mockApi((url, init) => {
+    if (url.endsWith("/ground-truth") && init?.method === "PUT") {
+      // Mỗi lượt tải ground truth tự tăng revision của cấu hình chấm; lượt nối tiếp phải thấy bản mới.
+      const track = (init.body as FormData).get("track");
+      return {
+        body: { ...SAVED, scoring: { ...SAVED.scoring, revision: track === "public" ? 2 : 3 } },
+        status: 200,
+      };
+    }
+    if (url.endsWith("/scoring") && init?.method === "PUT") return { body: SAVED, status: 200 };
+    if (url.endsWith("/scoring")) return { body: DUAL_SCORING, status: 200 };
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return { body: DUAL, status: 200 };
+  });
+  renderPage();
+  fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
+
+  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV nhánh Public"), {
+    target: { files: [new File(["id,label\n1,1"], "public.csv", { type: "text/csv" })] },
+  });
+  fireEvent.change(screen.getByLabelText("Upload ground truth CSV nhánh Private"), {
+    target: { files: [new File(["id,label\n1,1"], "private.csv", { type: "text/csv" })] },
+  });
+  // Chưa lưu cấu hình: hai tệp nằm chờ, chưa có request nào rời trình duyệt.
+  expect(await screen.findByText("public.csv")).toBeTruthy();
+  expect(screen.getByText("private.csv")).toBeTruthy();
+  expect(calls.some((call) => call.url.endsWith("/ground-truth"))).toBe(false);
+
+  fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" }).closest("form")!);
+  expect(await screen.findByText("Đã lưu cấu hình và tải lên ground truth.")).toBeTruthy();
+
+  const uploads = calls.filter(
+    (call) => call.url.endsWith("/ground-truth") && call.init?.method === "PUT",
+  );
+  expect(uploads).toHaveLength(2);
+  expect((uploads[0]!.init!.body as FormData).get("track")).toBe("public");
+  expect((uploads[0]!.init!.body as FormData).get("expected_revision")).toBe("1");
+  expect((uploads[1]!.init!.body as FormData).get("track")).toBe("private");
+  expect((uploads[1]!.init!.body as FormData).get("expected_revision")).toBe("2");
 });

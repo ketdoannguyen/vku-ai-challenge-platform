@@ -123,18 +123,22 @@ def submit(
     notebook: bytes | None = VALID_NOTEBOOK,
     notebook_filename: str = "solution.ipynb",
     key: str | None = None,
+    track: str | None = None,
 ):
     """Nộp bài kèm notebook; `notebook=None` để bỏ hẳn part notebook (test thiếu file).
 
     Mỗi lần gọi là một lần nhấn Nút mới nên mặc định có `Idempotency-Key` riêng; test nào muốn thử
-    gửi lại cùng một lần nhấn thì truyền `key` cố định.
+    gửi lại cùng một lần nhấn thì truyền `key` cố định. Cuộc thi dual nhận thêm `track` bắt buộc.
     """
     files = {"file": (filename, data, "text/csv")}
     if notebook is not None:
         files["notebook"] = (notebook_filename, notebook, "application/x-ipynb+json")
     headers = {"Idempotency-Key": key or f"test-key-{next(_submit_keys)}"}
     return client.post(
-        f"/api/competitions/{competition_id}/submissions", files=files, headers=headers
+        f"/api/competitions/{competition_id}/submissions",
+        files=files,
+        headers=headers,
+        data={"track": track} if track is not None else None,
     )
 
 

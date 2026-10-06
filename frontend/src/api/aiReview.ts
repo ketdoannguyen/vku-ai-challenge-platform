@@ -386,8 +386,8 @@ export const SOURCE_URL_MATCH_LABEL: Record<AiSourceMatch, string> = {
 
 /** Nhãn trạng thái nguồn cho cả danh sách lẫn modal; một chỗ định nghĩa, hai chỗ đọc. */
 export const AI_SOURCE_STATUS_LABEL: Record<AiSourceStatus, string> = {
-  ALIGNED: "AI: Phù hợp nguồn BTC",
-  EXTERNAL: "AI: Có dấu hiệu dùng nguồn ngoài",
+  ALIGNED: "Nguồn: Phù hợp BTC",
+  EXTERNAL: "Nguồn: Nghi nguồn ngoài",
   UNCLEAR: "Nguồn: Chưa xác minh",
   NOT_EVALUATED: "Nguồn: Chưa đánh giá được",
 };
@@ -416,9 +416,9 @@ export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: st
   { value: "flagged", label: "AI: Có dấu hiệu" },
   { value: "clear", label: "AI: Không phát hiện" },
   { value: "inconclusive", label: "AI: Chưa đủ căn cứ" },
-  { value: "source_external", label: "AI: Có dấu hiệu dùng nguồn ngoài" },
-  { value: "source_unclear", label: "Nguồn: Chưa xác minh" },
-  { value: "source_not_evaluated", label: "Nguồn: Chưa đánh giá được" },
+  { value: "source_external", label: AI_SOURCE_STATUS_LABEL.EXTERNAL },
+  { value: "source_unclear", label: AI_SOURCE_STATUS_LABEL.UNCLEAR },
+  { value: "source_not_evaluated", label: AI_SOURCE_STATUS_LABEL.NOT_EVALUATED },
   { value: "error", label: "AI lỗi" },
   { value: "pending", label: "AI đang xử lý" },
   { value: "none", label: "Chưa đánh giá" },
