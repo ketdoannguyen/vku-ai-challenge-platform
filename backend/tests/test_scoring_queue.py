@@ -259,11 +259,11 @@ def test_worker_ground_truth_error_is_not_reported_as_student_csv(client, fake_r
     assert _quota_used(client, competition["id"]) == 0
 
 
-def test_csv_rule_failure_shows_fixed_message_and_refunds(client, fake_runner, fake_artifact_storage):
+def test_csv_rule_failure_shows_evaluator_message_and_refunds(client, fake_runner, fake_artifact_storage):
     competition = publish_v2_competition(client)
     cid = competition["id"]
     fake_runner.error = EvaluatorError(
-        "SUBMISSION_RULE_VIOLATION", "SECRET: ground truth must not leak"
+        "SUBMISSION_RULE_VIOLATION", "Câu trả lời phải nằm trong đoạn văn."
     )
 
     queued = submit(client, cid, V2_SUBMISSION).json()
@@ -273,12 +273,32 @@ def test_csv_rule_failure_shows_fixed_message_and_refunds(client, fake_runner, f
     assert body["status"] == "FAILED"
     assert body["error"] == {
         "code": "SUBMISSION_RULE_VIOLATION",
-        "message": attempts_service.SUBMISSION_RULE_MESSAGE,
+        "message": "Câu trả lời phải nằm trong đoạn văn.",
     }
-    assert "SECRET" not in str(body)
+    assert "detail" not in str(body)
     assert _quota_used(client, cid) == 0
     assert not submission_documents(client)
     assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
+
+
+@pytest.mark.parametrize("message", [None, "  ", "x" * 301, "bad\x00value", "bad\x7fvalue", "bad" + chr(0x202e) + "value", 42])
+def test_rule_message_invalid_on_read_uses_fallback(message):
+    assert attempts_service.public_error({"code": "SUBMISSION_RULE_VIOLATION", "message": message}) == {
+        "code": "SUBMISSION_RULE_VIOLATION",
+        "message": attempts_service.SUBMISSION_RULE_MESSAGE,
+    }
+
+
+def test_rule_message_accepts_300_characters_on_read():
+    assert attempts_service.public_error({
+        "code": "SUBMISSION_RULE_VIOLATION", "message": "x" * 300
+    }) == {"code": "SUBMISSION_RULE_VIOLATION", "message": "x" * 300}
+
+
+def test_rule_message_is_normalized_on_read():
+    assert attempts_service.public_error({
+        "code": "SUBMISSION_RULE_VIOLATION", "message": "  Sai nhãn.\n Hãy thử lại.  "
+    }) == {"code": "SUBMISSION_RULE_VIOLATION", "message": "Sai nhãn. Hãy thử lại."}
 
 
 def test_invalid_class_id_shows_allowed_ids_and_refunds(client, fake_runner, fake_artifact_storage):

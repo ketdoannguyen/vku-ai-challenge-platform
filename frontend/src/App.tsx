@@ -458,6 +458,7 @@ export function App() {
   const support = pathname === "/ho-tro";
   // Trang giới thiệu cũng hai cột ở desktop nên dùng chung trần rộng với hỗ trợ.
   const about = pathname === "/gioi-thieu";
+  const aggregateIndex = pathname === "/tong-hop";
   useRouteFocus();
   return (
     <AuthProvider>
@@ -465,7 +466,7 @@ export function App() {
       <main
         className={`app-main${bare ? " app-main-bare" : ""}${dashboard ? " app-main-dashboard" : ""}${
           adminList ? " app-main-admin-list" : ""
-        }${support ? " app-main-support" : ""}${about ? " app-main-about" : ""}`}
+        }${support ? " app-main-support" : ""}${about ? " app-main-about" : ""}${aggregateIndex ? " app-main-aggregate-index" : ""}`}
         id="main-content"
         tabIndex={-1}
       >

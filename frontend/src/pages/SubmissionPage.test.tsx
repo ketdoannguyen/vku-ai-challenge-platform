@@ -864,6 +864,31 @@ test("lượt hỏng thì hiện lý do, không tính lượt và vẫn nộp l�
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();
 });
 
+test("hiện lời nhắn quy tắc từ evaluator trên banner thí sinh", async () => {
+  vi.useFakeTimers();
+  mockScoring(
+    queued(),
+    queued({
+      status: "FAILED",
+      queue_position: null,
+      error: {
+        code: "SUBMISSION_RULE_VIOLATION",
+        message: "Câu trả lời phải là một đoạn liên tiếp trong văn bản.",
+      },
+    }),
+  );
+  renderPage();
+  submitOnce();
+  await flushTimers(0);
+  await flushTimers(POLL_MS * 2);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("Câu trả lời phải là một đoạn liên tiếp trong văn bản.");
+  expect(alert).toHaveTextContent("SUBMISSION_RULE_VIOLATION");
+  expect(alert).toHaveTextContent("attempt-1");
+  expect(alert).toHaveTextContent("Lượt này không bị tính vào hạn mức nộp.");
+});
+
 test("lượt đang đối soát thì vẫn chờ dù đã quá 60 giây", async () => {
   vi.useFakeTimers();
   mockScoring(

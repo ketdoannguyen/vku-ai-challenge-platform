@@ -57,17 +57,43 @@ def test_entrypoint_tra_ket_qua_that_ra_khoi_stdout():
     assert _result(result) == {"status": "passed", "metrics": {"accuracy": 1.0, "n_items": 2.0}}
 
 
-def test_rule_violation_has_fixed_public_message_and_private_detail():
+def test_rule_violation_preserves_admin_message_and_private_detail():
     result, _ = _run(
         "def evaluate(truth_path, submission_path):\n"
-        "    raise SubmissionRuleError('PRIVATE ANSWER: 42')\n"
+        "    raise SubmissionRuleError('Câu trả lời phải nằm trong đoạn văn.')\n"
     )
     payload = _result(result)
     assert result.returncode == 0
     assert payload["code"] == "SUBMISSION_RULE_VIOLATION"
-    assert "CSV không đáp ứng quy tắc" in payload["message"]
-    assert "PRIVATE ANSWER" not in payload["message"]
-    assert "PRIVATE ANSWER: 42" in payload["detail"]
+    assert payload["message"] == "Câu trả lời phải nằm trong đoạn văn."
+    assert "SubmissionRuleError" in payload["detail"]
+
+
+def test_rule_violation_without_valid_message_uses_fallback():
+    for argument in ("", "'   '", "42", "'a', 'b'", "'x' * 301", "chr(0) + 'secret'", "chr(127) + 'secret'", "chr(0x202e) + 'secret'"):
+        result, _ = _run(
+            "def evaluate(truth_path, submission_path):\n"
+            f"    raise SubmissionRuleError({argument})\n"
+        )
+        payload = _result(result)
+        assert payload["code"] == "SUBMISSION_RULE_VIOLATION"
+        assert "CSV không đáp ứng quy tắc" in payload["message"]
+
+
+def test_rule_violation_accepts_300_char_message():
+    result, _ = _run(
+        "def evaluate(truth_path, submission_path):\n"
+        "    raise SubmissionRuleError('x' * 300)\n"
+    )
+    assert _result(result)["message"] == "x" * 300
+
+
+def test_rule_violation_collapses_whitespace_before_publication():
+    result, _ = _run(
+        "def evaluate(truth_path, submission_path):\n"
+        "    raise SubmissionRuleError('  Câu 3:  sai nhãn.\\n Hãy sửa lại.  ')\n"
+    )
+    assert _result(result)["message"] == "Câu 3: sai nhãn. Hãy sửa lại."
 
 
 def test_invalid_class_id_has_structured_numbers_and_private_traceback():

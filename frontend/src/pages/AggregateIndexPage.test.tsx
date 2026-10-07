@@ -71,7 +71,9 @@ test("danh sách hiện nguồn kèm trọng số, quyền xem và link vào b�
     "href",
     "/competitions/cv-a",
   );
-  expect(within(row).getByText("Thành viên một trong các cuộc thi nguồn")).toBeTruthy();
+  const visibility = within(row).getByText("Thành viên một trong các cuộc thi nguồn");
+  expect(visibility).toHaveClass("agg-visibility--member-any");
+  expect(visibility.closest("td")).toHaveClass("agg-visibility-cell");
   expect(within(row).getByRole("link", { name: "Tổng hợp Cup" })).toHaveAttribute(
     "href",
     "/tong-hop/tong-hop-cup",
@@ -82,7 +84,7 @@ test("danh sách hiện nguồn kèm trọng số, quyền xem và link vào b�
   const other = screen.getByText("Bảng mở").closest("tr") as HTMLElement;
   expect(within(other).getByText("Nguồn đã bị xoá")).toBeTruthy();
   expect(within(other).getByText("70%")).toBeTruthy();
-  expect(within(other).getByText("Mọi tài khoản đã đăng nhập")).toBeTruthy();
+  expect(within(other).getByText("Mọi tài khoản đã đăng nhập")).not.toHaveClass("agg-visibility--member-any");
   const longChip = within(other).getByText("NLP B với tên dài quá giới…");
   expect(longChip.closest(".agg-chip")).toHaveAttribute(
     "title",

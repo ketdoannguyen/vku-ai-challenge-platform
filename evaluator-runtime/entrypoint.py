@@ -27,6 +27,7 @@ MARKER = "<<<VKU_RESULT>>>"
 END = "<<<VKU_END>>>"
 MAX_RESULT_BYTES = 64 * 1024
 MAX_DETAIL_CHARS = 4_000
+MAX_RULE_MESSAGE_CHARS = 300
 ENTRYPOINT = "evaluate"
 GROUND_TRUTH_PATH = "/tmp/ground_truth.csv"
 SUBMISSION_PATH = "/tmp/submission.csv"
@@ -38,7 +39,7 @@ SUBMISSION_RULE_MESSAGE = (
 
 
 class SubmissionRuleError(Exception):
-    """Bộ chấm chủ động báo bài nộp vi phạm một quy tắc đã công khai."""
+    """Bộ chấm chủ động báo quy tắc công khai; lời nhắn hợp lệ sẽ hiển thị cho thí sinh."""
 
 
 class InvalidClassIdError(Exception):
@@ -84,6 +85,17 @@ def _failure(code: str, message: str, detail: str | None = None) -> dict:
     if detail:
         payload["detail"] = detail[-MAX_DETAIL_CHARS:]
     return payload
+
+
+def _rule_message(error: SubmissionRuleError) -> str:
+    if len(error.args) != 1 or not isinstance(error.args[0], str):
+        return SUBMISSION_RULE_MESSAGE
+    if any(not (char.isprintable() or char.isspace()) for char in error.args[0]):
+        return SUBMISSION_RULE_MESSAGE
+    message = " ".join(error.args[0].split())
+    if not message or len(message) > MAX_RULE_MESSAGE_CHARS:
+        return SUBMISSION_RULE_MESSAGE
+    return message
 
 
 def _deadline_seconds(raw: str | None) -> float | None:
@@ -165,12 +177,12 @@ def main() -> int:
             failure["class_info"] = error.class_info
             _emit(channel, failure)
             return 0
-        except SubmissionRuleError:
+        except SubmissionRuleError as error:
             _emit(
                 channel,
                 _failure(
                     "SUBMISSION_RULE_VIOLATION",
-                    SUBMISSION_RULE_MESSAGE,
+                    _rule_message(error),
                     traceback.format_exc(),
                 ),
             )
