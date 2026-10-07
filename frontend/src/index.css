@@ -852,6 +852,10 @@ samp {
   max-width: var(--container-wide);
 }
 
+.app-main-aggregate-index {
+  max-width: var(--container-wide);
+}
+
 /* Trang Giới thiệu cũng chia lưới con bên trong khối full-width nên dùng chung
    trần rộng; chỉ áp cho đúng `/gioi-thieu`, không đổi trần mặc định các màn khác. */
 .app-main-about {
@@ -7431,7 +7435,7 @@ a.agg-source-link:hover {
   }
 }
 
-/* Danh sách công khai: nhóm bảng rõ ràng, không phải dãy ô căn giữa. */
+/* Danh sách bảng tổng hợp. */
 .agg-index-heading {
   display: flex;
   flex-wrap: wrap;
@@ -7453,7 +7457,22 @@ a.agg-source-link:hover {
 }
 
 .agg-index-table {
-  min-width: 760px;
+  min-width: 960px;
+  font-size: var(--text-body);
+}
+
+.lb-table.agg-index-table th,
+.lb-table.agg-index-table td {
+  padding: 18px var(--space-lg);
+  text-align: center;
+}
+
+.lb-table.agg-index-table th {
+  font-size: var(--text-body-sm);
+}
+
+.agg-index-table .name-cell {
+  white-space: normal;
 }
 
 .agg-index-table .name-cell a {
@@ -7478,9 +7497,15 @@ a.agg-source-link:hover {
   line-height: 1.4;
 }
 
+.agg-visibility--member-any {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
 /* --- Bảng tổng hợp: điểm tổng nổi bật, bảng dữ liệu đọc từ trái sang phải --- */
 
-/* Nhấn ba màu VKU một lần ở mép card; đầu bảng để trắng cho dữ liệu dễ đọc. */
+/* Viền xanh ở mép card; đầu bảng giữ nền nhạt cho dữ liệu dễ đọc. */
 .agg-table-wrap {
   border-top: 3px solid var(--vku-blue-600);
 }
@@ -7495,10 +7520,6 @@ a.agg-source-link:hover {
   background: var(--vku-yellow-100);
   color: var(--vku-yellow-800);
   border-bottom-color: var(--vku-yellow-600);
-}
-
-.agg-table .agg-source-col:nth-child(4) {
-  border-bottom: 2px solid var(--vku-red-600);
 }
 
 /* Cột Điểm tổng: nền vàng nhạt hai bên viền, pill điểm lớn hơn phần còn lại. */
@@ -7529,11 +7550,6 @@ a.agg-source-link:hover {
   background: var(--surface-subtle);
   color: var(--vku-ink-muted);
   border-bottom-color: var(--vku-border);
-  text-align: center;
-}
-
-.agg-index-table td.lb-time-cell {
-  text-align: right;
 }
 
 /* Ba sắc theo từng nguồn, không phủ cả hàng: nguồn vẫn có chữ và trọng số rõ ràng. */
@@ -7561,6 +7577,18 @@ a.agg-source-link:hover {
   padding: 6px 12px;
 }
 
+.agg-index-table .agg-chips--stack,
+.agg-admin-table .agg-chips--stack {
+  width: 100%;
+  max-width: 360px;
+  margin-inline: auto;
+}
+
+.agg-index-table .agg-chip-name,
+.agg-admin-table .agg-chip-name {
+  text-align: left;
+}
+
 .agg-chips--stack .agg-chip-name {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -7574,7 +7602,16 @@ a.agg-source-link:hover {
 .ac-table.agg-admin-table thead th {
   background: var(--surface-subtle);
   color: var(--vku-ink-muted);
+}
+
+.ac-table.agg-admin-table th,
+.ac-table.agg-admin-table td,
+.ac-table.agg-admin-table th:last-child {
   text-align: center;
+}
+
+.agg-admin-table .ac-name-text {
+  align-items: center;
 }
 
 .ac-table.agg-admin-table tbody tr:hover td {
@@ -7583,10 +7620,6 @@ a.agg-source-link:hover {
 
 .ac-table.agg-admin-table .ac-name-text a {
   color: var(--vku-blue-800);
-}
-
-.ac-table.agg-admin-table td:last-child {
-  text-align: right;
 }
 
 .ac-table-card > .agg-note {

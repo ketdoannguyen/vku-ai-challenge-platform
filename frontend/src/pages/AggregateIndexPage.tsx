@@ -130,7 +130,11 @@ export function AggregateIndexPage() {
                         })}
                       </div>
                     </td>
-                    <td><span className="agg-visibility">{AGGREGATE_VISIBILITY_LABEL[aggregate.visibility] ?? aggregate.visibility}</span></td>
+                    <td className="agg-visibility-cell">
+                      <span className={`agg-visibility${aggregate.visibility === "members_any" ? " agg-visibility--member-any" : ""}`}>
+                        {AGGREGATE_VISIBILITY_LABEL[aggregate.visibility] ?? aggregate.visibility}
+                      </span>
+                    </td>
                     <td className="lb-time-cell">{formatLocal(aggregate.updated_at)}</td>
                   </tr>
                 ))}

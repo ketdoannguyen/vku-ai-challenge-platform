@@ -101,6 +101,24 @@ test("khách vào / thấy danh sách cuộc thi, không bị đẩy về /login
   const main = document.getElementById("main-content");
   expect(main).not.toHaveClass("app-main-support");
   expect(main).not.toHaveClass("app-main-about");
+  expect(main).not.toHaveClass("app-main-aggregate-index");
+});
+
+test("trang /tong-hop mở rộng khung danh sách sau khi xác thực", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = (value: unknown) =>
+        new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("/auth/me")) return body(ACCOUNT);
+      if (url.endsWith("/api/aggregates")) return body({ aggregates: [] });
+      return body({ error: { code: "NOT_FOUND", message: "Không tìm thấy." } });
+    }),
+  );
+  renderAt("/tong-hop");
+  expect(await screen.findByRole("heading", { level: 1, name: "Bảng xếp hạng tổng hợp" })).toBeTruthy();
+  expect(screen.getByRole("main")).toHaveClass("app-main-aggregate-index");
 });
 
 test("khách vào chi tiết cuộc thi thấy landing khóa kèm lời mời đăng nhập", async () => {
