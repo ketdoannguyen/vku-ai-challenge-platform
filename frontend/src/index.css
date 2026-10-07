@@ -553,6 +553,57 @@ samp {
   box-shadow: inset 0 -2px 0 var(--vku-blue-600);
 }
 
+/* Khu quản trị gom vào một mục "Quản trị": menu xổ xuống khi hover (chuột) hoặc
+   focus-within (bàn phím) nên không cần state trong React. */
+.app-nav-group {
+  position: relative;
+}
+
+.app-nav-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-nav-trigger svg {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.app-nav-group:hover .app-nav-trigger svg,
+.app-nav-group:focus-within .app-nav-trigger svg {
+  transform: rotate(180deg);
+}
+
+/* Menu dán liền mép dưới mục cha (top: 100%) để không có khe hở làm rớt hover. */
+.app-nav-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 60;
+  display: none;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--vku-border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 28px rgba(7, 20, 42, 0.12);
+}
+
+.app-nav-group:hover .app-nav-menu,
+.app-nav-group:focus-within .app-nav-menu {
+  display: block;
+}
+
+.app-nav-menu a {
+  display: block;
+  padding: 9px 12px;
+}
+
+/* Mục đang mở trong menu chỉ giữ nền + màu chữ, bỏ gạch chân inset của thanh ngang. */
+.app-nav-menu a.active {
+  box-shadow: none;
+}
+
 .app-header-right {
   grid-column: 3;
   justify-self: end;
@@ -751,6 +802,17 @@ samp {
 .app-drawer-nav a.active {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* Nhãn nhóm trong drawer: khu quản trị tách khỏi các mục điều hướng thường. */
+.app-drawer-section {
+  margin-top: var(--space-sm);
+  padding: 4px var(--space-sm) 0;
+  color: var(--text-muted);
+  font-size: var(--text-label-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .app-drawer-foot {
@@ -7071,6 +7133,491 @@ button.resource-link:disabled {
 }
 
 /* =============================================================================
+   S08b: Bảng xếp hạng tổng hợp (Aggregate leaderboard)
+   Chip nguồn dùng chung trang danh sách và trang bảng; cột điểm của bảng tổng hợp
+   căn giữa (BXH cuộc thi giữ căn phải) và kẻ sọc nhạt cho dãy số dài dễ dò.
+   ============================================================================= */
+.agg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Các nguồn đứng riêng dưới mô tả, không lẫn vào tiêu đề bảng. */
+.agg-leaderboard-copy > .agg-chips {
+  margin-top: var(--space-lg);
+}
+
+.agg-leaderboard-copy > .agg-chips .agg-chip:nth-child(3n + 2) {
+  border-color: var(--vku-red-100);
+}
+
+.agg-leaderboard-copy > .agg-chips .agg-chip:nth-child(3n) {
+  border-color: var(--vku-yellow-500);
+}
+
+.agg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 12px;
+  border: 1px solid var(--vku-border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.agg-chip-name {
+  display: block;
+  color: var(--vku-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.agg-chip-name:hover {
+  color: var(--vku-blue-700);
+  text-decoration: underline;
+}
+
+.agg-chip-meta {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--vku-yellow-50);
+  color: var(--vku-yellow-800);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Dòng chú thích dưới bảng: "-" là nguồn chưa có kết quả, khác hẳn điểm 0 thật. */
+.agg-note {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* Nêu tên thẻ để thắng quy tắc căn phải của bảng BXH cuộc thi (.results-table .score-cell). */
+.agg-table th.lb-col-num,
+.agg-table td.score-cell {
+  text-align: center;
+}
+
+/* Cột nguồn chia đều phần bề ngang còn lại; tên nguồn dài được xuống dòng trong ô. */
+.agg-table .agg-source-col {
+  white-space: normal;
+}
+
+.agg-source-link {
+  display: block;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+a.agg-source-link:hover {
+  color: var(--vku-blue-700);
+  text-decoration: underline;
+}
+
+/* Chip cách tính điểm dưới tên nguồn; th đã uppercase sẵn nên chip chỉ chỉnh cỡ chữ. */
+.agg-kind-chip {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--vku-blue-50);
+  color: var(--vku-blue-700);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.agg-table tbody tr:nth-child(even) {
+  background: var(--surface-subtle);
+}
+
+.agg-table tbody tr:hover {
+  background: var(--vku-blue-50);
+}
+
+.agg-table tbody tr.current-user-row,
+.agg-table tbody tr.current-user-row:hover {
+  background: var(--accent-soft);
+}
+
+/* Form cấu hình nguồn: một dòng một nguồn [cuộc thi | trọng số % | xoá], mỗi nguồn là một
+   thẻ nhỏ để các dòng không dính vào nhau. Legend của fieldset không phải flex item nên
+   khoảng cách dưới legend đặt ở đây thay vì flex gap. */
+.agg-source-rows {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.agg-source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--vku-border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.agg-weight-box {
+  position: relative;
+}
+
+.agg-weight-box .ac-form-control {
+  width: 100%;
+  padding-right: 32px;
+  text-align: right;
+}
+
+/* Ẩn mũi tên spinner của input number để chừa chỗ cho hậu tố %. */
+.agg-weight-box input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.agg-weight-box input[type="number"]::-webkit-outer-spin-button,
+.agg-weight-box input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.agg-weight-unit {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+/* Nút thêm nguồn chạy hết bề ngang form, cùng ngôn ngữ dashed xanh với nút thêm tài nguyên. */
+.btn.agg-add-source {
+  width: 100%;
+  border: 1px dashed var(--vku-blue-500);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.btn.agg-add-source:hover {
+  border-color: var(--accent);
+  background: var(--vku-blue-50);
+  color: var(--accent);
+}
+
+/* Fieldset nguồn là cột flex để các khối con có khoảng thở đều nhau. */
+.agg-source-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* Tách hẳn legend khỏi lưới Tên + Quyền xem phía trên; phải ghép cả `.ac-join-fieldset`
+   vì rule `margin: 0` của class đó nằm sau trong file. */
+.ac-join-fieldset.agg-source-fieldset {
+  margin-top: 16px;
+}
+
+.agg-source-fieldset > legend {
+  color: var(--vku-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Form này dùng `.ac-form { display: contents }`: trên trang sửa, grid nằm ngay sau
+   heading của card nên cần khoảng cách riêng; modal đã có khoảng cách ở header. */
+.ac-form-body .agg-form-grid {
+  margin-top: var(--space-lg);
+}
+
+.agg-form-grid .ac-form-field {
+  gap: 12px;
+}
+
+/* Nút Công bố (xanh) và Xoá bảng (đỏ) tách hẳn nhau thay vì dính sát. */
+.agg-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-md);
+}
+
+/* Hero bảng chi tiết: điều khiển nhánh phía trên, thông tin nguồn bên dưới tiêu đề. */
+.agg-leaderboard-hero {
+  gap: var(--space-lg);
+}
+
+.agg-leaderboard-hero .lb-head-top {
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--vku-border-soft);
+}
+
+.agg-leaderboard-hero .lb-eyebrow {
+  color: var(--vku-blue-800);
+}
+
+.agg-leaderboard-copy {
+  flex: 1 1 24rem;
+}
+
+@media (max-width: 47.99rem) {
+  .agg-leaderboard-copy {
+    flex-basis: auto;
+  }
+
+  .agg-leaderboard-hero .lb-head-tools {
+    align-self: flex-start;
+  }
+}
+
+@media (max-width: 37rem) {
+  .agg-source-row {
+    grid-template-columns: minmax(0, 1fr) 104px auto;
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .agg-source-row .ac-form-control {
+    min-width: 0;
+    padding-inline: 8px;
+  }
+
+  .agg-source-row .agg-weight-box .ac-form-control {
+    padding-right: 24px;
+  }
+
+  .agg-source-row .agg-weight-unit {
+    right: 8px;
+  }
+}
+
+@media (max-width: 25rem) {
+  .agg-source-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .agg-source-row > select {
+    grid-column: 1 / -1;
+  }
+}
+
+.agg-leaderboard-hero .lb-head-tools {
+  margin-top: 0;
+}
+
+@media (max-width: 47.99rem) {
+  .agg-pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .agg-pagination .pagination-actions {
+    justify-content: space-between;
+  }
+
+  .agg-pagination .pagination-actions > span {
+    white-space: nowrap;
+  }
+}
+
+/* Danh sách công khai: nhóm bảng rõ ràng, không phải dãy ô căn giữa. */
+.agg-index-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
+.agg-index-heading h2 {
+  margin: 0;
+  color: var(--vku-ink);
+  font-size: var(--text-h3);
+}
+
+.agg-index-heading > span {
+  color: var(--vku-ink-muted);
+  font-size: var(--text-body-sm);
+}
+
+.agg-index-table {
+  min-width: 760px;
+}
+
+.agg-index-table .name-cell a {
+  color: var(--vku-blue-800);
+  text-decoration: none;
+}
+
+.agg-index-table .name-cell a:hover {
+  color: var(--vku-blue-700);
+  text-decoration: underline;
+}
+
+.agg-visibility {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid var(--vku-red-100);
+  border-radius: var(--radius-pill);
+  background: var(--vku-red-50);
+  color: var(--vku-red-800);
+  font-size: var(--text-label);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* --- Bảng tổng hợp: điểm tổng nổi bật, bảng dữ liệu đọc từ trái sang phải --- */
+
+/* Nhấn ba màu VKU một lần ở mép card; đầu bảng để trắng cho dữ liệu dễ đọc. */
+.agg-table-wrap {
+  border-top: 3px solid var(--vku-blue-600);
+}
+
+.agg-table thead th {
+  background: var(--surface-subtle);
+  color: var(--vku-ink);
+  border-bottom-color: var(--vku-border);
+}
+
+.agg-table th.agg-total-col {
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+  border-bottom-color: var(--vku-yellow-600);
+}
+
+.agg-table .agg-source-col:nth-child(4) {
+  border-bottom: 2px solid var(--vku-red-600);
+}
+
+/* Cột Điểm tổng: nền vàng nhạt hai bên viền, pill điểm lớn hơn phần còn lại. */
+.agg-table td.lb-score-cell {
+  background: var(--vku-yellow-50);
+  border-inline: 1px solid var(--vku-yellow-500);
+}
+
+.agg-table td.primary-score .score-pill {
+  padding: 4px 12px;
+  border-color: var(--vku-yellow-600);
+  background: var(--vku-yellow-100);
+  color: var(--vku-yellow-800);
+  font-size: 15px;
+}
+
+/* Tên người cần dễ quét theo hàng; chỉ cột số liệu mới căn giữa. */
+.agg-table th.lb-col-name {
+  width: 24%;
+  text-align: left;
+}
+
+.agg-table .name-cell {
+  text-align: left;
+}
+
+.lb-table.agg-index-table thead th {
+  background: var(--surface-subtle);
+  color: var(--vku-ink-muted);
+  border-bottom-color: var(--vku-border);
+  text-align: center;
+}
+
+.agg-index-table td.lb-time-cell {
+  text-align: right;
+}
+
+/* Ba sắc theo từng nguồn, không phủ cả hàng: nguồn vẫn có chữ và trọng số rõ ràng. */
+.agg-chips--stack .agg-chip:nth-child(3n + 1) {
+  border-left: 3px solid var(--vku-blue-600);
+}
+
+.agg-chips--stack .agg-chip:nth-child(3n + 2) {
+  border-left: 3px solid var(--vku-red-600);
+}
+
+.agg-chips--stack .agg-chip:nth-child(3n) {
+  border-left: 3px solid var(--vku-yellow-600);
+}
+
+/* Danh sách nguồn dạng cột: mỗi cuộc thi một dòng, tên trái - trọng số phải. */
+.agg-chips--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.agg-chips--stack .agg-chip {
+  justify-content: space-between;
+  padding: 6px 12px;
+}
+
+.agg-chips--stack .agg-chip-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Admin: hàng trung tính, tên bảng dẫn mắt; trạng thái có chữ + sắc riêng. */
+.ac-table.agg-admin-table {
+  min-width: 840px;
+}
+
+.ac-table.agg-admin-table thead th {
+  background: var(--surface-subtle);
+  color: var(--vku-ink-muted);
+  text-align: center;
+}
+
+.ac-table.agg-admin-table tbody tr:hover td {
+  background: var(--vku-blue-50);
+}
+
+.ac-table.agg-admin-table .ac-name-text a {
+  color: var(--vku-blue-800);
+}
+
+.ac-table.agg-admin-table td:last-child {
+  text-align: right;
+}
+
+.ac-table-card > .agg-note {
+  margin: 12px 20px 16px;
+}
+
+.ac-form-field > .ac-resource-hint {
+  margin-top: 4px;
+}
+
+/* Thẻ chờ nguồn: mỗi nguồn một dòng lý do trên nền vàng nhạt, không dồn thành khối chữ. */
+.lb-locked-content ul {
+  width: 100%;
+  max-width: 44rem;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.lb-locked-content li {
+  padding: 10px 14px;
+  border: 1px solid var(--vku-yellow-100);
+  border-left: 3px solid var(--vku-yellow-600);
+  border-radius: 8px;
+  background: var(--vku-yellow-50);
+}
+
+/* =============================================================================
    Results, members & admin accounts - Stitch S16–S19
    ============================================================================= */
 .admin-results {
@@ -10798,14 +11345,14 @@ button.resource-link:disabled {
 /* Ràng buộc link tài nguyên là info note vàng, không phải paragraph trôi nổi. */
 .ac-resource-hint {
   margin: 0;
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--vku-yellow-100);
   border-left: 3px solid var(--vku-yellow-600);
   border-radius: 8px;
   background: var(--vku-yellow-50);
   color: var(--text);
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .ac-resource-row {

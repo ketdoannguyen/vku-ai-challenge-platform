@@ -126,8 +126,9 @@ export function CompetitionGuidePage() {
         <h3 className="ov-block-title">Notebook khởi đầu</h3>
         <p className="ov-facts">
           Bắt buộc dùng link tài nguyên chỉ đọc của BTC ở mục Tài nguyên của cuộc thi: dán vào
-          <code> DATASET_URL</code> để notebook tải và đọc dữ liệu. Điền tên cột và <code>TEST_FILE</code>
-          theo cuộc thi, rồi tự hoàn thiện hai bước <code>TODO</code> để xuất CSV.
+          <code> DATASET_URL</code> để notebook tải và đọc dữ liệu (link tới tệp <code>.zip</code> được tự
+          giải nén). Điền tên cột, <code>TEST_FILE</code> và <code>TRAIN_FILE</code> theo cuộc thi, rồi tự
+          hoàn thiện hai bước <code>TODO</code> để xuất CSV.
         </p>
         <div className="ov-actions">
           <button

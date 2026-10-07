@@ -204,11 +204,11 @@ def test_positive_norm_beats_zero_and_switches_the_representative(client):
     first, second = board["entries"]
 
     assert first["account_id"] == str(participant["_id"])
-    assert first["normalized_score"] == pytest.approx(50.0)
+    assert first["normalized_score"] == pytest.approx(100.0)
     assert first["primary_score"] == 0.90
     assert first["best_submission_id"] == str(later)
     assert first["best_submission_at"] == iso_z(BASE + timedelta(minutes=20))
-    assert second["normalized_score"] == pytest.approx(50 * (0.65 - 0.6) / (0.9 - 0.6))
+    assert second["normalized_score"] == pytest.approx(100 * (0.65 - 0.6) / (0.9 - 0.6))
     assert board["normalization"]["reference_best"] == 0.90
 
 
@@ -227,8 +227,8 @@ def test_new_global_best_recomputes_the_board_and_reject_rolls_it_back(client):
     board = _board(client, competition)
     norms = _norms(board)
     assert board["entries"][0]["account_id"] == str(top_id)
-    assert norms[str(top_id)] == pytest.approx(50.0)
-    assert norms[str(mid_id)] == pytest.approx(30.0)  # 50 × (0,80 − 0,50) ÷ (1,00 − 0,50)
+    assert norms[str(top_id)] == pytest.approx(100.0)
+    assert norms[str(mid_id)] == pytest.approx(60.0)  # 100 × (0,80 − 0,50) ÷ (1,00 − 0,50)
     assert norms[str(participant["_id"])] == 0.0  # bằng baseline cũng là 0
     assert board["normalization"]["reference_best"] == 1.00
 
@@ -238,7 +238,7 @@ def test_new_global_best_recomputes_the_board_and_reject_rolls_it_back(client):
     norms = _norms(board)
     assert str(top_id) not in norms
     assert board["entries"][0]["account_id"] == str(mid_id)
-    assert norms[str(mid_id)] == pytest.approx(50.0)
+    assert norms[str(mid_id)] == pytest.approx(100.0)
     assert norms[str(participant["_id"])] == 0.0
     assert board["normalization"]["reference_best"] == 0.80
 
@@ -252,7 +252,7 @@ def test_new_global_best_recomputes_the_board_and_reject_rolls_it_back(client):
     ]
     assert board["entries"][0]["best_submission_id"] == str(top)
     assert board["normalization"]["reference_best"] == 1.00
-    assert _norms(board)[str(mid_id)] == pytest.approx(30.0)
+    assert _norms(board)[str(mid_id)] == pytest.approx(60.0)
 
 
 def test_rejecting_the_earliest_zero_falls_back_and_restore_keeps_its_time(client):
@@ -337,9 +337,9 @@ def test_lower_is_better_uses_the_minimum_as_reference(client, fake_runner):
     assert board["normalization"]["reference_best"] == 0.5
     assert board["entries"][0]["account_id"] == str(min_id)
     norms = _norms(board)
-    assert norms[str(min_id)] == pytest.approx(50.0)
-    assert norms[str(mid_id)] == pytest.approx(25.0)  # 50 × (0,9 − 0,7) ÷ (0,9 − 0,5)
-    assert norms[str(participant["_id"])] == 0.0  # bằng baseline là 0, không phải 50
+    assert norms[str(min_id)] == pytest.approx(100.0)
+    assert norms[str(mid_id)] == pytest.approx(50.0)  # 100 × (0,9 − 0,7) ÷ (0,9 − 0,5)
+    assert norms[str(participant["_id"])] == 0.0  # bằng baseline là 0, không phải 100
 
     # Min mới: mẫu số đổi nên đội không nộp gì cũng bị tính lại norm.
     _submission(
@@ -349,9 +349,9 @@ def test_lower_is_better_uses_the_minimum_as_reference(client, fake_runner):
     board = _board(client, competition)
     assert board["normalization"]["reference_best"] == 0.3
     norms = _norms(board)
-    assert norms[str(participant["_id"])] == pytest.approx(50.0)
-    assert norms[str(min_id)] == pytest.approx(50 * (0.9 - 0.5) / (0.9 - 0.3))
-    assert norms[str(mid_id)] == pytest.approx(50 * (0.9 - 0.7) / (0.9 - 0.3))
+    assert norms[str(participant["_id"])] == pytest.approx(100.0)
+    assert norms[str(min_id)] == pytest.approx(100 * (0.9 - 0.5) / (0.9 - 0.3))
+    assert norms[str(mid_id)] == pytest.approx(100 * (0.9 - 0.7) / (0.9 - 0.3))
 
 
 def test_pagination_keeps_global_rank_and_norm_for_me(client):
@@ -370,7 +370,7 @@ def test_pagination_keeps_global_rank_and_norm_for_me(client):
     assert page["total"] == 3
     assert page["has_more"] is True
     assert [entry["rank"] for entry in page["entries"]] == [1]
-    assert page["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert page["entries"][0]["normalized_score"] == pytest.approx(100.0)
     assert page["me"]["rank"] == 3
     assert page["me"]["normalized_score"] == 0.0
     assert page["me"]["is_current_user"] is True
@@ -403,7 +403,7 @@ def test_hidden_source_metric_nulls_norm_for_participants_only(client, fake_runn
     assert page["normalization"] is None
 
     board = _board(client, competition)
-    assert board["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert board["entries"][0]["normalized_score"] == pytest.approx(100.0)
     assert board["normalization"]["source_metric"] == "accuracy"
     assert board["normalization"]["reference_best"] == 0.9
 
@@ -422,7 +422,7 @@ def test_my_stats_reports_current_norm_and_hides_it_with_the_board(client):
     stats = _list_item(client, "norm-stats")["my_stats"]
     assert stats["rank"] == 2
     assert stats["best_score"] == 0.55
-    assert stats["best_normalized_score"] == pytest.approx(12.5)  # 50 × (0,55 − 0,50) ÷ (0,70 − 0,50)
+    assert stats["best_normalized_score"] == pytest.approx(25.0)  # 100 × (0,55 − 0,50) ÷ (0,70 − 0,50)
 
     login(client)
     hidden = client.patch(
@@ -435,7 +435,7 @@ def test_my_stats_reports_current_norm_and_hides_it_with_the_board(client):
 
     # Admin vẫn thấy nguyên bảng và norm dù thí sinh không còn quyền xem.
     board = _board(client, competition)
-    assert board["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert board["entries"][0]["normalized_score"] == pytest.approx(100.0)
     assert board["normalization"]["baseline"] == 0.5
 
 
@@ -496,7 +496,7 @@ def test_rejecting_every_submission_empties_the_board_without_error(client):
     _touch(competition)
 
     page = _participant_board(client, "norm-empty")
-    assert page["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert page["entries"][0]["normalized_score"] == pytest.approx(100.0)
 
     _review(client, only, "rejected")
     page = _participant_board(client, "norm-empty")
@@ -509,7 +509,7 @@ def test_rejecting_every_submission_empties_the_board_without_error(client):
     page = _participant_board(client, "norm-empty")
     assert page["total"] == 1
     assert page["me"]["rank"] == 1
-    assert page["me"]["normalized_score"] == pytest.approx(50.0)
+    assert page["me"]["normalized_score"] == pytest.approx(100.0)
 
 
 def test_export_adds_current_norm_column_and_info_rows(client):
@@ -530,17 +530,17 @@ def test_export_adds_current_norm_column_and_info_rows(client):
     workbook = load_workbook(BytesIO(response.content))
     sheet = workbook["Results"]
     header = [cell.value for cell in sheet[1]]
-    assert header[3:5] == ["Best score", "Norm hiện tại (0–50)"]
+    assert header[3:5] == ["Best score", "Norm hiện tại (0–100)"]
     assert header[-2:] == ["Best submission time", "Total submissions"]
 
     rows = list(sheet.iter_rows(min_row=2, values_only=True))
     assert rows[0][1] == str(rival_id)
     assert rows[0][3] == 0.70
-    assert rows[0][4] == pytest.approx(50.0)
+    assert rows[0][4] == pytest.approx(100.0)
     # Điểm gốc lưu nguyên giá trị, không bị cắt theo số chữ số hiển thị của norm.
     assert rows[1][1] == str(participant["_id"])
     assert rows[1][3] == 0.55
-    assert rows[1][4] == pytest.approx(12.5)
+    assert rows[1][4] == pytest.approx(25.0)
     assert sheet.cell(row=2, column=5).number_format == "0.00"
 
     info = {
@@ -553,7 +553,7 @@ def test_export_adds_current_norm_column_and_info_rows(client):
     assert info["Norm source"] == "f1 (Higher is better)"
 
     # Export bỏ cache: sau khi bài đại diện bị từ chối, file tải ngay phải khớp bảng mới
-    # (0.55 trở thành mẫu số nên norm của chính nó là 50, không còn 12.5 của bản cũ).
+    # (0.55 trở thành mẫu số nên norm của chính nó là 100, không còn 25.0 của bản cũ).
     _review(client, rival_submission, "rejected")
     refreshed = client.get(f"/api/admin/competitions/{competition['id']}/export.xlsx")
     rows = list(
@@ -563,7 +563,7 @@ def test_export_adds_current_norm_column_and_info_rows(client):
     )
     assert len(rows) == 1
     assert rows[0][3] == 0.55
-    assert rows[0][4] == pytest.approx(50.0)
+    assert rows[0][4] == pytest.approx(100.0)
 
 
 def test_bang_toan_cuc_admin_gan_norm_metadata_ngoai_hop_dong(client):

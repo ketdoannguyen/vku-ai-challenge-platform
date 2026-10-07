@@ -1,4 +1,4 @@
-"""Điểm chuẩn hóa 0-50: công thức, cấu hình draft-only, khóa publish, clone và chống ghi chen."""
+"""Điểm chuẩn hóa 0-100: công thức, cấu hình draft-only, khóa publish, clone và chống ghi chen."""
 
 import asyncio
 import json
@@ -93,16 +93,16 @@ class _StaleReadBeforeNormalization:
 
 def test_formula_higher_is_better():
     kwargs = {"baseline": 0.5, "higher_is_better": True}
-    assert normalization.score(0.9, reference=0.9, **kwargs) == pytest.approx(50.0)
-    assert normalization.score(0.7, reference=0.9, **kwargs) == pytest.approx(25.0, rel=1e-12)
+    assert normalization.score(0.9, reference=0.9, **kwargs) == pytest.approx(100.0)
+    assert normalization.score(0.7, reference=0.9, **kwargs) == pytest.approx(50.0, rel=1e-12)
     assert normalization.score(0.5, reference=0.9, **kwargs) == 0.0
     assert normalization.score(0.2, reference=0.9, **kwargs) == 0.0
 
 
 def test_formula_lower_is_better():
     kwargs = {"baseline": 100.0, "higher_is_better": False}
-    assert normalization.score(60, reference=60, **kwargs) == pytest.approx(50.0)
-    assert normalization.score(80, reference=60, **kwargs) == pytest.approx(25.0)
+    assert normalization.score(60, reference=60, **kwargs) == pytest.approx(100.0)
+    assert normalization.score(80, reference=60, **kwargs) == pytest.approx(50.0)
     assert normalization.score(100, reference=60, **kwargs) == 0.0
     assert normalization.score(120, reference=60, **kwargs) == 0.0
 
@@ -117,11 +117,11 @@ def test_formula_without_anyone_above_baseline():
 
 
 def test_formula_baseline_zero_and_negative_are_valid():
-    assert normalization.score(0.5, baseline=0.0, reference=1.0, higher_is_better=True) == 25.0
-    # Lower-is-better với baseline âm: phải nhỏ hơn -1 mới có điểm, nên best -2 được 50 còn -1.5 được 25.
+    assert normalization.score(0.5, baseline=0.0, reference=1.0, higher_is_better=True) == 50.0
+    # Lower-is-better với baseline âm: phải nhỏ hơn -1 mới có điểm, nên best -2 được 100 còn -1.5 được 50.
     kwargs = {"baseline": -1.0, "higher_is_better": False}
-    assert normalization.score(-2.0, reference=-2.0, **kwargs) == pytest.approx(50.0)
-    assert normalization.score(-1.5, reference=-2.0, **kwargs) == pytest.approx(25.0)
+    assert normalization.score(-2.0, reference=-2.0, **kwargs) == pytest.approx(100.0)
+    assert normalization.score(-1.5, reference=-2.0, **kwargs) == pytest.approx(50.0)
     # Best bằng 0 không thắng được baseline -1 (0 > -1): cả bảng 0, không chia 0.
     assert normalization.score(0.0, reference=0.0, **kwargs) == 0.0
 
@@ -130,21 +130,21 @@ def test_formula_does_not_round_before_ranking():
     """Làm tròn sớm có thể đổi thứ tự hoà: giá trị thô phải giữ nguyên độ chính xác."""
     first = normalization.score(1.0, baseline=0.0, reference=3.0, higher_is_better=True)
     second = normalization.score(1.0000004, baseline=0.0, reference=3.0, higher_is_better=True)
-    assert first == pytest.approx(50 / 3, rel=1e-12)
+    assert first == pytest.approx(100 / 3, rel=1e-12)
     assert second > first
     assert second != first  # Nếu bị cắt 2 chữ số trước khi so, hai giá trị này bằng nhau.
 
 
 def test_formula_tiny_gap_is_not_treated_as_zero():
     assert normalization.score(1e-9, baseline=0.0, reference=1.0, higher_is_better=True) > 0
-    assert normalization.score(5e-301, baseline=0.0, reference=1e-300, higher_is_better=True) == pytest.approx(25.0)
+    assert normalization.score(5e-301, baseline=0.0, reference=1e-300, higher_is_better=True) == pytest.approx(50.0)
 
 
 def test_formula_survives_huge_finite_domain():
     """Hiệu hai số hữu hạn cực lớn tràn double: vẫn phải ra số hữu hạn, không NaN/Infinity."""
     value = normalization.score(0.0, baseline=-1e308, reference=1e308, higher_is_better=True)
     assert math.isfinite(value)
-    assert value == pytest.approx(25.0)
+    assert value == pytest.approx(50.0)
     clamped = normalization.score(1.7e308, baseline=-1.7e308, reference=1.5e308, higher_is_better=True)
     assert math.isfinite(clamped)
     assert clamped == float(normalization.MAX_SCORE)
@@ -259,7 +259,7 @@ def test_projection_helpers_shape():
     assert normalization.admin_snapshot(snapshot)["reference_best"] == 0.8
     rule = normalization.Rule(baseline=0.6, source_metric="f1", higher_is_better=True)
     metadata = normalization.board_metadata(rule, reference=None, calculated_at=calculated_at)
-    assert metadata["max_score"] == 50
+    assert metadata["max_score"] == 100
     assert metadata["decimals"] == 2
     assert metadata["reference_best"] is None
     assert metadata["calculated_at"] == normalization.iso_z(calculated_at)

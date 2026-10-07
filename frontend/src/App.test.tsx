@@ -377,6 +377,30 @@ test("drawer có hai mục tĩnh mới và vẫn để Đăng nhập là mục c
   ]);
 });
 
+test("admin thấy Tổng hợp, menu Quản trị và đủ lối vào bảng tổng hợp trên mobile", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const account = { ...ACCOUNT, role: "admin" };
+      const body = (value: unknown) =>
+        new Response(JSON.stringify(value), { headers: { "Content-Type": "application/json" } });
+      if (url.endsWith("/auth/me")) return body(account);
+      if (url.endsWith("/api/admin/aggregates")) return body({ aggregates: [] });
+      if (url.endsWith("/api/admin/competitions")) return body({ competitions: [] });
+      return body({ error: { code: "NOT_FOUND", message: "Không tìm thấy." } });
+    }),
+  );
+  renderAt("/admin/aggregates");
+  expect(await screen.findByRole("heading", { level: 1, name: "Bảng tổng hợp" })).toBeTruthy();
+  const headerNav = screen.getByRole("navigation", { name: "Điều hướng chính" });
+  expect(within(headerNav).getByRole("link", { name: "Tổng hợp" })).toHaveAttribute("href", "/tong-hop");
+  expect(within(headerNav).getByRole("link", { name: /Quản trị/ })).toHaveAttribute("href", "/admin/competitions");
+  expect(within(headerNav).getByRole("link", { name: "Bảng tổng hợp" })).toHaveAttribute("href", "/admin/aggregates");
+  await openDrawer();
+  expect(within(drawerNav()).getByRole("link", { name: "Bảng tổng hợp" })).toHaveAttribute("href", "/admin/aggregates");
+});
+
 test("đường dẫn con của trang tĩnh vẫn vào 404", async () => {
   mockGuestApi();
   renderAt("/ho-tro/khong-co");

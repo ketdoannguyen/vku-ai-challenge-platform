@@ -1,4 +1,4 @@
-"""Norm 0-50 theo nhánh: mặt bằng riêng từng track và một predicate quyền xem duy nhất.
+"""Norm 0-100 theo nhánh: mặt bằng riêng từng track và một predicate quyền xem duy nhất.
 
 Phụ lục Public/Private chốt: `can_view_norm = A ∧ N ∧ R ∧ L ∧ M` trên đúng nhánh đã resolve.
 Nhóm này khóa phần norm của hợp đồng đó - snapshot ghi theo population của từng nhánh, norm live
@@ -323,28 +323,28 @@ def test_predicate_norm_tra_tung_conjunct_va_thu_tu_ly_do():
 def test_snapshot_norm_dung_mat_bang_rieng_tung_nhanh(client, fake_runner):
     """Cùng raw 0,60 nhưng snapshot mỗi nhánh chốt theo best của chính nhánh đó.
 
-    Public best 0,90 và Private best 0,70 với baseline chung 0,50: hai snapshot phải là 12,50 và
-    25,00. Nếu mẫu số bị dùng chung, con số của Private đã là 12,50 - đúng thứ phụ lục cấm.
+    Public best 0,90 và Private best 0,70 với baseline chung 0,50: hai snapshot phải là 25,00 và
+    50,00. Nếu mẫu số bị dùng chung, con số của Private đã là 25,00 - đúng thứ phụ lục cấm.
     """
     competition = _dual_norm(client, "norm-track-snapshot")
     cid = competition["id"]
 
     first_public = _score(client, fake_runner, cid, "public", 0.90)
     first_private = _score(client, fake_runner, cid, "private", 0.70)
-    # Bài đầu của mỗi nhánh lấy chính mình làm mẫu số: chạm trần 50 mà không mượn best nhánh kia.
+    # Bài đầu của mỗi nhánh lấy chính mình làm mẫu số: chạm trần 100 mà không mượn best nhánh kia.
     assert _snapshot(client, first_public)["reference_best"] == 0.90
-    assert _snapshot(client, first_public)["score"] == pytest.approx(50.0)
+    assert _snapshot(client, first_public)["score"] == pytest.approx(100.0)
     assert _snapshot(client, first_private)["reference_best"] == 0.70
-    assert _snapshot(client, first_private)["score"] == pytest.approx(50.0)
+    assert _snapshot(client, first_private)["score"] == pytest.approx(100.0)
 
     public_half = _score(client, fake_runner, cid, "public", 0.60)
     private_half = _score(client, fake_runner, cid, "private", 0.60)
     assert _snapshot(client, public_half)["reference_best"] == 0.90
-    assert _snapshot(client, public_half)["score"] == pytest.approx(12.50)
+    assert _snapshot(client, public_half)["score"] == pytest.approx(25.0)
     assert _snapshot(client, private_half)["reference_best"] == 0.70
-    assert _snapshot(client, private_half)["score"] == pytest.approx(25.00)
+    assert _snapshot(client, private_half)["score"] == pytest.approx(50.0)
 
-    # Private chưa công bố: 25,00 nằm trong DB nhưng không rời backend ở lần poll.
+    # Private chưa công bố: 50,00 nằm trong DB nhưng không rời backend ở lần poll.
     polled = attempt_status(client, cid, private_half)["submission"]
     assert polled["result_visibility"] == "hidden"
     assert "normalization_snapshot" not in polled
@@ -354,13 +354,13 @@ def test_snapshot_norm_dung_mat_bang_rieng_tung_nhanh(client, fake_runner):
     assert hidden_item["result_visibility"] == "hidden"
     assert "normalization_snapshot" not in hidden_item
     assert _card(client, cid)["my_stats_by_track"]["private"]["best_normalized_score"] is None
-    # Trong khi đó Public đã công bố: snapshot 12,50 của chính thí sinh vẫn hiện đủ.
+    # Trong khi đó Public đã công bố: snapshot 25,00 của chính thí sinh vẫn hiện đủ.
     public_half_item = next(
         item
         for item in _history(client, cid, track="public")
         if item["primary_score"] == pytest.approx(0.60)
     )
-    assert public_half_item["normalization_snapshot"]["score"] == pytest.approx(12.50)
+    assert public_half_item["normalization_snapshot"]["score"] == pytest.approx(25.0)
 
 
 def test_bxh_norm_moi_nhanh_khong_doi_cheo_va_snapshot_khong_bi_viet_lai(client, fake_runner):
@@ -371,17 +371,17 @@ def test_bxh_norm_moi_nhanh_khong_doi_cheo_va_snapshot_khong_bi_viet_lai(client,
     """
     competition = _dual_norm(client, "norm-track-board")
     cid = competition["id"]
-    # Mặt bằng Private ban đầu là 0,70 của đội khác - đủ để snapshot của bài 0,60 ghi ở mốc 25,00.
+    # Mặt bằng Private ban đầu là 0,70 của đội khác - đủ để snapshot của bài 0,60 ghi ở mốc 50,00.
     _inserted(client, cid, ObjectId(), 0.70, track="private", minutes=10)
     _score(client, fake_runner, cid, "public", 0.80)
     private_half = _score(client, fake_runner, cid, "private", 0.60)
     _release_private(client, cid)
     before = _snapshot(client, private_half)
     assert before["reference_best"] == 0.70
-    assert before["score"] == pytest.approx(25.0)
+    assert before["score"] == pytest.approx(50.0)
     before_public = _board(client, cid, "public")
 
-    # Bài Private raw 0,90 vào bảng: mặt bằng Private đổi nên norm live của 0,60 thành 12,50;
+    # Bài Private raw 0,90 vào bảng: mặt bằng Private đổi nên norm live của 0,60 thành 25,00;
     # cùng lúc đó Public phải đứng yên từng entry - hai population không trộn.
     _inserted(client, cid, ObjectId(), 0.90, track="private", minutes=11)
     _touch(client, cid)
@@ -395,9 +395,9 @@ def test_bxh_norm_moi_nhanh_khong_doi_cheo_va_snapshot_khong_bi_viet_lai(client,
     norms = {
         entry["primary_score"]: entry["normalized_score"] for entry in private_board["entries"]
     }
-    assert norms[0.90] == pytest.approx(50.0)
-    assert norms[0.70] == pytest.approx(25.0)  # 50 × (0,70 − 0,50) ÷ (0,90 − 0,50)
-    assert norms[0.60] == pytest.approx(12.50)  # 50 × (0,60 − 0,50) ÷ (0,90 − 0,50)
+    assert norms[0.90] == pytest.approx(100.0)
+    assert norms[0.70] == pytest.approx(50.0)  # 100 × (0,70 − 0,50) ÷ (0,90 − 0,50)
+    assert norms[0.60] == pytest.approx(25.0)  # 100 × (0,60 − 0,50) ÷ (0,90 − 0,50)
     assert _board(client, cid, "public")["entries"] == before_public["entries"]
 
     # Thêm rồi từ chối bài tốt nhất Public: chỉ mặt bằng Public đổi, các con số Private đứng yên.
@@ -412,11 +412,11 @@ def test_bxh_norm_moi_nhanh_khong_doi_cheo_va_snapshot_khong_bi_viet_lai(client,
     assert private_board["normalization"]["reference_best"] == 0.90
     assert {
         entry["primary_score"]: entry["normalized_score"] for entry in private_board["entries"]
-    }[0.60] == pytest.approx(12.50)
+    }[0.60] == pytest.approx(25.0)
     _review(client, public_best, "accepted")
     assert _board(client, cid, "public")["normalization"]["reference_best"] == 0.97
 
-    # Mặt bằng Private đã thành 0,90 nhưng snapshot 25,00 không bị viết lại.
+    # Mặt bằng Private đã thành 0,90 nhưng snapshot 50,00 không bị viết lại.
     assert _snapshot(client, private_half) == before
 
 
@@ -432,7 +432,7 @@ def test_master_bxh_tat_sau_cong_bo_che_lai_norm_roi_bat_lai_thi_hien_lai(client
 
     visible = _history(client, cid)[0]["normalization_snapshot"]
     assert set(visible) == {"score", "calculated_at"}
-    assert _board(client, cid, "private")["me"]["normalized_score"] == pytest.approx(50.0)
+    assert _board(client, cid, "private")["me"]["normalized_score"] == pytest.approx(100.0)
     assert _tracks(client, "norm-master-toggle")["private"]["normalization_visible"] is True
 
     _set_master(client, cid, False)
@@ -447,7 +447,7 @@ def test_master_bxh_tat_sau_cong_bo_che_lai_norm_roi_bat_lai_thi_hien_lai(client
     assert _card(client, cid)["my_stats_by_track"]["private"]["best_normalized_score"] is None
     assert _hidden_board(client, cid, "private")["code"] == "LEADERBOARD_HIDDEN"
     # Che lúc đọc không phải xóa dữ liệu: bản ghi và snapshot trong DB còn nguyên.
-    assert _snapshot(client, attempt_id)["score"] == pytest.approx(50.0)
+    assert _snapshot(client, attempt_id)["score"] == pytest.approx(100.0)
 
     _set_master(client, cid, True)
     assert _history(client, cid)[0]["normalization_snapshot"] == visible
@@ -455,7 +455,7 @@ def test_master_bxh_tat_sau_cong_bo_che_lai_norm_roi_bat_lai_thi_hien_lai(client
     assert tracks["private"]["normalization_visible"] is True
     # Bật lại không đụng dấu công bố một chiều, và BXH trả lại đúng norm của chính thí sinh.
     assert tracks["private"]["results_released"] is True
-    assert _board(client, cid, "private")["me"]["normalized_score"] == pytest.approx(50.0)
+    assert _board(client, cid, "private")["me"]["normalized_score"] == pytest.approx(100.0)
 
 
 def test_an_metric_nguon_thi_norm_bi_che_chu_khong_ve_0(client, fake_runner):
@@ -468,7 +468,7 @@ def test_an_metric_nguon_thi_norm_bi_che_chu_khong_ve_0(client, fake_runner):
     # Cache BXH đã ấm với norm đang hiện trước khi cấu hình hiển thị điểm bị đổi.
     warm = _board(client, cid, "private")
     assert warm["normalization"]["reference_best"] == 0.70
-    assert warm["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert warm["entries"][0]["normalized_score"] == pytest.approx(100.0)
 
     saved = put_result_display(
         client,
@@ -494,7 +494,7 @@ def test_an_metric_nguon_thi_norm_bi_che_chu_khong_ve_0(client, fake_runner):
     assert tracks["private"]["normalization_hidden_reason"] == "source_metric_hidden"
     assert _card(client, cid)["my_stats_by_track"]["private"]["best_normalized_score"] is None
     # Storage vẫn đủ cho admin hậu kiểm và vận hành.
-    assert _snapshot(client, attempt_id)["score"] == pytest.approx(50.0)
+    assert _snapshot(client, attempt_id)["score"] == pytest.approx(100.0)
     login(client)
     admin_board = client.get(
         f"/api/admin/competitions/{cid}/leaderboard", params={"track": "private"}
@@ -579,15 +579,15 @@ def test_snapshot_duong_inline_v1_dung_nhanh_va_chi_hien_sau_cong_bo(client):
     stored = _stored(client, response["id"])
     raw = stored["primary_score"]
     snapshot = stored["normalization_snapshot"]
-    assert raw > 0.4  # vượt baseline nên mặt bằng của chính nhánh phải cho trần 50
+    assert raw > 0.4  # vượt baseline nên mặt bằng của chính nhánh phải cho trần 100
     assert snapshot["reference_best"] == raw
-    assert snapshot["score"] == pytest.approx(50.0)
+    assert snapshot["score"] == pytest.approx(100.0)
 
     _release_private(client, cid)
     item = _history(client, cid)[0]
     assert item["result_visibility"] == "visible"
     assert set(item["normalization_snapshot"]) == {"score", "calculated_at"}
-    assert item["normalization_snapshot"]["score"] == pytest.approx(50.0)
+    assert item["normalization_snapshot"]["score"] == pytest.approx(100.0)
 
 
 def test_bang_rong_khong_muon_best_nhanh_kia(client, fake_runner):
@@ -614,8 +614,8 @@ def test_bang_rong_khong_muon_best_nhanh_kia(client, fake_runner):
         "Đội Public Hai",
     ]
     assert [entry["normalized_score"] for entry in public_board["entries"]] == [
-        pytest.approx(50.0),
-        pytest.approx(50 * 0.3 / 0.4),
+        pytest.approx(100.0),
+        pytest.approx(100 * 0.3 / 0.4),
     ]
 
 
@@ -673,7 +673,7 @@ def test_best_nam_ngoai_trang_van_la_mau_so_toan_nhanh(client, fake_runner):
     assert page["entries"][0]["display_name"] == "Đội Giữa"
     # Mẫu số vẫn là best toàn nhánh (0,90) dù bài đó không nằm trong trang.
     assert page["normalization"]["reference_best"] == 0.90
-    assert page["entries"][0]["normalized_score"] == pytest.approx(25.0)
+    assert page["entries"][0]["normalized_score"] == pytest.approx(50.0)
     assert page["me"] is None
 
 
@@ -692,7 +692,7 @@ def test_immediate_khong_vuot_master_bxh(client, fake_runner):
     assert tracks["private"]["results_released"] is True
     assert tracks["private"]["normalization_visible"] is True
     item = _history(client, cid, track="private")[0]
-    assert item["normalization_snapshot"]["score"] == pytest.approx(50.0)
+    assert item["normalization_snapshot"]["score"] == pytest.approx(100.0)
 
     # Master BXH tắt là cổng độc lập: release có sẵn vẫn không đủ để norm rời backend.
     _set_master(client, cid, False)
@@ -709,7 +709,7 @@ def test_immediate_khong_vuot_master_bxh(client, fake_runner):
     assert _board(client, cid, "private")["normalization"]["reference_best"] == 0.70
     assert _history(client, cid, track="private")[0]["normalization_snapshot"][
         "score"
-    ] == pytest.approx(50.0)
+    ] == pytest.approx(100.0)
 
 
 def test_metric_lower_is_better_giu_mat_bang_rieng_tung_nhanh(client, fake_runner):
@@ -734,8 +734,8 @@ def test_metric_lower_is_better_giu_mat_bang_rieng_tung_nhanh(client, fake_runne
     public_norms = {
         entry["primary_score"]: entry["normalized_score"] for entry in public_board["entries"]
     }
-    assert public_norms[60.0] == pytest.approx(50.0)
-    assert public_norms[90.0] == pytest.approx(12.50)  # 50 × (100 − 90) ÷ (100 − 60)
+    assert public_norms[60.0] == pytest.approx(100.0)
+    assert public_norms[90.0] == pytest.approx(25.0)  # 100 × (100 − 90) ÷ (100 − 60)
 
     private_board = _board(client, cid, "private")
     assert private_board["normalization"]["reference_best"] == 80.0
@@ -743,5 +743,5 @@ def test_metric_lower_is_better_giu_mat_bang_rieng_tung_nhanh(client, fake_runne
     private_norms = {
         entry["primary_score"]: entry["normalized_score"] for entry in private_board["entries"]
     }
-    assert private_norms[80.0] == pytest.approx(50.0)
-    assert private_norms[90.0] == pytest.approx(25.00)  # 50 × (100 − 90) ÷ (100 − 80)
+    assert private_norms[80.0] == pytest.approx(100.0)
+    assert private_norms[90.0] == pytest.approx(50.0)  # 100 × (100 − 90) ÷ (100 − 80)

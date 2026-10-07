@@ -123,7 +123,7 @@ export function CompetitionOverview() {
             <li>
               <strong>Xếp hạng.</strong>{" "}
               <span>
-                Điểm xếp hạng là điểm chuẩn hóa (norm score, thang 0–50) quy đổi từ điểm gốc
+                Điểm xếp hạng là điểm chuẩn hóa (norm score, thang 0–100) quy đổi từ điểm gốc
                 {c.primary_metric_label ? ` ${c.primary_metric_label}` : ""}; công thức chi tiết ở
                 bảng xếp hạng.
               </span>

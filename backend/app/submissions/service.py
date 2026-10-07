@@ -383,7 +383,7 @@ async def normalization_snapshot(
     Mặt bằng đọc trực tiếp từ các bài eligible của **đúng nhánh** - cùng bộ lọc với BXH, cố ý
     không đi qua cache: cache có thể đang giữ bản trước một bài vừa ghi, và mẫu số cũ sẽ chốt sai
     điểm tạm. Raw của chính bài đang ghi được đưa vào mặt bằng; nếu không, bài đầu tiên vượt
-    baseline sẽ không bao giờ đạt 50. Bản ghi hỏng trong DB bị loại khỏi mặt bằng theo đúng chính
+    baseline sẽ không bao giờ đạt 100. Bản ghi hỏng trong DB bị loại khỏi mặt bằng theo đúng chính
     sách của BXH, không quy về 0. `track=None` là cuộc thi single; dual luôn nhận nhánh do server
     resolve nên hai nhánh không bao giờ dùng chung mẫu số.
     """

@@ -627,7 +627,7 @@ export function SubmissionPage() {
                 <div className="metric-card sub-result-card primary" data-metric="normalization">
                   <div className="sub-result-card-top">
                     <span className="sub-result-metric-label">{PROVISIONAL_NORM_LABEL}</span>
-                    <span className="sub-result-metric-badge">0–50</span>
+                    <span className="sub-result-metric-badge">0–100</span>
                   </div>
                   <div className="sub-result-score">
                     <strong>{formatMetric(shownSnapshot.score, 2)}</strong>

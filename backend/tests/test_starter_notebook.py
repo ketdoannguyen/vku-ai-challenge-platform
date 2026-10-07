@@ -2,9 +2,11 @@
 
 import io
 import json
+import shutil
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.request import Request
 
 import pytest
 
@@ -53,17 +55,35 @@ def test_body_is_a_valid_v4_scaffold_with_imports_seed_and_student_todo_steps(cl
     assert "SEED = 42" in code
     assert "random.seed(SEED)" in code
     assert "np.random.seed(SEED)" in code
+    # Seed thêm cho thư viện hay dùng; thiếu thư viện thì bỏ qua, không chặn notebook.
+    assert "torch.manual_seed(SEED)" in code
+    assert "torch.cuda.manual_seed_all(SEED)" in code
+    assert "tf.keras.utils.set_random_seed(SEED)" in code
+    assert "except ImportError" in code
     # URL BTC do thí sinh dán, notebook thực sự tải và đọc file trong folder vừa tải.
     assert 'DATASET_URL = ""' in code
-    assert "gdown.download_folder(DATASET_URL" in code
-    assert "gdown.download(DATASET_URL" in code
-    assert "fuzzy=True" not in code
-    assert "resume=True" not in code  # Tránh đọc lại dữ liệu cũ khi link BTC thay đổi.
+    assert "gdown" not in code  # Link BTC luôn tải trực tiếp, không còn nhánh Google Drive.
     assert "pd.read_csv(test_path)" in code
     assert "ID_COLUMN" in code and "PREDICTION_COLUMNS" in code
     assert "to_csv(OUTPUT_FILE, index=False)" in code
     assert "predictions = [0] * len(test)" not in code
     assert "model is None" not in code
+    # Link ngoài Drive tải trực tiếp; nhiều host chặn UA mặc định của Python bằng 403.
+    assert "from urllib.request import Request, urlopen" in code
+    assert 'headers={"User-Agent": "Mozilla/5.0"}' in code
+    # Tệp .zip nhận diện bằng đuôi hoặc bằng nội dung; tệp tải về đổi tên kèm đuôi trước khi
+    # giải nén để không trùng thư mục/tệp gốc bên trong zip.
+    assert "zipfile.is_zipfile(archive)" in code
+    assert 'archive.rename(archive.with_name(archive.name + ".zip"))' in code
+    # Đọc thử tệp Train trong chính bộ dữ liệu vừa tải; thiếu thì in nhắc, không chặn.
+    assert 'TRAIN_FILE = "train.csv"' in code
+    assert "train = pd.read_csv(train_files[0])" in code
+    assert "bỏ qua đọc Train" in code
+    # Kích thước mô hình: một hàm dùng chung hai nhánh PyTorch/TensorFlow, lời gọi để comment.
+    assert "# 7. KÍCH THƯỚC MÔ HÌNH" in code
+    assert "p.numel() for p in model.parameters()" in code
+    assert "count_params()" in code
+    assert "# model_size(model)" in code
     # Hai bước của thí sinh nằm đúng chỗ và được đánh dấu TODO.
     assert "# 5. TIỀN XỬ LÝ DỮ LIỆU" in code
     assert "# 6. HUẤN LUYỆN MÔ HÌNH" in code
@@ -84,80 +104,32 @@ def test_code_cells_compile_and_do_not_fill_in_student_todos(client):
         assert all(not line.strip() or line.lstrip().startswith("#") for line in code.splitlines())
 
 
-@pytest.mark.parametrize(
-    ("url", "download_method"),
-    [
-        ("https://drive.google.com/drive/folders/BTCdataset?usp=sharing", "download_folder"),
-        ("https://drive.google.com/drive/u/0/folders/BTCdataset", "download_folder"),
-        ("https://drive.google.com/file/d/BTCdataset/view", "download"),
-    ],
-)
-def test_download_cell_reads_only_fresh_drive_file(client, tmp_path, monkeypatch, url, download_method):
-    monkeypatch.chdir(tmp_path)
-    notebook = client.get(URL).json()
-    code = "".join(notebook["cells"][3]["source"])
-    calls = []
-    test_path = Path("dataset_btc") / "data" / "test.csv"
-
-    def download(*args, **kwargs):
-        calls.append((download_method, args, kwargs))
-        test_path.parent.mkdir(parents=True, exist_ok=True)
-        test_path.write_text("id,feature\n1,2\n")
-        return [str(test_path)] if download_method == "download_folder" else str(test_path)
-
-    def wrong_method(*args, **kwargs):
-        pytest.fail("Notebook dùng sai phương thức tải Drive.")
-
-    def wrong_retrieve(*args, **kwargs):
-        pytest.fail("Link Google Drive phải đi qua gdown, không dùng urlretrieve.")
-
-    class PandasStub:
-        @staticmethod
-        def read_csv(path):
-            assert Path(path) == test_path
-            assert calls  # Không thể đọc CSV cục bộ nếu chưa tải từ link BTC.
-            return SimpleNamespace(shape=(1, 2), head=lambda: None)
-
-    gdown = SimpleNamespace(download_folder=wrong_method, download=wrong_method)
-    setattr(gdown, download_method, download)
-    namespace = {
-        "DATASET_URL": url,
-        "TEST_FILE": "test.csv",
-        "Path": Path,
-        "gdown": gdown,
-        "urlretrieve": wrong_retrieve,
-        "pd": PandasStub,
-    }
-    exec(code, namespace)
-    assert len(calls) == 1
-    assert calls[0][1] == (url,)
-    assert calls[0][2]["output"].startswith("dataset_btc")
-    assert calls[0][0] == download_method
-
-
-def _download_namespace(url, *, pd, urlretrieve, **extra):
+def _download_namespace(url, *, pd, urlopen, **extra):
     return {
         "DATASET_URL": url,
         "TEST_FILE": "test.csv",
+        "TRAIN_FILE": "train.csv",
         "Path": Path,
-        "urlretrieve": urlretrieve,
+        "Request": Request,
+        "shutil": shutil,
+        "urlopen": urlopen,
+        "zipfile": zipfile,
         "pd": pd,
         **extra,
     }
 
 
 def test_download_cell_fetches_a_plain_link_and_reads_the_fresh_file(client, tmp_path, monkeypatch):
-    """Link ngoài Drive (S3, máy chủ riêng): tải trực tiếp bằng urlretrieve, không cần gdown."""
+    """Link ngoài Drive (S3, máy chủ riêng): tải trực tiếp, không cần gdown."""
     monkeypatch.chdir(tmp_path)
     code = "".join(client.get(URL).json()["cells"][3]["source"])
     url = "https://bucket.s3.amazonaws.com/btc/test.csv?X-Amz-Signature=abc"
     calls = []
     test_path = Path("dataset_btc") / "test.csv"
 
-    def urlretrieve(link, filename):
-        calls.append((link, filename))
-        Path(filename).parent.mkdir(parents=True, exist_ok=True)
-        Path(filename).write_text("id,feature\n1,2\n")
+    def urlopen(request, timeout=None):
+        calls.append((request, timeout))
+        return io.BytesIO(b"id,feature\n1,2\n")
 
     class PandasStub:
         @staticmethod
@@ -166,48 +138,87 @@ def test_download_cell_fetches_a_plain_link_and_reads_the_fresh_file(client, tmp
             assert calls  # Không thể đọc CSV cục bộ nếu chưa tải từ link BTC.
             return SimpleNamespace(shape=(1, 2), head=lambda: None)
 
-    exec(code, _download_namespace(url, pd=PandasStub, urlretrieve=urlretrieve))
-    assert calls == [(url, str(test_path))]
+    exec(code, _download_namespace(url, pd=PandasStub, urlopen=urlopen))
+    assert test_path.read_text() == "id,feature\n1,2\n"
+    [(request, timeout)] = calls
+    assert request.full_url == url
+    assert timeout == 120
+    # Host kiểu Cloudflare chặn UA mặc định của Python (403) nên notebook phải gửi UA trình duyệt.
+    assert request.get_header("User-agent") == "Mozilla/5.0"
 
 
-def test_download_cell_extracts_a_zip_and_finds_the_test_file_inside(client, tmp_path, monkeypatch):
+def test_download_cell_extracts_a_zip_and_reads_both_test_and_train(client, tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     code = "".join(client.get(URL).json()["cells"][3]["source"])
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w") as archive:
         archive.writestr("btc/sub/test.csv", "id,feature\n1,2\n")
-        archive.writestr("btc/train.csv", "id,feature\n9,9\n")
+        archive.writestr("btc/train.csv", "id,feature,label\n9,9,y\n")
     payload = archive_bytes.getvalue()
     test_path = Path("dataset_btc") / "btc" / "sub" / "test.csv"
+    train_path = Path("dataset_btc") / "btc" / "train.csv"
+    shapes = {test_path: (1, 2), train_path: (1, 3)}
 
-    def urlretrieve(link, filename):
-        Path(filename).write_bytes(payload)
+    def urlopen(request, timeout=None):
+        return io.BytesIO(payload)
 
     class PandasStub:
         @staticmethod
         def read_csv(path):
-            assert Path(path) == test_path
-            return SimpleNamespace(shape=(1, 2), head=lambda: None)
+            assert Path(path) in shapes, path
+            return SimpleNamespace(shape=shapes[Path(path)], head=lambda: None)
+
+    exec(code, _download_namespace("https://bucket.s3.amazonaws.com/btc/dataset.zip", pd=PandasStub, urlopen=urlopen))
+    assert test_path.exists() and train_path.exists()
+    assert not (Path("dataset_btc") / "dataset.zip").exists()  # Archive bị xoá sau khi giải nén.
+    captured = capsys.readouterr().out
+    assert "Đã giải nén 2 tệp vào dataset_btc/" in captured
+    assert "Kích thước Test: (1, 2)" in captured
+    assert "Kích thước Train: (1, 3)" in captured
+
+
+def test_download_cell_detects_zip_by_content_even_when_name_collides_with_archive(
+    client, tmp_path, monkeypatch
+):
+    """Link không đuôi `.zip` vẫn giải nén được; zip thật hay có thư mục gốc trùng tên tệp tải về."""
+    monkeypatch.chdir(tmp_path)
+    code = "".join(client.get(URL).json()["cells"][3]["source"])
+    archive_bytes = io.BytesIO()
+    with zipfile.ZipFile(archive_bytes, "w") as archive:
+        archive.writestr("dataset/test.csv", "id,feature\n1,2\n")
+        archive.writestr("dataset/train.csv", "id,feature,label\n9,9,y\n")
+        archive.writestr("dataset/images/1.png", b"\x89PNG")
+    payload = archive_bytes.getvalue()
+    shapes = {
+        Path("dataset_btc") / "dataset" / "test.csv": (1, 2),
+        Path("dataset_btc") / "dataset" / "train.csv": (1, 3),
+    }
+
+    def urlopen(request, timeout=None):
+        return io.BytesIO(payload)
+
+    class PandasStub:
+        @staticmethod
+        def read_csv(path):
+            assert Path(path) in shapes, path
+            return SimpleNamespace(shape=shapes[Path(path)], head=lambda: None)
 
     exec(
         code,
-        _download_namespace(
-            "https://bucket.s3.amazonaws.com/btc/dataset.zip?X-Amz-Signature=abc",
-            pd=PandasStub,
-            urlretrieve=urlretrieve,
-            zipfile=zipfile,
-        ),
+        _download_namespace("https://storage.example.com/files/dataset", pd=PandasStub, urlopen=urlopen),
     )
-    assert test_path.exists()
-    assert not (Path("dataset_btc") / "dataset.zip").exists()  # Archive bị xoá sau khi giải nén.
+    assert (Path("dataset_btc") / "dataset" / "images" / "1.png").exists()
+    # Tệp tải về (mọi tên) đều bị xoá sau khi giải nén, không đè lên thư mục vừa giải nén.
+    assert not (Path("dataset_btc") / "dataset").is_file()
+    assert not (Path("dataset_btc") / "dataset.zip").exists()
 
 
 def test_download_cell_requires_the_test_file_name_from_a_plain_link(client, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     code = "".join(client.get(URL).json()["cells"][3]["source"])
 
-    def urlretrieve(link, filename):
-        Path(filename).write_text("id,feature\n1,2\n")
+    def urlopen(request, timeout=None):
+        return io.BytesIO(b"id,feature\n1,2\n")
 
     with pytest.raises(AssertionError, match="cần đúng một tệp test.csv"):
         exec(
@@ -215,9 +226,64 @@ def test_download_cell_requires_the_test_file_name_from_a_plain_link(client, tmp
             _download_namespace(
                 "https://bucket.s3.amazonaws.com/btc/khac.csv",
                 pd=SimpleNamespace(read_csv=lambda path: None),
-                urlretrieve=urlretrieve,
+                urlopen=urlopen,
             ),
         )
+
+
+def test_download_cell_skips_train_when_dataset_has_no_train_file(client, tmp_path, monkeypatch, capsys):
+    """Cuộc thi chỉ có Test vẫn chạy được: thiếu tệp Train chỉ in nhắc, không assert."""
+    monkeypatch.chdir(tmp_path)
+    code = "".join(client.get(URL).json()["cells"][3]["source"])
+    reads = []
+
+    def urlopen(request, timeout=None):
+        return io.BytesIO(b"id,feature\n1,2\n")
+
+    class PandasStub:
+        @staticmethod
+        def read_csv(path):
+            reads.append(Path(path))
+            return SimpleNamespace(shape=(1, 2), head=lambda: None)
+
+    namespace = _download_namespace(
+        "https://bucket.s3.amazonaws.com/btc/test.csv", pd=PandasStub, urlopen=urlopen
+    )
+    exec(code, namespace)
+    assert reads == [Path("dataset_btc") / "test.csv"]
+    assert namespace["train"] is None
+    assert "Không thấy tệp train.csv trong bộ dữ liệu BTC — bỏ qua đọc Train." in capsys.readouterr().out
+
+
+def test_model_size_cell_prints_parameter_count_for_pytorch_and_tensorflow(client, capsys):
+    notebook = client.get(URL).json()
+    cell = next(
+        item for item in notebook["cells"]
+        if "".join(item["source"]).startswith("# 7. KÍCH THƯỚC MÔ HÌNH")
+    )
+    namespace: dict = {}
+    exec("".join(cell["source"]), namespace)
+    model_size = namespace["model_size"]
+
+    class Param:
+        def __init__(self, count):
+            self._count = count
+
+        def numel(self):
+            return self._count
+
+    class TorchLike:
+        def parameters(self):
+            return iter([Param(7_000_000), Param(0)])
+
+    class KerasLike:
+        def count_params(self):
+            return 1_234_567
+
+    assert model_size(TorchLike()) == 7_000_000
+    assert "7,000,000 tham số (~26.7 MB float32)" in capsys.readouterr().out
+    assert model_size(KerasLike()) == 1_234_567
+    assert "1,234,567 tham số (~4.7 MB float32)" in capsys.readouterr().out
 
 
 def test_scaffold_drops_reproducibility_checklist_and_error_table(client):

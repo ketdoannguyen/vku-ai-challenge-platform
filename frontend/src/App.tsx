@@ -8,7 +8,11 @@ import { useRouteFocus } from "./hooks/useRouteFocus";
 import { AboutPage } from "./pages/AboutPage";
 import { SupportPage } from "./pages/SupportPage";
 import { AdminAccountsPage } from "./pages/AdminAccountsPage";
+import { AdminAggregateDetailPage } from "./pages/AdminAggregateDetailPage";
+import { AdminAggregateManagement } from "./pages/AdminAggregateManagement";
 import { AdminCompetitionsPage } from "./pages/AdminCompetitionsPage";
+import { AggregateIndexPage } from "./pages/AggregateIndexPage";
+import { AggregateLeaderboardPage } from "./pages/AggregateLeaderboardPage";
 import { AdminCompetitionDetailPage } from "./pages/AdminCompetitionDetailPage";
 import { AdminSubmissionsPage } from "./pages/AdminSubmissionsPage";
 import { CompetitionDetailPage } from "./pages/CompetitionDetailPage";
@@ -110,9 +114,32 @@ function IconLogout() {
   );
 }
 
+function IconCaret() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width={14}
+      height={14}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 type NavItem = { to: string; label: string; end?: boolean };
 
-function useNavItems(): NavItem[] {
+/**
+ * Mục điều hướng tách hai nhóm: mục thường hiện trực tiếp trên header, khu quản trị
+ * gom vào dropdown "Quản trị" cho gọn. Drawer di động vẫn liệt kê đủ cả hai nhóm.
+ */
+function useNavItems(): { items: NavItem[]; adminItems: NavItem[] } {
   const { account } = useAuth();
   // "Cuộc thi" đọc công khai (ADR-014) nên khách cũng thấy; mục quản trị thì không.
   const items: NavItem[] = [{ to: "/", label: "Cuộc thi", end: true }];
@@ -120,12 +147,17 @@ function useNavItems(): NavItem[] {
   // tiêu đề trang vẫn đầy đủ ("Hỗ trợ & Liên hệ").
   items.push({ to: "/gioi-thieu", label: "Giới thiệu", end: true });
   items.push({ to: "/ho-tro", label: "Hỗ trợ", end: true });
+  // Bảng tổng hợp chỉ mở cho tài khoản đã đăng nhập (chế độ kín nhất là `authenticated`),
+  // nên mục điều hướng không xuất hiện với khách.
+  if (account) items.push({ to: "/tong-hop", label: "Tổng hợp" });
+  const adminItems: NavItem[] = [];
   if (account?.role === "admin") {
-    items.push({ to: "/admin/competitions", label: "Quản trị" });
-    items.push({ to: "/admin/submissions", label: "Bài nộp", end: true });
-    items.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
+    adminItems.push({ to: "/admin/competitions", label: "Cuộc thi", end: true });
+    adminItems.push({ to: "/admin/submissions", label: "Bài nộp", end: true });
+    adminItems.push({ to: "/admin/accounts", label: "Tài khoản", end: true });
+    adminItems.push({ to: "/admin/aggregates", label: "Bảng tổng hợp", end: true });
   }
-  return items;
+  return { items, adminItems };
 }
 
 function roleLabel(role: string) {
@@ -143,12 +175,14 @@ type DrawerCloseReason = "escape" | "overlay" | "close" | "navigation";
 function MobileDrawer({
   account,
   navItems,
+  adminItems,
   returnFocusRef,
   onClose,
   onLogout,
 }: {
   account: Account | null;
   navItems: NavItem[];
+  adminItems: NavItem[];
   returnFocusRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
   onLogout: () => void | Promise<void>;
@@ -259,6 +293,16 @@ function MobileDrawer({
               {item.label}
             </NavLink>
           ))}
+          {adminItems.length > 0 && (
+            <>
+              <div className="app-drawer-section">Quản trị</div>
+              {adminItems.map((item) => (
+                <NavLink key={item.to} to={item.to} end={item.end} onClick={() => requestClose("navigation")}>
+                  {item.label}
+                </NavLink>
+              ))}
+            </>
+          )}
         </nav>
         {/* Dưới 40rem nút "Đăng nhập" trên header bị ẩn nên drawer là lối vào
             duy nhất cho khách trên điện thoại. */}
@@ -286,7 +330,8 @@ function Header() {
   const { pathname } = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
-  const navItems = useNavItems();
+  const { items: navItems, adminItems } = useNavItems();
+  const inAdmin = pathname.startsWith("/admin");
 
   async function onLogout() {
     setMenuOpen(false);
@@ -318,6 +363,27 @@ function Header() {
               {item.label}
             </NavLink>
           ))}
+          {adminItems.length > 0 && (
+            <div className="app-nav-group">
+              <NavLink
+                to="/admin/competitions"
+                end
+                className={({ isActive }) =>
+                  `app-nav-trigger${isActive || inAdmin ? " active" : ""}`
+                }
+              >
+                Quản trị
+                <IconCaret />
+              </NavLink>
+              <div className="app-nav-menu">
+                {adminItems.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          )}
         </nav>
         <div className="app-header-right">
           {loading ? null : account ? (
@@ -364,6 +430,7 @@ function Header() {
         <MobileDrawer
           account={account}
           navItems={navItems}
+          adminItems={adminItems}
           returnFocusRef={toggleRef}
           onClose={closeDrawer}
           onLogout={onLogout}
@@ -385,6 +452,7 @@ export function App() {
   const adminList =
     pathname === "/admin/competitions" ||
     pathname === "/admin" ||
+    pathname === "/admin/aggregates" ||
     pathname === "/admin/submissions";
   // Trang hỗ trợ có lưới hai cột (hướng dẫn + liên hệ) nên cần trần rộng hơn 1280px.
   const support = pathname === "/ho-tro";
@@ -451,6 +519,40 @@ export function App() {
             element={
               <RequireAdmin>
                 <AdminCompetitionDetailPage />
+              </RequireAdmin>
+            }
+          />
+          {/* Bảng tổng hợp: danh sách và bảng đều gắn với danh tính (cấu hình kín nhất vẫn
+              yêu cầu đăng nhập), nên cả hai route đều qua RequireAuth. */}
+          <Route
+            path="/tong-hop"
+            element={
+              <RequireAuth>
+                <AggregateIndexPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/tong-hop/:slug"
+            element={
+              <RequireAuth>
+                <AggregateLeaderboardPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/aggregates"
+            element={
+              <RequireAdmin>
+                <AdminAggregateManagement />
+              </RequireAdmin>
+            }
+          />
+          <Route
+            path="/admin/aggregates/:slug"
+            element={
+              <RequireAdmin>
+                <AdminAggregateDetailPage />
               </RequireAdmin>
             }
           />

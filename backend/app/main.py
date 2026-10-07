@@ -10,6 +10,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.accounts import service as accounts_service
 from app.accounts.admin_router import router as admin_accounts_router
+from app.aggregates import service as aggregates_service
+from app.aggregates.admin_router import router as admin_aggregates_router
+from app.aggregates.router import router as aggregates_router
 from app.ai_review import service as ai_review_service
 from app.ai_review.admin_router import router as admin_ai_review_router
 from app.auth import sessions as sessions_module
@@ -50,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await accounts_service.ensure_indexes(ctx.db)
         await sessions_module.ensure_indexes(ctx.db)
         await competitions_service.ensure_indexes(ctx.db)
+        await aggregates_service.ensure_indexes(ctx.db)
         await memberships_service.ensure_indexes(ctx.db)
         await content_service.ensure_indexes(ctx.db)
         await submissions_service.ensure_indexes(ctx.db)
@@ -142,20 +146,23 @@ async def resolve_account_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-_COMPETITIONS_CACHE_PREFIX = "/api/competitions"
+# API phụ thuộc tài khoản: cuộc thi và bảng xếp hạng tổng hợp (kể cả đường admin preview).
+_NO_STORE_PREFIXES = ("/api/competitions", "/api/aggregates", "/api/admin/aggregates")
 
 
 @app.middleware("http")
-async def competitions_no_store_middleware(request: Request, call_next):
-    """Cấm mọi cache cho API cuộc thi vì response phụ thuộc tài khoản - kể cả lỗi phân quyền.
+async def account_scoped_no_store_middleware(request: Request, call_next):
+    """Cấm mọi cache cho API phụ thuộc tài khoản - kể cả lỗi phân quyền.
 
     Gán đè thay vì setdefault để không giữ lại `Cache-Control` sai của bất kỳ handler nào; chỉ
-    đúng tiền tố `/api/competitions`, không đụng `/api/starter-notebook` hay bundle tĩnh.
+    đúng các tiền tố trên, không đụng `/api/starter-notebook` hay bundle tĩnh.
     """
     response = await call_next(request)
     path = request.url.path
-    if path == _COMPETITIONS_CACHE_PREFIX or path.startswith(f"{_COMPETITIONS_CACHE_PREFIX}/"):
-        response.headers["Cache-Control"] = "private, no-store"
+    for prefix in _NO_STORE_PREFIXES:
+        if path == prefix or path.startswith(f"{prefix}/"):
+            response.headers["Cache-Control"] = "private, no-store"
+            break
     return response
 
 
@@ -172,6 +179,8 @@ async def received_at_middleware(request: Request, call_next):
 
 app.include_router(auth_router)
 app.include_router(admin_accounts_router)
+app.include_router(admin_aggregates_router)
+app.include_router(aggregates_router)
 app.include_router(admin_competitions_router)
 app.include_router(admin_memberships_router)
 app.include_router(admin_content_router)
