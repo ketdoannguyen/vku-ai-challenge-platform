@@ -115,6 +115,8 @@ test("bốn khối hướng dẫn dùng đúng cấu hình của cuộc thi", as
 
   expect(screen.getByText(/Bắt buộc dùng link tài nguyên chỉ đọc của BTC/)).toBeTruthy();
   expect(screen.getByText(/DATASET_URL/)).toBeTruthy();
+  expect(screen.getByText(/TEST_FILE/)).toBeTruthy();
+  expect(screen.getByText(/TRAIN_FILE/)).toBeTruthy();
 
   // Ví dụ CSV dùng đúng hai cột của cuộc thi và có nhiều dòng mẫu.
   const sample = screen.getByLabelText("Ví dụ nội dung tệp CSV dự đoán");

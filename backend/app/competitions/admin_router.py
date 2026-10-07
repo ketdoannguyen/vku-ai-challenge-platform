@@ -8,6 +8,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo.errors import DuplicateKeyError
 
+from app.aggregates import service as aggregates_service
 from app.auth.dependencies import AdminAccount
 from app.competitions import clone as clone_service, service
 from app.competitions import tracks as competition_tracks
@@ -174,6 +175,18 @@ async def delete_competition(
         )
     if confirm_slug != competition["slug"]:
         raise api_error(422, "CONFIRM_SLUG_MISMATCH", "Slug xác nhận không khớp với cuộc thi cần xoá.")
+    # Bảng tổng hợp (kể cả nháp) tham chiếu cuộc thi bằng ObjectId; xoá trước khi tháo nguồn sẽ
+    # để lại bảng trỏ vào hư không. Mongo standalone không có transaction nên đây là chốt mềm -
+    # đường đọc vẫn chịu được nguồn mất qua `source_missing`.
+    references = await aggregates_service.referencing_aggregates(db, competition["_id"])
+    if references:
+        names = ", ".join(reference["name"] for reference in references)
+        raise api_error(
+            409,
+            "COMPETITION_REFERENCED_BY_AGGREGATE",
+            f"Cuộc thi đang được dùng trong bảng tổng hợp: {names}. "
+            "Tháo nguồn hoặc xoá bảng tổng hợp trước.",
+        )
 
     await service.delete_competition_cascade(db, competition)
     files_removed = await service.remove_competition_files(
