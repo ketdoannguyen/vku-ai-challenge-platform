@@ -427,12 +427,12 @@ function normalizationSourceHint(competition?: AdminCompetition): string {
       : "";
   const label = competition ? primaryMetricLabel(competition) : null;
   if (!competition || !label || label === NO_SOURCE_METRIC) {
-    return `Điểm xếp hạng là điểm chuẩn hóa thang 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.${dualNote}`;
+    return `Điểm xếp hạng là điểm chuẩn hóa thang 0–100 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.${dualNote}`;
   }
   const direction = resultContract(competition.submission_config).higher_is_better
     ? "cao hơn là tốt hơn"
     : "thấp hơn là tốt hơn";
-  return `Điểm xếp hạng là điểm chuẩn hóa thang 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.${dualNote}`;
+  return `Điểm xếp hạng là điểm chuẩn hóa thang 0–100 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.${dualNote}`;
 }
 
 /** Lịch và quota của một nhánh trong form tạo cuộc thi dual. */
@@ -1235,7 +1235,7 @@ export function CompetitionFormModal({
                   disabled={normLocked}
                 />
                 <span>
-                  <strong>Tính điểm chuẩn hóa (0–50)</strong>
+                  <strong>Tính điểm chuẩn hóa (0–100)</strong>
                   <small>{normalizationSourceHint(competition)}</small>
                 </span>
               </label>

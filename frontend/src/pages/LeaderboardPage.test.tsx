@@ -217,7 +217,7 @@ const NORM_BOARD = {
   source_metric: "f1",
   higher_is_better: true,
   baseline: 0.5,
-  max_score: 50,
+  max_score: 100,
   decimals: 2,
   reference_best: 0.9,
   calculated_at: "2026-09-15T08:00:00Z",
@@ -229,10 +229,10 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
       total: 2,
       normalization: NORM_BOARD,
       entries: [
-        entry(1, "Đội Sớm", { normalized_score: 50 }),
-        entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+        entry(1, "Đội Sớm", { normalized_score: 100 }),
+        entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 25 }),
       ],
-      me: entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 12.5 }),
+      me: entry(2, "Thí Sinh", { is_current_user: true, normalized_score: 25 }),
     }),
   );
 
@@ -241,11 +241,11 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
   renderPage({ ...COMPETITION, normalization: { enabled: true, baseline: 0.5, version: 1 } });
 
   expect(await screen.findByText("Đội Sớm")).toBeTruthy();
-  // Cột norm đứng trước các metric của hợp đồng và nêu rõ thang 0–50.
+  // Cột norm đứng trước các metric của hợp đồng và nêu rõ thang 0–100.
   expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
     "Hạng",
     "Đội / tài khoản",
-    "Điểm chuẩn hóa (0–50)",
+    "Điểm chuẩn hóa (0–100)",
     "F1",
     "Precision",
     "Recall",
@@ -254,11 +254,11 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
 
   const top = screen.getByText("Đội Sớm").closest("tr") as HTMLElement;
   // Hai ô điểm của dòng cùng được nhấn: norm quyết định hạng, điểm gốc của metric chính đối chiếu.
-  expect(within(top).getByText("50.00").closest("td")).toHaveClass("primary-score", "lb-norm-score");
+  expect(within(top).getByText("100.00").closest("td")).toHaveClass("primary-score", "lb-norm-score");
   expect(within(top).getByText("0.9900").closest("td")).toHaveClass("primary-score", "lb-raw-score");
 
   // Quy tắc đọc gọn: công thức norm, rồi từng số liệu mẫu số tách thành ô riêng.
-  expect(screen.getByText(/Tính theo điểm chuẩn hóa \(norm score\) · 50 ×/)).toBeTruthy();
+  expect(screen.getByText(/Tính theo điểm chuẩn hóa \(norm score\) · 100 ×/)).toBeTruthy();
   expect(screen.getByText(/\(điểm gốc − baseline\) \/ \(điểm tốt nhất − baseline\)/)).toBeTruthy();
   const normFacts = document.querySelector(".lb-norm-facts") as HTMLElement;
   expect(within(normFacts).getByText(/Baseline · F1/)).toBeTruthy();
@@ -267,13 +267,13 @@ test("cuộc thi bật norm: norm là cột điểm chính, metric gốc vẫn �
   expect(within(normFacts).getByText("0.9000")).toBeTruthy();
   // Ô giới hạn thay cho mốc dựng bảng cũ: ba số liệu mẫu số là baseline, điểm tốt nhất, thang điểm.
   expect(within(normFacts).getByText("Giới hạn điểm")).toBeTruthy();
-  expect(within(normFacts).getByText("0–50")).toBeTruthy();
+  expect(within(normFacts).getByText("0–100")).toBeTruthy();
   expect(normFacts.querySelectorAll("[data-tone]")).toHaveLength(3);
 
   // Dải cá nhân dùng norm hiện tại từ bảng, kèm điểm gốc đối chiếu; không chỉ điểm gốc.
   const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
   expect(within(meStrip).getByText("Điểm chuẩn hóa")).toBeTruthy();
-  expect(within(meStrip).getByText("12.50")).toBeTruthy();
+  expect(within(meStrip).getByText("25.00")).toBeTruthy();
   expect(within(meStrip).getByText(/Điểm gốc · F1/)).toBeTruthy();
   expect(within(meStrip).getByText("0.9800")).toBeTruthy();
 });
@@ -313,8 +313,8 @@ test("norm bị ẩn theo capability dù payload còn metadata: không render c�
       total: 1,
       // Response đã tải từ lúc còn quyền: metadata norm vẫn nằm trong state cũ.
       normalization: NORM_BOARD,
-      entries: [entry(1, "Đội Sớm", { normalized_score: 50 })],
-      me: entry(1, "Đội Sớm", { is_current_user: true, normalized_score: 50 }),
+      entries: [entry(1, "Đội Sớm", { normalized_score: 100 })],
+      me: entry(1, "Đội Sớm", { is_current_user: true, normalized_score: 100 }),
     }),
   );
 
@@ -335,7 +335,7 @@ test("norm bị ẩn theo capability dù payload còn metadata: không render c�
     "Đạt lúc",
   ]);
   // Không rò mẫu số hay điểm norm khi quyền xem đã bị thu hồi.
-  expect(screen.queryByText("50.00")).toBeNull();
+  expect(screen.queryByText("100.00")).toBeNull();
   expect(screen.queryByText(/Baseline/)).toBeNull();
   expect(screen.getByText("Điểm chuẩn hóa bị ẩn theo cấu hình hiển thị điểm")).toBeTruthy();
   const meStrip = screen.getByText("Hạng của bạn").closest(".lb-me-strip") as HTMLElement;
@@ -367,7 +367,7 @@ test("master BXH tắt giữa chừng: bỏ dòng đang giữ, bật lại phả
   const visible = { ...COMPETITION, normalization: { enabled: true, baseline: 0.5, version: 1 } };
   const { rerender } = renderPage(visible);
   expect(await screen.findByText("Người 1")).toBeTruthy();
-  expect(screen.getByRole("columnheader", { name: "Điểm chuẩn hóa (0–50)" })).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Điểm chuẩn hóa (0–100)" })).toBeTruthy();
 
   // Shell poll thấy master vừa tắt: dòng và cột norm đang giữ bị bỏ ngay, không chờ request nào.
   rerender(tree({ ...visible, leaderboard_visible: false }));
@@ -379,7 +379,7 @@ test("master BXH tắt giữa chừng: bỏ dòng đang giữ, bật lại phả
   expect(screen.queryByText("Người 1")).toBeNull();
   await act(async () => releaseBack?.());
   expect(await screen.findByText("Người mới")).toBeTruthy();
-  expect(screen.getByRole("columnheader", { name: "Điểm chuẩn hóa (0–50)" })).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Điểm chuẩn hóa (0–100)" })).toBeTruthy();
 });
 
 test("master BXH tắt khi request đang bay: response trễ bị bỏ", async () => {

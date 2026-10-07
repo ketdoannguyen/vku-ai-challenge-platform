@@ -1,7 +1,7 @@
-"""Điểm chuẩn hóa tùy chọn 0-50 theo mặt bằng kết quả thực tế của từng cuộc thi.
+"""Điểm chuẩn hóa tùy chọn 0-100 theo mặt bằng kết quả thực tế của từng cuộc thi.
 
 Cuộc thi bật `normalization` có baseline do admin nhập (chỉ khi còn nháp). Điểm norm hiện tại trên
-bảng xếp hạng là `50 * (s - baseline) / (B - baseline)`: `s` là điểm gốc của bài, `B` là điểm gốc
+bảng xếp hạng là `100 * (s - baseline) / (B - baseline)`: `s` là điểm gốc của bài, `B` là điểm gốc
 tốt nhất trong toàn bộ bài hợp lệ của cuộc thi (higher-is-better; lower-is-better đảo chiều).
 Không vượt baseline - kể cả bằng - là 0, và điểm gốc không bao giờ bị ghi đè.
 
@@ -24,7 +24,7 @@ from app.scoring import contracts
 CONFIG_FIELD = "normalization"
 SNAPSHOT_FIELD = "normalization_snapshot"
 VERSION = 1
-MAX_SCORE = 50
+MAX_SCORE = 100
 DECIMALS = 2
 
 
@@ -33,7 +33,7 @@ class NormalizationError(ValueError):
 
 
 class NormalizationRequest(BaseModel):
-    """Phần cấu hình admin được gửi lên; cap 50 và version do backend ấn định."""
+    """Phần cấu hình admin được gửi lên; cap 100 và version do backend ấn định."""
 
     enabled: bool = False
     baseline: float | None = None
@@ -175,7 +175,7 @@ def is_valid_score(value) -> bool:
 
 
 def score(raw, *, baseline: float, reference: float, higher_is_better: bool) -> float:
-    """Điểm norm 0-50 của `raw` khi `reference` là điểm gốc tốt nhất hiện có.
+    """Điểm norm 0-100 của `raw` khi `reference` là điểm gốc tốt nhất hiện có.
 
     Không vượt baseline (kể cả bằng) trả 0. Không làm tròn tại đây: giá trị thô dùng để xếp hạng,
     chỉ lúc hiển thị mới cắt 2 chữ số - đổi chỗ hai bước đó có thể đảo thứ tự của các bài hòa.

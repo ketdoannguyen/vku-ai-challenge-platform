@@ -55,7 +55,7 @@ export interface QuotaStatus {
   resets_at: string;
 }
 
-/** Cấu hình chuẩn hóa 0-50 của cuộc thi; backend chỉ cho sửa khi cuộc thi còn nháp. */
+/** Cấu hình chuẩn hóa 0-100 của cuộc thi; backend chỉ cho sửa khi cuộc thi còn nháp. */
 export interface NormalizationConfig {
   enabled: boolean;
   /** Mẫu số do admin nhập; `null` khi tắt. 0 và số âm vẫn hợp lệ với metric tương ứng. */

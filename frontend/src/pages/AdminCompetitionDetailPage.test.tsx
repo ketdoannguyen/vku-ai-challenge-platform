@@ -1250,7 +1250,7 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
             source_metric: "f1",
             higher_is_better: true,
             baseline: 0.5,
-            max_score: 50,
+            max_score: 100,
             decimals: 2,
             reference_best: 0.9,
             calculated_at: "2026-09-15T08:00:00Z",
@@ -1261,7 +1261,7 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
               account_id: "u1",
               display_name: "Thí Sinh",
               primary_score: 0.9,
-              normalized_score: 50,
+              normalized_score: 100,
               metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
               best_submission_id: "s1",
               best_submission_at: "2026-09-15T09:00:00Z",
@@ -1315,12 +1315,12 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
   const table = within(leaderboard).getByRole("table");
   // Norm là điểm xếp hạng: cột riêng đứng ngay sau đội; F1 gốc còn đó nhưng hết được nhấn.
   const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
-  expect(headers).toEqual(["Hạng", "Đội", "Điểm chuẩn hóa (0–50)", "F1", "Precision", "Recall", "Số bài"]);
-  const normCell = within(table).getByText("50.00");
+  expect(headers).toEqual(["Hạng", "Đội", "Điểm chuẩn hóa (0–100)", "F1", "Precision", "Recall", "Số bài"]);
+  const normCell = within(table).getByText("100.00");
   expect(normCell.className).toContain("primary-score");
   expect(within(table).getByText("0.9000").className).not.toContain("primary-score");
   // Summary tách điểm xếp hạng khỏi metric nguồn, kèm mẫu số và luật hòa điểm.
-  expect(screen.getByText(/Điểm xếp hạng: điểm chuẩn hóa thang 0–50\./)).toBeTruthy();
+  expect(screen.getByText(/Điểm xếp hạng: điểm chuẩn hóa thang 0–100\./)).toBeTruthy();
   expect(screen.getByText(/Metric nguồn F1 với baseline 0\.5000/)).toBeTruthy();
   expect(screen.getByText(/Điểm gốc tốt nhất hiện tại 0\.9000/)).toBeTruthy();
   expect(screen.getByText(/Bảng dựng lúc/)).toBeTruthy();

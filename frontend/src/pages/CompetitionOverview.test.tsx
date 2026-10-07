@@ -177,7 +177,7 @@ test("cuộc thi bật chuẩn hóa: Tổng quan nói rõ xếp hạng theo norm
   await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
   expect(screen.getByText("Xếp hạng.")).toBeTruthy();
   expect(
-    screen.getByText(/Điểm xếp hạng là điểm chuẩn hóa \(norm score, thang 0–50\) quy đổi từ điểm gốc F1/),
+    screen.getByText(/Điểm xếp hạng là điểm chuẩn hóa \(norm score, thang 0–100\) quy đổi từ điểm gốc F1/),
   ).toBeTruthy();
   // Masthead giữ chỉ số chính là metric gốc; cách xếp hạng nằm ở dòng Xếp hạng phía trên.
   const masthead = document.querySelector(".comp-facts") as HTMLElement;

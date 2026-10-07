@@ -676,9 +676,9 @@ def _append_info_sheet(
     if normalization is not None:
         direction = "Higher is better" if normalization["higher_is_better"] else "Lower is better"
         formula = (
-            "50 × (s − baseline) ÷ (best − baseline)"
+            f"{normalization['max_score']} × (s − baseline) ÷ (best − baseline)"
             if normalization["higher_is_better"]
-            else "50 × (baseline − s) ÷ (baseline − best)"
+            else f"{normalization['max_score']} × (baseline − s) ÷ (baseline − best)"
         )
         reference = normalization["reference_best"]
         info.append(("Norm version", normalization["version"]))

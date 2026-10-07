@@ -141,7 +141,7 @@ def _history(client, competition: dict) -> list[dict]:
 
 
 def test_v1_snapshot_counts_the_incoming_score_in_its_own_reference(client, fake_artifact_storage):
-    """Bài đầu tiên vượt baseline được đúng 50 - điểm đang ghi phải nằm trong mẫu số của nó."""
+    """Bài đầu tiên vượt baseline được đúng 100 - điểm đang ghi phải nằm trong mẫu số của nó."""
     competition = _ready(client, "snap-first", baseline=0.4)
     login_participant(client)
     response = submit(client, competition["id"], HALF_PREDICTION)
@@ -150,7 +150,7 @@ def test_v1_snapshot_counts_the_incoming_score_in_its_own_reference(client, fake
     # Thí sinh nhận dạng rút gọn; raw và metrics không bị đụng tới.
     assert response.json()["primary_score"] == 0.5
     assert set(response.json()["normalization_snapshot"]) == {"score", "calculated_at"}
-    assert response.json()["normalization_snapshot"]["score"] == pytest.approx(50.0)
+    assert response.json()["normalization_snapshot"]["score"] == pytest.approx(100.0)
 
     stored = _stored(client, response.json()["id"])
     snapshot = stored["normalization_snapshot"]
@@ -159,13 +159,13 @@ def test_v1_snapshot_counts_the_incoming_score_in_its_own_reference(client, fake
     assert snapshot["higher_is_better"] is True
     assert snapshot["baseline"] == 0.4
     assert snapshot["reference_best"] == 0.5
-    assert snapshot["score"] == pytest.approx(50.0)
+    assert snapshot["score"] == pytest.approx(100.0)
     assert stored["primary_score"] == 0.5
     assert stored["metrics"] == {"f1": 0.5, "precision": 0.5, "recall": 0.5}
 
     # BXH lúc này khớp snapshot vì chưa có gì khác - nhưng đó là trùng hợp, không phải hợp đồng.
     board = _board(client, competition)
-    assert board["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert board["entries"][0]["normalized_score"] == pytest.approx(100.0)
     assert board["normalization"]["reference_best"] == 0.5
 
 
@@ -208,15 +208,15 @@ def test_v1_stored_snapshot_never_moves_when_the_board_recomputes(
 
     board = _board(client, competition)
     norms = {entry["account_id"]: entry["normalized_score"] for entry in board["entries"]}
-    assert norms[str(rival_id)] == 50.0
-    assert norms[str(participant["_id"])] == pytest.approx(10.0)  # 50 × (0,5 − 0,4) ÷ (0,9 − 0,4)
+    assert norms[str(rival_id)] == 100.0
+    assert norms[str(participant["_id"])] == pytest.approx(20.0)  # 100 × (0,5 − 0,4) ÷ (0,9 − 0,4)
     # Mặt bằng BXH đã khác mẫu số trong snapshot: hai con số phải được phép lệch nhau.
     assert board["normalization"]["reference_best"] == 0.9
     assert before["reference_best"] == 0.5
 
     _review(client, rival_submission, "rejected")
     board = _board(client, competition)
-    assert board["entries"][0]["normalized_score"] == pytest.approx(50.0)
+    assert board["entries"][0]["normalized_score"] == pytest.approx(100.0)
 
     after = _stored(client, submission_id)["normalization_snapshot"]
     assert after == before  # kể cả khi mẫu số BXH quay về 0.5, snapshot vẫn là bản ghi lúc nộp
@@ -285,16 +285,16 @@ def test_two_commits_stay_provisional_and_the_board_gets_one_denominator(
     first_snapshot = _stored(client, first.json()["id"])["normalization_snapshot"]
     second_snapshot = _stored(client, second.json()["id"])["normalization_snapshot"]
     assert first_snapshot["reference_best"] == 0.5
-    assert first_snapshot["score"] == pytest.approx(50.0)
+    assert first_snapshot["score"] == pytest.approx(100.0)
     assert second_snapshot["reference_best"] == 1.0
-    assert second_snapshot["score"] == pytest.approx(50.0)
+    assert second_snapshot["score"] == pytest.approx(100.0)
 
-    # BXH hội tụ về một mẫu số: đội thứ nhất không còn được 50 như snapshot của chính họ.
+    # BXH hội tụ về một mẫu số: đội thứ nhất không còn được 100 như snapshot của chính họ.
     board = _board(client, competition)
     norms = {entry["account_id"]: entry["normalized_score"] for entry in board["entries"]}
     assert board["normalization"]["reference_best"] == 1.0
-    assert norms[str(second_id)] == pytest.approx(50.0)
-    assert norms[str(_participant(client)["_id"])] == pytest.approx(50 * 0.1 / 0.6)
+    assert norms[str(second_id)] == pytest.approx(100.0)
+    assert norms[str(_participant(client)["_id"])] == pytest.approx(100 * 0.1 / 0.6)
 
 
 def test_v2_commit_keeps_admission_time_separate_from_the_snapshot_time(
@@ -315,7 +315,7 @@ def test_v2_commit_keeps_admission_time_separate_from_the_snapshot_time(
     assert as_utc(stored["created_at"]) == BASE
     snapshot = stored["normalization_snapshot"]
     assert snapshot["reference_best"] == 0.75
-    assert snapshot["score"] == pytest.approx(50.0)
+    assert snapshot["score"] == pytest.approx(100.0)
     assert as_utc(snapshot["calculated_at"]) > BASE
 
     # Poll của thí sinh chỉ thấy điểm tạm và thời điểm, không thấy mặt bằng điểm người khác.
