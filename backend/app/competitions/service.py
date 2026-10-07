@@ -383,9 +383,9 @@ def validate_update(competition: dict, changes: dict) -> dict:
     if status == "published":
         locked = [f for f in _LOCKED_WHEN_PUBLISHED if f in updates]
         if locked:
-            raise ValueError("Cuộc thi đã publish, không thể đổi primary_metric.")
+            raise ValueError("Cuộc thi đã xuất bản, không thể đổi primary_metric.")
         if "normalization" in updates:
-            raise ValueError("Cuộc thi đã publish, không thể đổi cấu hình chuẩn hóa.")
+            raise ValueError("Cuộc thi đã xuất bản, không thể đổi cấu hình chuẩn hóa.")
 
     if "name" in updates and not updates["name"].strip():
         raise ValueError("Tên cuộc thi không được để trống.")
@@ -557,7 +557,9 @@ def _participant_tracks(competition: dict, *, membership: dict | None, now: date
         )["ready"]
         # Capability chuẩn hóa của nhánh: frontend không tự suy từ đồng hồ hay cờ cấp cuộc thi.
         # Đây là trạng thái hiển thị, không phải lỗi HTTP - hàm này chỉ chạy khi đã có quyền đọc.
-        norm_visible, norm_hidden_reason = competition_tracks.can_view_norm(competition, track)
+        norm_visible, norm_hidden_reason = competition_tracks.can_view_norm(
+            competition, track, now=now
+        )
         entry["normalization_visible"] = norm_visible
         entry["normalization_hidden_reason"] = norm_hidden_reason
     return view
@@ -661,16 +663,32 @@ def _submission_config(competition: dict, *, participant: bool, track: str | Non
     return payload
 
 
-async def submission_counts(db, competition_ids: list) -> dict:
-    """Đếm mọi submission đã persist theo competition, không phụ thuộc status."""
+async def submission_counts(db, competition_ids: list, *, excluded_tracks: dict | None = None) -> dict:
+    """Đếm mọi submission đã persist theo competition, không phụ thuộc status.
+
+    `excluded_tracks` là `{competition_id: {track khóa}}`: payload thí sinh và danh sách công
+    khai không nhận con số có đóng góp từ nhánh chưa tới giờ mở. Đường admin không truyền tham
+    số này nên số liệu quản trị luôn đủ.
+    """
     from app.submissions.service import SUBMISSIONS_COLLECTION
 
     counts = {competition_id: 0 for competition_id in competition_ids}
     if not counts:
         return counts
+    if excluded_tracks:
+        match = {
+            "$or": [
+                competition_tracks.visible_track_filter(
+                    competition_id, excluded_tracks.get(competition_id) or set()
+                )
+                for competition_id in competition_ids
+            ]
+        }
+    else:
+        match = {"competition_id": {"$in": competition_ids}}
     cursor = db[SUBMISSIONS_COLLECTION].aggregate(
         [
-            {"$match": {"competition_id": {"$in": competition_ids}}},
+            {"$match": match},
             {"$group": {"_id": "$competition_id", "total": {"$sum": 1}}},
         ]
     )

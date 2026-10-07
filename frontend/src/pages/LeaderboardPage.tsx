@@ -8,6 +8,7 @@ import {
   formatLocal,
   isDual,
   parseTrack,
+  trackLocked,
   unpublishedNote,
   type Track,
 } from "../api/competitions";
@@ -57,7 +58,7 @@ function NormSummary({
   return (
     <div className="lb-norm-summary">
       <p className="lb-norm-formula">
-        Tính theo điểm norm score · {board.max_score} ×{" "}
+        Tính theo điểm chuẩn hóa (norm score) · {board.max_score} ×{" "}
         {board.higher_is_better
           ? "(điểm gốc − baseline) / (điểm tốt nhất − baseline)"
           : "(baseline − điểm gốc) / (baseline − điểm tốt nhất)"}
@@ -99,11 +100,19 @@ export function LeaderboardPage() {
    */
   const published = view ? view.results_released : true;
   /**
+   * Nhánh đang xem chưa tới giờ mở: bảng của nhánh bị khóa thay vì hiện dòng cũ - kể cả khi BTC
+   * vừa dời lịch về sau. Metadata của shell tự làm mới nên bảng tự mở lại khi tới giờ.
+   */
+  const locked = trackLocked(competition, dual ? track : null);
+  /**
    * Metadata chưa kịp thấy lần công bố mà server đã từ chối (lệch nhịp hiếm): hiện bảng "chờ công
    * bố" thay vì báo lỗi, và tự xoá khi có lượt tải thành công.
    */
   const [unpublished, setUnpublished] = useState(false);
+  /** Cùng lệch nhịp như `unpublished`, cho tín hiệu 403 `TRACK_NOT_OPEN` từ API bảng. */
+  const [notOpen, setNotOpen] = useState(false);
   const boardHidden = !published || unpublished;
+  const boardLocked = locked || notOpen;
   const [data, setData] = useState<ParticipantLeaderboardResponse | null>(null);
   const [loading, setLoading] = useState(competition.leaderboard_visible);
   const [refreshing, setRefreshing] = useState(false);
@@ -119,7 +128,7 @@ export function LeaderboardPage() {
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const loadData = useCallback(
     async (nextOffset: number, keepRows: boolean, silent = false) => {
-      if (!competition.leaderboard_visible || !published) return;
+      if (!competition.leaderboard_visible || !published || locked) return;
       const sequence = ++requestSequence.current;
       if (!silent) {
         manualLoads.current += 1;
@@ -162,6 +171,12 @@ export function LeaderboardPage() {
           hasData.current = false;
           setData(null);
           if (!silent) setError(reason);
+        } else if (reason instanceof ApiClientError && reason.code === "TRACK_NOT_OPEN") {
+          // Nhánh vừa bị dời về chưa mở mà metadata shell chưa kịp thấy: xoá dòng đã tải và chuyển
+          // sang thẻ khóa; lượt làm mới của shell sẽ đưa `window_state` về đúng để tự mở lại.
+          hasData.current = false;
+          setData(null);
+          setNotOpen(true);
         } else if (
           reason instanceof ApiClientError &&
           reason.code === "PRIVATE_RESULTS_UNPUBLISHED"
@@ -186,7 +201,15 @@ export function LeaderboardPage() {
         }
       }
     },
-    [competition.id, competition.leaderboard_visible, reportAccessLost, dual, track, published],
+    [
+      competition.id,
+      competition.leaderboard_visible,
+      reportAccessLost,
+      dual,
+      track,
+      published,
+      locked,
+    ],
   );
 
   // Đổi nhánh là đổi hẳn bảng: bỏ dòng của nhánh cũ thay vì để chúng mang nhãn nhánh mới, và về
@@ -195,6 +218,7 @@ export function LeaderboardPage() {
     hasData.current = false;
     setData(null);
     setUnpublished(false);
+    setNotOpen(false);
     setQuery((current) =>
       current.offset === 0 ? current : { offset: 0, attempt: current.attempt + 1 },
     );
@@ -208,6 +232,15 @@ export function LeaderboardPage() {
     hasData.current = false;
     setData(null);
   }, [competition.leaderboard_visible]);
+
+  // Cửa sổ của nhánh vừa đổi trạng thái khóa: bỏ dòng đang giữ (và mọi tín hiệu "chưa mở" cũ),
+  // vô hiệu request đang bay; lượt tải kế tiếp theo `loadData` phản ánh đúng cửa sổ hiện tại.
+  useEffect(() => {
+    requestSequence.current += 1;
+    hasData.current = false;
+    setData(null);
+    setNotOpen(false);
+  }, [locked]);
 
   useEffect(() => {
     void loadData(query.offset, hasData.current);
@@ -235,9 +268,9 @@ export function LeaderboardPage() {
   }, [loadData, query.offset]);
 
   // Bảng đang công bố thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn. Nhánh chưa công bố
-  // không có dòng để làm mới - metadata của shell mới là thứ mở bảng khi BTC công bố.
+  // hay đang khóa không có dòng để làm mới - metadata của shell mới là thứ mở bảng khi tới lúc.
   const refreshStatus = useAutoRefresh(
-    competition.leaderboard_visible && published,
+    competition.leaderboard_visible && published && !locked,
     silentRefresh,
     { intervalMs: AUTO_REFRESH_MS },
   );
@@ -361,9 +394,9 @@ export function LeaderboardPage() {
                       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                     </svg>
                   </div>
-                  <div className="lb-locked-tile-tag">Sandbox Chấm điểm</div>
+                  <div className="lb-locked-tile-tag">Chấm điểm nội bộ</div>
                   <p className="lb-locked-tile-text">
-                    Điểm số các bài nộp của bạn vẫn được tính toán và lưu vết an toàn trong hệ thống.
+                    Hệ thống vẫn chấm điểm và lưu kết quả các bài nộp của bạn.
                   </p>
                 </div>
               </div>
@@ -409,6 +442,36 @@ export function LeaderboardPage() {
                 Nộp bài mới
               </Link>
             </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  // Dual, nhánh đang xem chưa tới giờ mở (kể cả khi BTC vừa dời lịch về sau): bảng của nhánh bị
+  // khóa, không hiện dòng nào. Giữ bộ chọn nhánh để xem nhánh còn lại; dữ liệu cũ giữ nguyên
+  // trong hệ thống và tự hiện lại khi tới giờ.
+  if (boardLocked) {
+    return (
+      <section className="lb-page">
+        {header}
+
+        <div className="lb-locked-card">
+          <div className="lb-locked-content">
+            <div className="lb-locked-emblem" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+
+            <h2 className="lb-locked-title">
+              Nhánh {TRACK_LABEL[track]} chưa mở — Bảng xếp hạng đang khóa.
+            </h2>
+            <p className="lb-locked-lead">
+              {view && `Bảng của nhánh này mở lúc ${formatLocal(view.start_at)}. `}
+              Kết quả và bài nộp cũ của nhánh không bị xóa, sẽ hiện lại đầy đủ khi nhánh mở.
+            </p>
           </div>
         </div>
       </section>
@@ -523,7 +586,7 @@ export function LeaderboardPage() {
           </div>
           <dl className="lb-me-facts">
             <div className="lb-me-score">
-              <dt>{norm ? "Điểm norm" : "Điểm chính"}</dt>
+              <dt>{norm ? "Điểm chuẩn hóa" : "Điểm chính"}</dt>
               <dd>
                 {norm
                   ? formatMetric(data.me.normalized_score, norm.decimals)
@@ -585,7 +648,7 @@ export function LeaderboardPage() {
               {/* Norm là điểm xếp hạng khi cuộc thi bật chuẩn hóa; metric nguồn ở lại cột phụ. */}
               {norm && (
                 <th scope="col" className="lb-col-num">
-                  Điểm norm (0–{norm.max_score})
+                  Điểm chuẩn hóa (0–{norm.max_score})
                 </th>
               )}
               {contract.metrics.map((metric) => (

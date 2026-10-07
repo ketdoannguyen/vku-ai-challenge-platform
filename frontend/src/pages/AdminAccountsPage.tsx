@@ -963,7 +963,7 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
             <PasswordToggle visible={passwordVisible} onToggle={() => setPasswordVisible((value) => !value)} />
           </div>
         </div>
-        <p className="account-security-note">Mật khẩu mới cần được chuyển cho người dùng qua kênh riêng (email/chat) - hệ thống không gửi tự động.</p>
+        <p className="account-security-note">Mật khẩu mới cần được chuyển cho người dùng qua kênh riêng (email/chat) — hệ thống không gửi tự động.</p>
         {error && <div className="error-box" role="alert">{error}</div>}
         <div className="modal-actions account-form-actions">
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>Hủy</button>

@@ -208,7 +208,7 @@ test("mỗi control nằm đúng section và giữ nguyên thứ tự field hi�
   expect(titleOf(screen.getByLabelText(/Giới hạn nộp bài/))).toBe(
     "Chấm điểm & giới hạn",
   );
-  expect(titleOf(screen.getByLabelText(/Leaderboard hiển thị với thí sinh/))).toBe(
+  expect(titleOf(screen.getByLabelText(/Bảng xếp hạng hiển thị với thí sinh/))).toBe(
     "Chấm điểm & giới hạn",
   );
   expect(titleOf(screen.getByLabelText(/Tính điểm chuẩn hóa/))).toBe(
@@ -269,7 +269,7 @@ test("payload tạo mới giữ nguyên key, kiểu và giá trị của mọi f
   fireEvent.change(screen.getByLabelText("Kết thúc"), { target: { value: "2026-11-02T08:00" } });
   fireEvent.click(screen.getByRole("radio", { name: /Cần mã tham gia/ }));
   fireEvent.change(screen.getByLabelText(/Giới hạn nộp bài/), { target: { value: "12" } });
-  fireEvent.click(screen.getByLabelText(/Leaderboard hiển thị với thí sinh/));
+  fireEvent.click(screen.getByLabelText(/Bảng xếp hạng hiển thị với thí sinh/));
 
   fireEvent.click(screen.getByRole("button", { name: "+ Thêm tài nguyên" }));
   fireEvent.change(screen.getByLabelText("Tên tài nguyên 1"), { target: { value: "Dataset" } });
@@ -312,7 +312,7 @@ test("slug tự điền theo tên cuộc thi; gõ tay thì giá trị tay thắn
   fireEvent.change(name, { target: { value: "Tên khác" } });
   expect(slug).toHaveValue("vku-2026");
 
-  // Xoá trắng ô slug là bật lại tự điền.
+  // Xóa trắng ô slug là bật lại tự điền.
   fireEvent.change(slug, { target: { value: "" } });
   fireEvent.change(name, { target: { value: "VKU Challenge" } });
   expect(slug).toHaveValue("vku-challenge");
@@ -452,14 +452,14 @@ test("xác nhận clone nói rõ phạm vi sao chép đầy đủ và các phầ
     />,
   );
 
-  const dialog = screen.getByRole("dialog", { name: "Clone cuộc thi" });
+  const dialog = screen.getByRole("dialog", { name: "Nhân bản cuộc thi" });
   // Copy phải nói rõ có copy API key/đề/đáp án, không copy người dự thi/mã tham gia, và phải
-  // kiểm tra lại trước khi publish.
+  // kiểm tra lại trước khi xuất bản.
   expect(dialog).toHaveTextContent(/API key/);
   expect(dialog).toHaveTextContent(/không chép người dự thi, mã tham gia/);
-  expect(dialog).toHaveTextContent(/kiểm tra lại bộ chấm và kết nối AI trước khi publish/);
+  expect(dialog).toHaveTextContent(/kiểm tra lại bộ chấm và kết nối AI trước khi xuất bản/);
 
-  fireEvent.click(within(dialog).getByRole("button", { name: "Clone" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nhân bản" }));
 
   await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
   expect(calls).toHaveLength(1);

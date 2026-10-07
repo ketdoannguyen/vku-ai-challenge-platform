@@ -106,9 +106,9 @@ export const NOTEBOOK_OMISSION_LABEL: Record<NotebookOmissionReason, string> = {
   "unsupported-mime": "Định dạng của output chưa được hỗ trợ hiển thị.",
   "invalid-image": "Ảnh nhúng có dữ liệu base64 không hợp lệ.",
   "image-too-large": "Ảnh nhúng vượt quá 1 MiB.",
-  "image-budget-exhausted": "Notebook đã đạt hạn mức 4 MiB ảnh hiển thị.",
+  "image-budget-exhausted": "Notebook đã đạt giới hạn 4 MiB ảnh hiển thị.",
   "malformed-output": "Output sai cấu trúc hoặc không phải loại được hỗ trợ.",
-  "output-limit": `Chỉ hiển thị ${MAX_NOTEBOOK_OUTPUTS_PER_CELL} output đầu của cell này.`,
+  "output-limit": `Chỉ hiển thị ${MAX_NOTEBOOK_OUTPUTS_PER_CELL} output đầu tiên.`,
 };
 
 /** Nhãn chung cho phần văn bản đã bị cắt bớt. */

@@ -159,6 +159,28 @@ def test_parse_maps_entrypoint_failures_and_rejects_unknown_codes():
     assert unknown.value.code == "EVALUATOR_FAILED"
 
 
+def test_parse_checks_class_info_before_reporting_student_error():
+    info = {"class_id": 6, "allowed_class_ids": list(range(6))}
+    payload = {
+        "status": "failed", "code": "SUBMISSION_CLASS_ID_INVALID",
+        "message": "SECRET", "class_info": info,
+    }
+    with pytest.raises(EvaluatorError) as error:
+        _parse(_line(payload), b"")
+    assert error.value.code == "SUBMISSION_CLASS_ID_INVALID"
+    assert error.value.class_info == info
+
+    for bad in (
+        {"class_id": True, "allowed_class_ids": [0]},
+        {"class_id": 6, "allowed_class_ids": []},
+        None,
+    ):
+        with pytest.raises(EvaluatorError) as rejected:
+            _parse(_line({**payload, "class_info": bad}), b"")
+        assert rejected.value.code == "EVALUATOR_FAILED"
+        assert rejected.value.class_info is None
+
+
 def test_parse_rejects_missing_broken_or_oversized_results():
     with pytest.raises(EvaluatorError, match="không trả về kết quả"):
         _parse(b"khong co dau moc", b"traceback")

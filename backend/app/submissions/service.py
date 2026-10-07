@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from bson import ObjectId
@@ -282,7 +282,7 @@ EMPTY_COUNTS = {"total": 0, "eligible_count": 0, "today": 0}
 
 
 async def my_stats_by_competition(
-    db, competition_ids: list, account_id, now: datetime
+    db, competition_ids: list, account_id, now: datetime, *, excluded_tracks: dict | None = None
 ) -> dict:
     """Số liệu cá nhân theo từng cuộc thi và từng nhánh cho trang danh sách: một `$facet` cả trang.
 
@@ -293,19 +293,28 @@ async def my_stats_by_competition(
 
     Kết quả là `{competition_id: {track: counts}}` - bài single gom dưới khoá `None`, bài dual gom
     theo đúng nhánh để thẻ dual không trộn hai population thành một con số.
+
+    `excluded_tracks` là `{competition_id: {track khóa}}`: nhánh chưa tới giờ mở không đóng góp
+    con số nào, để thẻ danh sách không tiết lộ là đã có bài cũ trên nhánh đang khóa.
     """
     stats: dict = {competition_id: {} for competition_id in competition_ids}
     if not competition_ids:
         return stats
     day_start, day_end = utc_day_bounds(now)
+    if excluded_tracks:
+        scope = {
+            "$or": [
+                competition_tracks.visible_track_filter(
+                    competition_id, excluded_tracks.get(competition_id) or set()
+                )
+                for competition_id in competition_ids
+            ]
+        }
+    else:
+        scope = {"competition_id": {"$in": competition_ids}}
     cursor = db[SUBMISSIONS_COLLECTION].aggregate(
         [
-            {
-                "$match": {
-                    "competition_id": {"$in": competition_ids},
-                    "account_id": account_id,
-                }
-            },
+            {"$match": {"account_id": account_id, **scope}},
             {
                 "$facet": {
                     "total": [
@@ -565,16 +574,25 @@ def artifact_metadata(submission: dict) -> dict:
     return result
 
 
-def _visibility_flags(competition: dict, submission: dict) -> tuple[bool, dict]:
+def _visibility_flags(
+    competition: dict, submission: dict, *, now: datetime | None = None
+) -> tuple[bool, dict]:
     """`(bài có đang bị che, cờ công bố cho DTO)` của một bài nộp dưới mắt thí sinh.
 
     Nhánh đọc từ chính document bài nộp chứ không từ tham số người gọi: bài dual luôn mang `track`
-    của nó nên không có đường nào quên truyền scope rồi vô tình trả điểm. Bài dual thiếu `track`
-    là dữ liệu hỏng - che còn hơn lộ. Single không bao giờ có cờ để hình dạng DTO cũ giữ nguyên.
+    của nó nên không có đường nào quên truyền scope rồi vô tình trả điểm. Nhánh chưa tới giờ mở bị
+    khóa trước cả luật công bố - dời lịch về sau là mọi bản ghi cũ của nhánh biến mất khỏi tầm nhìn
+    thí sinh. Bài dual thiếu `track` là dữ liệu hỏng - che còn hơn lộ. Single không bao giờ có cờ
+    để hình dạng DTO cũ giữ nguyên.
     """
     if not competition_tracks.is_dual(competition):
         return False, {}
     track = submission.get("track")
+    if competition_tracks.track_locked(competition, track, now or datetime.now(timezone.utc)):
+        return True, {
+            "result_visibility": "hidden",
+            "visibility_reason": competition_tracks.REASON_TRACK_NOT_OPEN,
+        }
     if track is not None and competition_tracks.results_visible(competition, track):
         return False, {"result_visibility": "visible"}
     return True, {
@@ -590,14 +608,18 @@ def public_submission(
     competition: dict,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
+    now: datetime | None = None,
 ) -> dict:
     """`contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric.
 
     `competition` là trạng thái công bố tại lúc trả response: bài Private chưa release không mang
     điểm, metric hay snapshot chuẩn hóa - trạng thái chấm và file của thí sinh vẫn còn nguyên.
-    Quyền xem snapshot do chính bài nộp quyết định qua nhánh của nó, không nhận từ người gọi.
+    Nhánh chưa tới giờ mở khóa cả tệp lẫn AI review: với thí sinh, bài cũ của nhánh chưa được xem
+    dưới bất kỳ hình thức nào. Quyền xem snapshot do chính bài nộp quyết định qua nhánh của nó,
+    không nhận từ người gọi.
     """
-    hidden, flags = _visibility_flags(competition, submission)
+    hidden, flags = _visibility_flags(competition, submission, now=now)
+    locked = flags.get("visibility_reason") == competition_tracks.REASON_TRACK_NOT_OPEN
     result = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -616,6 +638,8 @@ def public_submission(
     if hidden:
         result["metrics"] = {}
         result["primary_score"] = None
+    if locked:
+        result["artifacts"] = {PREDICTION_ARTIFACT: None, NOTEBOOK_ARTIFACT: None}
     result.update(flags)
     result.update(
         _snapshot_projection(
@@ -624,11 +648,11 @@ def public_submission(
             # Snapshot chuẩn hóa suy ra từ điểm nên đi cùng số phận với điểm, rồi thêm cổng norm
             # của đúng nhánh bài nộp.
             normalization_visible=not hidden
-            and competition_tracks.can_view_norm(competition, submission.get("track"))[0],
+            and competition_tracks.can_view_norm(competition, submission.get("track"), now=now)[0],
         )
     )
     projection = ai_serializers.participant_projection(submission, ai_visible)
-    if projection is not None:
+    if projection is not None and not locked:
         result["ai_review"] = projection
     return result
 
@@ -657,19 +681,22 @@ def submission_history_item(
     competition: dict | None = None,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
+    now: datetime | None = None,
 ) -> dict:
     """Return participant-safe history data without account or storage details.
 
     `contract` là hợp đồng thí sinh; `None` (đường admin) giữ nguyên mọi metric. Snapshot norm
     tạm là dữ liệu dẫn xuất: chỉ trả theo quyền xem hiện tại của đúng nhánh bài nộp, không lấy
     từ cờ lúc nộp. Che kết quả Private chưa công bố chỉ áp cho đường thí sinh; đường admin không
-    truyền `competition` và xem đủ qua quyền admin thật.
+    truyền `competition` và xem đủ qua quyền admin thật. Nhánh chưa tới giờ mở khóa mạnh hơn:
+    cả tệp lẫn AI review đều đi cùng số phận với điểm.
     """
     hidden, flags = (
-        _visibility_flags(competition, submission)
+        _visibility_flags(competition, submission, now=now)
         if competition is not None and contract is not None
         else (False, {})
     )
+    locked = flags.get("visibility_reason") == competition_tracks.REASON_TRACK_NOT_OPEN
     item = {
         "id": str(submission["_id"]),
         "competition_id": str(submission["competition_id"]),
@@ -705,6 +732,8 @@ def submission_history_item(
     if hidden:
         item["metrics"] = {}
         item["primary_score"] = None
+    if locked:
+        item["artifacts"] = {PREDICTION_ARTIFACT: None, NOTEBOOK_ARTIFACT: None}
     item.update(flags)
     item.update(
         _snapshot_projection(
@@ -713,12 +742,12 @@ def submission_history_item(
             normalization_visible=(
                 competition is not None
                 and not hidden
-                and competition_tracks.can_view_norm(competition, submission.get("track"))[0]
+                and competition_tracks.can_view_norm(competition, submission.get("track"), now=now)[0]
             ),
         )
     )
     projection = ai_serializers.participant_projection(submission, ai_visible)
-    if projection is not None:
+    if projection is not None and not locked:
         item["ai_review"] = projection
     return item
 
@@ -733,8 +762,18 @@ async def list_account_submissions(
     offset: int,
     ai_visible: bool = False,
     contract: OutputContract | None = None,
+    now: datetime | None = None,
 ) -> tuple[list[dict], int]:
-    query = {"competition_id": competition_id, "account_id": account_id}
+    """Lịch sử nộp bài của một account; nhánh chưa tới giờ mở không xuất hiện ngay từ truy vấn.
+
+    Lọc trong query (thay vì bỏ dòng lúc serialize) để `total` và phân trang không có lỗ hổng:
+    trang lịch sử của nhánh đang khóa trống trơn, mở lại thì bản ghi cũ quay về đúng vị trí.
+    """
+    now = now or datetime.now(timezone.utc)
+    locked = competition_tracks.locked_tracks(competition, now=now)
+    query = competition_tracks.visible_track_filter(competition_id, locked) | {
+        "account_id": account_id
+    }
     collection = db[SUBMISSIONS_COLLECTION]
     total = await collection.count_documents(query)
     cursor = collection.find(query).sort([("created_at", -1), ("_id", -1)]).skip(offset).limit(limit)
@@ -744,6 +783,7 @@ async def list_account_submissions(
             competition=competition,
             ai_visible=ai_visible,
             contract=contract,
+            now=now,
         )
         async for item in cursor
     ], total

@@ -111,7 +111,7 @@ test("membership inactive: thông báo liên hệ BTC, không có nút join", ()
       />
     </MemoryRouter>,
   );
-  expect(screen.getByText(/Membership đã bị vô hiệu hóa/)).toBeTruthy();
+  expect(screen.getByText(/Tư cách tham gia đã bị vô hiệu hóa/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Tham gia/ })).toBeNull();
 });
 
@@ -177,7 +177,7 @@ test("quá end_at: trạng thái membership vẫn thắng nhánh hết hạn", (
       />
     </MemoryRouter>,
   );
-  expect(screen.getByText(/Membership đã bị vô hiệu hóa/)).toBeTruthy();
+  expect(screen.getByText(/Tư cách tham gia đã bị vô hiệu hóa/)).toBeTruthy();
 });
 
 test("closed thắng nhánh hết hạn tham gia", () => {

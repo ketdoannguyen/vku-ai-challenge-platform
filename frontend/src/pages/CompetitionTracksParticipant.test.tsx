@@ -84,13 +84,43 @@ const DUAL: CompetitionDetail = {
   tracks: { public: PUBLIC_VIEW, private: PRIVATE_VIEW },
 };
 
-/** Cùng cuộc thi nhưng BTC đã công bố kết quả Private. */
+/** Nhánh Private sau khi BTC công bố kết quả. */
+const PRIVATE_RELEASED: ParticipantTrackView = {
+  ...PRIVATE_VIEW,
+  results_released: true,
+  results_published_at: "2026-10-01T00:00:00Z",
+};
+
 const DUAL_RELEASED: CompetitionDetail = {
   ...DUAL,
-  tracks: {
-    public: PUBLIC_VIEW,
-    private: { ...PRIVATE_VIEW, results_released: true, results_published_at: "2026-10-01T00:00:00Z" },
-  },
+  tracks: { public: PUBLIC_VIEW, private: PRIVATE_RELEASED },
+};
+
+/**
+ * Nhánh vừa bị BTC dời lịch về tương lai: máy chủ suy ra chưa mở nên không nhận bài, tài nguyên
+ * cũng bị che. Dấu công bố (nếu có) không đổi - khóa đọc là tầng trên luật công bố.
+ */
+function rescheduled(view: ParticipantTrackView): ParticipantTrackView {
+  return {
+    ...view,
+    start_at: "2026-11-01T00:00:00Z",
+    window_state: "scheduled",
+    resources: [],
+    can_submit: false,
+    blocked_reason: "not_open",
+  };
+}
+
+/** Public vừa bị dời lịch; Private đã công bố nên nhánh còn lại vẫn xem bình thường. */
+const DUAL_LOCKED_PUBLIC: CompetitionDetail = {
+  ...DUAL_RELEASED,
+  tracks: { public: rescheduled(PUBLIC_VIEW), private: PRIVATE_RELEASED },
+};
+
+/** Private vừa bị dời lịch sau khi đã công bố; Public vẫn đang mở. */
+const DUAL_LOCKED_PRIVATE: CompetitionDetail = {
+  ...DUAL_RELEASED,
+  tracks: { public: PUBLIC_VIEW, private: rescheduled(PRIVATE_RELEASED) },
 };
 
 const reportAccessLost = vi.fn();
@@ -175,16 +205,20 @@ function leaderboardTree(competition: CompetitionDetail, entries: string[]) {
   );
 }
 
-function renderHistory(competition: CompetitionDetail, entries: string[]) {
-  return render(
+function historyTree(competition: CompetitionDetail, entries: string[]) {
+  return (
     <MemoryRouter initialEntries={entries}>
       <Routes>
         <Route element={<Outlet context={{ competition, contents: [], reportAccessLost }} />}>
           <Route path="/competitions/:slug/submissions" element={<MySubmissionsPage />} />
         </Route>
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderHistory(competition: CompetitionDetail, entries: string[]) {
+  return render(historyTree(competition, entries));
 }
 
 function board(entries: unknown[], overrides: Record<string, unknown> = {}) {
@@ -215,8 +249,32 @@ function boardEntry(rank: number, name: string) {
   };
 }
 
+/** Dòng lịch sử của một nhánh; `suffix` vào mã hiển thị dạng `#pub-0001`. */
+function historyRow(
+  track: "public" | "private",
+  suffix: string,
+  overrides: Record<string, unknown> = {},
+) {
+  const short = track === "public" ? "pub" : "pri";
+  return {
+    id: `sub-${short}-${suffix}`,
+    competition_id: BASE.id,
+    status: "completed",
+    metrics: { f1: 0.9, precision: 0.8, recall: 0.7 },
+    primary_score: 0.9,
+    created_at: "2026-09-15T10:00:00Z",
+    track,
+    result_visibility: "visible",
+    artifacts: {
+      prediction: { filename: "prediction.csv", size_bytes: 128, available: true },
+      notebook: { filename: "notebook.ipynb", size_bytes: 4096, available: true },
+    },
+    ...overrides,
+  };
+}
+
 function selectCsv() {
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+  fireEvent.change(screen.getByLabelText("Chọn tệp CSV"), {
     target: { files: [new File(["id,prediction\n1,1\n"], "result.csv", { type: "text/csv" })] },
   });
 }
@@ -375,6 +433,169 @@ test("dual mất quyền đọc giữa chừng: báo shell khóa gate, không hi
 
   await waitFor(() => expect(reportAccessLost).toHaveBeenCalledWith("membership_inactive"));
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("dual BXH nhánh vừa bị dời lịch: thẻ khóa, không gọi API; mở lại thì bảng cũ trở về nguyên vẹn", async () => {
+  const urls: string[] = [];
+  mockFetch((url) => {
+    urls.push(url);
+    const track = new URL(url, "http://localhost").searchParams.get("track");
+    return track === "private"
+      ? board([boardEntry(1, "Đội Private")])
+      : board([boardEntry(1, "Đội Public")]);
+  });
+
+  const view = render(
+    leaderboardTree(DUAL_LOCKED_PUBLIC, ["/competitions/dual-cup/leaderboard?track=public"]),
+  );
+
+  expect(screen.getByText("Nhánh Public chưa mở — Bảng xếp hạng đang khóa.")).toBeTruthy();
+  const lead = document.querySelector(".lb-locked-lead") as HTMLElement;
+  expect(lead).toHaveTextContent(
+    `Bảng của nhánh này mở lúc ${formatLocal("2026-11-01T00:00:00Z")}`,
+  );
+  // Không hứa xóa dữ liệu: bài và kết quả cũ còn nguyên, chỉ chưa được xem trong lúc này.
+  expect(lead).toHaveTextContent("không bị xóa, sẽ hiện lại đầy đủ khi nhánh mở");
+  // Nhánh khóa không có gì để hỏi và không hiện dòng nào.
+  expect(urls).toHaveLength(0);
+
+  // Bộ chọn nhánh còn đó; nhánh Private vẫn xem bình thường.
+  fireEvent.click(screen.getByRole("button", { name: "Private" }));
+  expect(await screen.findByText("Đội Private")).toBeTruthy();
+
+  // BTC đưa lịch Public về quá khứ: nhịp làm mới của shell đẩy metadata mới xuống, bảng cũ tự hiện.
+  fireEvent.click(screen.getByRole("button", { name: "Public" }));
+  view.rerender(
+    leaderboardTree(DUAL_RELEASED, ["/competitions/dual-cup/leaderboard?track=public"]),
+  );
+
+  expect(await screen.findByText("Đội Public")).toBeTruthy();
+  expect(screen.queryByText(/Bảng xếp hạng đang khóa/)).toBeNull();
+});
+
+test("dual BXH metadata còn cũ mà nhánh vừa bị dời lịch: 403 TRACK_NOT_OPEN thành thẻ khóa, không báo lỗi", async () => {
+  mockFetch(() => ({ error: { code: "TRACK_NOT_OPEN", message: "Nhánh này chưa mở." } }), 403);
+
+  render(leaderboardTree(DUAL_RELEASED, ["/competitions/dual-cup/leaderboard?track=public"]));
+
+  // Metadata shell chưa kịp thấy lịch mới: API từ chối là tín hiệu duy nhất, vẫn phải khóa êm.
+  expect(
+    await screen.findByText("Nhánh Public chưa mở — Bảng xếp hạng đang khóa."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("dual BXH một lượt tải đang bay mà nhánh bị dời lịch: response muộn không dựng lại dòng cũ", async () => {
+  let releasePublic = () => {};
+  const publicGate = new Promise<void>((resolve) => {
+    releasePublic = resolve;
+  });
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      await publicGate;
+      return jsonResponse(board([boardEntry(1, "Đội Public")]));
+    }),
+  );
+
+  const view = render(
+    leaderboardTree(DUAL_RELEASED, ["/competitions/dual-cup/leaderboard?track=public"]),
+  );
+  await waitFor(() => expect(urls).toHaveLength(1));
+
+  // BTC dời lịch Public về tương lai trước khi lượt tải kịp về.
+  view.rerender(
+    leaderboardTree(DUAL_LOCKED_PUBLIC, ["/competitions/dual-cup/leaderboard?track=public"]),
+  );
+  expect(screen.getByText("Nhánh Public chưa mở — Bảng xếp hạng đang khóa.")).toBeTruthy();
+
+  releasePublic();
+  await flush();
+  expect(screen.getByText("Nhánh Public chưa mở — Bảng xếp hạng đang khóa.")).toBeTruthy();
+  expect(screen.queryByText("Đội Public")).toBeNull();
+
+  // Tới giờ mở lại: lượt tải mới đưa đúng bảng cũ trở về, không cần chấm lại gì.
+  view.rerender(
+    leaderboardTree(DUAL_RELEASED, ["/competitions/dual-cup/leaderboard?track=public"]),
+  );
+  expect(await screen.findByText("Đội Public")).toBeTruthy();
+});
+
+test("dual lịch sử nhánh vừa bị dời lịch: thẻ khóa, không lộ bài cũ; nhánh còn lại vẫn xem, mở lại thì bài cũ trở về", async () => {
+  const urls: string[] = [];
+  mockFetch((url) => {
+    urls.push(url);
+    return {
+      submissions: [historyRow("public", "0001"), historyRow("private", "0001")],
+      total: 2,
+      limit: 50,
+      offset: 0,
+    };
+  });
+
+  const view = render(historyTree(DUAL_LOCKED_PUBLIC, ["/competitions/dual-cup/submissions"]));
+
+  expect(screen.getByText("Nhánh Public chưa mở — Bài đã nộp đang khóa.")).toBeTruthy();
+  // Nhánh khóa không gọi API và không hiện dòng nào, kể cả bài đã nằm sẵn trong hệ thống.
+  expect(urls).toHaveLength(0);
+  expect(screen.queryByText("#pub-0001")).toBeNull();
+
+  // Nhánh Private vẫn xem được đầy đủ.
+  fireEvent.click(screen.getByRole("button", { name: "Private" }));
+  expect(await screen.findByText("#pri-0001")).toBeTruthy();
+  expect(screen.queryByText("#pub-0001")).toBeNull();
+
+  // BTC đưa lịch Public về quá khứ: lịch sử Public trở lại nguyên vẹn, không mất bài nào.
+  fireEvent.click(screen.getByRole("button", { name: "Public" }));
+  view.rerender(historyTree(DUAL_RELEASED, ["/competitions/dual-cup/submissions"]));
+  expect(await screen.findByText("#pub-0001")).toBeTruthy();
+  expect(screen.queryByText("#pri-0001")).toBeNull();
+});
+
+test("dual trình xem tệp đang mở mà nhánh bị dời lịch: đóng trình xem, mở lại nhánh không tự bật lại", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/prediction")) {
+        return new Response("id,prediction\n1,1\n", {
+          status: 200,
+          headers: { "Content-Type": "text/csv" },
+        });
+      }
+      return jsonResponse({
+        submissions: [historyRow("private", "0001")],
+        total: 1,
+        limit: 50,
+        offset: 0,
+      });
+    }),
+  );
+
+  const view = render(
+    historyTree(DUAL_RELEASED, ["/competitions/dual-cup/submissions?track=private"]),
+  );
+  expect(await screen.findByText("#pri-0001")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Xem CSV" }));
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+
+  // BTC dời lịch Private về tương lai trong lúc trình xem đang mở: nội dung nhánh khóa biến mất.
+  view.rerender(
+    historyTree(DUAL_LOCKED_PRIVATE, ["/competitions/dual-cup/submissions?track=private"]),
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByText("Nhánh Private chưa mở — Bài đã nộp đang khóa.")).toBeTruthy();
+  expect(screen.queryByText("#pri-0001")).toBeNull();
+
+  // Mở lại nhánh: bài cũ trở về nhưng trình xem của lượt trước không tự bật lại.
+  view.rerender(
+    historyTree(DUAL_RELEASED, ["/competitions/dual-cup/submissions?track=private"]),
+  );
+  expect(await screen.findByText("#pri-0001")).toBeTruthy();
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("dual lịch sử: lọc theo nhánh, bài Private chưa công bố không lộ điểm", async () => {
@@ -548,7 +769,7 @@ test("single: lịch sử và thẻ dashboard giữ nguyên số liệu gộp", 
   expect(await screen.findByText("#one-0001")).toBeTruthy();
   expect(document.querySelector(".subm-summary-pills")).toHaveTextContent("Tổng cộng 1 bài nộp");
   expect(screen.queryByRole("group", { name: "Lọc lịch sử theo nhánh" })).toBeNull();
-  expect(screen.getByText("Hạn ngạch")).toBeTruthy();
+  expect(screen.getByText("Hạn mức")).toBeTruthy();
   history.unmount();
 
   const ACCOUNT = { id: "9", email: "thi.sinh@vku.vn", name: "Thí sinh", role: "participant", active: true };
@@ -583,6 +804,6 @@ test("single: lịch sử và thẻ dashboard giữ nguyên số liệu gộp", 
   const card = document.querySelector(".comp-card") as HTMLElement;
   expect(card).toHaveTextContent("Hạng hiện tại");
   expect(card).toHaveTextContent("#2/3");
-  expect(card).toHaveTextContent("5 lượt / ngày");
+  expect(card).toHaveTextContent("5 lượt/ngày");
   expect(screen.queryByText("Theo từng nhánh")).toBeNull();
 });

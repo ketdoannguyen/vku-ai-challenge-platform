@@ -197,7 +197,7 @@ const FAQ_ITEMS: FaqItem[] = [
     answer: (
       <>
         Cuộc thi có thể đã đóng hoặc đã quá hạn tham gia, cuộc thi có thể yêu cầu mã do Ban Tổ chức
-        cấp, hoặc quyền tham gia đang bị vô hiệu hoá sau khi bạn rời cuộc thi - khi đó cần Ban Tổ
+        cấp, hoặc quyền tham gia đang bị vô hiệu hoá sau khi bạn rời cuộc thi — khi đó cần Ban Tổ
         chức kích hoạt lại.
       </>
     ),

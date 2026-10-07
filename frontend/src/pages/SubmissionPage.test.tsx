@@ -36,12 +36,12 @@ const COMPETITION: CompetitionDetail = {
 /** Shell thật sẽ khóa gate khi được thông báo; ở đây chỉ cần ghi nhận lý do. */
 const reportAccessLost = vi.fn();
 
-function renderPage(
-  competition: CompetitionDetail = COMPETITION,
-  entry = "/competitions/submit-cup/submit",
+function pageTree(
+  competition: CompetitionDetail,
+  entry: string,
+  refreshCompetition: () => Promise<void> = async () => {},
 ) {
-  const refreshCompetition = vi.fn(async () => {});
-  const view = render(
+  return (
     <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route
@@ -52,8 +52,16 @@ function renderPage(
           <Route path="/competitions/:slug/submit" element={<SubmissionPage />} />
         </Route>
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderPage(
+  competition: CompetitionDetail = COMPETITION,
+  entry = "/competitions/submit-cup/submit",
+) {
+  const refreshCompetition = vi.fn(async () => {});
+  const view = render(pageTree(competition, entry, refreshCompetition));
   return { ...view, refreshCompetition, reportAccessLost };
 }
 
@@ -65,7 +73,7 @@ function selectNotebook(name = "solution.ipynb") {
 }
 
 function selectCsv(name = "result.csv", body = "id,prediction\n1,1\n") {
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+  fireEvent.change(screen.getByLabelText("Chọn tệp CSV"), {
     target: { files: [new File([body], name, { type: "text/csv" })] },
   });
 }
@@ -163,7 +171,7 @@ function submitOnce() {
 
 test("hiển thị rule summary và chỉ mở nút nộp khi đã đủ hai tệp", () => {
   renderPage();
-  const rules = screen.getByLabelText("Quy định file submission");
+  const rules = screen.getByLabelText("Quy định tệp nộp bài");
   expect(rules).toHaveTextContent("ID: id");
   expect(rules).toHaveTextContent("Prediction: prediction");
   expect(rules).toHaveTextContent("Binary");
@@ -172,7 +180,7 @@ test("hiển thị rule summary và chỉ mở nút nộp khi đã đủ hai t�
   expect(rules).toHaveTextContent("5 lượt/ngày");
 
   const file = new File(["id,prediction\n1,1\n"], "team-result.csv", { type: "text/csv" });
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), { target: { files: [file] } });
+  fireEvent.change(screen.getByLabelText("Chọn tệp CSV"), { target: { files: [file] } });
   expect(screen.getByText("team-result.csv")).toBeTruthy();
   // Notebook là phần bắt buộc của mỗi lượt nộp: thiếu nó thì chưa nộp được.
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
@@ -197,7 +205,7 @@ test("từ chối tệp sai định dạng và tệp vượt trần của từng
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("solution.ipynb")).toBeTruthy();
 
-  fireEvent.change(screen.getByLabelText("Chọn file CSV"), {
+  fireEvent.change(screen.getByLabelText("Chọn tệp CSV"), {
     target: { files: [new File([new Uint8Array(11 * 1024 * 1024)], "big.csv")] },
   });
   expect(screen.getByRole("alert")).toHaveTextContent(
@@ -219,7 +227,7 @@ test("thanh hạn mức dài theo đúng tỉ lệ còn lại và hạ mức mà
   expect(fill.dataset.level).toBe("ok");
   // Câu chữ trong ribbon là kênh thông tin chính; thẻ hướng dẫn bên phải lặp lại cùng
   // nhãn nên phải khoanh vùng trước khi đọc.
-  expect(within(screen.getByLabelText("Quy định file submission")).getByText("Còn 4/5 lượt hôm nay")).toBeTruthy();
+  expect(within(screen.getByLabelText("Quy định tệp nộp bài")).getByText("Còn 4/5 lượt hôm nay")).toBeTruthy();
   four.unmount();
 
   const one = withQuota(1);
@@ -235,18 +243,18 @@ test("thanh hạn mức dài theo đúng tỉ lệ còn lại và hạ mức mà
 test("chưa có số liệu quota thì không vẽ thanh, chỉ còn câu chữ", () => {
   renderPage();
   expect(document.querySelector(".sub-quota-track")).toBeNull();
-  expect(within(screen.getByLabelText("Quy định file submission")).getByText("5 lượt/ngày")).toBeTruthy();
+  expect(within(screen.getByLabelText("Quy định tệp nộp bài")).getByText("5 lượt/ngày")).toBeTruthy();
 });
 
 test("nút chọn file CSV là <button> thật nên Tab/Enter mở được picker", () => {
   renderPage();
-  const button = screen.getByRole("button", { name: "Chọn file CSV" });
+  const button = screen.getByRole("button", { name: "Chọn tệp CSV" });
   expect(button.tagName).toBe("BUTTON");
   expect(button).not.toBeDisabled();
   button.focus();
   expect(button).toHaveFocus();
 
-  const input = screen.getByLabelText("Chọn file CSV") as HTMLInputElement;
+  const input = screen.getByLabelText("Chọn tệp CSV") as HTMLInputElement;
   const openPicker = vi.spyOn(input, "click").mockImplementation(() => {});
   fireEvent.click(button);
   expect(openPicker).toHaveBeenCalledTimes(1);
@@ -315,7 +323,7 @@ test("cuộc thi bật norm: norm tạm là điểm nổi bật, metric gốc xu
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
   const normCard = document.querySelector<HTMLElement>('[data-metric="normalization"]');
   expect(normCard).toHaveClass("primary");
-  expect(within(normCard as HTMLElement).getByText("Norm score tạm")).toBeTruthy();
+  expect(within(normCard as HTMLElement).getByText("Điểm chuẩn hóa tạm")).toBeTruthy();
   expect(within(normCard as HTMLElement).getByText("37.50")).toBeTruthy();
 
   // Điểm gốc và các metric vẫn xem được, nhưng không còn được nhấn là điểm chính.
@@ -350,7 +358,7 @@ test("quyền xem norm bị thu hồi giữa chừng: snapshot trong payload b�
   expect(await screen.findByText("Kết quả chấm điểm")).toBeTruthy();
 
   expect(document.querySelector('[data-metric="normalization"]')).toBeNull();
-  expect(screen.queryByText("Norm score tạm")).toBeNull();
+  expect(screen.queryByText("Điểm chuẩn hóa tạm")).toBeNull();
   expect(screen.queryByText(/Con số tạm tính lúc/)).toBeNull();
   expect(screen.getByText("BXH đang được BTC ẩn; điểm chuẩn hóa chưa được hiển thị")).toBeTruthy();
   // Norm xuống khỏi màn hình thì metric nguồn trở lại là chỉ số chính.
@@ -359,10 +367,8 @@ test("quyền xem norm bị thu hồi giữa chừng: snapshot trong payload b�
   expect(within(f1Card as HTMLElement).getByText("Chỉ số chính")).toBeTruthy();
 });
 
-/** Cuộc thi dual: capability norm của nhánh do backend quyết, FE chỉ đọc lại. */
-function dualCompetition(
-  capability: Pick<ParticipantTrackView, "normalization_visible" | "normalization_hidden_reason">,
-): CompetitionDetail {
+/** Cuộc thi dual: lịch và capability norm của nhánh do backend quyết, FE chỉ đọc lại. */
+function dualCompetition(overrides: Partial<ParticipantTrackView> = {}): CompetitionDetail {
   const track: ParticipantTrackView = {
     start_at: "2026-01-01T00:00:00Z",
     end_at: "2027-01-01T00:00:00Z",
@@ -373,7 +379,7 @@ function dualCompetition(
     can_submit: true,
     blocked_reason: null,
     submission_ready: true,
-    ...capability,
+    ...overrides,
   };
   return { ...COMPETITION, mode: "public_private", tracks: { public: track, private: track } };
 }
@@ -488,7 +494,7 @@ test("quota còn lại hiển thị trước khi nộp và refetch sau khi nộp
       resets_at: "2026-09-18T00:00:00Z",
     },
   });
-  const rules = screen.getByLabelText("Quy định file submission");
+  const rules = screen.getByLabelText("Quy định tệp nộp bài");
   expect(rules).toHaveTextContent("Còn 3/5 lượt hôm nay");
 
   selectCsv();
@@ -517,7 +523,7 @@ test("hết quota thì khóa form và nêu giờ làm mới", () => {
   const banner = screen.getByText(/Bạn đã dùng hết 5 lượt nộp hôm nay/);
   expect(banner).toBeTruthy();
   expect(banner.textContent).toContain("Hạn mức làm mới lúc");
-  expect(screen.getByLabelText("Chọn file CSV")).toBeDisabled();
+  expect(screen.getByLabelText("Chọn tệp CSV")).toBeDisabled();
   expect(screen.getByLabelText("Chọn notebook")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeDisabled();
 });
@@ -541,7 +547,9 @@ test("validation error từ backend được hiển thị rõ", async () => {
   selectCsv("bad.csv", "id,prediction\n");
   selectNotebook();
   fireEvent.click(screen.getByRole("button", { name: "Nộp và chấm điểm" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Tập ID không khớp ground truth");
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("Tập ID không khớp ground truth");
+  expect(screen.getAllByText("SUBMISSION_ID_MISMATCH")).toHaveLength(2);
 });
 
 test("khóa form trước giờ mở và sau deadline với lý do rõ", () => {
@@ -733,6 +741,80 @@ test("mất quyền khi đang chờ chấm: báo shell khóa gate và dừng vò
   expect(urls.filter((url) => url.includes("/attempts/")).length).toBe(polls);
 });
 
+/** Nhánh Public vừa bị BTC dời lịch về tương lai: chưa mở, không nhận bài. */
+const LOCKED_PUBLIC: Partial<ParticipantTrackView> = {
+  start_at: "2026-11-01T00:00:00Z",
+  window_state: "scheduled",
+  can_submit: false,
+  blocked_reason: "not_open",
+};
+
+test("dual nhánh bị dời lịch khi đang chờ chấm: 403 TRACK_NOT_OPEN bỏ lượt, không thành lỗi hệ thống", async () => {
+  vi.useFakeTimers();
+  const urls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      urls.push(url);
+      if (init?.method === "POST") return json(queued(), 202);
+      if (url.endsWith("/submissions/attempts")) return json({ attempts: [] }, 200);
+      return json(
+        { error: { code: "TRACK_NOT_OPEN", message: "Nhánh này chưa mở nhận bài." } },
+        403,
+      );
+    }),
+  );
+
+  const entry = "/competitions/submit-cup/submit?track=public";
+  const view = renderPage(dualCompetition(), entry);
+  selectCsv();
+  selectNotebook();
+  fireEvent.click(screen.getByRole("button", { name: "Nộp nhánh Public và chấm điểm" }));
+  await flushTimers(0);
+  expect(screen.getByText("Bài đang chờ chấm")).toBeTruthy();
+
+  await flushTimers(POLL_MS);
+  // Lượt biến mất khỏi màn hình, không có băng lỗi, và shell được nhắc làm mới metadata.
+  expect(screen.queryByText("Bài đang chờ chấm")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(view.refreshCompetition).toHaveBeenCalled();
+  // Vòng hỏi trạng thái dừng: lượt không còn trên màn hình thì không còn gì để hỏi.
+  const polls = urls.filter((url) => url.includes("/attempts/")).length;
+  await flushTimers(POLL_MS * 5);
+  expect(urls.filter((url) => url.includes("/attempts/")).length).toBe(polls);
+
+  // Nhịp làm mới kế tiếp của shell đưa lịch mới xuống: băng khóa hiện đúng lý do, nút nộp bị chặn.
+  view.rerender(pageTree(dualCompetition(LOCKED_PUBLIC), entry, view.refreshCompetition));
+  expect(screen.getByText("Đang khóa")).toBeTruthy();
+  expect(screen.getByText("Nhánh này chưa mở nhận bài.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Nộp nhánh Public và chấm điểm" })).toBeDisabled();
+});
+
+test("dual nhánh bị dời lịch về sau: kết quả đang hiện bị bỏ và băng khóa thay chỗ", async () => {
+  vi.useFakeTimers();
+  mockScoring(queued(), completed());
+
+  const entry = "/competitions/submit-cup/submit?track=public";
+  const view = renderPage(dualCompetition(), entry);
+  selectCsv();
+  selectNotebook();
+  fireEvent.click(screen.getByRole("button", { name: "Nộp nhánh Public và chấm điểm" }));
+  // Hai nhịp hỏi: nhịp đầu còn QUEUED, nhịp sau mới COMPLETED - mỗi nhịp phải trọn một vòng render.
+  await flushTimers(POLL_MS);
+  await flushTimers(POLL_MS);
+  expect(screen.getByText("Kết quả chấm điểm · Nhánh Public")).toBeTruthy();
+
+  // BTC dời lịch nhánh Public về tương lai: shell thấy qua nhịp làm mới và đẩy metadata mới xuống.
+  view.rerender(pageTree(dualCompetition(LOCKED_PUBLIC), entry, view.refreshCompetition));
+
+  // Điểm cũ không được giữ lại trên màn hình dù backend đã trả payload lúc còn mở.
+  expect(screen.queryByText("Kết quả chấm điểm · Nhánh Public")).toBeNull();
+  expect(screen.queryByText("0.5000")).toBeNull();
+  expect(screen.getByText("Đang khóa")).toBeTruthy();
+  expect(screen.getByText("Nhánh này chưa mở nhận bài.")).toBeTruthy();
+});
+
 test("quá 60 giây thì báo không tính lượt và cho nộp lại bằng key mới", async () => {
   vi.useFakeTimers();
   const sent = mockScoring(queued(), queued());
@@ -775,6 +857,8 @@ test("lượt hỏng thì hiện lý do, không tính lượt và vẫn nộp l�
 
   const alert = screen.getByRole("alert");
   expect(alert).toHaveTextContent("Cuộc thi hiện không nhận bài nộp.");
+  expect(alert).toHaveTextContent("SUBMISSION_CLOSED");
+  expect(alert).toHaveTextContent("attempt-1");
   expect(alert).toHaveTextContent("Lượt này không bị tính vào hạn mức nộp.");
   expect(screen.getByText("result.csv")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Nộp và chấm điểm" })).toBeEnabled();

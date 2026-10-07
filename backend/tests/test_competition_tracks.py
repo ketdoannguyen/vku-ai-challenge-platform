@@ -2,7 +2,7 @@
 
 Nhóm test này khóa ranh giới của các giai đoạn A-D: domain contract, cấu hình nhánh, GT riêng,
 bằng chứng xác minh theo nhánh, khóa scoring, quyền nộp/quota/vòng đời lượt, và riêng tư kết quả
-Private chưa công bố trên mọi bề mặt thí sinh.
+Private chưa công bố trên mọi bề mặt thí sinh - kể cả khi BTC dời một nhánh về chưa mở.
 """
 
 import asyncio
@@ -17,9 +17,11 @@ from openpyxl import load_workbook
 from app.accounts.service import ACCOUNTS_COLLECTION
 from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
+from app.ai_review import constants as ai_constants
 from app.ai_review import content_snapshot
 from app.core.datetimes import utc_day_key
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.scoring import contracts
 from app.scoring_attempts import service as attempts_service
 from app.scoring_attempts import store as attempts_store
 from app.scoring_attempts import worker
@@ -2057,6 +2059,346 @@ def test_single_khong_doi_hinh_dang_dto_sau_khi_them_nhanh(client):
     assert export.status_code == 200, export.text
     assert "-results-" in export.headers["content-disposition"]
     assert "provisional" not in export.headers["content-disposition"]
+
+
+# --- Giai đoạn D: nhánh chưa tới giờ mở khóa mọi dữ liệu cũ của nhánh --------------------------------
+#
+# Cùng chuẩn bằng chứng với mục riêng tư phía trên: khi một nhánh dual bị dời về `scheduled` - kể cả
+# sau khi đã nhận bài - mọi bề mặt thí sinh của nhánh đó phải khóa, và giá trị điểm nhận dạng được
+# không được rời backend ở bất kỳ payload nào. Khóa chỉ là quyền đọc tạm thời: mở lại là bản ghi,
+# điểm, tệp và thứ hạng cũ hiện nguyên vẹn - không chấm lại, không hoàn quota, không xóa gì.
+
+RESCHEDULE_REASON = "Dời giờ mở nhánh Public để bổ sung ground truth"
+
+
+def _move_track(
+    client,
+    competition_id: str,
+    track: str,
+    *,
+    start_in: timedelta,
+    end_in: timedelta,
+    reason: str = RESCHEDULE_REASON,
+) -> dict:
+    """Dời lịch một nhánh bằng quyền admin với revision hiện tại; trả detail sau ghi.
+
+    Kết thúc ở phiên admin - người gọi tự quay lại phiên thí sinh.
+    """
+    login(client)
+    revision = client.get(f"/api/admin/competitions/{competition_id}").json()["control_revision"]
+    now = datetime.now(timezone.utc)
+    moved = client.patch(
+        f"/api/admin/competitions/{competition_id}/tracks/{track}/schedule",
+        json={
+            "start_at": iso(now + start_in),
+            "end_at": iso(now + end_in),
+            "expected_revision": revision,
+            "reason": reason,
+        },
+    )
+    assert moved.status_code == 200, moved.text
+    return moved.json()
+
+
+def test_khoa_nhanh_chua_mo_khong_lo_bat_ky_bay_nao(client, fake_runner):
+    """Public bị dời giờ mở sau khi đã nhận bài: mọi bề mặt thí sinh khóa, bản ghi vẫn nằm nguyên.
+
+    Lượt Public cố ý còn trong hàng đợi lúc dời lịch: cổng admission đã chốt lúc nhận bài nên
+    worker phải chấm xong bất chấp nhánh bị khóa - khóa là chuyện quyền đọc, không phải chuyện chấm.
+    """
+    login(client)
+    body = dual_body(slug="lock-cup")
+    body["normalization"] = {"enabled": True, "baseline": 0.5}
+    payload = create_dual_ok(client, body)
+    cid = payload["id"]
+    publish_dual_v2(client, cid, slug="lock-cup")
+
+    fake_runner.metrics = {"accuracy": PRIVATE_SCORE, "n_items": 4.0}
+    assert submit(client, cid, V2_SUBMISSION, track="private").status_code == 202
+    assert run_worker(client) == 1
+    _release_private(client, cid)
+
+    fake_runner.metrics = {"accuracy": PUBLIC_SCORE, "n_items": 4.0}
+    public_posted = submit(client, cid, V2_SUBMISSION, track="public", key="lock-cup-public")
+    assert public_posted.status_code == 202, public_posted.text
+    public_attempt = public_posted.json()["attempt_id"]
+    waiting = client.get(f"/api/competitions/{cid}/submissions/attempts")
+    assert [row["track"] for row in waiting.json()["attempts"]] == ["public"]
+
+    moved = _move_track(
+        client, cid, "public", start_in=timedelta(hours=2), end_in=timedelta(hours=4)
+    )
+    assert moved["tracks"]["public"]["window_state"] == "scheduled"
+    login_participant(client)
+
+    # Danh sách lượt chờ: lượt của nhánh khóa không hiện lại, kể cả khi lọc đích danh nhánh đó.
+    active = client.get(f"/api/competitions/{cid}/submissions/attempts")
+    assert active.status_code == 200
+    assert active.json()["attempts"] == []
+    active_public = client.get(
+        f"/api/competitions/{cid}/submissions/attempts", params={"track": "public"}
+    )
+    assert active_public.status_code == 200
+    assert active_public.json()["attempts"] == []
+
+    # Chi tiết lượt 403 chứ không 404: chủ bài vẫn là chủ bài, chỉ nhánh đang khóa.
+    locked_poll = client.get(f"/api/competitions/{cid}/submissions/attempts/{public_attempt}")
+    assert locked_poll.status_code == 403
+    assert err(locked_poll)["code"] == "TRACK_NOT_OPEN"
+
+    # Worker vẫn chấm và ghi điểm thật: khóa không đi ngược vào hàng đợi đã nhận.
+    assert run_worker(client) == 1
+    stored_public = submission_documents(client, {"track": "public"})[0]
+    assert stored_public["primary_score"] == PUBLIC_SCORE
+
+    after_worker = client.get(f"/api/competitions/{cid}/submissions/attempts/{public_attempt}")
+    assert after_worker.status_code == 403
+    assert err(after_worker)["code"] == "TRACK_NOT_OPEN"
+    locked_file = client.get(f"/api/competitions/{cid}/submissions/{public_attempt}/prediction")
+    assert locked_file.status_code == 403
+    assert err(locked_file)["code"] == "TRACK_NOT_OPEN"
+    locked_notebook = client.get(f"/api/competitions/{cid}/submissions/{public_attempt}/notebook")
+    assert locked_notebook.status_code == 403
+
+    # Lịch sử: bản ghi Public biến mất từ truy vấn - total và phân trang không có lỗ hổng.
+    history = client.get(f"/api/competitions/{cid}/submissions/me")
+    assert history.status_code == 200, history.text
+    assert history.json()["total"] == 1
+    assert [row["track"] for row in history.json()["submissions"]] == ["private"]
+    page_two = client.get(
+        f"/api/competitions/{cid}/submissions/me", params={"limit": 1, "offset": 1}
+    )
+    assert page_two.json() == {"submissions": [], "total": 1, "limit": 1, "offset": 1}
+
+    # BXH: nhánh khóa trả mã riêng đứng trước cả luật công bố; nhánh Private đã công bố vẫn nguyên.
+    locked_board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "public"})
+    assert locked_board.status_code == 403
+    assert err(locked_board)["code"] == "TRACK_NOT_OPEN"
+    private_board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "private"})
+    assert private_board.status_code == 200, private_board.text
+    assert private_board.json()["entries"][0]["primary_score"] == PRIVATE_SCORE
+
+    # Thẻ danh sách và trang chi tiết: nhánh khóa không đóng góp con số nào, không quota, không
+    # capability chuẩn hóa - nếu không, thí sinh suy được là nhánh đã từng nhận bài.
+    listing = client.get("/api/competitions")
+    card = next(c for c in listing.json()["competitions"] if c["id"] == cid)
+    assert card["submission_count"] == 1
+    assert card["my_submission_count"] == 1
+    assert card["my_stats_by_track"]["public"] == {
+        "rank": None,
+        "rank_total": None,
+        "best_score": None,
+        "best_normalized_score": None,
+        "used_today": 0,
+    }
+    private_stats = card["my_stats_by_track"]["private"]
+    assert private_stats["best_score"] == PRIVATE_SCORE
+    assert private_stats["used_today"] == 1
+
+    detail = client.get("/api/competitions/lock-cup")
+    tracks = detail.json()["tracks"]
+    assert tracks["public"]["window_state"] == "scheduled"
+    assert tracks["public"]["can_submit"] is False
+    assert tracks["public"]["blocked_reason"] == "not_open"
+    assert tracks["public"]["resources"] == []
+    assert "quota" not in tracks["public"]
+    assert tracks["public"]["normalization_visible"] is False
+    assert tracks["public"]["normalization_hidden_reason"] == "track_not_open"
+    assert tracks["private"]["quota"]["used_today"] == 1
+    assert tracks["private"]["normalization_visible"] is True
+
+    # Nộp lại bằng chính idempotency key cũ không hồi sinh lượt: cửa nhánh chưa mở trả 422 như mọi
+    # lần nộp mới, và không sinh thêm bản ghi nào.
+    replay = submit(client, cid, V2_SUBMISSION, track="public", key="lock-cup-public")
+    assert replay.status_code == 422, replay.text
+    assert err(replay)["code"] == "SUBMISSION_NOT_OPEN"
+    assert len(attempt_documents(client, {"track": "public"})) == 1
+
+    secret = repr(PUBLIC_SCORE)
+    for response in (
+        active,
+        active_public,
+        locked_poll,
+        after_worker,
+        locked_file,
+        locked_notebook,
+        history,
+        page_two,
+        locked_board,
+        listing,
+        detail,
+        replay,
+    ):
+        assert secret not in response.text
+
+    # Đường admin không đi qua cổng khóa: BTC vẫn đọc đủ hai nhánh để vận hành.
+    login(client)
+    admin_rows = client.get(f"/api/admin/competitions/{cid}/submissions")
+    assert admin_rows.status_code == 200, admin_rows.text
+    rows = {row["track"]: row for row in admin_rows.json()["submissions"]}
+    assert rows["public"]["primary_score"] == PUBLIC_SCORE
+    assert rows["private"]["primary_score"] == PRIVATE_SCORE
+
+    # Mở lại: dữ liệu cũ hiện nguyên vẹn, không chấm lại, quota đã tiêu không được hoàn.
+    _move_track(
+        client,
+        cid,
+        "public",
+        start_in=timedelta(hours=-2),
+        end_in=timedelta(hours=2),
+        reason="Mở lại nhánh Public sau khi bổ sung ground truth",
+    )
+    login_participant(client)
+    assert run_worker(client) == 0
+    reopened = attempt_status(client, cid, public_attempt)["submission"]
+    assert reopened["result_visibility"] == "visible"
+    assert reopened["primary_score"] == PUBLIC_SCORE
+    assert reopened["artifacts"]["prediction"]["available"] is True
+
+    both = client.get(f"/api/competitions/{cid}/submissions/me").json()
+    assert both["total"] == 2
+    assert {row["track"]: row["primary_score"] for row in both["submissions"]} == {
+        "public": PUBLIC_SCORE,
+        "private": PRIVATE_SCORE,
+    }
+    stored_after = submission_documents(client, {"track": "public"})[0]
+    assert stored_after["metrics"] == stored_public["metrics"]
+
+    reopened_board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "public"})
+    assert reopened_board.status_code == 200, reopened_board.text
+    assert reopened_board.json()["entries"][0]["primary_score"] == PUBLIC_SCORE
+    reopened_track = client.get("/api/competitions/lock-cup").json()["tracks"]["public"]
+    assert reopened_track["quota"]["used_today"] == 1
+    assert reopened_track["normalization_visible"] is True
+
+
+def test_cong_bo_private_khong_go_khoa_nhanh_chua_mo(client, fake_runner):
+    """Private đã công bố nhưng bị dời về chưa mở: khóa đứng trước luật công bố, dấu release nguyên."""
+    cid, attempt_id, _ = _private_submission(client, fake_runner, "relock-cup", PRIVATE_SCORE)
+    released = _release_private(client, cid)
+    assert released["tracks"]["private"]["results_released"] is True
+    assert attempt_status(client, cid, attempt_id)["submission"]["result_visibility"] == "visible"
+
+    _move_track(client, cid, "private", start_in=timedelta(hours=1), end_in=timedelta(hours=3))
+    login_participant(client)
+
+    locked_poll = client.get(f"/api/competitions/{cid}/submissions/attempts/{attempt_id}")
+    assert locked_poll.status_code == 403
+    assert err(locked_poll)["code"] == "TRACK_NOT_OPEN"
+    # Mã phải là "nhánh chưa mở", không phải "chưa công bố" - FE vẽ đúng thẻ khóa.
+    board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "private"})
+    assert board.status_code == 403
+    assert err(board)["code"] == "TRACK_NOT_OPEN"
+    history = client.get(f"/api/competitions/{cid}/submissions/me")
+    assert history.json()["total"] == 0
+    assert history.json()["submissions"] == []
+    for response in (locked_poll, board, history):
+        assert repr(PRIVATE_SCORE) not in response.text
+
+    # Dấu công bố không bị gỡ và quota đã tiêu không bị hoàn: mở lại chỉ mở cửa đọc.
+    login(client)
+    admin_detail = client.get(f"/api/admin/competitions/{cid}").json()
+    assert admin_detail["tracks"]["private"]["results_released"] is True
+    assert _track_used(client, cid, "private") == 1
+
+    _move_track(
+        client,
+        cid,
+        "private",
+        start_in=timedelta(hours=-1),
+        end_in=timedelta(hours=2),
+        reason="Mở lại nhánh Private sau khi kiểm tra",
+    )
+    login_participant(client)
+    reopened = attempt_status(client, cid, attempt_id)["submission"]
+    assert reopened["result_visibility"] == "visible"
+    assert reopened["primary_score"] == PRIVATE_SCORE
+    reopened_board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "private"})
+    assert reopened_board.status_code == 200, reopened_board.text
+    assert reopened_board.json()["entries"][0]["primary_score"] == PRIVATE_SCORE
+
+
+def test_nhanh_da_dong_khac_nhanh_chua_mo(client, fake_runner):
+    """Quá hạn nộp không phải khóa: bài cũ của nhánh đã đóng vẫn đọc được, chỉ chờ luật công bố."""
+    cid, attempt_id, _ = _private_submission(client, fake_runner, "closed-cup", PRIVATE_SCORE)
+
+    moved = _move_track(
+        client,
+        cid,
+        "private",
+        start_in=timedelta(hours=-3),
+        end_in=timedelta(hours=-1),
+        reason="Đóng nhánh Private để chạy tổng kết",
+    )
+    assert moved["tracks"]["private"]["window_state"] == "closed"
+    login_participant(client)
+
+    polled = attempt_status(client, cid, attempt_id)["submission"]
+    assert polled["result_visibility"] == "hidden"
+    assert polled["visibility_reason"] == "private_unpublished"
+    history = client.get(f"/api/competitions/{cid}/submissions/me").json()
+    assert history["total"] == 1
+    assert history["submissions"][0]["track"] == "private"
+    board = client.get(f"/api/competitions/{cid}/leaderboard", params={"track": "private"})
+    assert board.status_code == 403
+    assert err(board)["code"] == "PRIVATE_RESULTS_UNPUBLISHED"
+
+
+def test_dto_bai_nop_chieu_khoa_theo_lich_tai_thoi_diem_tra(client, fake_runner):
+    """Cùng một bản ghi, đổi lịch trong document là DTO khóa tệp/snapshot/AI - mọi đường trả đều vậy.
+
+    Đường trả bài ngay sau POST và các response đang bay không dựng lại được bằng request khi nhánh
+    đã khóa, nên chốt ở đúng tầng chiếu DTO: `public_submission` phải đọc lịch hiện tại của nhánh.
+    """
+    login(client)
+    body = dual_body(slug="dto-lock-cup")
+    body["normalization"] = {"enabled": True, "baseline": 0.5}
+    payload = create_dual_ok(client, body)
+    cid = payload["id"]
+    publish_dual_v2(client, cid, slug="dto-lock-cup")
+    fake_runner.metrics = {"accuracy": PUBLIC_SCORE, "n_items": 4.0}
+    assert submit(client, cid, V2_SUBMISSION, track="public").status_code == 202
+    assert run_worker(client) == 1
+
+    stored = submission_documents(client, {"track": "public"})[0]
+    competition = _competition_doc(client, cid)
+    contract = contracts.participant_contract(competition)
+
+    def project(document: dict) -> dict:
+        return submissions_service.public_submission(
+            document, 5, competition=competition, ai_visible=True, contract=contract
+        )
+
+    # Bản ghi thật không mang `ai_review` (cuộc thi chưa bật AI); ghim thêm một projection hợp lệ
+    # để chứng minh khóa che cả AI review chứ không chỉ điểm.
+    document = dict(stored)
+    document["ai_review"] = {
+        "state": ai_constants.AI_STATE_COMPLETED,
+        "verdict": ai_constants.VERDICT_CLEAR,
+    }
+
+    visible = project(document)
+    assert visible["result_visibility"] == "visible"
+    assert visible["primary_score"] == PUBLIC_SCORE
+    assert visible["artifacts"]["prediction"]["available"] is True
+    assert "normalization_snapshot" in visible
+    assert visible["ai_review"]["state"] == ai_constants.AI_STATE_COMPLETED
+
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    competition["tracks"]["public"]["start_at"] = future
+    competition["tracks"]["public"]["end_at"] = future + timedelta(hours=2)
+
+    locked = project(document)
+    assert locked["result_visibility"] == "hidden"
+    assert locked["visibility_reason"] == "track_not_open"
+    assert locked["primary_score"] is None
+    assert locked["metrics"] == {}
+    assert locked["artifacts"] == {"prediction": None, "notebook": None}
+    assert "normalization_snapshot" not in locked
+    assert "ai_review" not in locked
+
+    # Bản ghi trong DB không bị đụng: chiếu DTO là quyết định tại thời điểm trả, không ghi ngược.
+    assert submission_documents(client, {"track": "public"})[0]["primary_score"] == PUBLIC_SCORE
 
 
 # --- AI review theo nhánh --------------------------------------------------------------------------

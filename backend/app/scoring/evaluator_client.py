@@ -11,7 +11,7 @@ from typing import NamedTuple
 import httpx
 
 from app.core.config import Settings
-from app.scoring.errors import EvaluatorError, ScoringValidationError
+from app.scoring.errors import CLASS_ID_INVALID, EvaluatorError, ScoringValidationError, valid_class_info
 from app.scoring.output_validation import validate_metrics
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,7 @@ REPORTED_CODES = frozenset(
         "EVALUATOR_FAILED",
         "EVALUATOR_OUTPUT_MISMATCH",
         "SUBMISSION_RULE_VIOLATION",
+        CLASS_ID_INVALID,
         UNAVAILABLE,
     }
 )
@@ -93,10 +94,14 @@ def _parse(response: httpx.Response) -> EvaluatorResult:
 
     code = body.get("code")
     if code in REPORTED_CODES:
+        class_info = valid_class_info(body.get("class_info")) if code == CLASS_ID_INVALID else None
+        if code == CLASS_ID_INVALID and class_info is None:
+            raise EvaluatorError("EVALUATOR_FAILED", "Bộ chấm trả về mã lớp không hợp lệ.")
         raise EvaluatorError(
             code,
             str(body.get("message") or "Bộ chấm không chạy được."),
             detail=body.get("detail") or None,
+            class_info=class_info,
         )
     logger.warning("Runner trả về %s với nội dung không nhận ra: %s", response.status_code, body)
     raise EvaluatorError(UNAVAILABLE, "Máy chấm đang không sẵn sàng.")

@@ -8,10 +8,11 @@ Thời gian được tua bằng cách sửa thẳng document của lượt, khô
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from bson import ObjectId
 
 from app.core.config import get_settings
-from app.scoring.errors import EvaluatorError
+from app.scoring.errors import EvaluatorError, ScoringValidationError
 from app.scoring_attempts import service as attempts_service, worker
 from app.scoring_attempts.store import ATTEMPTS_COLLECTION
 from app.submissions import service as submissions_service
@@ -212,12 +213,50 @@ def test_bai_hong_thi_hoan_luot_va_khong_giu_file_tam(client, fake_runner, fake_
     body = attempt_status(client, cid, queued["attempt_id"])
     assert body["status"] == "FAILED"
     assert body["error"] == {
-        "code": "EVALUATOR_FAILED", "message": attempts_service.GENERIC_MESSAGE
+        "code": "EVALUATOR_FAILED", "message": attempts_service.SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"]
     }
     assert _quota_used(client, cid) == 0
     assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
     # Lượt hỏng không tiêu lượt nên thí sinh nộp lại được ngay.
     assert submit(client, cid, V2_SUBMISSION).status_code == 202
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("EVALUATOR_FAILED", "Bộ chấm"),
+        ("EVALUATOR_TIMEOUT", "quá thời gian"),
+        ("EVALUATOR_OUTPUT_MISMATCH", "kết quả"),
+        ("EVALUATOR_UNAVAILABLE", "tạm thời"),
+        ("SCORING_NOT_READY", "Ban Tổ chức"),
+        ("ARTIFACT_MISSING", "lưu trữ"),
+        ("SUBMISSION_RESOLVING", "đối soát"),
+    ],
+)
+def test_public_error_classifies_system_failures_without_leaking_internal_detail(code, expected):
+    public = attempts_service.public_error({"code": code, "message": "PRIVATE GT / source / traceback"})
+    assert public == {"code": code, "message": public["message"]}
+    assert expected in public["message"]
+    assert "PRIVATE" not in public["message"]
+    assert "traceback" not in public["message"]
+
+
+def test_worker_ground_truth_error_is_not_reported_as_student_csv(client, fake_runner, monkeypatch):
+    competition = publish_v2_competition(client)
+    queued = submit(client, competition["id"], V2_SUBMISSION).json()
+
+    async def invalid_ground_truth(*_args, **_kwargs):
+        raise ScoringValidationError("GROUND_TRUTH_INVALID", "PRIVATE GT value")
+
+    monkeypatch.setattr(worker.scoring_flow, "score_v2", invalid_ground_truth)
+    assert run_worker(client) == 1
+    body = attempt_status(client, competition["id"], queued["attempt_id"])
+    assert body["error"] == {
+        "code": "SCORING_NOT_READY",
+        "message": attempts_service.SYSTEM_ERROR_MESSAGES["SCORING_NOT_READY"],
+    }
+    assert "PRIVATE" not in str(body)
+    assert _quota_used(client, competition["id"]) == 0
 
 
 def test_csv_rule_failure_shows_fixed_message_and_refunds(client, fake_runner, fake_artifact_storage):
@@ -240,6 +279,57 @@ def test_csv_rule_failure_shows_fixed_message_and_refunds(client, fake_runner, f
     assert _quota_used(client, cid) == 0
     assert not submission_documents(client)
     assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
+
+
+def test_invalid_class_id_shows_allowed_ids_and_refunds(client, fake_runner, fake_artifact_storage):
+    competition = publish_v2_competition(client)
+    cid = competition["id"]
+    fake_runner.error = EvaluatorError(
+        "SUBMISSION_CLASS_ID_INVALID",
+        "SECRET: ground truth",
+        detail="private traceback",
+        class_info={"class_id": 6, "allowed_class_ids": [0, 1, 2, 3, 4, 5]},
+    )
+    queued = submit(client, cid, V2_SUBMISSION).json()
+    assert run_worker(client) == 1
+    body = attempt_status(client, cid, queued["attempt_id"])
+    assert body["status"] == "FAILED"
+    assert body["error"] == {
+        "code": "SUBMISSION_CLASS_ID_INVALID",
+        "message": "Mã lớp 6 không hợp lệ. Các mã lớp được chấp nhận: 0, 1, 2, 3, 4, 5.",
+    }
+    assert "SECRET" not in str(body) and "traceback" not in str(body)
+    assert _quota_used(client, cid) == 0
+    assert not submission_documents(client)
+    assert not [key for key in fake_artifact_storage.objects if "staging/scoring" in key]
+
+
+def test_invalid_class_id_without_valid_metadata_is_generic(client, fake_runner):
+    competition = publish_v2_competition(client)
+    cid = competition["id"]
+    fake_runner.error = EvaluatorError(
+        "SUBMISSION_CLASS_ID_INVALID",
+        "SECRET",
+        class_info={"class_id": 6, "allowed_class_ids": []},
+    )
+    queued = submit(client, cid, V2_SUBMISSION).json()
+    assert run_worker(client) == 1
+    assert attempt_status(client, cid, queued["attempt_id"])["error"] == {
+        "code": "EVALUATOR_FAILED", "message": attempts_service.SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"],
+    }
+
+
+def test_stored_class_metadata_is_checked_again_before_publication():
+    assert attempts_service.public_error({
+        "code": "SUBMISSION_CLASS_ID_INVALID",
+        "message": "SECRET",
+        "class_info": {"class_id": "SECRET", "allowed_class_ids": [0, 1]},
+    }) == {"code": "EVALUATOR_FAILED", "message": attempts_service.SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"]}
+    assert attempts_service.public_error({
+        "code": "EVALUATOR_FAILED",
+        "message": "SECRET",
+        "class_info": {"class_id": 6, "allowed_class_ids": [0, 1]},
+    }) == {"code": "EVALUATOR_FAILED", "message": attempts_service.SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"]}
 
 
 def test_hoan_luot_hai_lan_khong_thanh_hai_suat(client, fake_runner):
@@ -456,7 +546,7 @@ def test_ghi_bai_khong_ro_ket_qua_ma_khong_co_diem_thi_dong_luot(client, fake_ru
     assert _reconcile(client)["resolved"] == 1
     body = attempt_status(client, cid, queued["attempt_id"])
     assert body["status"] == "FAILED"
-    assert body["error"]["message"] == "Không thể chấm điểm bài nộp này."
+    assert body["error"]["message"] == attempts_service.SYSTEM_ERROR_MESSAGES["SCORING_FAILED"]
     assert _quota_used(client, cid) == 0
 
 

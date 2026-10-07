@@ -12,8 +12,8 @@ export type CleanNormalizationResult =
   | { ok: true; normalization: { enabled: boolean; baseline: number | null } }
   | { ok: false; message: string };
 
-/** Nhãn cố định cho con số lịch sử ghi cùng bài nộp - không được gọi là norm hiện tại. */
-export const PROVISIONAL_NORM_LABEL = "Norm score tạm";
+/** Nhãn cố định cho con số lịch sử ghi cùng bài nộp - không được gọi là điểm hiện tại. */
+export const PROVISIONAL_NORM_LABEL = "Điểm chuẩn hóa tạm";
 
 /** Câu giải thích khi norm bị ẩn vì master BXH tắt, kể cả khi nhánh Private đã công bố. */
 export const NORM_HIDDEN_BY_LEADERBOARD_NOTE =
@@ -74,7 +74,7 @@ export function currentNormHiddenReason(
  * không mô tả luật khác nhau.
  */
 export const NORM_RANKING_NOTE =
-  "Điểm norm cập nhật theo kết quả hợp lệ tốt nhất hiện tại. Bằng norm: bài hợp lệ đạt điểm đó được nộp sớm hơn đứng trước.";
+  "Điểm chuẩn hóa cập nhật theo kết quả hợp lệ tốt nhất hiện tại. Bằng điểm chuẩn hóa: bài hợp lệ đạt điểm đó được nộp sớm hơn đứng trước.";
 
 /**
  * Chuẩn hóa form cấu hình norm. Bật thì baseline bắt buộc là số hữu hạn (0 và số âm vẫn hợp lệ

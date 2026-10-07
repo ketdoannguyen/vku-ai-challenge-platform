@@ -79,7 +79,7 @@ def test_config_and_ground_truth_create_ready_metadata(client, isolated_data_dir
         "ready": False,
         "not_ready_reason": {
             "code": "SCORING_CONFIG_REQUIRED",
-            "message": "Cần cấu hình chấm điểm trước khi publish cuộc thi.",
+            "message": "Cần cấu hình chấm điểm trước khi xuất bản cuộc thi.",
         },
         "locked": False,
         "version": 1,

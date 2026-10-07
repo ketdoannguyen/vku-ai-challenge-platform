@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/admin/competitions")
 
 _SLUG_EXISTS_MESSAGE = "Slug này đã có cuộc thi khác dùng."
-_JOIN_CODE_REQUIRED_MESSAGE = "Cần cấu hình mã tham gia trước khi publish cuộc thi."
+_JOIN_CODE_REQUIRED_MESSAGE = "Cần cấu hình mã tham gia trước khi xuất bản cuộc thi."
 # Số ứng viên tối đa cho slug clone trước khi bỏ cuộc - chặn vòng lặp vô hạn khi slug gốc quá dài.
 _CLONE_SUFFIX = "-copy"
 _CLONE_SLUG_ATTEMPTS = 5
@@ -495,7 +495,7 @@ async def publish_private_results(
     if competition_tracks.results_released(competition, competition_tracks.PRIVATE):
         return _admin_detail(competition)
     if competition["status"] == "draft":
-        raise api_error(422, "VALIDATION_ERROR", "Cần publish cuộc thi trước khi công bố kết quả Private.")
+        raise api_error(422, "VALIDATION_ERROR", "Cần xuất bản cuộc thi trước khi công bố kết quả Private.")
 
     now = datetime.now(timezone.utc)
     guard = {
@@ -671,7 +671,7 @@ async def _transition(
         raise api_error(
             409,
             "SCORING_REVISION_CONFLICT",
-            "Cấu hình chấm điểm vừa thay đổi, tải lại trang rồi publish lại.",
+            "Cấu hình chấm điểm vừa thay đổi, tải lại trang rồi xuất bản lại.",
         )
     logger.info("Admin %s %s competition %s", admin["email"], _TRANSITION_PAST[action], competition["slug"])
     return _admin_detail(await _get_competition_or_404(db, competition_id))

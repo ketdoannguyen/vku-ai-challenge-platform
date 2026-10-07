@@ -5,7 +5,12 @@ Chỉ thành viên đang hoạt động (hoặc admin) đọc được bảng x�
 
 Cuộc thi dual có hai bảng độc lập: client phải chỉ rõ nhánh, và bảng Private chưa công bố bị chặn
 bằng mã riêng `PRIVATE_RESULTS_UNPUBLISHED` - khác hẳn "BXH bị ẩn" để FE nói đúng chuyện đang xảy ra.
+
+Nhánh chưa tới giờ mở đứng trước cả hai luật trên: bảng của nhánh scheduled là `TRACK_NOT_OPEN`,
+kể cả khi Private đã công bố hoặc tab đang mở từ trước - dời lịch về sau là bảng khóa ngay.
 """
+
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Query, Request
 
@@ -35,6 +40,14 @@ async def leaderboard(
         resolved_track = competition_tracks.resolve_track(competition, track)
     except competition_tracks.TrackError as exc:
         raise api_error(422, exc.code, exc.message)
+    if competition_tracks.track_locked(competition, resolved_track, datetime.now(timezone.utc)):
+        # Khóa do chưa mở phải đứng trước release/master: bảng của nhánh chưa mở không có lý do
+        # nào để lộ ra, và FE cần mã riêng này để vẽ thẻ "nhánh đang khóa" thay vì thẻ công bố.
+        raise api_error(
+            403,
+            "TRACK_NOT_OPEN",
+            "Nhánh này chưa mở nhận bài nộp; bảng xếp hạng chưa xem được.",
+        )
     if not competition_tracks.results_visible(competition, resolved_track):
         raise api_error(
             403,

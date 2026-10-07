@@ -42,7 +42,7 @@ function submitBlockedReason(c: CompetitionMetadata): string {
   if (c.status === "closed") return "Cuộc thi đã kết thúc nên không nhận thêm bài nộp.";
   if (c.quota_per_day === 0) return "Cuộc thi hiện không nhận bài nộp.";
   if (c.join_mode === "invite_only")
-    return "Cuộc thi chỉ dành cho thí sinh được mời - liên hệ Ban Tổ chức để được cấp quyền tham gia.";
+    return "Cuộc thi chỉ dành cho thí sinh được mời — liên hệ Ban Tổ chức để được cấp quyền tham gia.";
   if (c.join_mode === "code")
     return "Nhập mã do Ban Tổ chức cấp ở khối tham gia phía trên để bắt đầu nộp bài.";
   return "Bấm “Tham gia cuộc thi” ở khối phía trên để bắt đầu nộp bài.";
@@ -123,7 +123,7 @@ export function CompetitionOverview() {
             <li>
               <strong>Xếp hạng.</strong>{" "}
               <span>
-                Điểm xếp hạng là norm score (thang 0–50) quy đổi từ điểm gốc
+                Điểm xếp hạng là điểm chuẩn hóa (norm score, thang 0–50) quy đổi từ điểm gốc
                 {c.primary_metric_label ? ` ${c.primary_metric_label}` : ""}; công thức chi tiết ở
                 bảng xếp hạng.
               </span>

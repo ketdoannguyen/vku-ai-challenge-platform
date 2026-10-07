@@ -124,7 +124,7 @@ export interface SubmissionHistoryItem {
    */
   result_visibility?: "hidden" | "visible";
   /** Lý do bị che khi `hidden`; đủ ổn định để UI đối chiếu. */
-  visibility_reason?: "private_unpublished";
+  visibility_reason?: "private_unpublished" | "track_not_open";
   error?: { code: string; message: string };
   /** Chỉ có mặt khi bài đang bị từ chối; endpoint admin ghi đè bằng shape đầy đủ. */
   review?: ParticipantReview;
@@ -142,7 +142,7 @@ export interface SubmissionsResponse {
 }
 
 export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], string> = {
-  completed: "Đã chấm điểm",
+  completed: "Đã chấm xong",
   rejected: "Không hợp lệ",
   failed: "Lỗi chấm điểm",
 };
@@ -150,7 +150,7 @@ export const SUBMISSION_STATUS_LABEL: Record<SubmissionHistoryItem["status"], st
 /** Nhãn kết quả duyệt; bài chưa có quyết định được duyệt mặc định ở danh sách. */
 export const REVIEW_STATUS_LABEL: Record<ReviewStatus, string> = {
   accepted: "Duyệt",
-  rejected: "Không duyệt",
+  rejected: "Không chấp nhận",
 };
 
 /**

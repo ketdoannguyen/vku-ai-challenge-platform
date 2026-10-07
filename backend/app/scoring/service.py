@@ -168,6 +168,10 @@ def _read_required_rows(
             raise ScoringValidationError(error_code, "Header CSV không hợp lệ.")
         missing_columns = [column for column in required_columns if column not in columns]
         if missing_columns:
+            if len(columns) == 1 and ";" in columns[0] and set(columns[0].split(";")) >= set(required_columns):
+                raise ScoringValidationError(
+                    error_code, "Header CSV dùng dấu chấm phẩy; hãy phân cách các cột bằng dấu phẩy (,)."
+                )
             raise ScoringValidationError(
                 error_code,
                 f"File CSV thiếu cột bắt buộc: {', '.join(missing_columns)}.",
@@ -179,8 +183,9 @@ def _read_required_rows(
         for raw_row in reader:
             if len(rows) >= MAX_CSV_ROWS:
                 raise ScoringValidationError(error_code, f"File CSV vượt quá {MAX_CSV_ROWS} dòng.")
-            if None in raw_row:
-                raise ScoringValidationError(error_code, "Một dòng CSV có số cột không hợp lệ.")
+            line = reader.line_num
+            if None in raw_row or any(value is None for value in raw_row.values()):
+                raise ScoringValidationError(error_code, f"Dòng {line} có số cột không khớp header CSV.")
             row: dict[str, str] = {}
             for column in required_columns:
                 value = raw_row.get(column)
@@ -191,7 +196,7 @@ def _read_required_rows(
                         else "SUBMISSION_VALUE_INVALID"
                     )
                     raise ScoringValidationError(
-                        value_code, f"Cột {column} chứa giá trị rỗng."
+                        value_code, f"Cột {column} tại dòng {line} không được để trống."
                     )
                 row[column] = value.strip()
             row_id = row[id_column]
@@ -201,11 +206,11 @@ def _read_required_rows(
                     if kind == "ground_truth"
                     else "SUBMISSION_DUPLICATE_IDS"
                 )
-                raise ScoringValidationError(duplicate_code, "File CSV chứa ID trùng lặp.")
+                raise ScoringValidationError(duplicate_code, f"Cột {id_column} có ID trùng tại dòng {line}.")
             seen_ids.add(row_id)
             rows.append(row)
     except csv.Error as exc:
-        raise ScoringValidationError(error_code, "File CSV không đọc được.") from exc
+        raise ScoringValidationError(error_code, "CSV sai cấu trúc dấu nháy hoặc ký tự phân cách.") from exc
 
     if not rows:
         raise ScoringValidationError(error_code, "File CSV không có dòng dữ liệu.")

@@ -403,7 +403,7 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
         {includedPages.length === 0 ? (
           <p className="text-muted">
             {source && source.pages.length > 0
-              ? "Chưa trang nội dung nào có Markdown để gửi cho AI."
+              ? "Chưa có trang nội dung nào chứa Markdown để gửi cho AI."
               : "Cuộc thi chưa có trang nội dung nào để AI đối chiếu."}
           </p>
         ) : (
@@ -423,7 +423,7 @@ export function AiReviewSettingsPanel({ competitionId }: { competitionId: string
       {confirmingImport && importSource && (
         <ConfirmModal
           title="Nhập cấu hình AI"
-          body={`Nhập toàn bộ cấu hình AI từ "${importSource.name}" vào cuộc thi này? Cấu hình AI hiện tại sẽ bị thay thế hoàn toàn, kể cả API key (nếu nguồn có) - đây là bản sao độc lập nên sửa nguồn sau này không ảnh hưởng đích. Dấu xác minh kết nối sẽ bị xoá; hãy kiểm tra lại trước khi dùng.`}
+          body={`Nhập toàn bộ cấu hình AI từ "${importSource.name}" vào cuộc thi này? Cấu hình AI hiện tại sẽ bị thay thế hoàn toàn, kể cả API key (nếu nguồn có) — đây là bản sao độc lập nên sửa nguồn sau này không ảnh hưởng đích. Dấu xác minh kết nối sẽ bị xóa; hãy kiểm tra lại trước khi dùng.`}
           confirmLabel="Nhập cấu hình"
           onConfirm={importConfig}
           onClose={() => setConfirmingImport(false)}

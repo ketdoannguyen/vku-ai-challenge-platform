@@ -288,7 +288,7 @@ export function AdminCompetitionsPage() {
           </span>
           <div className="page-hero-copy">
             <h1 className="page-hero-title">Quản lý cuộc thi</h1>
-            <p className="page-hero-subtitle">Tạo, chỉnh sửa, publish/close và clone cuộc thi</p>
+            <p className="page-hero-subtitle">Tạo, chỉnh sửa, xuất bản/kết thúc và nhân bản cuộc thi</p>
             <span className="vku-accent" aria-hidden="true">
               <span className="blue" />
               <span className="red" />
@@ -537,9 +537,9 @@ export function AdminCompetitionsPage() {
             setConfirming(null);
             notify(
               action === "clone"
-                ? `Đã clone thành "${clone!.name}" (draft).`
+                ? `Đã nhân bản thành "${clone!.name}" (bản nháp).`
                 : action === "publish"
-                  ? "Đã publish cuộc thi."
+                  ? "Đã xuất bản cuộc thi."
                   : action === "reopen"
                     ? "Đã mở lại cuộc thi."
                     : "Đã kết thúc cuộc thi.",
@@ -818,7 +818,7 @@ function RowActionMenu({
             <div className="ac-menu-separator" />
             {c.status === "draft" && (
               <button className="ac-menu-item ac-menu-item-strong" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("publish", trigger))}>
-                Publish
+                Xuất bản
               </button>
             )}
             {c.status === "published" && (
@@ -832,9 +832,9 @@ function RowActionMenu({
               </button>
             )}
             <button className="ac-menu-item" type="button" role="menuitem" onClick={() => runFromMenu((trigger) => onConfirm("clone", trigger))}>
-              Clone
+              Nhân bản
             </button>
-            {/* Xoá được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
+            {/* Xóa được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
             {c.status !== "published" && (
               <>
                 <div className="ac-menu-separator" />
