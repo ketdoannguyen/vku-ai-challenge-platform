@@ -429,9 +429,9 @@ test("ô thống kê lấy từ dữ liệu thật, nằm trong vùng có tên",
   expect(within(stats).getByText("Đang diễn ra")).toBeTruthy();
   expect(within(stats).getByText("Đã kết thúc")).toBeTruthy();
   expect(within(stats).getByText("Đã tham gia")).toBeTruthy();
-  // 2 published, 1 closed, 1 joined - vẫn pad hai chữ số như trước.
-  expect(within(stats).getByText("02")).toBeTruthy();
-  expect(within(stats).getAllByText("01")).toHaveLength(2);
+  // 2 published, 1 closed, 1 joined - hiển thị số nguyên, không pad như trước.
+  expect(within(stats).getByText("2")).toBeTruthy();
+  expect(within(stats).getAllByText("1")).toHaveLength(2);
 });
 
 test("khách: vùng thống kê bỏ ô Đã tham gia nhưng giữ hai ô còn lại", async () => {
@@ -476,7 +476,7 @@ test("tự làm mới giữ nguyên từ khóa tìm kiếm và cập nhật KPI 
   await advance();
 
   const stats = screen.getByRole("region", { name: "Thống kê cuộc thi" });
-  expect(within(stats).getByText("01")).toBeTruthy(); // Đã tham gia
+  expect(within(stats).getByText("1")).toBeTruthy(); // Đã tham gia
   fireEvent.change(screen.getByLabelText("Tìm kiếm cuộc thi"), { target: { value: "AI" } });
 
   competitions.push({
@@ -491,7 +491,7 @@ test("tự làm mới giữ nguyên từ khóa tìm kiếm và cập nhật KPI 
   expect(screen.getByRole("heading", { name: "AI Challenge Mới" })).toBeTruthy();
   // Dữ liệu được thay nhưng bộ lọc tìm kiếm của người dùng còn nguyên.
   expect((screen.getByLabelText("Tìm kiếm cuộc thi") as HTMLInputElement).value).toBe("AI");
-  expect(within(stats).getByText("02")).toBeTruthy(); // Đã tham gia
+  expect(within(stats).getByText("2")).toBeTruthy(); // Đã tham gia
 });
 
 test("một cuộc thi tham gia không làm bật polling khi cuộc thi khác còn modal mở", async () => {
@@ -600,7 +600,7 @@ test("điểm cao nhất làm tròn 2 chữ số thập phân", async () => {
   expect(within(card).getByText("0.92")).toBeTruthy();
 });
 
-test("cuộc thi bật norm: thẻ hiện 'Điểm norm' lấy từ my_stats, không hiện điểm gốc", async () => {
+test("cuộc thi bật norm: thẻ hiện 'Điểm chuẩn hóa' lấy từ my_stats, không hiện điểm gốc", async () => {
   mockApi({
     competitions: [
       {
@@ -614,12 +614,12 @@ test("cuộc thi bật norm: thẻ hiện 'Điểm norm' lấy từ my_stats, kh
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getByText("Điểm norm")).toBeTruthy();
+  expect(within(card).getByText("Điểm chuẩn hóa")).toBeTruthy();
   expect(within(card).getByText("34.56")).toBeTruthy();
   expect(within(card).queryByText("0.91")).toBeNull();
 });
 
-test("norm bị ẩn nhưng điểm gốc còn: thẻ để '-', không gắn nhãn 'Điểm norm' cho raw", async () => {
+test("norm bị ẩn nhưng điểm gốc còn: thẻ để '-', không gắn nhãn 'Điểm chuẩn hóa' cho raw", async () => {
   mockApi({
     competitions: [
       {
@@ -633,7 +633,7 @@ test("norm bị ẩn nhưng điểm gốc còn: thẻ để '-', không gắn nh
   await screen.findByRole("heading", { name: "Joined Cup", level: 3 });
   const card = cardOf("Joined Cup");
 
-  expect(within(card).getByText("Điểm norm")).toBeTruthy();
+  expect(within(card).getByText("Điểm chuẩn hóa")).toBeTruthy();
   expect(within(card).getByText("-")).toBeTruthy();
   expect(within(card).queryByText("0.91")).toBeNull();
 });

@@ -14,6 +14,7 @@ from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
 from app.scoring import revisions, storage as scoring_storage
 from app.scoring.errors import EvaluatorError
+from app.scoring_attempts import service as attempts_service
 from tests.helpers import (
     V2_CONTRACT,
     V2_GROUND_TRUTH,
@@ -524,6 +525,18 @@ def test_v2_submission_rejects_bad_csv_without_running_evaluator(client, fake_ru
     assert membership_document(client, cid).get("quota_used", 0) == 0
 
 
+def test_v2_invalid_ground_truth_is_not_reported_as_student_file_error(client, monkeypatch, fake_runner):
+    competition = publish_v2_competition(client)
+    monkeypatch.setattr(scoring_storage, "read_ground_truth", lambda *_args: b"id\n1\n")
+    response = submit(client, competition["id"], V2_SUBMISSION)
+    assert response.status_code == 422
+    assert response.json()["error"] == {
+        "code": "SCORING_NOT_READY", "message": "Cuộc thi chưa sẵn sàng chấm điểm."
+    }
+    assert not attempt_documents(client)
+    assert membership_document(client, competition["id"]).get("quota_used", 0) == 0
+
+
 def test_v2_evaluator_failure_is_a_system_error_for_the_student(client, fake_runner):
     competition = publish_v2_competition(client)
     cid = competition["id"]
@@ -535,12 +548,12 @@ def test_v2_evaluator_failure_is_a_system_error_for_the_student(client, fake_run
     assert broken.status_code == 202
     assert run_worker(client) == 1
 
-    # Chi tiết lỗi nội bộ không ra tới thí sinh: chỉ còn một câu chung, mã lỗi giữ để tra log.
+    # Chi tiết lỗi nội bộ không ra tới thí sinh: chỉ còn lời cố định, mã lỗi giữ để tra log.
     failed = attempt_status(client, cid, broken.json()["attempt_id"])
     assert failed["status"] == "FAILED"
     assert failed["error"] == {
         "code": "EVALUATOR_FAILED",
-        "message": "Không thể chấm điểm bài nộp này.",
+        "message": attempts_service.SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"],
     }
 
     fake_runner.error = EvaluatorError("EVALUATOR_UNAVAILABLE", "Máy chấm đang không sẵn sàng.")
@@ -554,6 +567,19 @@ def test_v2_evaluator_failure_is_a_system_error_for_the_student(client, fake_run
     # Lỗi hệ thống không tiêu lượt và không để lại bài nộp giả.
     assert submission_documents(client) == []
     assert membership_document(client, cid).get("quota_used", 0) == 0
+
+
+@pytest.mark.parametrize("code", ["EVALUATOR_TIMEOUT", "EVALUATOR_OUTPUT_MISMATCH"])
+def test_v2_evaluator_failure_reports_a_safe_category(client, fake_runner, code):
+    competition = publish_v2_competition(client)
+    fake_runner.error = EvaluatorError(code, "PRIVATE GT", detail="SECRET traceback")
+    queued = submit(client, competition["id"], V2_SUBMISSION)
+    assert queued.status_code == 202
+    assert run_worker(client) == 1
+    failure = attempt_status(client, competition["id"], queued.json()["attempt_id"])
+    assert failure["error"] == {"code": code, "message": attempts_service.SYSTEM_ERROR_MESSAGES[code]}
+    assert "PRIVATE" not in str(failure) and "SECRET" not in str(failure)
+    assert membership_document(client, competition["id"]).get("quota_used", 0) == 0
 
 
 def test_v2_config_is_locked_after_the_first_submission(client, fake_runner):

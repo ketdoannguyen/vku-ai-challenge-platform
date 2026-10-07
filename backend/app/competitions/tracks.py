@@ -9,7 +9,7 @@ này đang trong cửa sổ nào", "kết quả nhánh này đã được công 
 phải trả lời giống nhau, nên mọi caller đi qua đây thay vì tự đọc `tracks` bằng tay.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.datetimes import as_utc, iso_z
 from app.scoring import contracts, normalization
@@ -39,6 +39,8 @@ PUBLISH_CONDITION_DEFAULT = PUBLISH_ADMIN_DECIDES
 
 # Lý do kết quả bị che với người xem; đủ ổn định để frontend đối chiếu.
 REASON_PRIVATE_UNPUBLISHED = "private_unpublished"
+# Nhánh dual chưa tới giờ mở - kể cả khi admin dời lịch về sau: dữ liệu cũ của nhánh bị khóa.
+REASON_TRACK_NOT_OPEN = "track_not_open"
 
 # Lý do dữ liệu chuẩn hóa chưa được xem; cùng hợp đồng ổn định với frontend.
 REASON_NORMALIZATION_DISABLED = "normalization_disabled"
@@ -131,6 +133,39 @@ def results_visible(competition: dict, track: str | None) -> bool:
     return results_released(competition, track)
 
 
+def track_locked(competition: dict, track: str | None, now: datetime) -> bool:
+    """Nhánh dual chưa tới giờ mở: mọi dữ liệu cũ của nhánh tạm khóa với thí sinh.
+
+    Lịch là nguồn sự thật duy nhất, suy lại ở mỗi request: admin dời giờ mở vào tương lai thì
+    nhánh khóa ngay; tới giờ mở thì dữ liệu cũ tự hiện lại theo đúng luật công bố hiện có -
+    không xóa, không chấm lại. Single không có nhánh nên không bao giờ khóa. `track` thiếu trên
+    document dual là dữ liệu hỏng, caller tự quyết cách từ chối (các đường thí sinh đều fail
+    closed ở tầng của chúng).
+    """
+    if track is None or not is_dual(competition):
+        return False
+    return window_state(competition, track, now) == WINDOW_SCHEDULED
+
+
+def locked_tracks(competition: dict, *, now: datetime) -> set[str]:
+    """Tên các nhánh đang bị khóa của cuộc thi; rỗng với single và dual đang mở/đóng."""
+    if not is_dual(competition):
+        return set()
+    return {track for track in TRACKS if track_locked(competition, track, now)}
+
+
+def visible_track_filter(competition_id, locked: set[str]) -> dict:
+    """Điều kiện Mongo cho một cuộc thi: chỉ các bản ghi thuộc nhánh chưa khóa.
+
+    Dùng whitelist thay vì blacklist để bản ghi dual thiếu `track` (dữ liệu hỏng) cũng bị loại
+    ngay trong truy vấn - câu đếm và trang lịch sử nhờ vậy không bao giờ lệch nhau.
+    """
+    clause: dict = {"competition_id": competition_id}
+    if locked:
+        clause["track"] = {"$in": [track for track in TRACKS if track not in locked]}
+    return clause
+
+
 def envelope(schedules: dict[str, tuple[datetime, datetime]]) -> tuple[datetime, datetime]:
     """Khoảng tổng của cuộc thi dual: sớm nhất trong các giờ mở, muộn nhất trong các giờ đóng.
 
@@ -195,18 +230,22 @@ class TrackError(Exception):
         self.message = message
 
 
-def can_view_norm(competition: dict, track: str | None) -> tuple[bool, str | None]:
+def can_view_norm(
+    competition: dict, track: str | None, *, now: datetime | None = None
+) -> tuple[bool, str | None]:
     """Quyền xem mọi dữ liệu chuẩn hóa (norm, snapshot, metadata BXH) của một nhánh đã resolve.
 
-    Một câu trả lời duy nhất cho cả bốn cửa, xét theo thứ tự: cuộc thi bật chuẩn hóa, nhánh đã
-    công bố kết quả, BXH không bị ẩn, metric nguồn không bị ẩn. Lý do trả về là trạng thái hiển
-    thị cho DTO - không phải lỗi HTTP; `track=None` là cuộc thi single.
+    Một câu trả lời duy nhất cho cả năm cửa, xét theo thứ tự: cuộc thi bật chuẩn hóa, nhánh chưa
+    tới giờ mở, nhánh đã công bố kết quả, BXH không bị ẩn, metric nguồn không bị ẩn. Lý do trả về
+    là trạng thái hiển thị cho DTO - không phải lỗi HTTP; `track=None` là cuộc thi single.
 
     Đọc cấu hình khoan dung qua `config_view`: một bản ghi norm hỏng vẫn không được làm sập trang
     thí sinh, trong khi mọi đường quyết định thứ hạng vẫn raise qua `active_rule`.
     """
     if not normalization.config_view(competition)["enabled"]:
         return False, REASON_NORMALIZATION_DISABLED
+    if track_locked(competition, track, now or datetime.now(timezone.utc)):
+        return False, REASON_TRACK_NOT_OPEN
     if not results_visible(competition, track):
         return False, REASON_PRIVATE_UNPUBLISHED
     if not competition.get("leaderboard_visible", False):

@@ -330,15 +330,79 @@ test("block Tài nguyên nằm sau Mục lục nội dung, lọc link không an 
   // Hai link hợp lệ + notebook khung built-in.
   expect(within(resourceSection as HTMLElement).getByText("3")).toBeTruthy();
 
-  const dataset = screen.getByRole("link", { name: /Dataset huấn luyện/ });
+  const dataset = screen.getByRole("link", { name: "Mở liên kết: Dataset huấn luyện" });
   expect(dataset.getAttribute("href")).toBe("https://drive.google.com/drive/folders/abc");
   expect(dataset.getAttribute("target")).toBe("_blank");
   expect(dataset.getAttribute("rel")).toBe("noopener noreferrer nofollow");
   // Link không phải https bị lọc trước khi render nên không tạo thành link sống.
   expect(screen.queryByText("Link lạ")).toBeNull();
-  expect(document.querySelectorAll(".resource-link")).toHaveLength(3);
+  // Mỗi link ngoài hai thao tác tách bạch: sao chép URL và mở link; nhãn không còn là link.
+  expect(screen.getByRole("button", { name: "Sao chép liên kết: Dataset huấn luyện" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Sao chép liên kết: Sample submission" })).toBeTruthy();
+  expect(document.querySelectorAll(".resource-row")).toHaveLength(2);
   // Notebook khung là thao tác tải tại chỗ nên phải là button, không phải link ra ngoài.
+  expect(document.querySelectorAll(".resource-link")).toHaveLength(1);
   expect(screen.getByRole("button", { name: /Notebook khởi đầu/ })).toBeTruthy();
+});
+
+/** Clipboard là API ngoài jsdom; mỗi test tự cài đặt để kiểm cả nhánh thành công lẫn thất bại. */
+function stubClipboard(writeText: (text: string) => Promise<void>) {
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+}
+
+test("sao chép tài nguyên: ghi đúng URL, đổi nút và tự tắt phản hồi", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  stubClipboard(writeText);
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        resources: [{ label: "Dataset huấn luyện", url: "https://drive.google.com/drive/folders/abc" }],
+      },
+      status: 200,
+    };
+  });
+  vi.useFakeTimers();
+  renderAt("/competitions/ai-challenge-2026");
+  await advance();
+
+  fireEvent.click(screen.getByRole("button", { name: "Sao chép liên kết: Dataset huấn luyện" }));
+
+  await advance();
+  const resourceSection = screen.getByText("Tài nguyên").closest("section") as HTMLElement;
+  expect(writeText).toHaveBeenCalledWith("https://drive.google.com/drive/folders/abc");
+  expect(screen.getByRole("button", { name: "Đã sao chép liên kết: Dataset huấn luyện" })).toBeTruthy();
+  expect(within(resourceSection).getByRole("status").textContent).toContain(
+    'Đã sao chép liên kết "Dataset huấn luyện"',
+  );
+  // Link vẫn còn nguyên sau khi sao chép.
+  expect(screen.getByRole("link", { name: "Mở liên kết: Dataset huấn luyện" })).toBeTruthy();
+
+  await advance(2_000);
+  expect(screen.getByRole("button", { name: "Sao chép liên kết: Dataset huấn luyện" })).toBeTruthy();
+  expect(within(resourceSection).getByRole("status").textContent).toBe("");
+});
+
+test("sao chép tài nguyên thất bại: báo lỗi tại chỗ và giữ nguyên danh sách link", async () => {
+  stubClipboard(vi.fn().mockRejectedValue(new Error("denied")));
+  apiMock((url) => {
+    if (url.includes("/contents")) return { body: CONTENTS, status: 200 };
+    return {
+      body: {
+        ...COMPETITION,
+        resources: [{ label: "Dataset huấn luyện", url: "https://drive.google.com/drive/folders/abc" }],
+      },
+      status: 200,
+    };
+  });
+  renderAt("/competitions/ai-challenge-2026");
+  await screen.findByRole("heading", { name: "AI Challenge 2026" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Sao chép liên kết: Dataset huấn luyện" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Không sao chép được liên kết");
+  expect(screen.getByRole("link", { name: "Mở liên kết: Dataset huấn luyện" })).toBeTruthy();
 });
 
 test("join xong tự tải lại cuộc thi ngầm để lấy quota, không nháy skeleton", async () => {

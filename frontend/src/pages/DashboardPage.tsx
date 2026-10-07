@@ -769,16 +769,16 @@ export function DashboardPage() {
                 <IconPulse />
                 Đang diễn ra
               </dt>
-              <dd className="dash-stat-value">{String(activeCount).padStart(2, "0")}</dd>
+              <dd className="dash-stat-value">{activeCount}</dd>
             </dl>
             <dl className="dash-stat dash-stat-closed">
               <dt className="dash-stat-label">
                 <IconTrophy />
                 Đã kết thúc
               </dt>
-              <dd className="dash-stat-value">{String(closedCount).padStart(2, "0")}</dd>
+              <dd className="dash-stat-value">{closedCount}</dd>
             </dl>
-            {/* Khách chưa có membership nào nên ô này luôn 00 - chỉ tổ rối. Dữ liệu phiên cũ
+            {/* Khách chưa có membership nào nên ô này luôn 0 — chỉ tổ rối. Dữ liệu phiên cũ
                 cũng không được hiện con số tham gia của người khác. */}
             {!isGuest && !stale && (
               <dl className="dash-stat dash-stat-joined">
@@ -786,7 +786,7 @@ export function DashboardPage() {
                   <IconUsers />
                   Đã tham gia
                 </dt>
-                <dd className="dash-stat-value">{String(joinedCount).padStart(2, "0")}</dd>
+                <dd className="dash-stat-value">{joinedCount}</dd>
               </dl>
             )}
           </section>
@@ -1031,7 +1031,7 @@ function CompetitionCard({
         <div className="comp-stats">
           <div className="comp-telemetry">
             <div className="comp-telemetry-item">
-              <span className="comp-telemetry-label">Chỉ số đánh giá</span>
+              <span className="comp-telemetry-label">Chỉ số chính</span>
               <span className="comp-telemetry-value">{c.primary_metric_label ?? "Chưa cấu hình"}</span>
             </div>
             <div className="comp-telemetry-item">
@@ -1040,7 +1040,7 @@ function CompetitionCard({
                 {dual
                   ? "Theo từng nhánh"
                   : c.quota_per_day != null && c.quota_per_day > 0
-                    ? `${c.quota_per_day} lượt / ngày`
+                    ? `${c.quota_per_day} lượt/ngày`
                     : "Không nhận bài nộp"}
               </span>
             </div>
@@ -1066,7 +1066,7 @@ function CompetitionCard({
                 <dd className="comp-personal-value">{rankText}</dd>
               </div>
               <div className="comp-personal-item">
-                <dt className="comp-personal-label">{norm.enabled ? "Điểm norm" : "Điểm cao nhất"}</dt>
+                <dt className="comp-personal-label">{norm.enabled ? "Điểm chuẩn hóa" : "Điểm cao nhất"}</dt>
                 {/* Thẻ làm tròn 2 chữ số cho gọn hàng; bảng xếp hạng vẫn theo hợp đồng. Cuộc thi
                     bật norm lấy norm hiện tại từ BXH; norm bị ẩn thì để "-", không rơi về raw. */}
                 <dd className="comp-personal-value">

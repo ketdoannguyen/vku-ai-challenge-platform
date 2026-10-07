@@ -71,7 +71,7 @@ def _check_v1(competition: dict, track: str | None) -> Readiness:
         config = None
     if config is None:
         return Readiness(
-            False, "SCORING_CONFIG_REQUIRED", "Cần cấu hình chấm điểm trước khi publish cuộc thi."
+            False, "SCORING_CONFIG_REQUIRED", "Cần cấu hình chấm điểm trước khi xuất bản cuộc thi."
         )
     try:
         scoring_service.validate_config(config)
@@ -125,14 +125,14 @@ def _check_v2(competition: dict, config: models.ScoringConfigV2, track: str | No
         return Readiness(
             False,
             "SCORING_TEST_REQUIRED",
-            "Cần chạy thử bộ chấm với cấu hình hiện tại trước khi publish cuộc thi.",
+            "Cần chạy thử bộ chấm với cấu hình hiện tại trước khi xuất bản cuộc thi.",
         )
     return Readiness(True)
 
 
 def _check_evaluator(evaluator: models.EvaluatorConfig) -> Readiness | None:
     if not evaluator.source_path or not evaluator.source_sha256:
-        return Readiness(False, "EVALUATOR_REQUIRED", "Cần lưu source bộ chấm trước khi publish.")
+        return Readiness(False, "EVALUATOR_REQUIRED", "Cần lưu source bộ chấm trước khi xuất bản.")
     try:
         source = scoring_storage.read_evaluator_source(evaluator)
     except (KeyError, OSError, ValueError):
@@ -147,7 +147,7 @@ def _check_evaluator(evaluator: models.EvaluatorConfig) -> Readiness | None:
 def _read_ground_truth(competition: dict, track: str | None) -> bytes | Readiness:
     if not competition_tracks.track_ground_truth(competition, track):
         return Readiness(
-            False, "GROUND_TRUTH_REQUIRED", "Cần tải lên ground truth trước khi publish cuộc thi."
+            False, "GROUND_TRUTH_REQUIRED", "Cần tải lên ground truth trước khi xuất bản cuộc thi."
         )
     try:
         return scoring_storage.read_ground_truth(competition, track)

@@ -31,7 +31,7 @@ import {
 } from "react";
 import { Link } from "react-router-dom";
 import {
-  AI_FILTER_OPTIONS,
+  AI_FILTER_GROUPS,
   AI_SOURCE_LEGACY_LABEL,
   AI_SOURCE_STATUS_LABEL,
   AI_STATE_LABEL,
@@ -88,7 +88,7 @@ const AUTO_REFRESH_MS = 3_000;
 
 const STATUS_OPTIONS = [
   { value: "", label: "Mọi trạng thái chấm" },
-  { value: "completed", label: "Đã chấm điểm" },
+  { value: "completed", label: "Đã chấm xong" },
   { value: "rejected", label: "Không hợp lệ" },
   { value: "failed", label: "Lỗi chấm điểm" },
 ];
@@ -97,7 +97,7 @@ const STATUS_OPTIONS = [
 const REVIEW_OPTIONS = [
   { value: "", label: "Mọi trạng thái duyệt" },
   { value: "accepted", label: "Duyệt" },
-  { value: "rejected", label: "Không duyệt" },
+  { value: "rejected", label: "Không chấp nhận" },
 ];
 
 /**
@@ -697,16 +697,20 @@ export function AdminSubmissionsPanel({
         </select>
         <select
           className="input"
-          aria-label="Lọc theo kết luận AI"
+          aria-label="Lọc theo trạng thái AI"
           value={query.ai_review}
           onChange={(event) =>
             changeFilters({ ai_review: event.target.value as AiReviewFilter })
           }
         >
-          {AI_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
+          {AI_FILTER_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         {hasFilters && (

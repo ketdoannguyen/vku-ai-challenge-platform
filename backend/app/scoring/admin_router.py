@@ -91,7 +91,7 @@ async def update_result_display(
         raise api_error(
             422,
             "SCORING_LOCKED",
-            "Chỉ sửa được cách hiển thị metric khi cuộc thi đang publish.",
+            "Chỉ sửa được cách hiển thị metric khi cuộc thi đã xuất bản.",
         )
     config = models.stored_config_or_none(competition)
     contract = config.output_contract if config else None
@@ -384,7 +384,7 @@ def _ensure_source_kept(
         raise api_error(
             422,
             "SCORING_LOCKED",
-            "Cuộc thi đang bật chuẩn hóa; không đổi được metric nguồn hoặc chiều xếp hạng sau khi publish.",
+            "Cuộc thi đang bật chuẩn hóa; không đổi được metric nguồn hoặc chiều xếp hạng sau khi xuất bản.",
         )
 
 
@@ -609,7 +609,7 @@ async def _update_published_display(
             raise api_error(
                 422,
                 "SCORING_LOCKED",
-                "Cuộc thi đã đóng trong lúc lưu; cách hiển thị chỉ sửa được khi đang publish.",
+                "Cuộc thi đã đóng trong lúc lưu; cách hiển thị chỉ sửa được khi đã xuất bản.",
             )
         raise api_error(
             409,
@@ -797,7 +797,7 @@ async def _read_limited(file: UploadFile) -> bytes:
     limit_mb = get_settings().max_upload_mb
     data = await file.read(limit_mb * 1024 * 1024 + 1)
     if len(data) > limit_mb * 1024 * 1024:
-        raise api_error(413, "FILE_TOO_LARGE", f"File vượt quá giới hạn {limit_mb} MiB.")
+        raise api_error(413, "FILE_TOO_LARGE", f"Tệp vượt quá giới hạn {limit_mb} MiB.")
     return data
 
 

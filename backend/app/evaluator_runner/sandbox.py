@@ -14,7 +14,7 @@ import shutil
 import time
 import uuid
 
-from app.scoring.errors import EvaluatorError, ScoringValidationError
+from app.scoring.errors import CLASS_ID_INVALID, EvaluatorError, ScoringValidationError, valid_class_info
 from app.scoring.models import MAX_SOURCE_BYTES
 from app.scoring.output_validation import validate_metrics
 
@@ -41,6 +41,7 @@ ENTRYPOINT_CODES = frozenset(
         "EVALUATOR_OUTPUT_MISMATCH",
         "EVALUATOR_TIMEOUT",
         "SUBMISSION_RULE_VIOLATION",
+        CLASS_ID_INVALID,
     }
 )
 MAX_DETAIL_CHARS = 4_000
@@ -349,10 +350,14 @@ def _parse(stdout: bytes, stderr: bytes) -> dict[str, float]:
         code = payload.get("code")
         if code not in ENTRYPOINT_CODES:
             code = "EVALUATOR_FAILED"
+        class_info = valid_class_info(payload.get("class_info")) if code == CLASS_ID_INVALID else None
+        if code == CLASS_ID_INVALID and class_info is None:
+            code = "EVALUATOR_FAILED"
         raise EvaluatorError(
             code,
             str(payload.get("message") or "Bộ chấm báo lỗi."),
             detail=_detail(str(payload.get("detail"))) if payload.get("detail") else _detail(stderr),
+            class_info=class_info,
         )
     if status != "passed":
         raise EvaluatorError(

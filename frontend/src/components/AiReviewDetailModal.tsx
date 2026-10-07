@@ -107,7 +107,7 @@ const SOURCE_MATCH_EXPLANATION: Record<AiSourceMatch, string> = {
   // Trạng thái tổng hợp là mức cần xem xét cao nhất, không phải "mọi nguồn": đoạn code có thể vừa
   // khớp vừa không khớp, nên câu chữ phải nói "ít nhất một" thay vì phủ định toàn bộ.
   EXTERNAL_SOURCE:
-    "Có ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp trong bản thể lệ đã chụp tại thời điểm nộp. Không trùng không đồng nghĩa nguồn đến từ ngoài cuộc thi.",
+    "Có ít nhất một nguồn trong đoạn code không trùng tài nguyên BTC cấp trong bản thể lệ đã chụp tại thời điểm nộp — không trùng không có nghĩa nguồn đến từ ngoài cuộc thi.",
   FOLDER_MEMBERSHIP_UNVERIFIED:
     "Có nguồn chưa trùng tài nguyên BTC cấp; vì tài nguyên BTC có thể gồm thư mục, chỉ từ notebook không thể xác minh tệp riêng nằm trong thư mục đó.",
   UNVERIFIED_SOURCE:

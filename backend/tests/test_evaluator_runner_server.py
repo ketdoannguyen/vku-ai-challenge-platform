@@ -134,6 +134,17 @@ def test_evaluate_doi_ma_loi_cua_sandbox_thanh_http_status():
         assert response.json()["code"] == code
 
 
+def test_evaluate_keeps_checked_class_ids_for_the_api():
+    info = {"class_id": 6, "allowed_class_ids": list(range(6))}
+    fake = FakeSandbox(error=EvaluatorError(
+        "SUBMISSION_CLASS_ID_INVALID", "CSV sai quy tắc.", class_info=info
+    ))
+    with runner_client(fake) as client:
+        response = client.post("/evaluate", json=PAYLOAD)
+    assert response.status_code == 422
+    assert response.json()["class_info"] == info
+
+
 def test_het_slot_thi_tu_choi_ngay_chu_khong_xep_hang():
     """Lượt thứ hai phải nhận 503 trong lúc lượt đầu còn chạy - đây là hành vi các phép đo đồng thời đo."""
     gate = threading.Event()

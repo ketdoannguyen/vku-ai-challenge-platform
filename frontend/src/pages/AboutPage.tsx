@@ -216,7 +216,7 @@ const PLATFORM_FEATURES: PlatformFeature[] = [
   },
   {
     title: "Đọc công khai",
-    body: "Danh sách và trang chi tiết cuộc thi đọc được không cần đăng nhập; các thao tác gắn với tài khoản như tham gia, nộp bài và xem bảng xếp hạng thì cần đăng nhập.",
+    body: "Danh sách và thông tin cơ bản của cuộc thi (thời gian, chỉ số, hạn mức) đọc được không cần đăng nhập; nội dung cuộc thi dành cho thành viên đã tham gia; các thao tác như nộp bài và xem bảng xếp hạng cần đăng nhập.",
     icon: <IconEye />,
     tone: "blue",
   },

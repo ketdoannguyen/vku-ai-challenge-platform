@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.memberships.service import MEMBERSHIPS_COLLECTION
+from app.scoring.errors import CLASS_ID_INVALID, valid_class_info
 from app.scoring import contracts
 from app.scoring_attempts import store
 from app.submission_artifacts import storage as artifact_storage
@@ -46,9 +47,25 @@ SUBMISSION_RULE_MESSAGE = (
     "Hãy đối chiếu với yêu cầu về file nộp và dữ liệu trong đề bài rồi nộp lại."
 )
 QUEUE_FULL_MESSAGE = "Hàng đợi chấm điểm đang đầy. Bạn thử lại sau ít phút nhé."
-# Câu chữ của những mã này là thứ thí sinh phải đọc để biết đường làm tiếp: file sai thì sửa file,
-# quá hạn thì nộp lại. Mọi mã khác là lỗi hệ thống, quy về một câu chung.
+# Chỉ những lỗi đã kiểm chứng từ CSV hoặc trạng thái lượt mới dùng thông báo đã lưu. Lỗi
+# runner/config/kho tạm luôn dùng câu cố định của backend, không tin message từ evaluator.
 SAFE_ERROR_CODES = scoring_flow.STUDENT_ERROR_CODES | {EXPIRED_CODE, CANCELLED_CODE}
+SYSTEM_ERROR_MESSAGES = {
+    "EVALUATOR_FAILED": "Bộ chấm gặp lỗi khi xử lý bài; không thể kết luận CSV sai. Hãy báo Ban Tổ chức kèm mã lỗi.",
+    "EVALUATOR_TIMEOUT": "Bộ chấm chạy quá thời gian; không thể kết luận CSV sai. Hãy báo Ban Tổ chức kèm mã lỗi.",
+    "EVALUATOR_OUTPUT_MISMATCH": "Bộ chấm trả kết quả không đúng cấu hình; hãy báo Ban Tổ chức kèm mã lỗi.",
+    "EVALUATOR_UNAVAILABLE": "Hệ thống chấm tạm thời không sẵn sàng. Hãy thử lại sau.",
+    "SCORING_NOT_READY": "Cấu hình chấm chưa sẵn sàng; hãy báo Ban Tổ chức kèm mã lỗi.",
+    "SCORING_TEST_REQUIRED": "Cấu hình chấm chưa được xác minh; hãy báo Ban Tổ chức kèm mã lỗi.",
+    "ARTIFACT_MISSING": "Hệ thống lưu trữ thiếu tệp đã nhận; hãy báo Ban Tổ chức kèm mã lỗi.",
+    "ARTIFACT_STORAGE_UNAVAILABLE": "Hệ thống lưu trữ tạm thời không sẵn sàng. Hãy thử lại sau.",
+    "SUBMISSION_RESOLVING": "Hệ thống đang đối soát kết quả bài nộp; hãy thử xem lại sau.",
+    "SUBMISSION_CLOSED": "Cuộc thi đã đóng trong lúc chờ chấm; lượt không bị tính.",
+    "SUBMISSION_DEADLINE_PASSED": "Đã hết hạn nộp bài trong lúc chờ chấm; lượt không bị tính.",
+    "MEMBERSHIP_INACTIVE": "Quyền tham gia đã bị vô hiệu hóa trong lúc chờ chấm.",
+    "ACCOUNT_MISSING": "Không tìm thấy tài khoản khi chấm; hãy liên hệ Ban Tổ chức.",
+    "SCORING_FAILED": "Hệ thống gặp lỗi khi chấm bài; không thể kết luận CSV sai. Hãy báo Ban Tổ chức kèm mã lỗi.",
+}
 
 
 def staging_prefix(competition_slug, attempt_id) -> str:
@@ -315,13 +332,18 @@ async def expire(db, attempt: dict, *, now: datetime) -> bool:
     )
 
 
-async def fail(db, attempt: dict, *, code: str, message: str, now: datetime) -> bool:
+async def fail(
+    db, attempt: dict, *, code: str, message: str, now: datetime, class_info: dict | None = None
+) -> bool:
     """Đóng một lượt thất bại: hỏng lúc nhận file hay lúc chấm đều đi qua đây."""
-    return await _close(db, attempt, expired=False, code=code, message=message, now=now)
+    return await _close(
+        db, attempt, expired=False, code=code, message=message, now=now, class_info=class_info
+    )
 
 
 async def _close(
-    db, attempt: dict, *, expired: bool, code: str, message: str, now: datetime
+    db, attempt: dict, *, expired: bool, code: str, message: str, now: datetime,
+    class_info: dict | None = None,
 ) -> bool:
     """Đóng lượt không thành công, dọn kho tạm và hoàn quota.
 
@@ -330,6 +352,10 @@ async def _close(
     file mà worker khác đang đọc.
     """
     error = {"code": code, "message": message}
+    if code == CLASS_ID_INVALID:
+        checked = valid_class_info(class_info)
+        if checked is not None:
+            error["class_info"] = checked
     closed = (
         await store.expire(db, attempt, error=error, now=now)
         if expired
@@ -399,6 +425,7 @@ async def attempt_payload(
                 competition=competition,
                 ai_visible=ai_settings.participant_visible(competition),
                 contract=contracts.participant_contract(competition),
+                now=now,
             )
     return payload
 
@@ -406,17 +433,29 @@ async def attempt_payload(
 def public_error(error: dict | None) -> dict | None:
     """Lý do một lượt không thành công, ở dạng thí sinh hiểu được.
 
-    Lỗi file của thí sinh và lượt quá hạn giữ nguyên câu chữ; lỗi còn lại - cấu hình chấm hỏng,
-    runner bận - quy về một câu chung, còn chi tiết nằm trong log.
+    Lỗi file của thí sinh và lượt quá hạn giữ nguyên câu chữ; lỗi hệ thống có thông báo
+    cố định theo mã, không công khai chi tiết của evaluator hay dữ liệu riêng tư.
     """
     if not error:
         return None
     code = error.get("code") or "SUBMISSION_FAILED"
+    if code == CLASS_ID_INVALID:
+        class_info = valid_class_info(error.get("class_info"))
+        if class_info is None:
+            return {"code": "EVALUATOR_FAILED", "message": SYSTEM_ERROR_MESSAGES["EVALUATOR_FAILED"]}
+        allowed = ", ".join(str(value) for value in sorted(class_info["allowed_class_ids"]))
+        return {
+            "code": code,
+            "message": (
+                f"Mã lớp {class_info['class_id']} không hợp lệ. "
+                f"Các mã lớp được chấp nhận: {allowed}."
+            ),
+        }
     if code == "SUBMISSION_RULE_VIOLATION":
         return {"code": code, "message": SUBMISSION_RULE_MESSAGE}
     if code in SAFE_ERROR_CODES:
         return {"code": code, "message": error.get("message") or GENERIC_MESSAGE}
-    return {"code": code, "message": GENERIC_MESSAGE}
+    return {"code": code, "message": SYSTEM_ERROR_MESSAGES.get(code, GENERIC_MESSAGE)}
 
 
 async def remaining_quota(

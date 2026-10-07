@@ -38,7 +38,17 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
     memberships = (
         await memberships_by_competition(db, competition_ids, account["_id"]) if account else {}
     )
-    submission_counts = await service.submission_counts(db, competition_ids)
+    now = datetime.now(timezone.utc)
+    # Nhánh chưa tới giờ mở không đóng góp con số nào vào thẻ cuộc thi: cả tổng bài công khai lẫn
+    # số liệu cá nhân đều bỏ qua nhánh đó, để dời lịch về sau không kéo theo rò rỉ gián tiếp.
+    excluded_tracks = {}
+    for competition in competitions:
+        locked = competition_tracks.locked_tracks(competition, now=now)
+        if locked:
+            excluded_tracks[competition["_id"]] = locked
+    submission_counts = await service.submission_counts(
+        db, competition_ids, excluded_tracks=excluded_tracks or None
+    )
     # Số liệu cá nhân (hạng/điểm/bài đã nộp) chỉ có nghĩa với thành viên đang hoạt động - người
     # chưa tham gia hoặc đã bị vô hiệu hóa không nhận gì. Một aggregation cho cả trang, không
     # truy vấn per-card; không có cuộc thi nào đủ điều kiện thì bỏ luôn lượt đọc.
@@ -49,7 +59,7 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
     }
     my_stats = (
         await submissions_service.my_stats_by_competition(
-            db, competition_ids, account["_id"], datetime.now(timezone.utc)
+            db, competition_ids, account["_id"], now, excluded_tracks=excluded_tracks or None
         )
         if active_id_set
         else {}
@@ -66,7 +76,7 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
                 "pinned": competition["_id"] in pinned_ids,
                 **(
                     await _my_stats_payload(
-                        db, competition, account["_id"], my_stats[competition["_id"]]
+                        db, competition, account["_id"], my_stats[competition["_id"]], now=now
                     )
                     if competition["_id"] in active_id_set
                     else {}
@@ -77,7 +87,9 @@ async def list_visible_competitions(request: Request, account: OptionalAccount) 
     }
 
 
-async def _my_stats_payload(db, competition: dict, account_id, counts_by_track: dict) -> dict:
+async def _my_stats_payload(
+    db, competition: dict, account_id, counts_by_track: dict, *, now: datetime
+) -> dict:
     """Số liệu cá nhân trên thẻ cuộc thi: dual tách hẳn hai nhánh, single giữ `my_stats` cũ.
 
     Dual không có số gộp: hai nhánh là hai bảng riêng, và nhánh Private chưa công bố chỉ trả quota
@@ -87,7 +99,7 @@ async def _my_stats_payload(db, competition: dict, account_id, counts_by_track: 
         counts = counts_by_track.get(None, submissions_service.EMPTY_COUNTS)
         return {
             "my_submission_count": counts["total"],
-            "my_stats": await _my_stats(db, competition, account_id, counts),
+            "my_stats": await _my_stats(db, competition, account_id, counts, now=now),
         }
     return {
         "my_submission_count": sum(counts["total"] for counts in counts_by_track.values()),
@@ -98,13 +110,16 @@ async def _my_stats_payload(db, competition: dict, account_id, counts_by_track: 
                 account_id,
                 counts_by_track.get(track, submissions_service.EMPTY_COUNTS),
                 track=track,
+                now=now,
             )
             for track in competition_tracks.TRACKS
         },
     }
 
 
-async def _my_stats(db, competition: dict, account_id, counts: dict, *, track: str | None = None) -> dict:
+async def _my_stats(
+    db, competition: dict, account_id, counts: dict, *, track: str | None = None, now: datetime
+) -> dict:
     """Hạng/điểm tốt nhất của thành viên đang hoạt động, lấy từ đúng bảng xếp hạng của nhánh.
 
     Không tự tính lại thứ hạng: `leaderboard_response` giữ nguyên quy tắc tie-break, chiều metric
@@ -112,6 +127,9 @@ async def _my_stats(db, competition: dict, account_id, counts: dict, *, track: s
     nhánh Private chưa công bố cũng vậy, chỉ quota là số thật. `best_score` là raw của đúng bài đại
     diện nên không hứa là raw tốt nhất của đội; norm hiện tại nằm ở `best_normalized_score`, null
     khi cuộc thi không bật norm hoặc người xem không được xem.
+
+    Nhánh chưa tới giờ mở đứng trước mọi luật trên: không đọc bảng, không trả hạng/điểm - chốt
+    chặn thứ hai sau khi truy vấn đếm đã loại nhánh đó.
     """
     stats = {
         "rank": None,
@@ -120,6 +138,8 @@ async def _my_stats(db, competition: dict, account_id, counts: dict, *, track: s
         "best_normalized_score": None,
         "used_today": counts["today"],
     }
+    if competition_tracks.track_locked(competition, track, now):
+        return stats
     if not competition_tracks.results_visible(competition, track):
         return stats
     if not competition["leaderboard_visible"] or counts["eligible_count"] == 0:
@@ -165,6 +185,9 @@ async def get_competition_by_slug(slug: str, request: Request, account: Optional
         now = datetime.now(timezone.utc)
         if competition_tracks.is_dual(competition):
             for track, entry in (payload.get("tracks") or {}).items():
+                if competition_tracks.track_locked(competition, track, now):
+                    # Nhánh chưa mở: số đã dùng suy từ bài cũ nên đi cùng số phận với bài.
+                    continue
                 entry["quota"] = await submissions_service.quota_status(
                     db,
                     competition["_id"],

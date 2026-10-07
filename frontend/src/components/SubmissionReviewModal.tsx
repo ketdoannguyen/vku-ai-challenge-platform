@@ -95,7 +95,7 @@ export function SubmissionRejectModal({
       <form className="account-form-modal" onSubmit={submit}>
         <p className="text-muted">
           Bài nộp của <strong>{submission.account.name}</strong> vẫn được lưu cùng tệp đã nộp và
-          vẫn tính là một lượt nộp, nhưng sẽ không được tính vào kết quả, bảng xếp hạng và file
+          vẫn tính là một lượt nộp, nhưng sẽ không được tính vào kết quả, bảng xếp hạng và tệp
           xuất.
         </p>
         {suggested && (
@@ -104,7 +104,7 @@ export function SubmissionRejectModal({
               ? "Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất, nối thêm câu yêu cầu tải dữ liệu từ link tài nguyên của BTC."
               : prefill.aiDraft
                 ? "Lý do dưới đây do AI soạn nháp từ lượt kiểm tra gần nhất."
-                : "Lý do dưới đây được điền sẵn câu yêu cầu tải dữ liệu từ link tài nguyên của BTC vì nguồn dữ liệu chưa xác minh hoặc có dấu hiệu dùng nguồn ngoài."}{" "}
+                : "Lý do dưới đây được điền sẵn câu yêu cầu tải dữ liệu từ link tài nguyên của BTC vì nguồn dữ liệu chưa xác minh hoặc nghi nguồn ngoài."}{" "}
             Hãy đọc lại và sửa trước khi gửi: thí sinh chỉ nhận đúng chữ bạn để lại trong ô này.
           </p>
         )}

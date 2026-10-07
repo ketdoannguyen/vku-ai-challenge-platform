@@ -128,7 +128,7 @@ test("hiển thị table competitions với status badge và hành động theo 
   expect(await screen.findByText("AI Challenge 2026")).toBeTruthy();
   expect(screen.getByText("Nháp")).toBeTruthy();
   await openRowMenu();
-  expect(await screen.findByRole("menuitem", { name: "Publish" })).toBeTruthy();
+  expect(await screen.findByRole("menuitem", { name: "Xuất bản" })).toBeTruthy();
   expect(screen.queryByRole("menuitem", { name: "Kết thúc" })).toBeNull(); // draft chưa có nút close
 });
 

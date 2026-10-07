@@ -651,8 +651,8 @@ test("bài bị từ chối vẫn giữ metrics và artifact, hiện lý do, nh�
 
   const rows = screen.getAllByRole("row");
   const rejectedRow = rows[1];
-  // Trạng thái chấm điểm vẫn là "Đã chấm điểm"; quyết định của admin là badge riêng kèm lý do.
-  expect(within(rejectedRow).getByText("Đã chấm điểm")).toBeTruthy();
+  // Trạng thái chấm điểm vẫn là "Đã chấm xong"; quyết định của admin là badge riêng kèm lý do.
+  expect(within(rejectedRow).getByText("Đã chấm xong")).toBeTruthy();
   expect(within(rejectedRow).getByText("Không chấp nhận")).toBeTruthy();
   expect(within(rejectedRow).getByText(`Lý do: ${REJECTED_NOTE}`)).toBeTruthy();
   // Minh bạch: metrics và cả hai artifact vẫn còn; điểm chính là cột metric chính nên chỉ hiện một lần.
@@ -713,7 +713,7 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
 
   // Cột snapshot nằm cạnh cụm điểm; metric nguồn đổi nhãn "Điểm gốc" vì không còn là điểm xếp hạng.
   expect(screen.getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
-    "Submission / thời gian",
+    "Bài nộp / thời gian",
     "Tệp đã nộp",
     "Trạng thái",
     PROVISIONAL_NORM_LABEL,
@@ -733,14 +733,14 @@ test("lịch sử có norm: snapshot là cột riêng, điểm gốc hết đư�
   expect(within(rows[1]).getByText("42.50")).toHaveClass("score-pill", "norm");
   expect(within(rows[1]).getByText("0.9500")).toHaveClass("score-pill");
   // Ảnh chụp lúc nộp phải được nói rõ là điểm chấm tạm, không phải norm hiện tại.
-  expect(screen.getByText("Điểm norm trong bảng là điểm chấm tạm lúc nộp bài.")).toBeTruthy();
+  expect(screen.getByText("Điểm chuẩn hóa trong bảng là điểm chấm tạm lúc nộp bài.")).toBeTruthy();
 
   // Snapshot có mẫu số khác nhau nên không suy "tốt nhất" từ raw; đường xem norm là bảng xếp hạng.
   expect(screen.queryByText("Tốt nhất")).toBeNull();
   expect(document.querySelector(".best-submission-row")).toBeNull();
   expect(screen.queryByText(/Điểm tốt nhất trong trang/)).toBeNull();
   expect(
-    screen.getByRole("link", { name: "Điểm norm hiện tại xem ở bảng xếp hạng" }),
+    screen.getByRole("link", { name: "Điểm chuẩn hóa hiện tại ở bảng xếp hạng" }),
   ).toBeTruthy();
 });
 

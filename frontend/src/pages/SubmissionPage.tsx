@@ -13,6 +13,7 @@ import {
   isDual,
   isSafeResourceUrl,
   parseTrack,
+  trackLocked,
   unpublishedNote,
   type ParticipantTrackView,
   type Track,
@@ -68,8 +69,8 @@ const SLOTS: {
     kind: "csv",
     part: "file",
     label: "Tệp dự đoán (.csv)",
-    prompt: "Kéo thả file CSV vào đây hoặc bấm để duyệt",
-    button: "Chọn file CSV",
+    prompt: "Kéo thả tệp CSV vào đây hoặc bấm để chọn tệp",
+    button: "Chọn tệp CSV",
     extensions: [".csv"],
     mimeTypes: ["text/csv"],
   },
@@ -77,7 +78,7 @@ const SLOTS: {
     kind: "notebook",
     part: "notebook",
     label: "Notebook (.ipynb)",
-    prompt: "Kéo thả notebook Jupyter vào đây hoặc bấm để duyệt",
+    prompt: "Kéo thả notebook Jupyter vào đây hoặc bấm để chọn tệp",
     button: "Chọn notebook",
     extensions: [".ipynb"],
     mimeTypes: ["application/x-ipynb+json"],
@@ -131,6 +132,8 @@ export function SubmissionPage() {
   const track: Track | null = dual ? parseTrack(searchParams.get("track")) : null;
   const trackView: ParticipantTrackView | null =
     track !== null ? competition.tracks?.[track] ?? null : null;
+  /** Nhánh chưa tới giờ mở: trang không hiện lượt hay kết quả cũ của nhánh, chỉ còn băng khóa. */
+  const branchLocked = trackLocked(competition, track);
   const [files, setFiles] = useState<Record<SlotKind, File | null>>({
     csv: null,
     notebook: null,
@@ -216,6 +219,12 @@ export function SubmissionPage() {
     setPendingTrack(null);
   }, [track]);
 
+  // Nhánh vừa bị dời về chưa mở: bỏ lượt và kết quả đang giữ trên màn hình. Bài đã nhận vẫn
+  // được worker chấm tiếp ở hệ thống; mở lại nhánh thì kết quả hiện đủ trong lịch sử.
+  useEffect(() => {
+    if (branchLocked) setAttempt(null);
+  }, [branchLocked]);
+
   // Mở lại trang giữa chừng (đóng tab, mất mạng): nhận lại đúng lượt đang chờ thay vì nộp lần nữa.
   useEffect(() => {
     if (config.version !== 2 || (dual && track === null)) return;
@@ -265,6 +274,13 @@ export function SubmissionPage() {
           setError(err);
           return;
         }
+        if (err instanceof ApiClientError && err.code === "TRACK_NOT_OPEN") {
+          // Nhánh vừa bị dời về chưa mở: bỏ lượt khỏi màn hình và làm mới metadata để băng
+          // trạng thái nói đúng; worker vẫn chấm tiếp bài đã nhận.
+          setAttempt(null);
+          void refreshCompetition();
+          return;
+        }
         const lost = accessLostReason(err);
         if (lost !== null) {
           // Quyền đọc vừa mất: nhường shell đóng gate, dừng vòng hỏi trạng thái lượt.
@@ -287,7 +303,7 @@ export function SubmissionPage() {
   function rejectReason(kind: SlotKind, selectedFile: File): string | null {
     const limitMb = kind === "csv" ? config.max_upload_mb : config.max_notebook_mb;
     if (selectedFile.size > limitMb * 1024 * 1024) {
-      return `Dung lượng file (${formatBytes(selectedFile.size)}) vượt quá giới hạn tối đa ${limitMb} MiB.`;
+      return `Dung lượng tệp (${formatBytes(selectedFile.size)}) vượt quá giới hạn tối đa ${limitMb} MiB.`;
     }
     const slot = SLOTS.find((item) => item.kind === kind)!;
     const name = selectedFile.name.toLowerCase();
@@ -296,8 +312,8 @@ export function SubmissionPage() {
     const typeOk = !selectedFile.type || slot.mimeTypes.includes(selectedFile.type);
     if (!nameOk && !typeOk) {
       return kind === "csv"
-        ? "File không đúng định dạng. Chỉ chấp nhận tệp CSV (.csv)."
-        : "File không đúng định dạng. Chỉ chấp nhận notebook Jupyter (.ipynb).";
+        ? "Tệp không đúng định dạng. Chỉ chấp nhận CSV (.csv)."
+        : "Tệp không đúng định dạng. Chỉ chấp nhận notebook Jupyter (.ipynb).";
     }
     return null;
   }
@@ -421,8 +437,8 @@ export function SubmissionPage() {
             {dual && track ? `Nộp bài dự đoán · Nhánh ${TRACK_LABEL[track]}` : "Nộp bài dự đoán"}
           </h2>
           <p className="sub-lead text-muted">
-            Mỗi lượt nộp gồm file CSV dự đoán và notebook tái lập. File được kiểm tra ngay khi
-            upload rồi vào hàng đợi chấm.
+            Mỗi lượt nộp gồm tệp CSV dự đoán và notebook tái lập. Tệp được kiểm tra ngay khi
+            tải lên rồi vào hàng đợi chấm.
           </p>
         </div>
 
@@ -463,9 +479,9 @@ export function SubmissionPage() {
           </div>
         )}
 
-        {/* Bốn quy định định dạng file xếp một hàng, thanh hạn mức nằm riêng một hàng
+        {/* Bốn quy định định dạng tệp xếp một hàng, thanh hạn mức nằm riêng một hàng
             ngang bên dưới để đủ dài mà đọc được tỉ lệ còn lại. */}
-        <div className="sub-specs-strip" aria-label="Quy định file submission">
+        <div className="sub-specs-strip" aria-label="Quy định tệp nộp bài">
           <div className="sub-spec-item">
             <span className="sub-spec-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" focusable="false">
@@ -502,7 +518,7 @@ export function SubmissionPage() {
                 <circle cx="8" cy="12" r="2.5" />
               </svg>
             </span>
-            <span className="sub-spec-label">Định dạng</span>
+            <span className="sub-spec-label">Cách chấm</span>
             <span className="sub-spec-val">
               {/* v2 chấm bằng bộ chấm Python của cuộc thi; average/pos_label là cấu hình của bộ chấm sklearn. */}
               {config.version === 2 ? "Bộ chấm Python" : averageLabel(config.average)}
@@ -565,11 +581,15 @@ export function SubmissionPage() {
         )}
 
         <ErrorBox error={error} />
+        {error instanceof ApiClientError && (
+          <p className="text-muted" role="status">Mã lỗi: <code>{error.code}</code></p>
+        )}
 
         {/* Lượt vừa rồi hỏng hay quá hạn: nói rõ lý do và nhắc lại là không bị tính lượt. */}
         {failure && (
           <div className="error-box" role="alert">
-            {failure.message} Lượt này không bị tính vào hạn mức nộp.
+            {failure.message} Lượt này không bị tính vào hạn mức nộp. Mã lỗi: <code>{failure.code}</code>
+            {attempt?.attempt_id && <> · Mã lượt: <code>{attempt.attempt_id}</code></>}
           </div>
         )}
 
@@ -584,8 +604,8 @@ export function SubmissionPage() {
               </h3>
               <p className="sub-result-lead">
                 {dual && track
-                  ? `Hệ thống đã kiểm tra và đối soát kết quả dự đoán với Ground Truth của nhánh ${TRACK_LABEL[track]}.`
-                  : "Hệ thống đã kiểm tra và đối soát kết quả dự đoán với Public Ground Truth."}
+                  ? `Hệ thống đã kiểm tra và đối soát kết quả dự đoán với ground truth của nhánh ${TRACK_LABEL[track]}.`
+                  : "Hệ thống đã kiểm tra và đối soát kết quả dự đoán với ground truth của cuộc thi."}
               </p>
               {/* Đã chấm nhưng chưa công bố: nói rõ vì sao các ô điểm đang để trống thay vì bỏ im lặng. */}
               {result.result_visibility === "hidden" && (
@@ -646,8 +666,8 @@ export function SubmissionPage() {
             {/* Snapshot là ảnh chụp lúc ghi nhận, không phải norm hiện tại của bảng xếp hạng. */}
             {shownSnapshot && (
               <p className="sub-result-ai-note text-muted">
-                Con số tạm tính lúc {formatLocal(shownSnapshot.calculated_at)}; điểm norm hiện tại
-                có thể đã đổi theo kết quả tốt nhất của cuộc thi.{" "}
+                Con số tạm tính lúc {formatLocal(shownSnapshot.calculated_at)}; điểm chuẩn hóa hiện
+                tại có thể đã đổi theo kết quả tốt nhất của cuộc thi.{" "}
                 <Link to="../leaderboard">Xem bảng xếp hạng để đối chiếu</Link>.
               </p>
             )}
@@ -827,20 +847,9 @@ export function SubmissionPage() {
               })}
             </div>
 
-            {/* Vùng trigger nộp bài và hạn ngạch */}
+            {/* Vùng trigger nộp bài; hạn mức đã nằm trong ribbon quy định phía trên. */}
             <div className="sub-trigger-block">
               <div className="sub-trigger-row">
-                <div className="sub-quota-box">
-                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10" />
-                    <line x1="12" y1="16" x2="12" y2="12" />
-                    <line x1="12" y1="8" x2="12.01" y2="8" />
-                  </svg>
-                  <span>
-                    Hạn mức: <strong>{quotaLabel}</strong>
-                  </span>
-                </div>
-
                 <div className="sub-trigger-actions">
                   <button
                     className="btn"
@@ -858,9 +867,9 @@ export function SubmissionPage() {
 
               <p className="sub-notice-footnote">
                 Lưu ý: Mỗi lượt nộp chạy kiểm tra ground truth tự động và chỉ tính vào hạn mức khi
-                chấm xong. Lượt quá 60 giây không bị tính — bạn hãy nộp lại. Upload phải hoàn tất
-                trước hạn nộp của nhánh; đồng hồ đếm ngược không bảo đảm nhận bài nếu upload còn
-                chạy.
+                chấm xong. Lượt quá 60 giây không bị tính — bạn hãy nộp lại. Phải tải lên xong
+                trước hạn nộp của nhánh; đồng hồ đếm ngược không bảo đảm nhận bài nếu tệp còn
+                đang tải lên.
               </p>
             </div>
           </form>
@@ -882,7 +891,7 @@ export function SubmissionPage() {
             <span className="sub-guide-tag">Header chuẩn</span>
           </div>
           <p className="sub-guide-desc">
-            File nộp phải chứa đúng {schema.columns.length} cột, phân cách bằng dấu phẩy (<code>,</code>),
+            Tệp nộp phải chứa đúng {schema.columns.length} cột, phân cách bằng dấu phẩy (<code>,</code>),
             không có dấu cách thừa.
           </p>
           <p className="sub-guide-desc">
@@ -918,7 +927,8 @@ export function SubmissionPage() {
             </h3>
           </div>
           <p className="sub-guide-desc">
-            Các file gặp lỗi bên dưới sẽ bị hệ thống từ chối nộp trước khi trừ lượt quota của bạn.
+            Tệp gặp lỗi bên dưới sẽ bị từ chối ngay khi nộp, không trừ lượt. Khi cần hỗ trợ, gửi
+            kèm mã lỗi cho Ban Tổ chức.
           </p>
           <div className="sub-pitfalls-list">
             {SUBMISSION_PITFALLS.map((pitfall) => (

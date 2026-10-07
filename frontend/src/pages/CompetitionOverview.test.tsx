@@ -177,13 +177,14 @@ test("cuộc thi bật chuẩn hóa: Tổng quan nói rõ xếp hạng theo norm
   await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
   expect(screen.getByText("Xếp hạng.")).toBeTruthy();
   expect(
-    screen.getByText(/Điểm xếp hạng là norm score \(thang 0–50\) quy đổi từ điểm gốc F1/),
+    screen.getByText(/Điểm xếp hạng là điểm chuẩn hóa \(norm score, thang 0–50\) quy đổi từ điểm gốc F1/),
   ).toBeTruthy();
-  // Masthead đổi chỉ số chính sang norm score, chỉ số gốc xuống ngoặc.
-  expect(screen.getByText("Norm score (F1)")).toBeTruthy();
+  // Masthead giữ chỉ số chính là metric gốc; cách xếp hạng nằm ở dòng Xếp hạng phía trên.
+  const masthead = document.querySelector(".comp-facts") as HTMLElement;
+  expect(within(masthead).getByText("F1")).toBeTruthy();
 });
 
-test("dual bật chuẩn hóa: masthead ghi chỉ số norm và lịch/hạn mức của cả hai nhánh", async () => {
+test("dual bật chuẩn hóa: masthead giữ metric gốc và lịch/hạn mức của cả hai nhánh", async () => {
   apiMock((url) =>
     url.includes("/contents")
       ? { body: CONTENTS, status: 200 }
@@ -192,10 +193,10 @@ test("dual bật chuẩn hóa: masthead ghi chỉ số norm và lịch/hạn m�
   renderAt("/competitions/ai-challenge-2026");
 
   await screen.findByRole("heading", { name: "Tổng quan", level: 2 });
-  expect(screen.getByText("Norm score (F1)")).toBeTruthy();
+  const facts = document.querySelector(".comp-facts") as HTMLElement;
+  expect(within(facts).getByText("F1")).toBeTruthy();
   // Dual: mỗi nhánh một dòng nhỏ thay cho giá trị gộp "Theo từng nhánh".
   expect(screen.queryByText("Theo từng nhánh")).toBeNull();
-  const facts = document.querySelector(".comp-facts") as HTMLElement;
   const lines = facts.querySelectorAll(".comp-fact-line");
   expect(lines).toHaveLength(4);
   expect(lines[0]).toHaveTextContent(

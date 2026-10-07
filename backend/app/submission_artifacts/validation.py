@@ -23,6 +23,19 @@ def has_notebook_extension(filename: str | None) -> bool:
     return Path(filename or "").suffix.lower() == NOTEBOOK_SUFFIX
 
 
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise NotebookValidationError("NOTEBOOK_INVALID", "Notebook có khóa JSON trùng lặp.")
+        result[key] = value
+    return result
+
+
+def _reject_non_json_constant(_value: str) -> None:
+    raise NotebookValidationError("NOTEBOOK_INVALID", "Notebook không phải JSON UTF-8 hợp lệ.")
+
+
 def validate_notebook(data: bytes) -> None:
     """Raise `NotebookValidationError` với code ổn định cho frontend."""
     if b"\x00" in data:
@@ -30,7 +43,13 @@ def validate_notebook(data: bytes) -> None:
             "NOTEBOOK_INVALID", "Notebook chứa ký tự không hợp lệ."
         )
     try:
-        payload = json.loads(data.decode("utf-8-sig"))
+        payload = json.loads(
+            data.decode("utf-8-sig"),
+            object_pairs_hook=_unique_keys,
+            parse_constant=_reject_non_json_constant,
+        )
+    except NotebookValidationError:
+        raise
     except (UnicodeDecodeError, ValueError):
         raise NotebookValidationError(
             "NOTEBOOK_INVALID", "Notebook không phải JSON UTF-8 hợp lệ."
@@ -40,12 +59,12 @@ def validate_notebook(data: bytes) -> None:
         raise NotebookValidationError(
             "NOTEBOOK_INVALID", "Notebook phải là một JSON object ở cấp gốc."
         )
-    if payload.get("nbformat") != _NBFORMAT:
+    if type(payload.get("nbformat")) is not int or payload["nbformat"] != _NBFORMAT:
         raise NotebookValidationError(
             "NOTEBOOK_UNSUPPORTED_VERSION", "Chỉ chấp nhận notebook định dạng v4."
         )
     minor = payload.get("nbformat_minor")
-    if not isinstance(minor, int) or isinstance(minor, bool):
+    if type(minor) is not int or minor < 0:
         raise NotebookValidationError(
             "NOTEBOOK_INVALID", "Notebook thiếu `nbformat_minor` hợp lệ."
         )
@@ -54,12 +73,13 @@ def validate_notebook(data: bytes) -> None:
     cells = payload.get("cells")
     if not isinstance(cells, list):
         raise NotebookValidationError("NOTEBOOK_INVALID", "Notebook thiếu danh sách `cells`.")
-    for cell in cells:
+    for index, cell in enumerate(cells, start=1):
         if not isinstance(cell, dict):
-            raise NotebookValidationError("NOTEBOOK_INVALID", "Mỗi cell phải là một object.")
-        if cell.get("cell_type") not in _CELL_TYPES:
+            raise NotebookValidationError("NOTEBOOK_INVALID", f"Cell {index} phải là một object.")
+        cell_type = cell.get("cell_type")
+        if not isinstance(cell_type, str) or cell_type not in _CELL_TYPES:
             raise NotebookValidationError(
-                "NOTEBOOK_INVALID", "Cell có `cell_type` không hợp lệ."
+                "NOTEBOOK_INVALID", f"Cell {index} có `cell_type` không hợp lệ."
             )
         source = cell.get("source")
         valid_source = isinstance(source, str) or (
@@ -67,7 +87,7 @@ def validate_notebook(data: bytes) -> None:
         )
         if not valid_source:
             raise NotebookValidationError(
-                "NOTEBOOK_INVALID", "`source` của cell phải là chuỗi hoặc danh sách chuỗi."
+                "NOTEBOOK_INVALID", f"Cell {index}: `source` phải là chuỗi hoặc danh sách chuỗi."
             )
     # Danh sách rỗng thoả vòng lặp trên một cách rỗng, nên phải chặn riêng: notebook không có
     # cell code nào thì không chứng minh được cách tạo ra kết quả.
