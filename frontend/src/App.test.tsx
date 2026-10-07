@@ -306,7 +306,7 @@ test("route không tồn tại: H1 404 và tiêu đề tab mô tả trạng thá
   expect(await screen.findByRole("heading", { name: "404 - Không tìm thấy trang" })).toBeTruthy();
   expect(document.title).toBe("Không tìm thấy trang - AI Challenge");
   // Hai lối thoát: link về dashboard đúng route và nút quay lại lịch sử.
-  expect(screen.getByRole("link", { name: "Về trang chính" })).toHaveAttribute("href", "/");
+  expect(screen.getByRole("link", { name: "Về trang chủ" })).toHaveAttribute("href", "/");
   expect(screen.getByRole("button", { name: "Quay lại" })).toBeTruthy();
   // Trang lỗi dùng icon SVG trang trí đã ẩn khỏi AT, không dùng emoji production.
   const main = document.getElementById("main-content") as HTMLElement;

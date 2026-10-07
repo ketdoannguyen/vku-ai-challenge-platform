@@ -14,6 +14,7 @@ import {
   formatLocal,
   isDual,
   parseTrack,
+  trackLocked,
   unpublishedNote,
   type CompetitionDetail,
   type Track,
@@ -47,7 +48,7 @@ const PAGE_SIZE = 50;
 const AUTO_REFRESH_MS = 3_000;
 
 /**
- * Hạn ngạch hiển thị trên thẻ telemetry. Cuộc thi dual không có quota cấp cuộc thi: số phải lấy
+ * Hạn mức hiển thị trên thẻ telemetry. Cuộc thi dual không có quota cấp cuộc thi: số phải lấy
  * theo nhánh đang xem, và là quota thật của chính thí sinh nên vẫn hiện dù nhánh đó chưa công bố.
  */
 function quotaBadgeValue(competition: CompetitionDetail, track: Track, dual: boolean): string {
@@ -71,6 +72,11 @@ export function MySubmissionsPage() {
   const dual = isDual(competition);
   const [searchParams, setSearchParams] = useSearchParams();
   const track: Track = (dual ? parseTrack(searchParams.get("track")) : null) ?? "public";
+  /**
+   * Nhánh đang xem chưa tới giờ mở: lịch sử của nhánh bị khóa - kể cả khi BTC vừa dời lịch về
+   * sau. Danh sách trả cả hai nhánh nên dòng của nhánh khóa bị máy chủ loại khỏi mọi lượt tải.
+   */
+  const locked = trackLocked(competition, dual ? track : null);
   const [data, setData] = useState<SubmissionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -97,6 +103,7 @@ export function MySubmissionsPage() {
   /** Giữ bảng cũ trong lúc tải trang mới; chỉ lần đầu chưa có dữ liệu mới hiện full loading. */
   const loadData = useCallback(
     async (nextOffset: number, keepRows: boolean, silent = false) => {
+      if (locked) return;
       const sequence = ++requestSequence.current;
       if (!silent) {
         manualLoads.current += 1;
@@ -140,8 +147,15 @@ export function MySubmissionsPage() {
         }
       }
     },
-    [competition.id, reportAccessLost],
+    [competition.id, reportAccessLost, locked],
   );
+
+  // Cửa sổ của nhánh vừa đổi trạng thái khóa: vô hiệu response đang bay và đóng trình xem tệp -
+  // dữ liệu đang giữ không xóa vì danh sách dùng chung hai nhánh, máy chủ đã loại dòng nhánh khóa.
+  useEffect(() => {
+    requestSequence.current += 1;
+    setViewer(null);
+  }, [locked]);
 
   useEffect(() => {
     void loadData(query.offset, hasData.current);
@@ -156,7 +170,7 @@ export function MySubmissionsPage() {
   function copyId(id: string) {
     if (!navigator.clipboard) {
       setCopiedId(null);
-      setCopyError("Trình duyệt không cho phép sao chép tự động - hãy chọn ID và sao chép thủ công.");
+      setCopyError("Trình duyệt không cho phép sao chép tự động — hãy chọn ID và sao chép thủ công.");
       return;
     }
     navigator.clipboard.writeText(id).then(
@@ -171,7 +185,7 @@ export function MySubmissionsPage() {
       },
       () => {
         setCopiedId(null);
-        setCopyError("Không sao chép được ID - hãy chọn ID và sao chép thủ công.");
+        setCopyError("Không sao chép được ID — hãy chọn ID và sao chép thủ công.");
       },
     );
   }
@@ -194,8 +208,9 @@ export function MySubmissionsPage() {
     await loadData(query.offset, true, true);
   }, [loadData, query.offset, viewer]);
 
-  // Trang đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn.
-  const refreshStatus = useAutoRefresh(true, silentRefresh, {
+  // Trang đang mở thì tự cập nhật ngầm; hook tự tạm dừng khi tab bị ẩn. Nhánh đang khóa không có
+  // dòng nào để làm mới - metadata của shell mới là thứ đưa trang về trạng thái xem được.
+  const refreshStatus = useAutoRefresh(!locked, silentRefresh, {
     intervalMs: AUTO_REFRESH_MS,
   });
 
@@ -207,7 +222,7 @@ export function MySubmissionsPage() {
     <div className="subm-head">
       <div className="subm-head-top">
         <div className="subm-eyebrow">
-          <span>Lịch sử đánh giá</span>
+          <span>Bài đã nộp</span>
           <span>•</span>
           <span className="results-slug">{competition.slug}</span>
         </div>
@@ -239,7 +254,7 @@ export function MySubmissionsPage() {
           <div className="subm-telemetry-badge">
             <div className="subm-telemetry-item">
               <span className="subm-telemetry-label">
-                {dual ? `Hạn ngạch · ${TRACK_LABEL[track]}` : "Hạn ngạch"}
+                {dual ? `Hạn mức · ${TRACK_LABEL[track]}` : "Hạn mức"}
               </span>
               <span className="subm-telemetry-val">{quotaBadgeValue(competition, track, dual)}</span>
             </div>
@@ -255,6 +270,37 @@ export function MySubmissionsPage() {
       </div>
     </div>
   );
+
+  // Nhánh đang xem chưa tới giờ mở (kể cả khi BTC vừa dời lịch về sau): khóa lịch sử của nhánh
+  // thay vì hiện dòng cũ. Đứng trước cả nhánh loading vì lượt tải của nhánh khóa không bao giờ
+  // chạy nên trang sẽ kẹt ở vòng xoay. Giữ bộ chọn nhánh để xem nhánh còn lại.
+  if (locked) {
+    const view = competition.tracks?.[track];
+    return (
+      <section className="subm-page">
+        {header}
+
+        <div className="lb-locked-card">
+          <div className="lb-locked-content">
+            <div className="lb-locked-emblem" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.75">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+            </div>
+
+            <h2 className="lb-locked-title">
+              Nhánh {TRACK_LABEL[track]} chưa mở — Bài đã nộp đang khóa.
+            </h2>
+            <p className="lb-locked-lead">
+              {view && `Nhánh này mở lúc ${formatLocal(view.start_at)}. `}
+              Bài nộp và kết quả cũ của nhánh không bị xóa, sẽ hiện lại đầy đủ khi nhánh mở.
+            </p>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   // Lần đầu chưa có gì thì vẫn là full loading; các lần sau bảng cũ ở lại trong DOM.
   if (loading && !data) return <Loading label="Đang tải lịch sử bài nộp..." />;
@@ -373,7 +419,7 @@ export function MySubmissionsPage() {
             <>
               <span>•</span>
               <Link to={dual ? `../leaderboard?track=${track}` : "../leaderboard"}>
-                Điểm norm hiện tại xem ở bảng xếp hạng
+                Điểm chuẩn hóa hiện tại ở bảng xếp hạng
               </Link>
             </>
           )}
@@ -460,7 +506,7 @@ export function MySubmissionsPage() {
         <table className="subm-table table results-table">
           <thead>
             <tr>
-              <th scope="col" className="subm-col-id">Submission / thời gian</th>
+              <th scope="col" className="subm-col-id">Bài nộp / thời gian</th>
               <th scope="col" className="subm-col-file">Tệp đã nộp</th>
               <th scope="col" className="subm-col-status">Trạng thái</th>
               {showsAi && (
@@ -646,7 +692,7 @@ export function MySubmissionsPage() {
       {/* Cột norm là ảnh chụp lúc nộp, không phải norm hiện tại: nói một câu ngay dưới bảng. */}
       {showsNorm && (
         <p className="subm-norm-note text-muted">
-          Điểm norm trong bảng là điểm chấm tạm lúc nộp bài.
+          Điểm chuẩn hóa trong bảng là điểm chấm tạm lúc nộp bài.
         </p>
       )}
 

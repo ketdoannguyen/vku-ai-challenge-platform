@@ -41,6 +41,27 @@ class SubmissionRuleError(Exception):
     """Bộ chấm chủ động báo bài nộp vi phạm một quy tắc đã công khai."""
 
 
+class InvalidClassIdError(Exception):
+    """Mã lớp trong bài nộp nằm ngoài tập mã đã công khai của cuộc thi."""
+
+    def __init__(self, class_id: int, allowed_class_ids: list[int]):
+        if (
+            type(class_id) is not int
+            or abs(class_id) > 1_000_000_000
+            or not isinstance(allowed_class_ids, (list, tuple))
+            or not 1 <= len(allowed_class_ids) <= 32
+            or any(
+                type(value) is not int or abs(value) > 1_000_000_000
+                for value in allowed_class_ids
+            )
+            or len(set(allowed_class_ids)) != len(allowed_class_ids)
+            or class_id in allowed_class_ids
+        ):
+            raise ValueError("Invalid class ID error metadata")
+        self.class_info = {"class_id": class_id, "allowed_class_ids": list(allowed_class_ids)}
+        super().__init__("Invalid class ID in submission")
+
+
 def _emit(channel: int, payload: dict) -> None:
     blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     if len(blob) > MAX_RESULT_BYTES:
@@ -99,6 +120,7 @@ def _load_entrypoint(source_code: str):
     """
     module = types.ModuleType("evaluator")
     module.__dict__["SubmissionRuleError"] = SubmissionRuleError
+    module.__dict__["InvalidClassIdError"] = InvalidClassIdError
     exec(compile(source_code, "<evaluator>", "exec"), module.__dict__)  # noqa: S102 - mục đích của file
     function = getattr(module, ENTRYPOINT, None)
     if not callable(function):
@@ -134,6 +156,15 @@ def main() -> int:
         function = _load_entrypoint(payload["source_code"])
         try:
             result = function(GROUND_TRUTH_PATH, SUBMISSION_PATH)
+        except InvalidClassIdError as error:
+            failure = _failure(
+                "SUBMISSION_CLASS_ID_INVALID",
+                SUBMISSION_RULE_MESSAGE,
+                traceback.format_exc(),
+            )
+            failure["class_info"] = error.class_info
+            _emit(channel, failure)
+            return 0
         except SubmissionRuleError:
             _emit(
                 channel,

@@ -40,7 +40,7 @@ export function NotFoundPage() {
         <p>Trang bạn tìm không tồn tại.</p>
         <div className="empty-actions">
           <Link className="btn" to="/">
-            Về trang chính
+            Về trang chủ
           </Link>
           <button type="button" className="btn btn-secondary" onClick={() => navigate(-1)}>
             Quay lại

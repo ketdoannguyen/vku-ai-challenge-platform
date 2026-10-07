@@ -3253,7 +3253,8 @@ select.input {
   padding: 10px;
 }
 
-.content-card-resources .resource-link {
+.content-card-resources .resource-link,
+.content-card-resources .resource-row {
   position: relative;
   counter-increment: resource-item;
   min-height: 44px;
@@ -3261,7 +3262,8 @@ select.input {
   border-color: var(--vku-border-soft);
 }
 
-.content-card-resources .resource-link::before {
+.content-card-resources .resource-link::before,
+.content-card-resources .resource-row::before {
   content: counter(resource-item, decimal-leading-zero);
   position: absolute;
   top: 50%;
@@ -3295,6 +3297,46 @@ select.input {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Link ngoài không còn là cả dòng bấm được: nhãn co giãn, hai thao tác vuông nằm bên phải. */
+.resource-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-label-md);
+  font-weight: 500;
+}
+
+.resource-row .resource-label {
+  flex: 1;
+}
+
+/* Nút sao chép / mở link của một dòng tài nguyên: chỉ icon, vuông 32px, không gạch chân. */
+.resource-action.btn-sm {
+  width: 32px;
+  padding: 0;
+  color: var(--vku-blue-700);
+  text-decoration: none;
+}
+
+.resource-action.btn-sm:hover {
+  border-color: var(--vku-blue-600);
+  background: var(--vku-blue-100);
+  color: var(--vku-blue-800);
+  text-decoration: none;
+}
+
+/* Icon check giữ màu xanh cả khi con trỏ còn nằm trên nút vừa sao chép. */
+.resource-action.copied,
+.resource-action.copied:hover {
+  color: var(--success);
 }
 
 .resource-link {
@@ -5442,27 +5484,8 @@ button.resource-link:disabled {
   .sub-trigger-row {
     flex-direction: row;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;
   }
-}
-
-.sub-quota-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--text-body-sm);
-  color: var(--text-muted);
-}
-
-.sub-quota-box strong {
-  font-weight: 500;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.sub-quota-box svg {
-  flex-shrink: 0;
-  color: var(--info);
 }
 
 .sub-notice-footnote {
@@ -5842,7 +5865,7 @@ button.resource-link:disabled {
   gap: 10px;
 }
 
-/* Cụm nút hành động của form nộp bài, đứng cạnh hộp hạn mức trong `.sub-trigger-row`. */
+/* Cụm nút hành động của form nộp bài, căn phải trong `.sub-trigger-row`. */
 .sub-trigger-actions {
   display: flex;
   align-items: center;

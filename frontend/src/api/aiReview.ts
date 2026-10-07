@@ -411,17 +411,34 @@ export const SOURCE_CODE_LABEL: Record<string, string> = {
   SOURCE_NOTEBOOK_TRUNCATED: "notebook bị cắt bớt khi gửi AI",
 };
 
-export const AI_FILTER_OPTIONS: ReadonlyArray<{ value: AiReviewFilter; label: string }> = [
-  { value: "all", label: "Mọi trạng thái AI" },
-  { value: "flagged", label: "AI: Có dấu hiệu" },
-  { value: "clear", label: "AI: Không phát hiện" },
-  { value: "inconclusive", label: "AI: Chưa đủ căn cứ" },
-  { value: "source_external", label: AI_SOURCE_STATUS_LABEL.EXTERNAL },
-  { value: "source_unclear", label: AI_SOURCE_STATUS_LABEL.UNCLEAR },
-  { value: "source_not_evaluated", label: AI_SOURCE_STATUS_LABEL.NOT_EVALUATED },
-  { value: "error", label: "AI lỗi" },
-  { value: "pending", label: "AI đang xử lý" },
-  { value: "none", label: "Chưa đánh giá" },
+/**
+ * Bộ lọc cột AI, tách hai nhóm theo trục: kết luận/trạng thái AI và đánh giá nguồn - không trộn
+ * hai loại kết quả khác nhau vào một danh sách phẳng. Nhãn nhóm AI khớp badge trong bảng.
+ */
+export const AI_FILTER_GROUPS: ReadonlyArray<{
+  label: string;
+  options: ReadonlyArray<{ value: AiReviewFilter; label: string }>;
+}> = [
+  {
+    label: "Kết luận AI",
+    options: [
+      { value: "all", label: "Mọi trạng thái AI" },
+      { value: "flagged", label: "AI: Có dấu hiệu" },
+      { value: "clear", label: "AI: Không phát hiện" },
+      { value: "inconclusive", label: "AI: Chưa đủ căn cứ" },
+      { value: "error", label: "AI: Chưa hoàn tất" },
+      { value: "pending", label: "AI: Đang xử lý" },
+      { value: "none", label: "AI: Chưa đánh giá" },
+    ],
+  },
+  {
+    label: "Đánh giá nguồn",
+    options: [
+      { value: "source_external", label: AI_SOURCE_STATUS_LABEL.EXTERNAL },
+      { value: "source_unclear", label: AI_SOURCE_STATUS_LABEL.UNCLEAR },
+      { value: "source_not_evaluated", label: AI_SOURCE_STATUS_LABEL.NOT_EVALUATED },
+    ],
+  },
 ];
 
 /** Câu thí sinh đọc được. Không có mã lỗi, tên provider, model hay chi tiết kỹ thuật. */

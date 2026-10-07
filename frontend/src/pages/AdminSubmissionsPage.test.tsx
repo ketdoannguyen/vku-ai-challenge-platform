@@ -161,7 +161,7 @@ test("hiển thị bảng toàn cục với cuộc thi, đội, trạng thái v�
   // Trạng thái chỉ còn icon, kết luận nằm trong `aria-label`; nhãn chữ trùng với ô lọc nên chỉ
   // tra được bằng role.
   const region = screen.getByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
-  expect(within(region).getByRole("img", { name: "Đã chấm điểm" })).toBeTruthy();
+  expect(within(region).getByRole("img", { name: "Đã chấm xong" })).toBeTruthy();
   // Response cũ không có `result_contract` nên được mô tả lại thành bộ ba v1 với 4 số thập phân.
   expect(screen.getAllByText("0.9000").length).toBeGreaterThan(0);
   expect(screen.getByText("1 bài nộp trong bộ lọc hiện tại.")).toBeTruthy();
@@ -513,7 +513,7 @@ test("bảng toàn cục: norm của từng dòng tra theo metadata cuộc thi, 
   expect(
     fieldValue(normItem, "Điểm gốc").querySelector(".subm-result-primary-score"),
   ).toHaveTextContent("0.9000");
-  const snapshot = fieldValue(normItem, "Norm score tạm");
+  const snapshot = fieldValue(normItem, "Điểm chuẩn hóa tạm");
   expect(snapshot.querySelector(".subm-result-primary-score")).toHaveTextContent("37.50");
   expect(snapshot.querySelector(".subm-score")?.getAttribute("title")).toBe(
     "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
@@ -525,7 +525,7 @@ test("bảng toàn cục: norm của từng dòng tra theo metadata cuộc thi, 
     fieldValue(plainItem, "Điểm chính").querySelector(".subm-result-primary-score"),
   ).toHaveTextContent("0.9000");
   expect(Array.from(plainItem.querySelectorAll("dt")).map((dt) => dt.textContent)).not.toContain(
-    "Norm score tạm",
+    "Điểm chuẩn hóa tạm",
   );
 });
 
@@ -901,14 +901,14 @@ test("trường Duyệt chỉ có hai kết quả; quyết định thực giữ 
 
   const rejectedItem = itemOf("Đội bị từ chối");
   const rejectedReview = statusBadge(rejectedItem, "Duyệt");
-  expect(rejectedReview).toHaveAttribute("aria-label", "Không duyệt");
+  expect(rejectedReview).toHaveAttribute("aria-label", "Không chấp nhận");
   // Lý do có thể dài tới 1000 ký tự nên không được chiếm chỗ trong thẻ: nó đi cùng người duyệt
   // và thời điểm vào tooltip, cách nhau bằng xuống dòng. Nhãn kết luận đã hiện ngay trên badge
   // nên tooltip không lặp lại nó nữa.
   const rejectedTip = statusTip(rejectedItem, "Duyệt").textContent ?? "";
   expect(rejectedTip).toContain(REJECTED_REVIEW.note);
   expect(rejectedTip).toContain("Admin A");
-  expect(rejectedTip).not.toContain("Không duyệt");
+  expect(rejectedTip).not.toContain("Không chấp nhận");
   expect(
     within(fieldValue(rejectedItem, "Thao tác")).getByRole("button", { name: "Khôi phục" }),
   ).toBeTruthy();
@@ -943,7 +943,7 @@ test("lọc theo trạng thái duyệt là trục riêng, không lẫn với tr�
   await screen.findByText("Đội 0");
   expect(lastParams(urls).has("review")).toBe(false);
   expect(within(screen.getByLabelText("Lọc theo trạng thái duyệt")).getAllByRole("option")
-    .map((option) => option.textContent)).toEqual(["Mọi trạng thái duyệt", "Duyệt", "Không duyệt"]);
+    .map((option) => option.textContent)).toEqual(["Mọi trạng thái duyệt", "Duyệt", "Không chấp nhận"]);
 
   fireEvent.change(screen.getByLabelText("Lọc theo trạng thái duyệt"), {
     target: { value: "rejected" },
@@ -1143,7 +1143,7 @@ test("khôi phục bài đã bị từ chối qua confirm modal", async () => {
   renderPage();
 
   const region = await screen.findByRole("region", { name: "Danh sách bài nộp toàn hệ thống" });
-  await within(region).findByText("Không duyệt");
+  await within(region).findByText("Không chấp nhận");
 
   fireEvent.click(within(region).getByRole("button", { name: "Khôi phục" }));
   const dialog = await screen.findByRole("dialog", { name: "Khôi phục bài nộp" });
@@ -1441,7 +1441,7 @@ test("lọc theo kết luận AI là trục riêng, không lẫn với trạng t
   await screen.findByText("Đội 0");
   expect(lastParams(urls).get("ai_review")).toBe("all");
 
-  fireEvent.change(screen.getByLabelText("Lọc theo kết luận AI"), {
+  fireEvent.change(screen.getByLabelText("Lọc theo trạng thái AI"), {
     target: { value: "flagged" },
   });
   await waitFor(() => expect(lastParams(urls).get("ai_review")).toBe("flagged"));
@@ -1462,7 +1462,7 @@ test("ba bộ lọc nguồn mới nằm cùng trục AI và gửi đúng giá tr
   renderPage();
   await screen.findByText("Đội 0");
 
-  const filter = screen.getByLabelText("Lọc theo kết luận AI");
+  const filter = screen.getByLabelText("Lọc theo trạng thái AI");
   const labels = within(filter).getAllByRole("option").map((option) => option.textContent);
   for (const label of [
     "Nguồn: Nghi nguồn ngoài",

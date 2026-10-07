@@ -19,7 +19,6 @@ import {
   displayStatus,
   formatLocal,
   isDual,
-  normalizationOf,
   statusClass,
 } from "../api/competitions";
 import { fetchContents, type ContentSummary } from "../api/contents";
@@ -555,12 +554,8 @@ export function CompetitionDetailPage() {
               </Icon>
               Chỉ số chính
             </dt>
-            {/* Cuộc thi chuẩn hóa: xếp hạng theo norm score, chỉ số gốc xuống ngoặc. */}
-            <dd className="comp-fact-value">
-              {normalizationOf(c).enabled
-                ? `Norm score${c.primary_metric_label ? ` (${c.primary_metric_label})` : ""}`
-                : c.primary_metric_label ?? "Chưa cấu hình"}
-            </dd>
+            {/* Chỉ số chính là metric gốc; cách xếp hạng (điểm chuẩn hóa) nằm ở khối Tổng quan. */}
+            <dd className="comp-fact-value">{c.primary_metric_label ?? "Chưa cấu hình"}</dd>
           </div>
           <div className="comp-fact">
             <dt>

@@ -100,6 +100,10 @@ def _parse(
             raise ScoringValidationError(code, "Header CSV không hợp lệ.")
         missing = [column for column in declared if column not in columns]
         if missing:
+            if len(columns) == 1 and ";" in columns[0] and set(columns[0].split(";")) >= set(declared):
+                raise ScoringValidationError(
+                    code, "Header CSV dùng dấu chấm phẩy; hãy phân cách các cột bằng dấu phẩy (,)."
+                )
             raise ScoringValidationError(
                 code, f"Thiếu cột bắt buộc: {', '.join(missing)}."
             )
@@ -116,14 +120,14 @@ def _parse(
         for index, raw_row in enumerate(reader):
             if index >= MAX_CSV_ROWS:
                 raise ScoringValidationError(code, f"File CSV vượt quá {MAX_CSV_ROWS} dòng.")
-            line = index + 2
+            line = reader.line_num
             if None in raw_row:
-                raise ScoringValidationError(code, f"Dòng {line} có số cột không hợp lệ.")
+                raise ScoringValidationError(code, f"Dòng {line} có số cột không khớp header CSV.")
             row: dict[str, str] = {}
             for column in columns:
                 value = raw_row.get(column)
                 if value is None:
-                    raise ScoringValidationError(code, f"Dòng {line} có số cột không hợp lệ.")
+                    raise ScoringValidationError(code, f"Dòng {line} có số cột không khớp header CSV.")
                 spec = specs.get(column)
                 if spec is not None:
                     _check_value(
@@ -138,12 +142,12 @@ def _parse(
             if row_id in seen_ids:
                 duplicate_code = DUPLICATE_IDS if code == SCHEMA_INVALID else code
                 raise ScoringValidationError(
-                    duplicate_code, f"Cột {schema.id_column} chứa ID trùng lặp."
+                    duplicate_code, f"Cột {schema.id_column} có ID trùng tại dòng {line}."
                 )
             seen_ids.add(row_id)
             rows.append(row)
     except csv.Error as exc:
-        raise ScoringValidationError(code, "File CSV không đọc được.") from exc
+        raise ScoringValidationError(code, "CSV sai cấu trúc dấu nháy hoặc ký tự phân cách.") from exc
 
     if not rows:
         raise ScoringValidationError(code, "File CSV không có dòng dữ liệu.")

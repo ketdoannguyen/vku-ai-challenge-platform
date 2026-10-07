@@ -129,7 +129,7 @@ const SUMMARY_FACTS: ReadonlyArray<{
     // Cuộc thi v2 đặt chỉ số chính theo hợp đồng kết quả, không còn là f1/precision/recall.
     read: (c) => primaryMetricLabel(c),
   },
-  { label: "Quota", Icon: IconClock, read: (c) => `${c.quota_per_day} lượt/ngày` },
+  { label: "Hạn mức", Icon: IconClock, read: (c) => `${c.quota_per_day} lượt/ngày` },
 ];
 
 
@@ -577,7 +577,7 @@ function formatAssetType(contentType: string): string {
 
 /** Chặn ở client để file quá trần không phát request; câu chữ khớp lỗi 413 của backend. */
 function tooLargeMessage(file: File, limitMb: number): string | null {
-  return file.size > limitMb * 1024 * 1024 ? `File vượt quá giới hạn ${limitMb} MiB.` : null;
+  return file.size > limitMb * 1024 * 1024 ? `Tệp vượt quá giới hạn ${limitMb} MiB.` : null;
 }
 
 function formatBytes(bytes: number): string {
@@ -781,7 +781,7 @@ export function AdminCompetitionDetailPage() {
               onClick={() => setConfirming("clone")}
             >
               <IconCopy className="admin-detail-action-icon" />
-              <span>Clone</span>
+              <span>Nhân bản</span>
             </button>
             {competition.status === "draft" && (
               <button
@@ -795,7 +795,7 @@ export function AdminCompetitionDetailPage() {
                 onClick={() => setConfirming("publish")}
               >
                 <IconPublish className="admin-detail-action-icon" />
-                <span>Publish</span>
+                <span>Xuất bản</span>
               </button>
             )}
             {competition.status === "published" && (
@@ -818,7 +818,7 @@ export function AdminCompetitionDetailPage() {
                 <span>Mở lại</span>
               </button>
             )}
-            {/* Xoá được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
+            {/* Xóa được ở draft và closed; cuộc thi đang chạy phải Kết thúc trước. */}
             {competition.status !== "published" && (
               <button
                 type="button"
@@ -857,7 +857,7 @@ export function AdminCompetitionDetailPage() {
           id={`publish-blocked-${competition.id}`}
         >
           <span className="admin-detail-publish-banner-text">
-            <strong>Chưa thể publish.</strong> {publishBlocked.message}
+            <strong>Chưa thể xuất bản.</strong> {publishBlocked.message}
           </span>
           <button
             type="button"
@@ -995,7 +995,7 @@ export function AdminCompetitionDetailPage() {
             } else {
               notify(
                 action === "publish"
-                  ? "Đã publish cuộc thi."
+                  ? "Đã xuất bản cuộc thi."
                   : action === "reopen"
                     ? "Đã mở lại cuộc thi."
                     : "Đã kết thúc cuộc thi.",
@@ -1121,7 +1121,7 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
             </span>
             <div>
               <h2 className="admin-detail-card-title">Bảng xếp hạng</h2>
-              <p className="text-muted">Admin luôn xem được kết quả, kể cả khi participant leaderboard đang ẩn.</p>
+              <p className="text-muted">Admin luôn xem được kết quả, kể cả khi bảng xếp hạng bị ẩn với thí sinh.</p>
             </div>
           </div>
           <div className="results-head-actions">
@@ -1167,9 +1167,9 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
             là con số đang dùng để xếp hạng. */}
         {norm && (
           <p className="text-muted">
-            Điểm xếp hạng: Norm / {norm.max_score}. Metric nguồn {sourceLabel} với baseline{" "}
+            Điểm xếp hạng: điểm chuẩn hóa thang 0–{norm.max_score}. Metric nguồn {sourceLabel} với baseline{" "}
             {formatMetric(norm.baseline, sourceDecimals)} · Điểm gốc tốt nhất hiện tại{" "}
-            {dual ? `nhánh ${TRACK_LABEL[track]} (mặt bằng riêng của nhánh) ` : ""}
+            {dual ? `nhánh ${TRACK_LABEL[track]} (baseline riêng của nhánh) ` : ""}
             {formatMetric(norm.reference_best, sourceDecimals)} · Bảng dựng lúc{" "}
             {formatLocal(norm.calculated_at)}. {NORM_RANKING_NOTE}
           </p>
@@ -1196,7 +1196,7 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
             <table className="table results-table">
               {/* Norm bật thì norm là con số xếp hạng, cột metric nguồn xuống hàng đối chiếu;
                   norm tắt giữ nguyên bảng cũ với điểm chính được nhấn trong cụm metric. */}
-              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{norm && <th scope="col" className="score-cell">Điểm norm (0–{norm.max_score})</th>}{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
+              <thead><tr><th scope="col">Hạng</th><th scope="col">Đội</th>{norm && <th scope="col" className="score-cell">Điểm chuẩn hóa (0–{norm.max_score})</th>}{contract.metrics.map((metric) => <th key={metric.key} scope="col" className="score-cell">{metric.label}</th>)}<th scope="col" className="results-count-cell">Số bài</th></tr></thead>
               <tbody>
                 {leaderboard.entries.map((entry) => (
                   <tr key={entry.best_submission_id}>
@@ -1226,7 +1226,7 @@ function ResultsPanel({ competition }: { competition: AdminCompetition }) {
         resultContract={contract}
         normalization={competition.normalization}
         tracks={dual ? TRACKS : null}
-        title="Danh sách submissions"
+        title="Danh sách bài nộp"
         listLabel="Danh sách bài nộp của cuộc thi"
       />
     </div>
@@ -1248,7 +1248,7 @@ function windowClass(state: TrackWindowState): string {
 
 /** Nhãn đọc được của `last_change.action`; mã lạ giữ nguyên để không giấu thao tác. */
 const CHANGE_ACTION_LABEL: Record<string, string> = {
-  publish: "publish cuộc thi",
+  publish: "xuất bản cuộc thi",
   close: "kết thúc cuộc thi",
   reopen: "mở lại cuộc thi",
   track_schedule: "đổi lịch nhánh",
@@ -1323,9 +1323,9 @@ function TracksPanel({
    */
   const publishBlocked =
     competition.status === "draft"
-      ? "Cần publish cuộc thi trước khi công bố kết quả Private."
+      ? "Cần xuất bản cuộc thi trước khi công bố kết quả Private."
       : strict && windowOpen
-        ? "Private vẫn đang trong thời gian nhận bài; chưa công bố được."
+        ? "Private vẫn đang nhận bài; chưa công bố được."
         : strict && processing
           ? "Private còn bài đã nhận đang xử lý; chưa công bố được."
           : null;
@@ -1341,7 +1341,7 @@ function TracksPanel({
             <div>
               <h2 className="admin-detail-card-title">Lịch hai nhánh</h2>
               <p className="admin-detail-card-desc">
-                Mỗi nhánh có giờ mở/đóng và quota riêng; hai lịch được giao nhau hoặc nối tiếp đều
+                Mỗi nhánh có giờ mở/đóng và hạn mức riêng; hai lịch được giao nhau hoặc nối tiếp đều
                 hợp lệ.
               </p>
             </div>
@@ -1625,7 +1625,7 @@ function TrackScheduleModal({
       quotaValue !== null &&
       (!Number.isInteger(quotaValue) || quotaValue < 0 || quotaValue > 1000)
     ) {
-      setError("Quota mỗi ngày phải là số nguyên từ 0 đến 1000.");
+      setError("Hạn mức mỗi ngày phải là số nguyên từ 0 đến 1000.");
       return;
     }
     if (!reason.trim()) {
@@ -1712,7 +1712,7 @@ function TrackScheduleModal({
           <p className="text-muted">Lịch mới rút ngắn thời gian nhận bài so với lịch hiện tại.</p>
         )}
         <p className="text-muted">
-          Đổi lịch không thay ground truth, điểm đã chấm, quota đã dùng hay trạng thái công bố.
+          Đổi lịch không thay ground truth, điểm đã chấm, hạn mức đã dùng hay trạng thái công bố.
           {view.results_released && " BXH Private tiếp tục thay đổi khi có bài mới."}
         </p>
         <div className="form-field">
@@ -2027,7 +2027,7 @@ function DualReopenModal({
       }
       const quotaValue = forms[track].quota.trim() === "" ? 0 : Number(forms[track].quota);
       if (!Number.isInteger(quotaValue) || quotaValue < 0 || quotaValue > 1000) {
-        setError("Quota mỗi ngày phải là số nguyên từ 0 đến 1000.");
+        setError("Hạn mức mỗi ngày phải là số nguyên từ 0 đến 1000.");
         return;
       }
       tracks[track] = { start_at: startIso, end_at: endIso, quota_per_day: quotaValue };
@@ -2346,7 +2346,7 @@ function verificationText(scoring: ScoringV2): string {
   const verification = scoring.verification;
   if (!verification) return "Chưa chạy thử lần nào.";
   if (!scoring.verified) {
-    return "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi publish.";
+    return "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi xuất bản.";
   }
   return verification.tested_at
     ? `Lượt chạy thử khớp cấu hình hiện tại (lúc ${formatLocal(verification.tested_at)}).`
@@ -2358,7 +2358,7 @@ function trackVerificationText(view: ScoringTrackView): string {
   const verification = view.verification;
   if (!verification) return "Chưa chạy thử nhánh này lần nào.";
   if (!view.verified) {
-    return "Lượt chạy thử đã cũ vì cấu hình hoặc ground truth của nhánh đã đổi sau đó; chạy thử lại trước khi publish.";
+    return "Lượt chạy thử đã cũ vì cấu hình hoặc ground truth của nhánh đã đổi sau đó; chạy thử lại trước khi xuất bản.";
   }
   const at = verification.tested_at ? ` (lúc ${formatLocal(verification.tested_at)})` : "";
   const by = verification.tested_by ? ` Người chạy: ${verification.tested_by}.` : "";
@@ -2431,7 +2431,7 @@ function ColumnEditor({
               <th scope="col">Giá trị hợp lệ</th>
               <th scope="col">Cột ID</th>
               <th scope="col">
-                <span className="sr-only">Xoá cột</span>
+                <span className="sr-only">Xóa cột</span>
               </th>
             </tr>
           </thead>
@@ -2496,13 +2496,13 @@ function ColumnEditor({
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    aria-label={`${position(index)}: xoá`}
+                    aria-label={`${position(index)}: xóa`}
                     disabled={disabled || schema.columns.length <= 1}
                     onClick={() =>
                       onChange({ ...schema, columns: schema.columns.filter((_, i) => i !== index) })
                     }
                   >
-                    Xoá
+                    Xóa
                   </button>
                 </td>
               </tr>
@@ -2713,7 +2713,7 @@ function ScoringPanel({
           ? "Đã lưu cấu hình và tải lên ground truth."
           : "Đã lưu cấu hình chấm điểm.";
       return wasVerified && !saved.scoring?.verified
-        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi publish.`
+        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi xuất bản.`
         : done;
     }, "save");
   }
@@ -2743,7 +2743,7 @@ function ScoringPanel({
         ? Boolean(data.tracks?.[track]?.verified)
         : Boolean(data.scoring?.verified);
       return wasVerified && !stillVerified
-        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì ground truth vừa đổi; chạy thử lại trước khi publish.`
+        ? `${done} Lượt chạy thử trước đã hết hiệu lực vì ground truth vừa đổi; chạy thử lại trước khi xuất bản.`
         : done;
     }, "groundTruth");
   }
@@ -2918,7 +2918,7 @@ function ScoringPanel({
               <IconCheck className="admin-detail-card-icon-glyph" />
             </span>
             <div>
-              <h2 className="admin-detail-card-title">Trạng thái sẵn sàng publish</h2>
+              <h2 className="admin-detail-card-title">Trạng thái sẵn sàng xuất bản</h2>
               <p className="admin-detail-card-desc">
                 Publish chỉ mở khi đủ cả sáu điều kiện; thay đổi chưa lưu không được tính.
               </p>
@@ -3021,7 +3021,7 @@ function ScoringPanel({
           onChange={(groundTruth) => setForm({ ...form, groundTruth })}
         />
         <ColumnEditor
-          title="Submission"
+          title="Bài nộp"
           idPrefix="sub"
           icon={<IconUpload className="scoring-file-icon-glyph" />}
           tone="blue"
@@ -3075,7 +3075,7 @@ function ScoringPanel({
           {!dualScoring && (
             <FileButton
               className="btn btn-secondary admin-detail-outline-action"
-              inputLabel="Upload ground truth CSV"
+              inputLabel="Tải lên ground truth CSV"
               accept=".csv,text/csv"
               disabled={disabled}
               onFile={(file) => {
@@ -3089,7 +3089,7 @@ function ScoringPanel({
                 uploadGroundTruth(file);
               }}
             >
-              {status?.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+              {status?.ground_truth ? "Thay ground truth CSV" : "Tải lên ground truth CSV"}
             </FileButton>
           )}
         </div>
@@ -3108,7 +3108,7 @@ function ScoringPanel({
                       </span>
                       <FileButton
                         className="btn btn-secondary admin-detail-outline-action btn-sm"
-                        inputLabel={`Upload ground truth CSV nhánh ${TRACK_LABEL[track]}`}
+                        inputLabel={`Tải lên ground truth CSV nhánh ${TRACK_LABEL[track]}`}
                         accept=".csv,text/csv"
                         disabled={disabled}
                         onFile={(file) => {
@@ -3125,7 +3125,7 @@ function ScoringPanel({
                           uploadGroundTruth(file, track);
                         }}
                       >
-                        {view.ground_truth ? "Thay ground truth CSV" : "Upload ground truth CSV"}
+                        {view.ground_truth ? "Thay ground truth CSV" : "Tải lên ground truth CSV"}
                       </FileButton>
                     </div>
                   </div>
@@ -3146,7 +3146,7 @@ function ScoringPanel({
                         <dd>{view.ground_truth.columns.join(", ")}</dd>
                       </div>
                       <div className="scoring-meta-item">
-                        <dt>Upload lúc</dt>
+                        <dt>Tải lên lúc</dt>
                         <dd>{formatLocal(view.ground_truth.uploaded_at)}</dd>
                       </div>
                     </dl>
@@ -3181,7 +3181,7 @@ function ScoringPanel({
                   <dd>{status.ground_truth.columns.join(", ")}</dd>
                 </div>
                 <div className="scoring-meta-item">
-                  <dt>Upload lúc</dt>
+                  <dt>Tải lên lúc</dt>
                   <dd>{formatLocal(status.ground_truth.uploaded_at)}</dd>
                 </div>
               </dl>
@@ -3473,7 +3473,7 @@ function ScoringPanel({
       {pendingGroundTruth && status?.ground_truth && (
         <ConfirmModal
           title="Thay ground truth"
-          body="File ground truth hiện tại sẽ bị thay thế và lượt chạy thử cũ mất hiệu lực. Hãy chắc chắn file mới đúng schema đã khai báo."
+          body="Tệp ground truth hiện tại sẽ bị thay thế và lượt chạy thử cũ mất hiệu lực. Hãy chắc chắn tệp mới đúng schema đã khai báo."
           confirmLabel="Thay ground truth"
           danger
           onConfirm={async () => {
@@ -3495,7 +3495,7 @@ function ScoringPanel({
 const CONTENT_TOPICS: ReadonlyArray<{ title: string; hint: string }> = [
   { title: "Thể lệ", hint: "Điều kiện dự thi, cách tính điểm và quy định bài nộp." },
   { title: "Lịch trình", hint: "Mốc mở đề, hạn nộp và thời gian công bố kết quả." },
-  { title: "Dataset / Tài nguyên", hint: "Tập dữ liệu, file mẫu và tài liệu kèm theo." },
+  { title: "Dataset / Tài nguyên", hint: "Tập dữ liệu, tệp mẫu và tài liệu kèm theo." },
   { title: "Giải thưởng / Kết quả", hint: "Cơ cấu giải thưởng và cách công bố kết quả." },
   { title: "Ban Tổ chức & Liên hệ", hint: "Đơn vị tổ chức và kênh hỗ trợ thí sinh." },
 ];
@@ -3675,7 +3675,7 @@ function ContentsPanel({ competitionId, maxContentMb }: { competitionId: string;
         {deleting && (
           <ConfirmModal
             title="Xóa trang nội dung"
-            body={`Xóa "${deleting.title}" và file Markdown liên quan? Thao tác này không thể hoàn tác.`}
+            body={`Xóa "${deleting.title}" và tệp Markdown liên quan? Thao tác này không thể hoàn tác.`}
             confirmLabel="Xóa"
             danger
             onConfirm={async () => {
@@ -3789,20 +3789,20 @@ function ContentRow({
         <td>
           {content.size_bytes !== null ? (
             <span className="status-badge success file-status-badge">
-              <span>Đã upload</span>
+              <span>Đã tải lên</span>
               {content.size_bytes > 0 && (
                 <span className="file-size-hint"> ({(content.size_bytes / 1024).toFixed(0)} KB)</span>
               )}
             </span>
           ) : (
-            <span className="status-badge warning file-status-badge">Chưa có file</span>
+            <span className="status-badge warning file-status-badge">Chưa có tệp</span>
           )}
         </td>
         <td className="col-actions">
           <span className="action-group">
             <FileButton
               className="btn btn-sm upload-md-btn admin-detail-primary-action"
-              inputLabel={`Upload file Markdown cho "${content.title}"`}
+              inputLabel={`Tải lên tệp Markdown cho "${content.title}"`}
               accept=".md,text/markdown"
               disabled={busy}
               onFile={(file) => {
@@ -3813,11 +3813,11 @@ function ContentRow({
                 }
                 void run(
                   () => api.upload(`/admin/competitions/${competitionId}/contents/${content.id}/file`, file),
-                  `Đã upload Markdown cho "${content.title}".`,
+                  `Đã tải lên Markdown cho "${content.title}".`,
                 );
               }}
             >
-              {content.size_bytes !== null ? "Thay .md" : "Upload .md"}{" "}
+              {content.size_bytes !== null ? "Thay .md" : "Tải lên .md"}{" "}
               <span className="upload-size-hint">≤ {maxContentMb} MiB</span>
             </FileButton>
             <button
@@ -3917,7 +3917,7 @@ function ContentFormModal({
           </div>
           <div className="form-field">
             <label className="field-label" htmlFor="content-slug">
-              Slug {isEdit && "(không hiển thị cho participant khi đổi)"}
+              Slug {isEdit && "(không hiển thị cho thí sinh khi đổi)"}
             </label>
             <input
               id="content-slug"
@@ -4254,7 +4254,7 @@ function ResourcesPanel({
 
       {locked && (
         <div className="status-banner warning">
-          Cuộc thi đã kết thúc - không thể sửa tài nguyên.
+          Cuộc thi đã kết thúc — không thể sửa tài nguyên.
         </div>
       )}
 
@@ -4393,7 +4393,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
     setError(null);
     try {
       await api.postFile(`/admin/competitions/${competitionId}/assets`, { file });
-      setMessage(`Đã upload "${file.name}".`);
+      setMessage(`Đã tải lên "${file.name}".`);
       await load();
     } catch (err) {
       setError(err);
@@ -4419,9 +4419,9 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
   async function copyRef(ref: string) {
     try {
       await navigator.clipboard.writeText(ref);
-      setMessage(`Đã copy: ${ref}`);
+      setMessage(`Đã sao chép: ${ref}`);
     } catch {
-      setError(new Error(`Không thể copy "${ref}" vào clipboard. Vui lòng copy thủ công.`));
+      setError(new Error(`Không thể sao chép "${ref}" vào clipboard. Vui lòng sao chép thủ công.`));
     }
   }
 
@@ -4471,13 +4471,11 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
               >
                 <IconUpload className="s14-btn-icon" />
                 <span>
-                  {busy
-                    ? "Đang xử lý..."
-                    : `Upload ảnh (PNG/JPEG/GIF/WebP ≤ ${maxAssetMb} MiB)`}
+                  {busy ? "Đang xử lý..." : "Tải ảnh lên"}
                 </span>
               </FileButton>
               <span className="s14-upload-hint">
-                Định dạng hỗ trợ: PNG, JPG, GIF, WebP (Tối đa {maxAssetMb} MiB / tệp)
+                Định dạng hỗ trợ: PNG, JPEG, GIF, WebP (tối đa {maxAssetMb} MiB/tệp)
               </span>
             </div>
           </div>
@@ -4503,11 +4501,11 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
               <button
                 type="button"
                 className="s14-copy-pill-btn"
-                title="Copy cú pháp mẫu"
+                title="Sao chép cú pháp mẫu"
                 onClick={() => void copyRef("![Mô tả](assets/ten-file.png)")}
               >
                 <IconCopy className="s14-icon-xs" />
-                <span>Copy mẫu</span>
+                <span>Sao chép mẫu</span>
               </button>
             </div>
             <p className="s14-guide-subtext">
@@ -4574,7 +4572,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
           <table className="table s14-table">
             <thead>
               <tr>
-                <th scope="col">Tên file</th>
+                <th scope="col">Tên tệp</th>
                 <th scope="col">Loại</th>
                 <th scope="col" className="s14-th-size">Dung lượng</th>
                 <th scope="col">Dùng trong Markdown</th>
@@ -4625,7 +4623,7 @@ function AssetsPanel({ competitionId, maxAssetMb }: { competitionId: string; max
                           onClick={() => void copyRef(`assets/${asset.name}`)}
                         >
                           <IconCopy className="s14-icon-xs" />
-                          <span>Copy tham chiếu</span>
+                          <span>Sao chép tham chiếu</span>
                         </button>
                         <button
                           type="button"
@@ -4736,7 +4734,7 @@ function JoinCodePanel({
         {competition.join_mode !== "code" ? (
           <p className="text-muted admin-members-note">
             Cuộc thi này dùng chế độ tham gia{" "}
-            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} - không dùng mã.
+            {competition.join_mode === "open" ? "tự do" : "chỉ mời"} — không dùng mã.
           </p>
         ) : (
           <form
@@ -4751,7 +4749,7 @@ function JoinCodePanel({
               className="input"
               type="password"
               aria-label="Mã tham gia mới"
-              placeholder={codeConfigured ? "Đã đặt mã - nhập mã mới để đổi" : "Chưa đặt mã"}
+              placeholder={codeConfigured ? "Đã đặt mã — nhập mã mới để đổi" : "Chưa đặt mã"}
               value={joinCode}
               onChange={(event) => setJoinCode(event.target.value)}
               minLength={8}

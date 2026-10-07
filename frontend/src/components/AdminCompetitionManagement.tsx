@@ -38,27 +38,27 @@ const CONFIRMATION: Record<
   (name: string) => { title: string; body: string; label: string; danger: boolean }
 > = {
   publish: (name) => ({
-    title: "Publish cuộc thi",
-    body: `Publish "${name}" - thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
-    label: "Publish",
+    title: "Xuất bản cuộc thi",
+    body: `Xuất bản "${name}" — thí sinh sẽ thấy cuộc thi này. Thao tác này không tự hoàn tác.`,
+    label: "Xuất bản",
     danger: false,
   }),
   close: (name) => ({
     title: "Kết thúc cuộc thi",
-    body: `Kết thúc "${name}" - không nhận submission mới. Cuộc thi vẫn mở lại được sau đó.`,
+    body: `Kết thúc "${name}" — không nhận bài nộp mới. Cuộc thi vẫn mở lại được sau đó.`,
     label: "Kết thúc",
     danger: true,
   }),
   reopen: (name) => ({
     title: "Mở lại cuộc thi",
-    body: `Mở lại "${name}" - cuộc thi nhận bài trở lại nếu chưa quá thời gian kết thúc.`,
+    body: `Mở lại "${name}" — cuộc thi nhận bài trở lại nếu chưa quá thời gian kết thúc.`,
     label: "Mở lại",
     danger: false,
   }),
   clone: (name) => ({
-    title: "Clone cuộc thi",
-    body: `Clone "${name}" thành một bản nháp độc lập? Bản sao chép đầy đủ đề, ảnh, đáp án, cấu hình chấm và cấu hình AI (kể cả API key), nhưng không chép người dự thi, mã tham gia hay bài nộp. Phải kiểm tra lại bộ chấm và kết nối AI trước khi publish.`,
-    label: "Clone",
+    title: "Nhân bản cuộc thi",
+    body: `Nhân bản "${name}" thành một bản nháp độc lập? Bản sao chép đầy đủ đề, ảnh, đáp án, cấu hình chấm và cấu hình AI (kể cả API key), nhưng không chép người dự thi, mã tham gia hay bài nộp. Phải kiểm tra lại bộ chấm và kết nối AI trước khi xuất bản.`,
+    label: "Nhân bản",
     danger: false,
   }),
 };
@@ -317,7 +317,7 @@ export function CompetitionActionConfirmModal({
   );
 }
 
-/** Xoá cuộc thi (nháp hoặc đã kết thúc): backend cascade nội dung/thành viên/bài nộp nên phải gõ đúng slug mới cho bấm. */
+/** Xóa cuộc thi (nháp hoặc đã kết thúc): backend cascade nội dung/thành viên/bài nộp nên phải gõ đúng slug mới cho bấm. */
 export function CompetitionDeleteModal({
   competition,
   onDeleted,
@@ -423,16 +423,16 @@ const NO_SOURCE_METRIC = "Chưa cấu hình";
 function normalizationSourceHint(competition?: AdminCompetition): string {
   const dualNote =
     competition && isDual(competition)
-      ? " Cấu hình dùng chung cho cả hai nhánh, nhưng mỗi nhánh có mặt bằng riêng từ bài hợp lệ của nhánh đó."
+      ? " Cấu hình dùng chung cho cả hai nhánh, nhưng mỗi nhánh có baseline riêng từ bài hợp lệ của nhánh đó."
       : "";
   const label = competition ? primaryMetricLabel(competition) : null;
   if (!competition || !label || label === NO_SOURCE_METRIC) {
-    return `Điểm xếp hạng là norm 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.${dualNote}`;
+    return `Điểm xếp hạng là điểm chuẩn hóa thang 0–50 lấy từ metric chính ở tab Chấm điểm; điểm gốc vẫn được giữ nguyên.${dualNote}`;
   }
   const direction = resultContract(competition.submission_config).higher_is_better
     ? "cao hơn là tốt hơn"
     : "thấp hơn là tốt hơn";
-  return `Điểm xếp hạng là norm 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.${dualNote}`;
+  return `Điểm xếp hạng là điểm chuẩn hóa thang 0–50 tính từ metric ${label} (${direction}); điểm gốc vẫn được giữ nguyên.${dualNote}`;
 }
 
 /** Lịch và quota của một nhánh trong form tạo cuộc thi dual. */
@@ -902,7 +902,7 @@ export function CompetitionFormModal({
               </div>
               <small>
                 Slug dùng làm URL định danh: /competitions/{slug || "slug-cuoc-thi"}
-                {!isEdit && " - tự điền theo tên cuộc thi, gõ tay để đổi."}
+                {!isEdit && " — tự điền theo tên cuộc thi, gõ tay để đổi."}
               </small>
             </div>
 
@@ -1128,7 +1128,7 @@ export function CompetitionFormModal({
                   ) : (
                     <p className="ac-resource-hint">
                       Điểm Private hiện ngay khi chấm xong và không thể trở lại bí mật; nếu cuộc thi
-                      đã publish, dấu mốc công bố được ghi ngay tại thời điểm đổi chính sách.
+                      đã xuất bản, dấu mốc công bố được ghi ngay tại thời điểm đổi chính sách.
                     </p>
                   )}
                 </>
@@ -1199,7 +1199,7 @@ export function CompetitionFormModal({
                       onChange={(event) => setQuota(event.target.value)}
                       required
                     />
-                    <span aria-hidden="true">lượt / ngày</span>
+                    <span aria-hidden="true">lượt/ngày</span>
                   </div>
                 </div>
               </div>
@@ -1216,7 +1216,7 @@ export function CompetitionFormModal({
                   }
                 />
                 <span>
-                  <strong>Leaderboard hiển thị với thí sinh</strong>
+                  <strong>Bảng xếp hạng hiển thị với thí sinh</strong>
                   <small>
                     Nếu tắt, thí sinh sẽ thấy thông báo bảng xếp hạng chưa được
                     công bố.
@@ -1265,7 +1265,7 @@ export function CompetitionFormModal({
             {normLocked && (
               <p className="ac-resource-hint">
                 Cấu hình chuẩn hóa chỉ sửa được khi cuộc thi còn nháp. Muốn đổi
-                baseline, hãy clone cuộc thi thành bản nháp mới.
+                baseline, hãy nhân bản cuộc thi thành bản nháp mới.
               </p>
             )}
 
@@ -1286,8 +1286,8 @@ export function CompetitionFormModal({
               <fieldset className="ac-resource-fieldset">
                 <legend className="sr-only">Tài nguyên tải về</legend>
                 <p className="ac-resource-hint">
-                  Nhận mọi link https (Google Drive, Google Docs, S3, máy chủ riêng...) - hệ thống
-                  không lưu file dataset. Nhớ đặt quyền truy cập để thí sinh mở được.
+                  Nhận mọi link https (Google Drive, Google Docs, S3, máy chủ riêng...) — hệ thống
+                  không lưu tệp dữ liệu. Nhớ đặt quyền truy cập để thí sinh mở được.
                 </p>
 
                 {dual ? (

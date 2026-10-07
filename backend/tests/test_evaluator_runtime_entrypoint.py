@@ -70,6 +70,30 @@ def test_rule_violation_has_fixed_public_message_and_private_detail():
     assert "PRIVATE ANSWER: 42" in payload["detail"]
 
 
+def test_invalid_class_id_has_structured_numbers_and_private_traceback():
+    result, _ = _run(
+        "def evaluate(truth_path, submission_path):\n"
+        "    raise InvalidClassIdError(6, [0, 1, 2, 3, 4, 5])\n"
+    )
+    payload = _result(result)
+    assert payload["code"] == "SUBMISSION_CLASS_ID_INVALID"
+    assert payload["class_info"] == {"class_id": 6, "allowed_class_ids": [0, 1, 2, 3, 4, 5]}
+    assert "6" not in payload["message"]
+    assert "InvalidClassIdError" in payload["detail"]
+
+
+def test_invalid_class_id_metadata_cannot_turn_evaluator_fault_into_student_fault():
+    for args in ("True, [0, 1]", "6, [0, 1, 1]", "6, []", "6, [0, 'SECRET']", "1, [0, 1]"):
+        result, _ = _run(
+            "def evaluate(truth_path, submission_path):\n"
+            f"    raise InvalidClassIdError({args})\n"
+        )
+        payload = _result(result)
+        assert payload["code"] == "EVALUATOR_FAILED"
+        assert "class_info" not in payload
+        assert "SECRET" not in payload["message"]
+
+
 def test_other_errors_are_not_misclassified_as_submission_rules():
     for source in (
         "def evaluate(truth_path, submission_path):\n    raise ValueError('bad code')\n",

@@ -35,7 +35,7 @@ from app.core.database import mongo_lifespan
 from app.core.datetimes import as_utc
 from app.memberships.service import get_membership
 from app.scoring import models
-from app.scoring.errors import EvaluatorError, ScoringValidationError
+from app.scoring.errors import CLASS_ID_INVALID, EvaluatorError, ScoringValidationError, valid_class_info
 from app.scoring_attempts import service, store
 from app.submission_artifacts import storage as artifact_storage
 from app.submission_artifacts.naming import (
@@ -61,12 +61,13 @@ class Stop:
 
 
 class _Rejected(Exception):
-    """Lượt không chấm được; mã và câu chữ ở đây là thứ thí sinh nhìn thấy."""
+    """Lượt không chấm được; thông báo nội bộ được lọc qua public_error trước khi trả."""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, class_info: dict | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.class_info = class_info
 
 
 @dataclass(frozen=True)
@@ -232,6 +233,7 @@ async def _process(db, attempt: dict, *, settings) -> str:
             expired=rejected.code == service.EXPIRED_CODE,
             code=rejected.code,
             message=rejected.message,
+            class_info=rejected.class_info,
         )
 
     now = datetime.now(timezone.utc)
@@ -269,14 +271,17 @@ async def _process(db, attempt: dict, *, settings) -> str:
 
 
 async def _close(
-    db, attempt: dict, *, expired: bool, code: str = "", message: str = ""
+    db, attempt: dict, *, expired: bool, code: str = "", message: str = "",
+    class_info: dict | None = None,
 ) -> str:
     """Đóng một lượt không chấm được; lượt đã thuộc nơi khác thì báo LOST chứ không nhận là của mình."""
     now = datetime.now(timezone.utc)
     if expired:
         closed = await service.expire(db, attempt, now=now)
     else:
-        closed = await service.fail(db, attempt, code=code, message=message, now=now)
+        closed = await service.fail(
+            db, attempt, code=code, message=message, class_info=class_info, now=now
+        )
     return ("EXPIRED" if expired else "FAILED") if closed else "LOST"
 
 
@@ -390,12 +395,19 @@ async def _score(
             client_timeout=min(remaining, settings.evaluator_client_timeout_seconds),
         )
     except ScoringValidationError as exc:
+        if exc.code not in scoring_flow.STUDENT_ERROR_CODES:
+            logger.error("Scoring configuration failed attempt=%s code=%s", attempt["_id"], exc.code)
+            raise _Rejected("SCORING_NOT_READY", scoring_flow.SCORING_NOT_READY_MESSAGE)
         raise _Rejected(exc.code, exc.message)
     except EvaluatorError as exc:
         if _out_of_time(deadline, settings, datetime.now(timezone.utc)):
             # Hết 60 giây trong lúc chờ runner: lượt không được tính, không phải bài của thí sinh hỏng.
             raise _Rejected(service.EXPIRED_CODE, service.EXPIRED_MESSAGE)
-        raise _Rejected(exc.code, exc.message)
+        class_info = valid_class_info(exc.class_info) if exc.code == CLASS_ID_INVALID else None
+        logger.info("Bộ chấm từ chối attempt=%s code=%s", attempt["_id"], exc.code)
+        if exc.code == CLASS_ID_INVALID and class_info is None:
+            raise _Rejected("EVALUATOR_FAILED", service.GENERIC_MESSAGE)
+        raise _Rejected(exc.code, exc.message, class_info=class_info)
     except HTTPException as exc:
         # Tầng đọc file của `scoring_flow` đã dịch lỗi cấu hình thành HTTP; dùng lại đúng mã và câu chữ.
         detail = exc.detail if isinstance(exc.detail, dict) else {}

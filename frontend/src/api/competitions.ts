@@ -68,7 +68,8 @@ export type NormalizationHiddenReason =
   | "normalization_disabled"
   | "private_unpublished"
   | "leaderboard_hidden"
-  | "source_metric_hidden";
+  | "source_metric_hidden"
+  | "track_not_open";
 
 /** Hình thức đánh giá: một luồng nộp bài, hay hai nhánh Public/Private trong cùng cuộc thi. */
 export type CompetitionMode = "single" | "public_private";
@@ -220,6 +221,18 @@ export function isDual(competition: Pick<CompetitionMetadata, "mode">): boolean 
 /** Nhánh đọc từ query string; giá trị lạ bị bỏ qua thay vì đoán. */
 export function parseTrack(value: string | null): Track | null {
   return value === "public" || value === "private" ? value : null;
+}
+
+/**
+ * Nhánh dual đang khóa vì chưa tới giờ mở - kể cả khi BTC dời lịch về sau. Đọc từ metadata của
+ * shell (backend suy từ giờ server), không đoán theo đồng hồ máy khách. Single không bao giờ khóa.
+ */
+export function trackLocked(
+  competition: Pick<CompetitionMetadata, "mode" | "tracks">,
+  track: Track | null,
+): boolean {
+  if (track === null || !isDual(competition)) return false;
+  return competition.tracks?.[track]?.window_state === "scheduled";
 }
 
 /** Nhãn trạng thái kết quả đã chấm nhưng chưa được công bố (Private chưa release). */

@@ -12,6 +12,7 @@ from app.competitions.service import COMPETITIONS_COLLECTION
 from app.core.config import get_settings
 from app.core.datetimes import utc_day_key
 from app.submission_artifacts import storage as artifact_storage
+from app.submissions import scoring as scoring_flow
 from app.submissions.service import SUBMISSIONS_COLLECTION, reserve_quota_slot
 from tests.helpers import (
     PARTICIPANT_CREDENTIALS,
@@ -88,6 +89,21 @@ def test_valid_submission_scores_and_stores_both_artifacts(
     assert fake_artifact_storage.objects[f"{prefix}/notebook.ipynb"] == VALID_NOTEBOOK
     assert not (isolated_data_dir / "submissions").exists()
     assert not (isolated_data_dir / "team-result.csv").exists()
+
+
+def test_unexpected_inline_scoring_error_has_actionable_safe_message(client, monkeypatch):
+    competition = ready_competition(client)
+
+    def fail_scoring(*_args, **_kwargs):
+        raise RuntimeError("private ground truth SECRET")
+
+    monkeypatch.setattr(scoring_flow, "score_v1", fail_scoring)
+    response = submit(client, competition["id"], b"id,prediction\n1,1\n2,0\n3,1\n4,0\n")
+    assert response.status_code == 500
+    error = response.json()["error"]
+    assert error["code"] == "SCORING_FAILED"
+    assert "Hãy báo Ban Tổ chức" in error["message"]
+    assert "SECRET" not in error["message"]
 
 
 def test_reordered_submission_has_identical_score(client):
@@ -344,6 +360,8 @@ def test_submission_rejects_extension_and_size_limits(
         (b"", "NOTEBOOK_INVALID"),
         (b"not json at all", "NOTEBOOK_INVALID"),
         (b"[1, 2, 3]", "NOTEBOOK_INVALID"),
+        (b'{"nbformat": 4, "nbformat": 3}', "NOTEBOOK_INVALID"),
+        (b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": [], "source": "private code"}]}', "NOTEBOOK_INVALID"),
         (b'{"nbformat": 3, "nbformat_minor": 5, "metadata": {}, "cells": []}', "NOTEBOOK_UNSUPPORTED_VERSION"),
         (b'{"nbformat": 4, "nbformat_minor": "5", "metadata": {}, "cells": []}', "NOTEBOOK_INVALID"),
         (b'{"nbformat": 4, "nbformat_minor": 5, "metadata": [], "cells": []}', "NOTEBOOK_INVALID"),

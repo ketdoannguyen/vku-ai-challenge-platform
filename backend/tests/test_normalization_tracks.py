@@ -257,21 +257,30 @@ def _revision(client, competition_id: str) -> int:
     return response.json()["scoring"]["revision"]
 
 
-def _dual_doc(*, normalization: dict, leaderboard_visible: bool = True, private_released: bool = False, primary_metric="f1") -> dict:
-    """Document dual tối thiểu đủ cho predicate: mode, config norm, master BXH và release nhánh."""
+def _dual_doc(*, normalization: dict, leaderboard_visible: bool = True, private_released: bool = False, primary_metric="f1", window: dict | None = None) -> dict:
+    """Document dual tối thiểu đủ cho predicate: mode, lịch nhánh, config norm, master BXH, release.
+
+    Cửa sổ mặc định đóng hẳn để phép thử chỉ xoay quanh N/R/L/M; test khóa nhánh truyền `window`
+    với giờ mở ở tương lai.
+    """
+    track_window = window or {"start_at": BASE - timedelta(days=1), "end_at": BASE}
     return {
         "mode": "public_private",
         "normalization": normalization,
         "leaderboard_visible": leaderboard_visible,
         "primary_metric": primary_metric,
         "tracks": {
-            "private": {"results_published_at": BASE if private_released else None},
+            "public": dict(track_window),
+            "private": {
+                **track_window,
+                "results_published_at": BASE if private_released else None,
+            },
         },
     }
 
 
 def test_predicate_norm_tra_tung_conjunct_va_thu_tu_ly_do():
-    """`can_view_norm` là chỗ duy nhất trả lời: N rồi R rồi L rồi M, kèm đúng lý do đang chặn."""
+    """`can_view_norm` là chỗ duy nhất trả lời: N rồi W rồi R rồi L rồi M, kèm đúng lý do."""
     enabled = {"enabled": True, "baseline": 0.5}
     assert competition_tracks.can_view_norm(_dual_doc(normalization=enabled), "public") == (
         True,
@@ -284,6 +293,15 @@ def test_predicate_norm_tra_tung_conjunct_va_thu_tu_ly_do():
     )
     released = _dual_doc(normalization=enabled, private_released=True)
     assert competition_tracks.can_view_norm(released, "private") == (True, None)
+    # W: nhánh chưa tới giờ mở đứng trước cả R: dời lịch về sau khóa luôn nhánh đã công bố.
+    future = datetime.now(timezone.utc) + timedelta(hours=2)
+    scheduled = {"start_at": future, "end_at": future + timedelta(hours=2)}
+    assert competition_tracks.can_view_norm(
+        _dual_doc(normalization=enabled, window=scheduled), "public"
+    ) == (False, "track_not_open")
+    assert competition_tracks.can_view_norm(
+        _dual_doc(normalization=enabled, private_released=True, window=scheduled), "private"
+    ) == (False, "track_not_open")
     # L: master tắt, và R đứng trước L khi cả hai cùng chặn.
     assert competition_tracks.can_view_norm(
         {**released, "leaderboard_visible": False}, "private"

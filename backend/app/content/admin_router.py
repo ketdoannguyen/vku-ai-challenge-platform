@@ -258,7 +258,7 @@ async def _read_limited(file: UploadFile, limit_mb: int) -> bytes:
     limit = limit_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
-        raise api_error(413, "FILE_TOO_LARGE", f"File vượt quá giới hạn {limit_mb} MiB.")
+        raise api_error(413, "FILE_TOO_LARGE", f"Tệp vượt quá giới hạn {limit_mb} MiB.")
     return data
 
 

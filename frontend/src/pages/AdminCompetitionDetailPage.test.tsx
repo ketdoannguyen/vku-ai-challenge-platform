@@ -300,8 +300,8 @@ test("tab Nội dung render table theo order + trạng thái file", async () => 
   expect(await screen.findByText("Đề bài")).toBeTruthy();
   expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("01/10/2026");
   expect(screen.getByLabelText("Thông tin chung cuộc thi")).toHaveTextContent("5 lượt/ngày");
-  expect(screen.getByText("Chưa có file")).toBeTruthy();
-  expect(screen.getByText("Đã upload")).toBeTruthy();
+  expect(screen.getByText("Chưa có tệp")).toBeTruthy();
+  expect(screen.getByText("Đã tải lên")).toBeTruthy();
   // Không còn cột/badge hiển thị "public vs members": mọi tài liệu đều chỉ thành viên active đọc được.
   expect(screen.queryByText("Hiển thị")).toBeNull();
   expect(screen.queryByText("Chỉ thành viên")).toBeNull();
@@ -314,7 +314,7 @@ test("nút upload .md trong tab Nội dung là <button> thật nên Tab/Enter m�
   });
   renderPage();
   await screen.findByText("Đề bài");
-  expectKeyboardFilePicker(/^Upload \.md/, 'Upload file Markdown cho "Rules"');
+  expectKeyboardFilePicker(/^Tải lên .md/, 'Tải lên tệp Markdown cho "Rules"');
 });
 
 test("rail quản trị: đủ 7 khu vực, panel gắn đúng tab đang mở", async () => {
@@ -565,7 +565,7 @@ test("tab Tài nguyên giới hạn 10 dòng và khóa chỉnh sửa khi cuộc 
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Tài nguyên" }));
 
-  expect(screen.getByText("Cuộc thi đã kết thúc - không thể sửa tài nguyên.")).toBeTruthy();
+  expect(screen.getByText("Cuộc thi đã kết thúc — không thể sửa tài nguyên.")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Thêm tài nguyên" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Lưu thay đổi" })).toBeDisabled();
 });
@@ -669,7 +669,7 @@ test("đặt mã ở Cài đặt cập nhật trạng thái publish; Thành viê
         join_code_configured: codeConfigured,
         publish_blocked_reason: codeConfigured
           ? null
-          : { code: "JOIN_CODE_REQUIRED", message: "Cần cấu hình mã tham gia trước khi publish cuộc thi." },
+          : { code: "JOIN_CODE_REQUIRED", message: "Cần cấu hình mã tham gia trước khi xuất bản cuộc thi." },
       },
       status: 200,
     };
@@ -685,8 +685,8 @@ test("đặt mã ở Cài đặt cập nhật trạng thái publish; Thành viê
   fireEvent.submit(input.closest("form")!);
 
   await screen.findByText("Đã đặt mã tham gia.");
-  await waitFor(() => expect(screen.queryByText("Chưa thể publish.")).toBeNull());
-  expect(screen.getByRole("button", { name: "Publish" })).not.toBeDisabled();
+  await waitFor(() => expect(screen.queryByText("Chưa thể xuất bản.")).toBeNull());
+  expect(screen.getByRole("button", { name: "Xuất bản" })).not.toBeDisabled();
   expect(screen.queryByDisplayValue("first-secret-2026")).toBeNull();
   expect(JSON.parse(calls.find((call) => call.url.endsWith("/join-code"))!.init!.body as string))
     .toEqual({ join_code: "first-secret-2026" });
@@ -734,7 +734,7 @@ test.each([
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Cài đặt" }));
-  expect(screen.getByText(`Cuộc thi này dùng chế độ tham gia ${label} - không dùng mã.`)).toBeTruthy();
+  expect(screen.getByText(`Cuộc thi này dùng chế độ tham gia ${label} — không dùng mã.`)).toBeTruthy();
   expect(screen.queryByLabelText("Mã tham gia mới")).toBeNull();
 });
 
@@ -787,7 +787,7 @@ test("lưu cấu hình chấm điểm gửi đủ schema, source và hợp đồ
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
 
   // Sửa một cột của submission: lượt lưu phải mang theo cả schema hai phía, source và metric.
-  fireEvent.change(await screen.findByLabelText("Submission: cột 2: tên"), {
+  fireEvent.change(await screen.findByLabelText("Bài nộp: cột 2: tên"), {
     target: { value: "answer" },
   });
   fireEvent.submit(screen.getByRole("button", { name: "Lưu cấu hình chấm điểm" }).closest("form")!);
@@ -867,7 +867,7 @@ test("upload ground truth dùng endpoint private và form data", async () => {
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
-  const input = await screen.findByLabelText("Upload ground truth CSV");
+  const input = await screen.findByLabelText("Tải lên ground truth CSV");
   fireEvent.change(input, { target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] } });
   await waitFor(() => {
     const put = calls.find((call) => call.url.endsWith("/ground-truth") && call.init?.method === "PUT");
@@ -891,7 +891,7 @@ test("chưa lưu cấu hình vẫn chọn trước được ground truth, tệp 
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
 
-  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV"), {
+  fireEvent.change(await screen.findByLabelText("Tải lên ground truth CSV"), {
     target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] },
   });
 
@@ -921,10 +921,10 @@ test("chưa lưu cấu hình vẫn chọn trước được ground truth, tệp 
   expect(screen.getByText("4 dòng")).toBeTruthy();
 });
 
-test("upload ground truth xong thì banner publish biến mất và nút Publish mở khóa", async () => {
+test("upload ground truth xong thì banner xuất bản biến mất và nút Xuất bản mở khóa", async () => {
   const blocked = {
     code: "GROUND_TRUTH_REQUIRED",
-    message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+    message: "Cần tải lên ground truth trước khi xuất bản cuộc thi.",
   };
   // Backend là bên quyết định: sau upload, detail trả readiness mới. Test bám vào đó để
   // bắt lỗi panel cấu hình xong mà không đọc lại state trang.
@@ -953,18 +953,18 @@ test("upload ground truth xong thì banner publish biến mất và nút Publish
   });
   renderPage();
 
-  expect(await screen.findByText("Chưa thể publish.")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+  expect(await screen.findByText("Chưa thể xuất bản.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Xuất bản" })).toBeDisabled();
 
   fireEvent.click(screen.getByRole("tab", { name: "Chấm điểm" }));
-  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV"), {
+  fireEvent.change(await screen.findByLabelText("Tải lên ground truth CSV"), {
     target: { files: [new File(["id,label\n1,1"], "truth.csv", { type: "text/csv" })] },
   });
 
   await waitFor(() => {
-    expect(screen.queryByText("Chưa thể publish.")).toBeNull();
+    expect(screen.queryByText("Chưa thể xuất bản.")).toBeNull();
   });
-  expect(screen.getByRole("button", { name: "Publish" })).not.toBeDisabled();
+  expect(screen.getByRole("button", { name: "Xuất bản" })).not.toBeDisabled();
 });
 
 test("banner chặn vì thiếu mã tham gia mở tab Cài đặt chứ không phải tab Chấm điểm", async () => {
@@ -980,7 +980,7 @@ test("banner chặn vì thiếu mã tham gia mở tab Cài đặt chứ không p
         publish_ready: false,
         publish_blocked_reason: {
           code: "JOIN_CODE_REQUIRED",
-          message: "Cần cấu hình mã tham gia trước khi publish cuộc thi.",
+          message: "Cần cấu hình mã tham gia trước khi xuất bản cuộc thi.",
         },
       },
       status: 200,
@@ -988,7 +988,7 @@ test("banner chặn vì thiếu mã tham gia mở tab Cài đặt chứ không p
   });
   renderPage();
 
-  const banner = (await screen.findByText("Chưa thể publish.")).closest(
+  const banner = (await screen.findByText("Chưa thể xuất bản.")).closest(
     ".status-banner",
   ) as HTMLElement;
   fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Cài đặt" }));
@@ -1009,7 +1009,7 @@ test("nút upload ground truth là <button> thật nên Tab/Enter mở được 
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
   await screen.findByText("Thay ground truth CSV");
-  expectKeyboardFilePicker("Thay ground truth CSV", "Upload ground truth CSV");
+  expectKeyboardFilePicker("Thay ground truth CSV", "Tải lên ground truth CSV");
 });
 
 test("locked: luật chấm khóa nhưng ba trường hiển thị vẫn sửa được qua nút lưu riêng", async () => {
@@ -1024,9 +1024,9 @@ test("locked: luật chấm khóa nhưng ba trường hiển thị vẫn sửa �
   // Luật chấm và lượt lưu toàn cấu hình khóa như cũ.
   expect(screen.queryByRole("button", { name: "Lưu cấu hình chấm điểm" })).toBeNull();
   expect(screen.getByRole("button", { name: "Lưu" })).toBeDisabled();
-  expect(screen.getByLabelText("Upload ground truth CSV")).toBeDisabled();
+  expect(screen.getByLabelText("Tải lên ground truth CSV")).toBeDisabled();
   expect(screen.getByLabelText("Chọn CSV mẫu để chạy thử")).toBeDisabled();
-  expect(screen.getByLabelText("Submission: cột 2: tên")).toBeDisabled();
+  expect(screen.getByLabelText("Bài nộp: cột 2: tên")).toBeDisabled();
   expect(screen.getByLabelText("Chọn f1 làm chỉ số chính")).toBeDisabled();
   expect(screen.getByLabelText("Chiều xếp hạng")).toBeDisabled();
   // Cách hiển thị của hợp đồng kết quả vẫn sửa được, qua nút lưu riêng.
@@ -1210,7 +1210,7 @@ test("tab Kết quả hiển thị ranking, filter submission và link export", 
   expect(leaderboard).toHaveAttribute("tabindex", "0");
   expect(within(leaderboard).getByRole("table")).toBeTruthy();
   // Cuộc thi không bật norm: bảng giữ nguyên cột metric, không mọc thêm cột norm.
-  expect(screen.queryByText(/Điểm norm/)).toBeNull();
+  expect(screen.queryByText(/Điểm chuẩn hóa/)).toBeNull();
   // Danh sách bài nộp thì không: thẻ tự dồn cột nên không còn vùng cuộn nào để tab vào.
   const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
   expect(submissions).not.toHaveAttribute("tabindex");
@@ -1315,12 +1315,12 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
   const table = within(leaderboard).getByRole("table");
   // Norm là điểm xếp hạng: cột riêng đứng ngay sau đội; F1 gốc còn đó nhưng hết được nhấn.
   const headers = within(table).getAllByRole("columnheader").map((th) => th.textContent);
-  expect(headers).toEqual(["Hạng", "Đội", "Điểm norm (0–50)", "F1", "Precision", "Recall", "Số bài"]);
+  expect(headers).toEqual(["Hạng", "Đội", "Điểm chuẩn hóa (0–50)", "F1", "Precision", "Recall", "Số bài"]);
   const normCell = within(table).getByText("50.00");
   expect(normCell.className).toContain("primary-score");
   expect(within(table).getByText("0.9000").className).not.toContain("primary-score");
   // Summary tách điểm xếp hạng khỏi metric nguồn, kèm mẫu số và luật hòa điểm.
-  expect(screen.getByText(/Điểm xếp hạng: Norm \/ 50\./)).toBeTruthy();
+  expect(screen.getByText(/Điểm xếp hạng: điểm chuẩn hóa thang 0–50\./)).toBeTruthy();
   expect(screen.getByText(/Metric nguồn F1 với baseline 0\.5000/)).toBeTruthy();
   expect(screen.getByText(/Điểm gốc tốt nhất hiện tại 0\.9000/)).toBeTruthy();
   expect(screen.getByText(/Bảng dựng lúc/)).toBeTruthy();
@@ -1332,7 +1332,7 @@ test("tab Kết quả với norm: cột norm là điểm xếp hạng, metric ng
   const submissions = screen.getByRole("region", { name: "Danh sách bài nộp của cuộc thi" });
   const card = within(submissions).getByRole("listitem");
   expect(within(card).getByText("Điểm gốc")).toBeTruthy();
-  expect(within(card).getByText("Norm score tạm")).toBeTruthy();
+  expect(within(card).getByText("Điểm chuẩn hóa tạm")).toBeTruthy();
   const snapshot = within(card).getByText("37.50");
   expect(snapshot.closest(".subm-score")?.getAttribute("title")).toBe(
     "v1 · f1 · baseline 0.5 · best lúc ghi 0.8",
@@ -1505,9 +1505,9 @@ test("header hiển thị action theo status: draft có Publish, published có K
   const { unmount, container } = renderPage();
   expect(await screen.findByRole("button", { name: "Kết thúc" })).toBeTruthy();
   const headerActions = container.querySelector(".admin-detail-actions") as HTMLElement;
-  expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Xuất bản" })).toBeNull();
   expect(within(headerActions).getByRole("button", { name: "Sửa" })).not.toBeDisabled();
-  expect(screen.getByRole("button", { name: "Clone" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Nhân bản" })).toBeTruthy();
   // Cuộc thi đang chạy phải Kết thúc trước khi xoá.
   expect(within(headerActions).queryByRole("button", { name: "Xóa" })).toBeNull();
   unmount();
@@ -1518,7 +1518,7 @@ test("header hiển thị action theo status: draft có Publish, published có K
     return { body: { ...COMPETITION, status: "draft" }, status: 200 };
   });
   const renderDraft = renderPage();
-  expect(await screen.findByRole("button", { name: "Publish" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Xuất bản" })).toBeTruthy();
   const draftHeaderActions = renderDraft.container.querySelector(".admin-detail-actions") as HTMLElement;
   expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
   expect(within(draftHeaderActions).getByRole("button", { name: "Sửa" })).not.toBeDisabled();
@@ -1530,11 +1530,11 @@ test("header hiển thị action theo status: draft có Publish, published có K
     return { body: { ...COMPETITION, status: "closed" }, status: 200 };
   });
   const renderClosed = renderPage();
-  expect(await screen.findByRole("button", { name: "Clone" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Nhân bản" })).toBeTruthy();
   const closedHeaderActions = renderClosed.container.querySelector(".admin-detail-actions") as HTMLElement;
   // Sửa vẫn khoá khi đã kết thúc - phải Mở lại trước.
   expect(within(closedHeaderActions).getByRole("button", { name: "Sửa" })).toBeDisabled();
-  expect(screen.queryByRole("button", { name: "Publish" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Xuất bản" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Kết thúc" })).toBeNull();
   expect(within(closedHeaderActions).getByRole("button", { name: "Mở lại" })).toBeTruthy();
   expect(within(closedHeaderActions).getByRole("button", { name: "Xóa" })).toBeTruthy();
@@ -1576,23 +1576,23 @@ test("header publish/close/clone gọi đúng endpoint modal xác nhận", async
   });
   renderPage();
 
-  // Publish
-  const publishBtn = await screen.findByRole("button", { name: "Publish" });
+  // Xuất bản
+  const publishBtn = await screen.findByRole("button", { name: "Xuất bản" });
   fireEvent.click(publishBtn);
-  const publishDialog = screen.getByRole("dialog", { name: "Publish cuộc thi" });
+  const publishDialog = screen.getByRole("dialog", { name: "Xuất bản cuộc thi" });
   expect(publishDialog).toBeTruthy();
   expect(calls.some((c) => c.url.endsWith("/publish"))).toBe(false);
-  fireEvent.click(within(publishDialog).getByRole("button", { name: "Publish" }));
+  fireEvent.click(within(publishDialog).getByRole("button", { name: "Xuất bản" }));
   await waitFor(() => {
     expect(calls.some((c) => c.url.endsWith("/publish") && c.init?.method === "POST")).toBe(true);
   });
 
-  // Clone
-  const cloneBtn = screen.getByRole("button", { name: "Clone" });
+  // Nhân bản
+  const cloneBtn = screen.getByRole("button", { name: "Nhân bản" });
   fireEvent.click(cloneBtn);
-  const cloneDialog = screen.getByRole("dialog", { name: "Clone cuộc thi" });
+  const cloneDialog = screen.getByRole("dialog", { name: "Nhân bản cuộc thi" });
   expect(cloneDialog).toBeTruthy();
-  fireEvent.click(within(cloneDialog).getByRole("button", { name: "Clone" }));
+  fireEvent.click(within(cloneDialog).getByRole("button", { name: "Nhân bản" }));
   await waitFor(() => {
     expect(calls.some((c) => c.url.endsWith("/clone") && c.init?.method === "POST")).toBe(true);
   });
@@ -1601,7 +1601,7 @@ test("header publish/close/clone gọi đúng endpoint modal xác nhận", async
 test("draft chưa sẵn sàng chấm điểm: banner lý do, disable Publish, nhảy sang tab Chấm điểm", async () => {
   const blocked = {
     code: "GROUND_TRUTH_REQUIRED",
-    message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+    message: "Cần tải lên ground truth trước khi xuất bản cuộc thi.",
   };
   mockApi((url) => {
     if (url.endsWith("/scoring")) {
@@ -1619,12 +1619,12 @@ test("draft chưa sẵn sàng chấm điểm: banner lý do, disable Publish, nh
   renderPage();
 
   // Loading cũng mang role="status" nên bám vào nội dung banner thay vì role.
-  const banner = (await screen.findByText("Chưa thể publish.")).closest(
+  const banner = (await screen.findByText("Chưa thể xuất bản.")).closest(
     ".status-banner",
   ) as HTMLElement;
   expect(banner).not.toBeNull();
   expect(banner).toHaveTextContent(blocked.message);
-  expect(screen.getByRole("button", { name: "Publish" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Xuất bản" })).toBeDisabled();
 
   fireEvent.click(within(banner).getByRole("button", { name: "Mở tab Chấm điểm" }));
   // Cùng một nguồn readiness: tab Chấm điểm nhắc lại đúng lý do đang chặn publish.
@@ -1640,7 +1640,7 @@ test("publish trả 422 vẫn hiển thị lỗi trong modal xác nhận", async
         body: {
           error: {
             code: "GROUND_TRUTH_REQUIRED",
-            message: "Cần tải lên ground truth trước khi publish cuộc thi.",
+            message: "Cần tải lên ground truth trước khi xuất bản cuộc thi.",
           },
         },
         status: 422,
@@ -1652,11 +1652,11 @@ test("publish trả 422 vẫn hiển thị lỗi trong modal xác nhận", async
   });
   renderPage();
 
-  fireEvent.click(await screen.findByRole("button", { name: "Publish" }));
-  const dialog = screen.getByRole("dialog", { name: "Publish cuộc thi" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Xuất bản" }));
+  const dialog = screen.getByRole("dialog", { name: "Xuất bản cuộc thi" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Xuất bản" }));
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-    "Cần tải lên ground truth trước khi publish cuộc thi.",
+    "Cần tải lên ground truth trước khi xuất bản cuộc thi.",
   );
 });
 
@@ -1725,7 +1725,7 @@ test("tab Hình ảnh render Bento 8/4, inventory table 5 cột, copy markdown v
   expect(screen.getByText("assets/architecture.jpg")).toBeTruthy();
 
   // Copy action
-  const copyBtns = screen.getAllByRole("button", { name: "Copy tham chiếu" });
+  const copyBtns = screen.getAllByRole("button", { name: "Sao chép tham chiếu" });
   fireEvent.click(copyBtns[0]); // first asset row copy
   expect(clipboardWrite).toHaveBeenCalledWith("assets/banner.png");
 
@@ -1760,8 +1760,8 @@ test("nút upload ảnh trong tab Hình ảnh là <button> thật nên Tab/Enter
   });
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Hình ảnh" }));
-  await screen.findByText(/Upload ảnh/);
-  expectKeyboardFilePicker(/^Upload ảnh/, "Chọn tệp ảnh");
+  await screen.findByText(/Tải ảnh lên/);
+  expectKeyboardFilePicker(/^Tải ảnh lên/, "Chọn tệp ảnh");
 });
 
 test("xóa thành viên: xác nhận rồi mới DELETE", async () => {
@@ -2085,12 +2085,11 @@ test("trần upload lấy từ backend: hint render giá trị runtime, không h
   renderPage();
   await screen.findByText("Đề bài");
 
-  expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 7 MiB");
+  expect(screen.getByRole("button", { name: /Tải lên \.md/ }).textContent).toContain("≤ 7 MiB");
 
   fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
-  const uploadButton = await screen.findByRole("button", { name: /Upload ảnh/ });
-  expect(uploadButton.textContent).toContain("9 MiB");
-  expect(screen.getByText(/Tối đa 9 MiB \/ tệp/)).toBeTruthy();
+  await screen.findByRole("button", { name: /Tải ảnh lên/ });
+  expect(screen.getByText(/tối đa 9 MiB\/tệp/)).toBeTruthy();
 });
 
 test("backend cũ chưa trả upload_limits: rơi về mặc định thay vì ẩn hint", async () => {
@@ -2102,10 +2101,10 @@ test("backend cũ chưa trả upload_limits: rơi về mặc định thay vì �
   renderPage();
   await screen.findByText("Đề bài");
 
-  expect(screen.getByRole("button", { name: /Upload \.md/ }).textContent).toContain("≤ 2 MiB");
+  expect(screen.getByRole("button", { name: /Tải lên \.md/ }).textContent).toContain("≤ 2 MiB");
 
   fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
-  expect(await screen.findByText(/Tối đa 2 MiB \/ tệp/)).toBeTruthy();
+  expect(await screen.findByText(/tối đa 2 MiB\/tệp/)).toBeTruthy();
 });
 
 test("nút upload tách nhãn khỏi giới hạn dung lượng trong tên truy cập", async () => {
@@ -2114,8 +2113,8 @@ test("nút upload tách nhãn khỏi giới hạn dung lượng trong tên truy 
   await screen.findByText("Đề bài");
 
   // Khoảng cách thị giác giữa nhãn và hint đến từ `gap` của flex, không phải từ
-  // ký tự trắng - thiếu dấu cách thì trình đọc màn hình đọc liền "Upload .md≤ 2 MiB".
-  expect(screen.getByRole("button", { name: "Upload .md ≤ 2 MiB" }).textContent).toBe("Upload .md ≤ 2 MiB");
+  // ký tự trắng - thiếu dấu cách thì trình đọc màn hình đọc liền "Tải lên .md≤ 2 MiB".
+  expect(screen.getByRole("button", { name: "Tải lên .md ≤ 2 MiB" }).textContent).toBe("Tải lên .md ≤ 2 MiB");
 });
 
 test("Markdown vượt trần bị chặn ở client, không phát request upload", async () => {
@@ -2126,10 +2125,10 @@ test("Markdown vượt trần bị chặn ở client, không phát request uploa
   renderPage();
   await screen.findByText("Đề bài");
 
-  const input = screen.getByLabelText('Upload file Markdown cho "Rules"') as HTMLInputElement;
+  const input = screen.getByLabelText('Tải lên tệp Markdown cho "Rules"') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [fileOf("rules.md", 3 * 1024 * 1024)] } });
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 2 MiB.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tệp vượt quá giới hạn 2 MiB.");
   expect(calls.some((call) => call.url.includes("/contents/c2/file"))).toBe(false);
 });
 
@@ -2142,12 +2141,12 @@ test("ảnh asset vượt trần bị chặn ở client, không phát request up
   renderPage();
   await screen.findByText("Đề bài");
   fireEvent.click(screen.getByRole("tab", { name: "Hình ảnh" }));
-  await screen.findByRole("button", { name: /Upload ảnh/ });
+  await screen.findByRole("button", { name: /Tải ảnh lên/ });
 
   const input = screen.getByLabelText("Chọn tệp ảnh") as HTMLInputElement;
   fireEvent.change(input, { target: { files: [fileOf("banner.png", 4 * 1024 * 1024, "image/png")] } });
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 3 MiB.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Tệp vượt quá giới hạn 3 MiB.");
   expect(calls.some((call) => call.url.endsWith("/assets") && call.init?.method === "POST")).toBe(false);
 });
 
@@ -2272,7 +2271,7 @@ test("dải tóm tắt: đủ sáu field theo formatter hiện có, tone xoay th
     "Kết thúc",
     "Tham gia",
     "Chỉ số chính",
-    "Quota",
+    "Hạn mức",
   ]);
 
   const values = facts.map((fact) => fact.querySelector("dd")!.textContent ?? "");
@@ -2527,7 +2526,7 @@ test("Sửa MD trang chưa có file: editor trống, lưu tạo file .md qua đ�
   expect(file.name).toBe("rules.md");
   expect(file.type).toBe("text/markdown");
   expect(await file.text()).toBe("# Thể lệ\n\nNội dung mới");
-  // Danh sách được tải lại để badge "Chưa có file" chuyển trạng thái.
+  // Danh sách được tải lại để badge "Chưa có tệp" chuyển trạng thái.
   expect(calls.filter((call) => call.url.endsWith("/contents")).length).toBeGreaterThan(1);
 });
 
@@ -2562,7 +2561,7 @@ test("Sửa MD: nội dung vượt trần bị chặn ở client, không phát r
   fireEvent.change(textarea, { target: { value: "x".repeat(1024 * 1024 + 1) } });
   fireEvent.click(within(dialog).getByRole("button", { name: "Lưu" }));
 
-  expect(await within(dialog).findByRole("alert")).toHaveTextContent("File vượt quá giới hạn 1 MiB.");
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Tệp vượt quá giới hạn 1 MiB.");
   expect(calls.some((call) => call.url.endsWith("/file"))).toBe(false);
 });
 
@@ -2751,7 +2750,7 @@ test("Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lư
   // Đã có bộ chấm Python: không còn cảnh báo sklearn, cột khai báo được điền từ backend.
   expect(screen.queryByText(/bộ chấm sklearn cố định/)).toBeNull();
   expect(screen.getByLabelText("Ground truth: cột 2: tên")).toHaveProperty("value", "label");
-  expect(screen.getByLabelText("Submission: cột 2: tên")).toHaveProperty("value", "predict_label");
+  expect(screen.getByLabelText("Bài nộp: cột 2: tên")).toHaveProperty("value", "predict_label");
   first.unmount();
 
   // Cuộc thi còn chấm bằng sklearn: cảnh báo và dòng cấu hình cũ nằm trong chính card đó.
@@ -2787,7 +2786,7 @@ test("Định dạng dữ liệu chỉ phản ánh cấu hình backend đang lư
   ).toBeTruthy();
   expect(screen.getByText("Lưu cấu hình trước khi chạy thử.")).toBeTruthy();
   expect(screen.getByText("Chạy thử bộ chấm để nhận diện các khóa metric.")).toBeTruthy();
-  expect((screen.getByLabelText("Upload ground truth CSV") as HTMLInputElement).disabled).toBe(false);
+  expect((screen.getByLabelText("Tải lên ground truth CSV") as HTMLInputElement).disabled).toBe(false);
 });
 
 test("đã lưu định dạng nhưng chưa có source: nút chạy thử khóa kèm nhắc lưu source", async () => {
@@ -3057,14 +3056,14 @@ test("lưu cấu hình làm lượt chạy thử hết hiệu lực: banner nói
   // ngay tại lượt lưu thay vì để admin tự phát hiện qua badge Chưa đạt.
   expect(
     await screen.findByText(
-      "Đã lưu cấu hình chấm điểm. Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi publish.",
+      "Đã lưu cấu hình chấm điểm. Lượt chạy thử trước đã hết hiệu lực vì cấu hình vừa đổi; chạy thử lại trước khi xuất bản.",
     ),
   ).toBeTruthy();
   // Checklist chỉ còn đúng mục chạy thử là chưa đạt; lý do nằm ở dòng hiệu lực trong card chạy thử.
   expect(screen.getAllByText("Chưa đạt")).toHaveLength(1);
   expect(
     screen.getByText(
-      "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi publish.",
+      "Lượt chạy thử đã cũ vì cấu hình (schema, source, ground truth hoặc tập khóa metric) đã đổi sau đó; chạy thử lại trước khi xuất bản.",
     ),
   ).toBeTruthy();
 });
@@ -3097,12 +3096,12 @@ test("lưu thất bại thì lỗi backend hiện trong khối phản hồi củ
   expect(alert.closest(".scoring-feedback")).toBeTruthy();
 });
 
-test("checklist sẵn sàng publish đứng đầu tab và mỗi mục dẫn tới vùng cần xử lý", async () => {
+test("checklist sẵn sàng xuất bản đứng đầu tab và mỗi mục dẫn tới vùng cần xử lý", async () => {
   await openScoring();
 
   const panel = screen.getByRole("tabpanel", { name: "Chấm điểm" });
   const firstCard = panel.querySelector(".admin-detail-card") as HTMLElement;
-  expect(within(firstCard).getByText("Trạng thái sẵn sàng publish")).toBeTruthy();
+  expect(within(firstCard).getByText("Trạng thái sẵn sàng xuất bản")).toBeTruthy();
   // Checklist đọc trạng thái đã lưu: sửa trong form mà chưa bấm Lưu thì các mục vẫn "Chưa đạt".
   expect(within(firstCard).getByText(/thay đổi chưa lưu không được tính/)).toBeTruthy();
 
@@ -3129,7 +3128,7 @@ test("hai bảng schema có heading riêng (kèm icon) và hướng dẫn giá t
 
   // Heading đứng trên bảng, còn mô tả chữ nhỏ nằm cùng hàng bên phải.
   const gtHeading = screen.getByRole("heading", { level: 3, name: "Ground truth" });
-  const subHeading = screen.getByRole("heading", { level: 3, name: "Submission" });
+  const subHeading = screen.getByRole("heading", { level: 3, name: "Bài nộp" });
   expect(
     within(subHeading.closest(".scoring-file-heading") as HTMLElement).getByText(
       /source Python quyết định/,
@@ -3153,7 +3152,7 @@ test("hai bảng schema có heading riêng (kèm icon) và hướng dẫn giá t
   const gtAllowed = screen.getByLabelText("Ground truth: cột 1: giá trị hợp lệ");
   expect(gtAllowed).toHaveAttribute("aria-describedby", "scoring-allowed-gt");
   expect(gtAllowed).toHaveAttribute("placeholder", "ví dụ: 0, 1");
-  expect(screen.getByLabelText("Submission: cột 1: giá trị hợp lệ")).toHaveAttribute(
+  expect(screen.getByLabelText("Bài nộp: cột 1: giá trị hợp lệ")).toHaveAttribute(
     "aria-describedby",
     "scoring-allowed-sub",
   );
@@ -3181,7 +3180,7 @@ test("nút thêm cột nằm ở hàng cuối bảng, thêm dòng và không g�
 test("khi cấu hình bị khóa, nút thêm cột bị vô hiệu nhưng checklist vẫn điều hướng", async () => {
   await openScoring({ ...SCORING, locked: true });
 
-  expect(screen.getByRole("button", { name: "Submission: thêm cột" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Bài nộp: thêm cột" })).toBeDisabled();
 
   fireEvent.click(screen.getByRole("link", { name: "Đã khai báo metric" }));
   expect(document.getElementById("scoring-section-metrics")).toHaveFocus();
@@ -3192,7 +3191,7 @@ test("nút upload ground truth và nút chạy thử nằm cùng hàng tiêu đ�
 
   // Hai nút file ẩn nằm chung khối head với tiêu đề thẻ / nhãn khối.
   expect(
-    screen.getByLabelText("Upload ground truth CSV").closest(".admin-detail-card-head"),
+    screen.getByLabelText("Tải lên ground truth CSV").closest(".admin-detail-card-head"),
   ).toBeTruthy();
   expect(
     screen.getByLabelText("Chọn CSV mẫu để chạy thử").closest(".scoring-test-head"),
@@ -3443,10 +3442,10 @@ test("dual: điều kiện after_closed_and_scored chặn công bố khi cửa c
   const publishButton = screen.getByRole("button", { name: "Công bố kết quả Private" });
   expect(publishButton).toBeDisabled();
   expect(publishButton.getAttribute("title")).toBe(
-    "Private vẫn đang trong thời gian nhận bài; chưa công bố được.",
+    "Private vẫn đang nhận bài; chưa công bố được.",
   );
   expect(
-    screen.getByText("Private vẫn đang trong thời gian nhận bài; chưa công bố được."),
+    screen.getByText("Private vẫn đang nhận bài; chưa công bố được."),
   ).toBeTruthy();
 
   // Đường thoát nằm ngay cạnh: admin đổi điều kiện thay vì bị kẹt ở điều kiện chặt.
@@ -3615,10 +3614,10 @@ test("dual: hàng chờ ground truth hai nhánh tải tuần tự, lượt sau d
   renderPage();
   fireEvent.click(await screen.findByRole("tab", { name: "Chấm điểm" }));
 
-  fireEvent.change(await screen.findByLabelText("Upload ground truth CSV nhánh Public"), {
+  fireEvent.change(await screen.findByLabelText("Tải lên ground truth CSV nhánh Public"), {
     target: { files: [new File(["id,label\n1,1"], "public.csv", { type: "text/csv" })] },
   });
-  fireEvent.change(screen.getByLabelText("Upload ground truth CSV nhánh Private"), {
+  fireEvent.change(screen.getByLabelText("Tải lên ground truth CSV nhánh Private"), {
     target: { files: [new File(["id,label\n1,1"], "private.csv", { type: "text/csv" })] },
   });
   // Chưa lưu cấu hình: hai tệp nằm chờ, chưa có request nào rời trình duyệt.

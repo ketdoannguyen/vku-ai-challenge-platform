@@ -249,10 +249,14 @@ def test_has_notebook_extension_is_case_insensitive():
         b"\xff\xfe\x00bad",
         b"[]",
         b'{"nbformat": 3, "nbformat_minor": 0, "metadata": {}, "cells": []}',
+        b'{"nbformat": 4.0, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "code", "source": "ok"}]}',
+        b'{"nbformat": 4, "nbformat_minor": -1, "metadata": {}, "cells": [{"cell_type": "code", "source": "ok"}]}',
         b'{"nbformat": 4, "metadata": {}, "cells": []}',
         b'{"nbformat": 4, "nbformat_minor": true, "metadata": {}, "cells": []}',
         b'{"nbformat": 4, "nbformat_minor": 5, "cells": []}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": {}}',
+        b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {"unsafe": NaN}, "cells": [{"cell_type": "code", "source": "ok"}]}',
+        b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {"unsafe": Infinity}, "cells": [{"cell_type": "code", "source": "ok"}]}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": ["x"]}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "sql", "source": ""}]}',
         b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "code"}]}',
@@ -267,6 +271,36 @@ def test_validate_notebook_rejects_malformed_payloads(payload):
     with pytest.raises(validation.NotebookValidationError) as excinfo:
         validation.validate_notebook(payload)
     assert excinfo.value.code.startswith("NOTEBOOK_")
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (b'{"nbformat": 4, "nbformat": 3}', "trùng"),
+        (
+            b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "code", "source": 7}]}',
+            "Cell 1",
+        ),
+        (
+            b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": "markdown", "source": "ok"}, {"cell_type": "code", "source": [7]}]}',
+            "Cell 2",
+        ),
+        (
+            b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": [], "source": "private code"}]}',
+            "Cell 1",
+        ),
+        (
+            b'{"nbformat": 4, "nbformat_minor": 5, "metadata": {}, "cells": [{"cell_type": {}, "source": "private code"}]}',
+            "Cell 1",
+        ),
+    ],
+)
+def test_notebook_error_identifies_structure_without_source(payload, message):
+    with pytest.raises(validation.NotebookValidationError) as error:
+        validation.validate_notebook(payload)
+    assert error.value.code == "NOTEBOOK_INVALID"
+    assert message in error.value.message
+    assert "\"source\": \"ok\"" not in error.value.message
 
 
 def test_validate_notebook_accepts_v4_notebook_with_nul_free_source():

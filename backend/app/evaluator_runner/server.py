@@ -69,7 +69,12 @@ app = FastAPI(title="Evaluator Runner", lifespan=lifespan)
 def _failure(error: EvaluatorError, status_code: int) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content={"code": error.code, "message": error.message, "detail": error.detail},
+        content={
+            "code": error.code,
+            "message": error.message,
+            "detail": error.detail,
+            **({"class_info": error.class_info} if error.class_info is not None else {}),
+        },
     )
 
 

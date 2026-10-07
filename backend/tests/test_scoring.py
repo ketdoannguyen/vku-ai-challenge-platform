@@ -130,6 +130,27 @@ def test_submission_validation_rejects_invalid_csv(csv_data, expected_code):
 
 
 @pytest.mark.parametrize(
+    ("data", "code", "message"),
+    [
+        (b"id;prediction\n1;1\n", "SUBMISSION_SCHEMA_INVALID", "dấu phẩy"),
+        (b"unrelated;header\n1;1\n", "SUBMISSION_SCHEMA_INVALID", "thiếu cột"),
+        (b'id,prediction\n1,"1\n', "SUBMISSION_SCHEMA_INVALID", "dấu nháy"),
+        (b"id,prediction\n1,1,extra\n", "SUBMISSION_SCHEMA_INVALID", "Dòng 2"),
+        (b"id,prediction\n1\n", "SUBMISSION_SCHEMA_INVALID", "Dòng 2"),
+        (b"id,prediction\n1,1\n1,0\n", "SUBMISSION_DUPLICATE_IDS", "dòng 3"),
+    ],
+)
+def test_legacy_submission_csv_reports_precise_structure(data, code, message):
+    config = _binary_config()
+    truth = load_ground_truth(b"id,label\n1,1\n2,0\n", config)
+    with pytest.raises(ScoringValidationError) as error:
+        score_submission(data, truth, config, "f1")
+    assert error.value.code == code
+    assert message in error.value.message
+    assert "extra" not in error.value.message
+
+
+@pytest.mark.parametrize(
     "csv_data",
     [
         b"",

@@ -411,7 +411,7 @@ test("chưa có trang nào có Markdown thì danh sách nói rõ vì sao trống
   renderPanel();
 
   expect(
-    await screen.findByText("Chưa trang nội dung nào có Markdown để gửi cho AI."),
+    await screen.findByText("Chưa có trang nội dung nào chứa Markdown để gửi cho AI."),
   ).toBeTruthy();
 });
 
@@ -495,7 +495,7 @@ test("nhập cấu hình: xác nhận thay thế toàn bộ, gửi ID nguồn, n
   expect(dialog).toHaveTextContent("thay thế hoàn toàn");
   expect(dialog).toHaveTextContent("API key");
   expect(dialog).toHaveTextContent("bản sao độc lập");
-  expect(dialog).toHaveTextContent("Dấu xác minh kết nối sẽ bị xoá");
+  expect(dialog).toHaveTextContent("Dấu xác minh kết nối sẽ bị xóa");
 
   fireEvent.click(within(dialog).getByRole("button", { name: "Nhập cấu hình" }));
 

@@ -395,6 +395,7 @@ async def _submit_inline(
         competition=current,
         ai_visible=ai_settings.participant_visible(current),
         contract=contracts.participant_contract(current),
+        now=now,
     )
 
 
@@ -417,6 +418,7 @@ async def _inline_result(
                 competition=competition,
                 ai_visible=ai_settings.participant_visible(competition),
                 contract=contracts.participant_contract(competition),
+                now=now,
             )
     response.status_code = 202
     return await attempts_service.attempt_payload(
@@ -569,6 +571,8 @@ async def _submit_queued(
             account["_id"],
             exc.code,
         )
+        if exc.code not in scoring_flow.STUDENT_ERROR_CODES:
+            raise scoring_flow.scoring_not_ready()
         raise api_error(422, exc.code, exc.message)
     try:
         attempt = await attempts_service.admit(
@@ -677,6 +681,14 @@ async def my_active_attempts(
     attempts = await attempts_store.list_active(
         db, competition["_id"], account["_id"], track=track
     )
+    if competition_tracks.is_dual(competition):
+        readable = [
+            candidate
+            for candidate in competition_tracks.TRACKS
+            if not competition_tracks.track_locked(competition, candidate, now)
+        ]
+        # Lượt của nhánh chưa mở (kể cả bản ghi hỏng thiếu `track`) không hiện lại sau khi mở tab.
+        attempts = [attempt for attempt in attempts if attempt.get("track") in readable]
     return {
         "attempts": [
             await attempts_service.attempt_payload(
@@ -696,9 +708,28 @@ async def my_attempt_status(
     competition = await _competition_or_404(db, competition_id)
     await require_read_access(db, competition, account)
     attempt = await _own_attempt_or_404(db, competition, account, attempt_id)
+    now = datetime.now(timezone.utc)
+    _ensure_track_open(competition, attempt, now)
     return await attempts_service.attempt_payload(
-        db, attempt, competition=competition, account=account, now=datetime.now(timezone.utc)
+        db, attempt, competition=competition, account=account, now=now
     )
+
+
+def _ensure_track_open(competition: dict, record: dict, now: datetime) -> None:
+    """Chặn lượt/bài của nhánh chưa mở, kể cả với chính chủ và admin trên đường thí sinh.
+
+    Bản ghi dual thiếu `track` là dữ liệu hỏng - fail closed: không có nhánh hợp lệ thì không có
+    đường đọc. Đường admin riêng `/api/admin/*` không đi qua đây.
+    """
+    if not competition_tracks.is_dual(competition):
+        return
+    track = record.get("track")
+    if track is None or competition_tracks.track_locked(competition, track, now):
+        raise api_error(
+            403,
+            "TRACK_NOT_OPEN",
+            "Nhánh này chưa mở nhận bài nộp; dữ liệu của nhánh đang tạm khóa.",
+        )
 
 
 async def _own_attempt_or_404(db, competition: dict, account: dict, attempt_id: str) -> dict:
@@ -733,11 +764,16 @@ async def download_notebook(
 async def _download_own(
     request: Request, competition_id: str, submission_id: str, account: dict, kind: str
 ) -> Response:
-    """Tải bài của chính mình; bài của người khác luôn là 404 kể cả admin."""
+    """Tải bài của chính mình; bài của người khác luôn là 404 kể cả admin.
+
+    Quyền sở hữu xét trước để không ai dùng mã 403 dò được bài của người khác; sau đó nhánh chưa
+    mở chặn cả chủ bài - tệp là thứ không thể thu hồi nên cổng nằm ngay trước khi đọc storage.
+    """
     db = request.app.state.mongo.db
     competition = await _competition_or_404(db, competition_id)
     await require_read_access(db, competition, account)
     submission = await _own_submission_or_404(db, competition, account, submission_id)
+    _ensure_track_open(competition, submission, datetime.now(timezone.utc))
     return await artifacts_reader.artifact_response(submission, competition, account, kind)
 
 
@@ -806,8 +842,8 @@ async def _score_or_fail(
     """Chấm bài nộp, dịch mọi lỗi sang HTTP.
 
     Lỗi thuộc về file của thí sinh giữ mã riêng để em biết đường sửa; lỗi của cấu hình chấm và của
-    bộ chấm là chuyện nội bộ - thí sinh chỉ nhận một câu chung, chi tiết đi vào log. `track` chọn
-    đúng ground truth của nhánh đang chấm.
+    bộ chấm nhận thông báo cố định theo mã, chi tiết chỉ đi vào log. `track` chọn đúng ground truth
+    của nhánh đang chấm.
     """
     try:
         if isinstance(config, models.ScoringConfigV2):
@@ -838,10 +874,14 @@ async def _score_or_fail(
             exc.detail,
         )
         if exc.code == evaluator_client.UNAVAILABLE:
-            raise api_error(
-                503, "EVALUATOR_UNAVAILABLE", "Hệ thống chấm đang bận, vui lòng thử lại sau."
-            )
-        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
+            raise api_error(503, exc.code, attempts_service.SYSTEM_ERROR_MESSAGES[exc.code])
+        if exc.code in ("SUBMISSION_RULE_VIOLATION", "SUBMISSION_CLASS_ID_INVALID"):
+            safe = attempts_service.public_error({
+                "code": exc.code, "message": exc.message, "class_info": exc.class_info
+            })
+            raise api_error(422 if safe["code"].startswith("SUBMISSION_") else 500, safe["code"], safe["message"])
+        code = exc.code if exc.code in attempts_service.SYSTEM_ERROR_MESSAGES else "SCORING_FAILED"
+        raise api_error(500, code, attempts_service.SYSTEM_ERROR_MESSAGES[code])
     except HTTPException:
         # "Cuộc thi chưa sẵn sàng" đã được dịch sẵn ở tầng đọc file; không bọc lại thành lỗi 500.
         raise
@@ -851,12 +891,12 @@ async def _score_or_fail(
             competition["_id"],
             account["_id"],
         )
-        raise api_error(500, "SCORING_FAILED", "Không thể chấm điểm bài nộp.")
+        raise api_error(500, "SCORING_FAILED", attempts_service.SYSTEM_ERROR_MESSAGES["SCORING_FAILED"])
 
 
 async def _read_limited(file: UploadFile, limit_mb: int) -> bytes:
     limit = limit_mb * 1024 * 1024
     data = await file.read(limit + 1)
     if len(data) > limit:
-        raise api_error(413, "FILE_TOO_LARGE", f"File vượt quá giới hạn {limit_mb} MiB.")
+        raise api_error(413, "FILE_TOO_LARGE", f"Tệp vượt quá giới hạn {limit_mb} MiB.")
     return data

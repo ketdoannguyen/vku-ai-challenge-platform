@@ -343,6 +343,55 @@ def test_id_dinh_khoang_trang_bi_tu_choi():
         csv_validation.prepare_submission(b"id,prediction\na ,1\nb,0\nc,1\n", _schema().submission, truth)
 
 
+@pytest.mark.parametrize(
+    ("data", "code", "message"),
+    [
+        (b"id;prediction\na;1\n", "SUBMISSION_SCHEMA_INVALID", "dấu phẩy"),
+        (b"unrelated;header\na;1\n", "SUBMISSION_SCHEMA_INVALID", "Thiếu cột"),
+        (b'id,prediction\na,"1\n', "SUBMISSION_SCHEMA_INVALID", "dấu nháy"),
+        (b"id,prediction\na,1,extra\n", "SUBMISSION_SCHEMA_INVALID", "Dòng 2"),
+        (b"id,prediction\na\n", "SUBMISSION_SCHEMA_INVALID", "Dòng 2"),
+        (b"id,prediction\na,1\na,0\n", "SUBMISSION_DUPLICATE_IDS", "dòng 3"),
+    ],
+)
+def test_submission_csv_diagnoses_structure_without_disclosing_values(data, code, message):
+    truth = csv_validation.load_ground_truth(_gt_csv(), _schema().ground_truth)
+    with pytest.raises(ScoringValidationError) as error:
+        csv_validation.prepare_submission(data, _schema().submission, truth)
+    assert error.value.code == code
+    assert message in error.value.message
+    assert "extra" not in error.value.message
+
+
+def test_submission_csv_reports_physical_line_after_quoted_newline():
+    schema = FileSchema(
+        id_column="id",
+        columns=[ColumnSpec(name="id", type="string"), ColumnSpec(name="prediction", type="string")],
+    )
+    truth = csv_validation.load_ground_truth(_gt_csv(), _schema().ground_truth)
+    with pytest.raises(ScoringValidationError) as error:
+        csv_validation.prepare_submission(
+            b'id,prediction\na,"hello\nworld"\na,duplicate\n', schema, truth
+        )
+    assert error.value.code == "SUBMISSION_DUPLICATE_IDS"
+    assert "dòng 4" in error.value.message
+    assert "hello" not in error.value.message
+
+
+def test_submission_csv_with_quoted_comma_is_valid():
+    schema = FileSchema(
+        id_column="id",
+        columns=[ColumnSpec(name="id", type="string"), ColumnSpec(name="prediction", type="string")],
+    )
+    truth = csv_validation.load_ground_truth(_gt_csv(), _schema().ground_truth)
+    assert csv_validation.prepare_submission(
+        b'id,prediction\na,"hello,world"\nb,0\nc,1\n', schema, truth
+    )
+    assert csv_validation.prepare_submission(
+        b'id,prediction\na,"hello\nworld"\nb,0\nc,1\n', schema, truth
+    )
+
+
 def test_csv_bom_va_crlf_doc_duoc():
     truth = csv_validation.load_ground_truth(
         "﻿id,label\r\na,1\r\nb,0\r\nc,1\r\n".encode(), _schema().ground_truth
