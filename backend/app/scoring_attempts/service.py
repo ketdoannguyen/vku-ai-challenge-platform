@@ -21,7 +21,7 @@ from app.core.config import get_settings
 from app.core.datetimes import iso_z
 from app.core.errors import api_error
 from app.memberships.service import MEMBERSHIPS_COLLECTION
-from app.scoring.errors import CLASS_ID_INVALID, valid_class_info
+from app.scoring.errors import CLASS_ID_INVALID, valid_class_info, valid_rule_message
 from app.scoring import contracts
 from app.scoring_attempts import store
 from app.submission_artifacts import storage as artifact_storage
@@ -433,8 +433,8 @@ async def attempt_payload(
 def public_error(error: dict | None) -> dict | None:
     """Lý do một lượt không thành công, ở dạng thí sinh hiểu được.
 
-    Lỗi file của thí sinh và lượt quá hạn giữ nguyên câu chữ; lỗi hệ thống có thông báo
-    cố định theo mã, không công khai chi tiết của evaluator hay dữ liệu riêng tư.
+    Lỗi file của thí sinh, quy tắc do evaluator báo và lượt quá hạn giữ lời nhắn
+    đã kiểm tra; lỗi hệ thống dùng câu cố định, không công khai traceback của evaluator.
     """
     if not error:
         return None
@@ -452,7 +452,7 @@ def public_error(error: dict | None) -> dict | None:
             ),
         }
     if code == "SUBMISSION_RULE_VIOLATION":
-        return {"code": code, "message": SUBMISSION_RULE_MESSAGE}
+        return {"code": code, "message": valid_rule_message(error.get("message")) or SUBMISSION_RULE_MESSAGE}
     if code in SAFE_ERROR_CODES:
         return {"code": code, "message": error.get("message") or GENERIC_MESSAGE}
     return {"code": code, "message": SYSTEM_ERROR_MESSAGES.get(code, GENERIC_MESSAGE)}

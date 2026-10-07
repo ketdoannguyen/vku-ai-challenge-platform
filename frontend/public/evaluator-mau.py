@@ -10,8 +10,12 @@ Hợp đồng bắt buộc:
   dòng với đáp án (khớp theo cột ID).
 - Trả về dictionary các chỉ số dạng số, ví dụ {"accuracy": 0.5}. Mỗi khóa phải được khai
   báo lại ở bảng "Kết quả và metric" thì mới dùng để xếp hạng.
+- Nếu bài nộp vi phạm quy tắc đã công bố, `raise SubmissionRuleError("Lời nhắn")`
+  trong hàm evaluate; lời nhắn sẽ hiện cho thí sinh (tối đa 300 ký tự). Không cần import
+  SubmissionRuleError. Lỗi Python bất ngờ vẫn hiện thông báo chung, không lộ traceback.
 
 Tên cột dưới đây chỉ là ví dụ; đổi cho khớp định dạng dữ liệu của cuộc thi.
+Xem docs/EVALUATOR_RULE_MESSAGES.md khi viết bộ chấm thật.
 """
 
 import pandas as pd

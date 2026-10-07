@@ -12,6 +12,15 @@ class ScoringValidationError(ValueError):
 
 
 CLASS_ID_INVALID = "SUBMISSION_CLASS_ID_INVALID"
+MAX_RULE_MESSAGE_CHARS = 300
+
+
+def valid_rule_message(value: object) -> str | None:
+    """Chỉ cho lời nhắn quy tắc do evaluator chủ động viết đi ra API thí sinh."""
+    if not isinstance(value, str) or any(not (char.isprintable() or char.isspace()) for char in value):
+        return None
+    message = " ".join(value.split())
+    return message if message and len(message) <= MAX_RULE_MESSAGE_CHARS else None
 
 
 def valid_class_info(value: object) -> dict | None:
